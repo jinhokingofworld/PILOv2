@@ -1,5 +1,6 @@
 import { ApiError } from "../../common/api-error";
 import { GithubIssueAssigneeValidationError } from "../github-integration/github-issue-assignee.error";
+import { GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE } from "../github-integration/github-oauth-refresh.error";
 import { boardBadGateway } from "./board-api-error";
 
 const PRESERVED_GITHUB_ERROR_MESSAGES = [
@@ -42,6 +43,13 @@ function shouldPreserveApiError(error: ApiError): boolean {
   const errorMessage = apiError?.message;
   if (typeof errorMessage !== "string") {
     return false;
+  }
+
+  if (
+    error.getStatus() === 400 &&
+    errorMessage === GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE
+  ) {
+    return true;
   }
 
   return PRESERVED_GITHUB_ERROR_MESSAGES.some((message) =>

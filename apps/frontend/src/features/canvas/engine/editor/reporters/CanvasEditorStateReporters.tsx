@@ -2,40 +2,27 @@
 
 import { useEffect } from "react";
 import { useValue } from "@tldraw/state-react";
-import { useEditor, type TLShapeId } from "tldraw";
+import { useEditor } from "tldraw";
 import type { PiloCanvasLocalInteractionState } from "../../canvas-engine-types";
-import { isCanvasFreehandInteractionActive } from "../../interactions/canvas-local-interaction-policy";
+import {
+  getCanvasActiveMutationShapeIds,
+  getCanvasInteractionToolPath,
+  isCanvasFreehandInteractionActive,
+} from "../../interactions/canvas-local-interaction-policy";
 import type {
   PiloCanvasHistoryState,
   PiloCanvasSnapState,
 } from "../canvas-editor-contracts";
 
 const idleInteractionState: PiloCanvasLocalInteractionState = {
+  activeMutationShapeIds: [],
   currentToolId: "select.idle",
   editingShapeId: null,
   focusedGroupId: null,
   isFreehandDrawing: false,
   isFocused: false,
-  protectedShapeIds: [],
   selectedShapeIds: [],
 };
-
-function getProtectedShapeIds(
-  selectedShapeIds: TLShapeId[],
-  editingShapeId: TLShapeId | null,
-) {
-  const protectedShapeIds = new Set<string>();
-
-  if (editingShapeId) {
-    protectedShapeIds.add(String(editingShapeId));
-  }
-
-  selectedShapeIds.forEach((shapeId) => {
-    protectedShapeIds.add(String(shapeId));
-  });
-
-  return Array.from(protectedShapeIds);
-}
 
 export function CanvasLocalInteractionReporter({
   onChange,
@@ -49,13 +36,24 @@ export function CanvasLocalInteractionReporter({
       const selectedShapeIds = editor.getSelectedShapeIds();
       const editingShapeId = editor.getEditingShapeId();
       const pageState = editor.getCurrentPageState();
-      const currentToolId = editor.getCurrentToolId();
+      const currentToolId = getCanvasInteractionToolPath(editor);
       const isDragging = editor.inputs.getIsDragging();
       const isPointing = editor.inputs.getIsPointing();
+      const normalizedEditingShapeId = editingShapeId
+        ? String(editingShapeId)
+        : null;
+      const normalizedSelectedShapeIds = selectedShapeIds.map(String);
 
       return {
+        activeMutationShapeIds: getCanvasActiveMutationShapeIds({
+          currentToolId,
+          editingShapeId: normalizedEditingShapeId,
+          isDragging,
+          isPointing,
+          selectedShapeIds: normalizedSelectedShapeIds,
+        }),
         currentToolId,
-        editingShapeId: editingShapeId ? String(editingShapeId) : null,
+        editingShapeId: normalizedEditingShapeId,
         focusedGroupId: pageState.focusedGroupId
           ? String(pageState.focusedGroupId)
           : null,
@@ -65,11 +63,7 @@ export function CanvasLocalInteractionReporter({
           isPointing,
         }),
         isFocused: editor.getIsFocused(),
-        protectedShapeIds: getProtectedShapeIds(
-          selectedShapeIds,
-          editingShapeId,
-        ),
-        selectedShapeIds: selectedShapeIds.map(String),
+        selectedShapeIds: normalizedSelectedShapeIds,
       };
     },
     [editor],

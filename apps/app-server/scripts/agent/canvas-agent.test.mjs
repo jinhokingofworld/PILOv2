@@ -305,6 +305,56 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 }
 
 {
+  const values = validateCanvasAgentRunRequest({
+    prompt: "선택 영역을 HTML로 만들어줘",
+    selectedShapeIds: ["shape:page", "shape:title"],
+    selectedScene: {
+      selectionMode: "frame",
+      bounds: { width: 1440, height: 900 },
+      rootShapeIds: ["shape:page"],
+      shapes: [
+        {
+          id: "shape:page",
+          shapeType: "frame",
+          parentId: null,
+          x: 0,
+          y: 0,
+          width: 1440,
+          height: 900,
+          rotation: 0,
+          zIndex: 0,
+          depth: 0,
+          title: "대시보드",
+          text: null,
+          assetRef: null,
+          style: { backgroundColor: "#ffffff" },
+        },
+        {
+          id: "shape:title",
+          shapeType: "text",
+          parentId: "shape:page",
+          x: 80,
+          y: 60,
+          width: 240,
+          height: 48,
+          rotation: 0,
+          zIndex: 1,
+          depth: 1,
+          title: null,
+          text: "대시보드",
+          assetRef: null,
+          style: { color: "black" },
+        },
+      ],
+      options: { styleMode: "faithful", responsive: false, includeJavaScript: false },
+    },
+  });
+
+  assert.equal(values.context.selectedScene.selectionMode, "frame");
+  assert.equal(values.context.selectedScene.shapes.length, 2);
+}
+
+{
   const repository = new FakeRepository();
   const service = new CanvasAgentActionService(repository);
 
@@ -378,6 +428,117 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
   assert.deepEqual(repository.findByIdCalls, []);
   assert.deepEqual(result.resourceRefs, ["shape:dashboard"]);
   assert.match(result.summary, /현재 캔버스에서/);
+}
+
+{
+  const repository = new FakeRepository();
+  repository.shapesById = [shape("shape:dashboard", {
+    shape_type: "frame",
+    title: "대시보드 와이어프레임",
+  })];
+  const service = new CanvasAgentActionService(repository);
+
+  const result = await service.execute(
+    run("대시보드 와이어프레임 어디 있어?"),
+    step({
+      intent: "find_shapes",
+      arguments: {
+        query: "대시보드 와이어프레임",
+        shapeIds: ["shape:dashboard"],
+        routingSource: "database_text",
+      },
+    }, "route_intent")
+  );
+
+  assert.deepEqual(repository.findByIdCalls, [{
+    canvasId: "canvas-1",
+    shapeIds: ["shape:dashboard"],
+  }]);
+  assert.deepEqual(result.resourceRefs, ["shape:dashboard"]);
+  assert.match(result.summary, /DB 검색으로/);
+}
+
+{
+  const repository = new FakeRepository();
+  const service = new CanvasAgentActionService(repository);
+  const html = "<!doctype html><html><head><style>body{margin:0}</style></head><body>대시보드</body></html>";
+
+  const result = await service.execute(
+    run("선택 영역을 HTML로 만들어줘", {
+      selectedScene: {
+        shapes: [{ id: "shape:page" }, { id: "shape:title" }],
+      },
+    }),
+    step({
+      intent: "generate_html",
+      arguments: {
+        artifact: {
+          kind: "html",
+          title: "대시보드",
+          html,
+          sourceShapeIds: ["shape:page", "shape:title"],
+        },
+      },
+    }, "route_intent"),
+  );
+
+  assert.equal(result.artifact.html, html);
+  assert.deepEqual(result.resourceRefs, ["shape:page", "shape:title"]);
+  assert.match(result.summary, /정적 HTML\/CSS/);
+}
+
+{
+  const repository = new FakeRepository();
+  const service = new CanvasAgentActionService(repository);
+
+  await assert.rejects(
+    service.execute(
+      run("선택 영역을 HTML로 만들어줘", {
+        selectedScene: { shapes: [{ id: "shape:page" }] },
+      }),
+      step({
+        intent: "generate_html",
+        arguments: {
+          artifact: {
+            kind: "html",
+            title: "대시보드",
+            html: "<!doctype html><html><script>alert(1)</script></html>",
+            sourceShapeIds: ["shape:page"],
+          },
+        },
+      }, "route_intent"),
+    ),
+    (error) => error.response?.error?.message === "코드 생성 중 오류가 났어요. 다시 시도해 주세요.",
+  );
+}
+
+{
+  const repository = new FakeRepository();
+  const service = new CanvasAgentActionService(repository);
+
+  const result = await service.execute(
+    run("HTML로 만들어줘"),
+    step({
+      intent: "generate_html",
+      arguments: { missingSelection: true },
+    }, "route_intent"),
+  );
+
+  assert.equal(result.artifact, null);
+  assert.equal(result.summary, "HTML로 만들 캔버스 영역을 먼저 선택해주세요.");
+}
+
+{
+  const repository = new FakeRepository();
+  const service = new CanvasAgentActionService(repository);
+
+  const result = await service.execute(
+    run("선택한 도형을 삭제해줘"),
+    step({ intent: "unsupported", arguments: {} }, "route_intent"),
+  );
+
+  assert.equal(result.shouldContinue, false);
+  assert.match(result.summary, /기존 도형 찾기.*정적 HTML\/CSS 생성/);
 }
 
 {

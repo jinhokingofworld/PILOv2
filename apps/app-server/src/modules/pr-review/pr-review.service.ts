@@ -339,6 +339,29 @@ interface ReviewFileDetailRow extends QueryResultRow {
   latest_decision_reviewed_at: Date | string | null;
 }
 
+interface PrReviewAgentFocusSessionRow extends QueryResultRow {
+  id: string;
+  status: PrReviewSessionStatus;
+}
+
+interface PrReviewAgentFocusFileRow extends QueryResultRow {
+  id: string;
+  file_path: string;
+  file_name: string;
+  role_type: PrReviewFileRoleType;
+  risk_level: PrReviewFileRiskLevel;
+  change_summary: string | null;
+  review_points: unknown;
+  current_status: PrReviewFileReviewStatus;
+}
+
+interface PrReviewAgentFocusRelationRow extends QueryResultRow {
+  from_review_file_id: string;
+  to_review_file_id: string;
+  relation_type: PrReviewRelationType;
+  reason: string;
+}
+
 interface ReviewFileConflictTargetRow extends QueryResultRow {
   id: string;
   file_path: string;
@@ -523,6 +546,27 @@ export interface PrReviewSessionPayload {
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PrReviewAgentFocusData {
+  reviewSessionId: string;
+  status: PrReviewSessionStatus;
+  files: Array<{
+    id: string;
+    filePath: string;
+    fileName: string;
+    roleType: PrReviewFileRoleType;
+    riskLevel: PrReviewFileRiskLevel;
+    changeSummary: string | null;
+    reviewPoints: string[];
+    reviewStatus: PrReviewFileReviewStatus;
+  }>;
+  relations: Array<{
+    fromReviewFileId: string;
+    toReviewFileId: string;
+    relationType: PrReviewRelationType;
+    reason: string;
+  }>;
 }
 
 export interface PrReviewAnalysisErrorPayload {
@@ -2024,6 +2068,99 @@ export class PrReviewService {
         summary
       );
     }
+  }
+
+  async getReviewSessionAgentFocusData(
+    currentUserId: string,
+    workspaceId: string,
+    reviewSessionId: string
+  ): Promise<PrReviewAgentFocusData> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const session = await this.database.queryOne<PrReviewAgentFocusSessionRow>(
+      `
+        SELECT review_session.id, review_session.status
+        FROM pr_review_sessions AS review_session
+        JOIN pr_review_rooms AS review_room
+          ON review_room.id = review_session.room_id
+        WHERE review_session.id = $1
+          AND review_room.workspace_id = $2
+      `,
+      [this.requireUuid(reviewSessionId, "reviewSessionId"), workspaceId]
+    );
+    if (!session) {
+      throw notFound("Review session not found");
+    }
+
+    const [files, relations] = await Promise.all([
+      this.database.query<PrReviewAgentFocusFileRow>(
+        `
+          SELECT
+            review_file.id,
+            review_file.file_path,
+            review_file.file_name,
+            review_file.role_type,
+            review_file.risk_level,
+            review_file.change_summary,
+            review_file.review_points,
+            review_file.current_status
+          FROM review_files AS review_file
+          JOIN pr_review_sessions AS review_session
+            ON review_session.id = review_file.session_id
+          JOIN pr_review_rooms AS review_room
+            ON review_room.id = review_session.room_id
+          WHERE review_file.session_id = $1
+            AND review_room.workspace_id = $2
+          ORDER BY review_file.file_path ASC, review_file.id ASC
+        `,
+        [session.id, workspaceId]
+      ),
+      this.database.query<PrReviewAgentFocusRelationRow>(
+        `
+          SELECT
+            from_flow_file.review_file_id AS from_review_file_id,
+            to_flow_file.review_file_id AS to_review_file_id,
+            relation.relation_type,
+            relation.reason
+          FROM review_flow_relations AS relation
+          JOIN review_flow_files AS from_flow_file
+            ON from_flow_file.id = relation.from_review_flow_file_id
+           AND from_flow_file.session_id = relation.session_id
+          JOIN review_flow_files AS to_flow_file
+            ON to_flow_file.id = relation.to_review_flow_file_id
+           AND to_flow_file.session_id = relation.session_id
+          JOIN pr_review_sessions AS review_session
+            ON review_session.id = relation.session_id
+          JOIN pr_review_rooms AS review_room
+            ON review_room.id = review_session.room_id
+          WHERE relation.session_id = $1
+            AND review_room.workspace_id = $2
+          ORDER BY relation.confidence DESC, relation.id ASC
+        `,
+        [session.id, workspaceId]
+      )
+    ]);
+
+    return {
+      reviewSessionId: session.id,
+      status: session.status,
+      files: files.map((file) => ({
+        id: file.id,
+        filePath: file.file_path,
+        fileName: file.file_name,
+        roleType: file.role_type,
+        riskLevel: file.risk_level,
+        changeSummary: file.change_summary,
+        reviewPoints: this.toStringArray(file.review_points),
+        reviewStatus: file.current_status
+      })),
+      relations: relations.map((relation) => ({
+        fromReviewFileId: relation.from_review_file_id,
+        toReviewFileId: relation.to_review_file_id,
+        relationType: relation.relation_type,
+        reason: relation.reason
+      }))
+    };
   }
 
   async listReviewFlows(

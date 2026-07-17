@@ -13,6 +13,86 @@ const currentUserId = "44444444-4444-4444-8444-444444444444";
 const decisionId = "55555555-5555-4555-8555-555555555555";
 const filePath = "apps/app-server/src/modules/pr-review/pr-review.service.ts";
 
+{
+  const queries = [];
+  const database = {
+    async queryOne(text, values = []) {
+      queries.push({ method: "queryOne", text, values });
+      return {
+        id: reviewSessionId,
+        status: "reviewing"
+      };
+    },
+    async query(text, values = []) {
+      queries.push({ method: "query", text, values });
+      if (text.includes("FROM review_flow_relations AS relation")) {
+        return [
+          {
+            from_review_file_id: reviewFileId,
+            to_review_file_id: "66666666-6666-4666-8666-666666666666",
+            relation_type: "uses_api",
+            reason: "주문 API 응답을 화면 상태에 전달합니다."
+          }
+        ];
+      }
+
+      return [
+        {
+          id: reviewFileId,
+          file_path: filePath,
+          file_name: "pr-review.service.ts",
+          role_type: "core_logic",
+          risk_level: "high",
+          change_summary: "리뷰 세션 조회를 추가했습니다.",
+          review_points: ["workspace 소속을 확인합니다."],
+          current_status: "not_reviewed",
+          comment: "must not be returned",
+          raw_diff: "must not be queried"
+        }
+      ];
+    }
+  };
+  const service = new PrReviewService(
+    database,
+    { async assertWorkspaceAccess() {} },
+    {},
+    {}
+  );
+
+  const result = await service.getReviewSessionAgentFocusData(
+    currentUserId,
+    workspaceId,
+    reviewSessionId
+  );
+
+  assert.deepEqual(result, {
+    reviewSessionId,
+    status: "reviewing",
+    files: [
+      {
+        id: reviewFileId,
+        filePath,
+        fileName: "pr-review.service.ts",
+        roleType: "core_logic",
+        riskLevel: "high",
+        changeSummary: "리뷰 세션 조회를 추가했습니다.",
+        reviewPoints: ["workspace 소속을 확인합니다."],
+        reviewStatus: "not_reviewed"
+      }
+    ],
+    relations: [
+      {
+        fromReviewFileId: reviewFileId,
+        toReviewFileId: "66666666-6666-4666-8666-666666666666",
+        relationType: "uses_api",
+        reason: "주문 API 응답을 화면 상태에 전달합니다."
+      }
+    ]
+  });
+  assert.match(queries[0].text, /JOIN pr_review_rooms AS review_room/);
+  assert.doesNotMatch(JSON.stringify(result), /must not be returned|raw_diff/);
+}
+
 async function captureProgressUpdate(reviewedCount, totalFileCount) {
   const queries = [];
   const transaction = {

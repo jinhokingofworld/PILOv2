@@ -2,10 +2,11 @@
 
 ## Scope
 
-Canvas Agent API creates and tracks asynchronous read-only AI work that is
+Canvas Agent API creates and tracks asynchronous, non-mutating AI work that is
 limited to one Workspace Canvas. It explains Canvas functionality, finds
-existing Canvas shapes, selects matching shapes, and moves the current user's
-viewport. New runs do not create, connect, update, delete, or duplicate shapes.
+existing Canvas shapes, moves the current user's viewport, and can generate a
+copyable static HTML/CSS artifact from an explicit Canvas selection. New runs
+do not create, connect, update, delete, or duplicate Canvas shapes.
 
 Canvas Agent is restricted to Canvas actions. Calendar, Issue, PR, Meeting,
 and every other external-domain resource are excluded from this API: it does
@@ -14,7 +15,7 @@ not read, create, update, delete, or represent them as Canvas shapes.
 ## Ownership and boundaries
 
 - Canvas domain owns this API and `canvas_agent_*` tables.
-- App Server validates Workspace and Canvas access and validates each read-only
+- App Server validates Workspace and Canvas access and validates each non-mutating
   action. Canvas Agent does not perform persisted Canvas mutations.
 - AI Worker classifies the request into a bounded Canvas intent and extracts
   typed arguments. It must not choose an arbitrary executable action, mutate
@@ -25,7 +26,7 @@ not read, create, update, delete, or represent them as Canvas shapes.
 - The requester alone can read or cancel their Canvas Agent runs. Legacy draft
   apply/discard endpoints remain available only for previews created before the
   read-only action restriction.
-- AI Worker provider payloads, full raw shapes, tokens, secrets, and credentials
+- AI Worker provider payloads, full raw Canvas snapshots, tokens, secrets, and credentials
   are never returned or stored in these API payloads.
 
 ## Common rules
@@ -43,11 +44,12 @@ not read, create, update, delete, or represent them as Canvas shapes.
 
 ```text
 Frontend -> App Server Canvas Agent API -> Canvas Agent run + SQS job
-  -> AI Worker: one intent classification with typed arguments
+  -> AI Worker: intent classification with typed arguments
+     + one HTML generation call only for generate_html
   -> route_intent step
   -> App Server: validate the intent and execute its registered Canvas handler
   -> result saved to run/step
-  -> completed explanation/search/navigation result
+  -> completed explanation/search/navigation result or static HTML artifact
 ```
 
 For a shape-finding request, Canvas Agent uses this bounded route:
@@ -56,6 +58,7 @@ For a shape-finding request, Canvas Agent uses this bounded route:
 Structured GPT intent classification over a bounded client shape summary
   -> use matching currently loaded shape ids when present
   -> current-Canvas-only pgvector search with the extracted query otherwise
+  -> workspace-and-current-Canvas-scoped DB title/text search when embedding is unavailable or ambiguous
   -> App Server find_shapes handler
 ```
 
@@ -66,18 +69,53 @@ Structured GPT intent classification over a bounded client shape summary
   found without waiting for the DB checkpoint or embedding refresh flow.
 - A pre-checkpoint shape outside the requester's loaded regions is not included
   in that snapshot. It becomes searchable after it is loaded by the client or
-  after the normal checkpoint and embedding refresh flow.
-- DB fallback uses only pgvector similarity search scoped to the authenticated
-  path Canvas. Canvas Agent does not run a separate DB `ILIKE` text search.
+  after the normal checkpoint writes it to DB.
+- DB fallback tries pgvector first. If no current embedding exists or the best
+  match is below the confidence/margin thresholds, it searches only active
+  shapes whose Canvas matches both the run `workspaceId` and `canvasId`. The
+  bounded title/text search returns at most four rows and never scans shapes
+  from another Workspace or Canvas.
 - The configured local model is `intfloat/multilingual-e5-small` (384
   dimensions). Queries use `query: ` and indexed Canvas text uses `passage: `.
 - The default pgvector shape-result thresholds are shape similarity `0.78` and
   winner margin `0.08`. A missing or ambiguous embedding match produces an
   empty `find_shapes` result after the structured intent classification.
-- Normal mode currently exposes only the `find_shapes` intent. The classifier
+- Normal mode exposes `find_shapes`, `generate_html`, and `unsupported`. The classifier
   returns `{ intent, arguments }`; App Server stores it in a `route_intent`
   step and maps it to the registered `find_shapes` handler. Adding a future
   intent also requires an App Server handler and validation.
+
+For `generate_html`, the Frontend sends only a bounded, normalized
+`selectedScene`; it never sends raw tldraw records. A selected frame includes
+all recursively loaded descendants. Multiple selected roots are normalized
+against a virtual root whose bounds are the union of the selection. The
+Frontend first reads the active editor/roomState-reflected store and recursively
+hydrates persisted frame children through the existing Canvas shape API. If a
+frame's known child count is still incomplete, `selectedSceneError` is sent and
+the run completes without generating a partial artifact.
+
+The AI Worker produces one complete static HTML document with inline CSS. The
+App Server rejects JavaScript, event handlers, active embedded content, and
+oversized output. The Frontend previews the artifact in a sandboxed iframe and
+offers copying the same validated HTML. After receiving the complete artifact,
+the Frontend also creates one `pilo-code-block` beside the selected source area
+with the validated HTML as its code, then binds a connector between the selected
+root shape and the code block. Both records use the normal Classic Canvas shape
+patch path, so they enter roomState, room history, and checkpoint persistence and
+the connector follows either bound shape when it moves. Repeated polling of the
+same run must not insert duplicates. The AI Worker and App Server never write
+these Canvas records directly, no Canvas draft is created, and generated HTML
+does not include JavaScript behavior.
+
+For HTML generation, `styleMode: faithful` means structural fidelity rather
+than literal Canvas pixel reproduction. The generator preserves hierarchy,
+section order, relative proportions, meaningful overlap, and user-authored
+text, then lays the result out as a browser-filling product UI with grid/flex.
+An explicit visual style in the user's prompt takes precedence. When no style
+is requested, the default is a bright, restrained, Toss-inspired Korean fintech
+visual language. The generator may add concise static example labels, cards,
+values, inputs, and buttons needed to complete the selected sections, but it
+must not add JavaScript behavior or contradict user-authored content.
 - Client-summary and embedding matches are classified as `find_shapes` with
   `focusResult: true`, so the client can move the requester-only Canvas AI
   pointer, zoom to the matching shape area, and highlight the result. Separate
@@ -404,20 +442,49 @@ Request:
 
 ```json
 {
-  "prompt": "로그인 관련 메모 찾아줘",
-  "selectedShapeIds": ["shape:note-1", "shape:note-2"],
+  "prompt": "선택한 대시보드를 HTML로 만들어줘",
+  "selectedShapeIds": ["shape:frame-1"],
   "shapeSummaries": [
     {
-      "id": "shape:note-1",
-      "shapeType": "sticky-note",
-      "title": null,
-      "text": "로그인 회의",
-      "x": 120,
-      "y": 240,
-      "width": 180,
-      "height": 180
+      "id": "shape:frame-1",
+      "shapeType": "frame",
+      "title": "대시보드",
+      "text": null,
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 900
     }
   ],
+  "selectedScene": {
+    "selectionMode": "frame",
+    "bounds": { "width": 1440, "height": 900 },
+    "rootShapeIds": ["shape:frame-1"],
+    "shapes": [
+      {
+        "id": "shape:frame-1",
+        "shapeType": "frame",
+        "parentId": null,
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 900,
+        "rotation": 0,
+        "zIndex": 0,
+        "depth": 0,
+        "title": "대시보드",
+        "text": null,
+        "assetRef": null,
+        "style": { "backgroundColor": "#ffffff" }
+      }
+    ],
+    "options": {
+      "styleMode": "faithful",
+      "responsive": false,
+      "includeJavaScript": false
+    }
+  },
+  "selectedSceneError": null,
   "viewport": {
     "x": 0,
     "y": 0,
@@ -428,29 +495,31 @@ Request:
   "toolHelpMode": false,
   "conversationContext": {
     "messages": [
-      { "role": "user", "content": "인증 메모 찾아줘" },
-      { "role": "assistant", "content": "관련 도형 2개를 찾았어요." }
+      { "role": "user", "content": "이 화면을 코드로 옮길 수 있어?" },
+      { "role": "assistant", "content": "코드로 만들 영역을 선택해 주세요." }
     ],
     "lastTask": {
-      "prompt": "인증 메모 찾아줘",
+      "prompt": "이 화면을 코드로 옮길 수 있어?",
       "status": "completed",
-      "summary": "관련 도형 2개를 찾았어요.",
+      "summary": "코드로 만들 영역을 선택해 주세요.",
       "draftId": null,
       "draftTitle": null
     }
   },
-  "clientRequestId": "canvas-ai-20260710-0001"
+  "clientRequestId": "canvas-ai-html-20260717-0001"
 }
 ```
 
 | Field | Required | Description |
 | --- | --- | --- |
 | `prompt` | Yes | Trimmed user request, 1 to 32768 bytes. |
-| `selectedShapeIds` | No | Current Canvas selection. Every id must belong to the path Canvas. |
+| `selectedShapeIds` | No | Current Canvas selection, up to 160 ids. |
 | `shapeSummaries` | No | Up to 120 bounded summaries from the requester's currently loaded tldraw shapes. Selected and visible shapes should be ordered first. These summaries are advisory and may be used only for read-only search, highlight, and viewport focus. |
+| `selectedScene` | No | Up to 160 normalized selected shapes and 50000 bytes. Required for `generate_html`; omitted when there is no selection or the snapshot is incomplete. Coordinates are relative to the real or virtual root bounds. |
+| `selectedSceneError` | No | Bounded client-side selection/hydration error. A `generate_html` intent returns this message without producing partial HTML. |
 | `viewport` | No | Current visible Canvas bounds used only to create minimal planning context. |
 | `presentationMode` | No | `interactive` shows requester-only progress, pointer, highlight, and viewport focus on the Canvas surface. `background` creates the same read-only run without Canvas-local playback. Defaults to `interactive`. |
-| `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, interpret the prompt only as a search for existing Canvas content. Defaults to `false`. |
+| `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, classify among existing-shape search, selected-scene HTML generation, and unsupported requests. Defaults to `false`. |
 | `conversationContext` | No | Short-lived same-panel chat memory. `messages` contains up to 10 recent user/assistant messages, and `lastTask` can describe the previous Canvas Agent run for follow-up prompts. Legacy draft id/title fields remain nullable for compatibility. |
 | `clientRequestId` | No | Stable retry idempotency key, up to 128 bytes. |
 
@@ -468,9 +537,10 @@ Server rules:
   existing run and does not enqueue another job.
 - Reusing a `clientRequestId` with different request content returns
   `409 CLIENT_REQUEST_ID_CONFLICT`.
-- The Frontend constructs bounded summaries from currently loaded shapes. It
-  must not send `rawShape`, bindings, assets, styles, or a complete Canvas
-  snapshot. The App Server validates the count, text size, ids, and bounds.
+- The Frontend constructs bounded search summaries and a separate normalized
+  selected scene. It must not send `rawShape`, bindings, asset bodies, or a
+  complete Canvas snapshot. The App Server validates counts, byte sizes,
+  hierarchy, style primitives, ids, and bounds.
 
 Response: `202 Accepted`
 
@@ -484,7 +554,7 @@ Response: `202 Accepted`
       "canvasId": "canvas_uuid",
       "presentationMode": "interactive",
       "status": "queued",
-      "prompt": "로그인 관련 메모 찾아줘",
+      "prompt": "선택한 대시보드를 HTML로 만들어줘",
       "message": "Canvas AI 요청을 준비하고 있습니다.",
       "createdAt": "2026-07-10T00:00:00.000Z",
       "completedAt": null
@@ -519,6 +589,7 @@ resource ids, not raw shape payloads or AI provider output.
       "prompt": "로그인 메모 찾아줘",
       "summary": "임베딩 검색으로 ‘로그인 메모’ 관련 도형 2개를 찾았습니다.",
       "canvasRevision": 103,
+      "artifact": null,
       "createdAt": "2026-07-10T00:00:00.000Z",
       "completedAt": null
     },
@@ -536,6 +607,24 @@ resource ids, not raw shape payloads or AI provider output.
   }
 }
 ```
+
+For a completed `generate_html` run, `run.artifact` is returned as:
+
+```json
+{
+  "kind": "html",
+  "title": "대시보드",
+  "html": "<!doctype html><html>...</html>",
+  "sourceShapeIds": ["shape:frame-1", "shape:title-1"]
+}
+```
+
+The Frontend uses `sourceShapeIds` together with the submitted
+`selectedScene.rootShapeIds` to place the code block to the right of the source
+bounds. A real selected frame is preferred as the connector target; for a
+multi-selection without a frame, the first selected root is used. If the source
+records are no longer loaded, the artifact remains available in chat for preview
+and copy, but no partial Canvas insertion is attempted.
 
 Main errors: `401 UNAUTHORIZED`, `403 FORBIDDEN`, `404 CANVAS_AGENT_RUN_NOT_FOUND`.
 
@@ -643,6 +732,8 @@ values through shared Canvas presence or store pointer coordinates in the DB.
 ```text
 AI Worker intent:
   find_shapes
+  generate_html
+  unsupported
 
 App Server executor actions:
   route_intent

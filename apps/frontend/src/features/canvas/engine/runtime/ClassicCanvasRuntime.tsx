@@ -78,12 +78,12 @@ type CanvasSyncNotice = {
 };
 
 const initialLocalInteractionState: PiloCanvasLocalInteractionState = {
+  activeMutationShapeIds: [],
   currentToolId: "select.idle",
   editingShapeId: null,
   focusedGroupId: null,
   isFreehandDrawing: false,
   isFocused: false,
-  protectedShapeIds: [],
   selectedShapeIds: [],
 };
 const MAX_DEFERRED_REMOTE_OPERATIONS = 80;
@@ -161,9 +161,8 @@ function isRemoteOperationProtectedByLocalInteraction({
   localInteractionState: PiloCanvasLocalInteractionState;
   operation: CanvasShapeOperationPayload;
 }) {
-  return (
-    localInteractionState.isFreehandDrawing ||
-    localInteractionState.protectedShapeIds.includes(operation.shapeId)
+  return localInteractionState.activeMutationShapeIds.includes(
+    operation.shapeId,
   );
 }
 
@@ -439,8 +438,9 @@ function ClassicCanvasRuntimeInner({
   }, []);
   const isCanvasShapePatchProtected = useCallback((shapeId: string) => {
     return (
-      localInteractionStateRef.current.isFreehandDrawing ||
-      localInteractionStateRef.current.protectedShapeIds.includes(shapeId) ||
+      localInteractionStateRef.current.activeMutationShapeIds.includes(
+        shapeId,
+      ) ||
       pendingLocalShapeVersionsRef.current.has(shapeId) ||
       pendingRoomShapeAckCountsRef.current.has(shapeId)
     );
@@ -659,11 +659,8 @@ function ClassicCanvasRuntimeInner({
   const handleLocalInteractionStateChange = useCallback(
     (state: PiloCanvasLocalInteractionState) => {
       localInteractionStateRef.current = state;
-
-      if (!state.isFreehandDrawing) {
-        flushDeferredRemoteOperations();
-        flushDeferredRoomShapeChangesRef.current();
-      }
+      flushDeferredRemoteOperations();
+      flushDeferredRoomShapeChangesRef.current();
     },
     [flushDeferredRemoteOperations],
   );
@@ -816,18 +813,15 @@ function ClassicCanvasRuntimeInner({
         patch.upsertShapes,
       ) as PiloCanvasFreeformShape[];
       const protectedShapeIds = new Set([
-        ...localInteractionStateRef.current.protectedShapeIds,
+        ...localInteractionStateRef.current.activeMutationShapeIds,
         ...pendingLocalShapeVersionsRef.current.keys(),
         ...pendingRoomShapeAckCountsRef.current.keys(),
       ]);
-      const shouldDeferForLocalFreehand =
-        localInteractionStateRef.current.isFreehandDrawing;
       const immediateDeletedShapeIds: string[] = [];
       const immediateUpsertShapes: PiloCanvasFreeformShape[] = [];
 
       patch.deletedShapeIds.forEach((shapeId) => {
         if (
-          shouldDeferForLocalFreehand ||
           isRemoteShapeDeletionProtected({
             currentShapes: freeformShapesRef.current,
             protectedShapeIds,
@@ -857,7 +851,6 @@ function ClassicCanvasRuntimeInner({
         }
 
         if (
-          shouldDeferForLocalFreehand ||
           protectedShapeIds.has(shapeId) ||
           isRemoteFrameCollapseProtected({
             currentShapes: freeformShapesRef.current,
@@ -893,15 +886,12 @@ function ClassicCanvasRuntimeInner({
     ],
   );
   const flushDeferredRoomShapeChanges = useCallback(() => {
-    if (
-      localInteractionStateRef.current.isFreehandDrawing ||
-      !deferredRoomShapeChangesRef.current.size
-    ) {
+    if (!deferredRoomShapeChangesRef.current.size) {
       return;
     }
 
     const protectedShapeIds = new Set([
-      ...localInteractionStateRef.current.protectedShapeIds,
+      ...localInteractionStateRef.current.activeMutationShapeIds,
       ...pendingLocalShapeVersionsRef.current.keys(),
       ...pendingRoomShapeAckCountsRef.current.keys(),
     ]);
@@ -1192,7 +1182,7 @@ function ClassicCanvasRuntimeInner({
     );
   }, []);
 
-  const { loadFrameChildren, loadShapeDetail, loadViewportShapes } =
+  const { loadFrameChildren, loadFrameSubtree, loadShapeDetail, loadViewportShapes } =
     useCanvasViewportQueries({
     board,
     canvasClient,
@@ -1298,6 +1288,7 @@ function ClassicCanvasRuntimeInner({
           onFrameChildShapesUnload={handleFrameChildShapesUnload}
           onViewportBoundsChange={loadViewportShapes}
           onFrameChildrenRequest={loadFrameChildren}
+          onFrameSubtreeRequest={loadFrameSubtree}
           getPreservedFreeformShapeSnapshots={
             getPreservedFreeformShapeSnapshots
           }

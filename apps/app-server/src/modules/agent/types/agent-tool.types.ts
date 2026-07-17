@@ -1,5 +1,7 @@
 export type AgentRiskLevel = "low" | "medium" | "high";
 
+export type AgentSurface = "sql_erd" | "pr_review";
+
 export type AgentToolExecutionMode =
   | "auto"
   | "confirmation_required"
@@ -8,6 +10,10 @@ export type AgentToolExecutionMode =
 export type AgentRunRequestContext =
   | {
       surface: "sql_erd";
+      sessionId: string;
+    }
+  | {
+      surface: "pr_review";
       sessionId: string;
     }
   | null;
@@ -28,6 +34,10 @@ export type AgentToolInputSchema = AgentJsonObject;
 export type AgentToolInputSummary = AgentJsonObject;
 
 export type AgentToolOutputSummary = AgentJsonObject;
+
+export interface AgentToolContextRequirement {
+  surface: AgentSurface;
+}
 
 export interface AgentToolContext {
   currentUserId: string;
@@ -103,6 +113,7 @@ export interface AgentToolDefinition<TInput> {
   description: string;
   riskLevel: AgentRiskLevel;
   executionMode: AgentToolExecutionMode;
+  contextRequirement?: AgentToolContextRequirement;
   requiresGroundedAnswer?: boolean;
   inputSchema: AgentToolInputSchema;
   validateInput: (input: unknown) => TInput;

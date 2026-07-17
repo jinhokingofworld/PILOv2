@@ -27,6 +27,10 @@ export type AgentRunRequestContext =
       surface: "sql_erd";
       sessionId: string;
     }
+  | {
+      surface: "pr_review";
+      sessionId: string;
+    }
   | null;
 
 export type AgentResourceRef = {

@@ -48,7 +48,8 @@ Workspace 상태 변경은 기존 도메인 service/API 계약을 따른다.
 - 1차는 streaming 없이 polling으로 run 상태를 조회한다.
 - `clientRequestId`는 선택값이며, 같은 Workspace와 요청자 안에서 run 생성 재시도 idempotency key로 사용한다.
 - `requestContext`는 선택값이며, 현재는 `null` 또는 서버가 현재 Workspace의 활성 session으로 재검증한
-  `{ "surface": "sql_erd", "sessionId": "uuid" }`만 허용한다. 저장 크기는 최대 2 KiB다.
+  `{ "surface": "sql_erd", "sessionId": "uuid" }`, `{ "surface": "pr_review", "sessionId": "uuid" }`를
+  허용한다. 저장 크기는 최대 2 KiB다.
 
 ## 처리 구조
 
@@ -370,7 +371,7 @@ Request:
 | `prompt` | Yes | 사용자 자연어 요청. 빈 문자열 불가 |
 | `timezone` | No | IANA timezone. 없으면 `Asia/Seoul` |
 | `clientRequestId` | No | 클라이언트가 재시도 방지를 위해 보내는 idempotency key. 최대 128 bytes |
-| `requestContext` | No | `null` 또는 SQLtoERD context. JSON 최대 2 KiB |
+| `requestContext` | No | `null`, SQLtoERD 또는 PR Review context. JSON 최대 2 KiB |
 
 서버 규칙:
 
@@ -378,8 +379,8 @@ Request:
 - `prompt`는 trim 후 저장한다.
 - `timezone`이 없으면 `Asia/Seoul`을 저장한다.
 - `clientRequestId`가 있으면 같은 Workspace와 요청자가 같은 key로 만든 run을 중복 생성하지 않는다.
-- `requestContext.surface`은 현재 `sql_erd`만 허용하고, `sessionId`는 UUID여야 하며 추가 field를 허용하지 않는다.
-- App Server는 SQLtoERD session이 현재 Workspace에 속하고 삭제되지 않았는지 재검증한다.
+- `requestContext.surface`은 `sql_erd`, `pr_review`만 허용하고, `sessionId`는 UUID여야 하며 추가 field를 허용하지 않는다.
+- App Server는 SQLtoERD session 또는 PR Review session이 현재 Workspace에 속하고 유효한지 재검증한다.
 - 같은 `clientRequestId`, `prompt`, `timezone`, `requestContext`로 재시도하면 기존 run을 반환하고 새 outbox intent를 만들지 않는다.
 - 같은 `clientRequestId`로 다른 `prompt`, `timezone` 또는 `requestContext`를 보내면 `409 CLIENT_REQUEST_ID_CONFLICT`를 반환한다.
 - 새 run은 `planning` 상태와 pending outbox intent를 같은 transaction으로 생성한다.
@@ -800,6 +801,7 @@ Status code: `200 OK`
 | `generate_sql_erd` | `medium` | 상황별 | `SqlErdSchemaSpecV1`을 검증해 새 session을 만들거나 현재 operations_v1 session의 schema를 교체 |
 | `inspect_sql_erd_schema` | `low` | 가능 | session의 modelJson을 bounded compact projection으로 조회하고 여러 session이면 사용자 선택을 요청 |
 | `focus_sql_erd_tables` | `low` | 가능 | inspect 결과의 compact ref와 `sessionRevision`을 재검증해 일회성 `table_focus` resource ref 생성 |
+| `recommend_pr_review_focus` | `low` | 가능 | PR Review context의 immutable revision 안전 projection에서 핵심 검토 파일과 연결 파일을 추천 |
 
 > `assign_board_issue_safely`는 공개 assignee option 조회 계약을 사용하지만, 실행은 내부 add/remove
 > Board service 경로를 사용한다. 별도의 공개 endpoint는 추가하지 않는다.
@@ -849,6 +851,22 @@ Status code: `200 OK`
   writer lease, autosave와 Activity Log를 만들지 않으며 blur는 접근 제어나 보안 경계가 아니다.
 - 지원 범위를 벗어난 schema 기능은 `unsupportedFeatures`에 명시한다. DB 실행·배포만 요구하는
   요청은 `unsupported`이며, 요구 entity/table 정보가 없으면 먼저 clarification을 요청한다.
+
+### PR Review
+
+- `requestContext`는 `null`, `{ "surface": "sql_erd", "sessionId": "uuid" }`, 또는
+  `{ "surface": "pr_review", "sessionId": "uuid" }`이다. App Server는 run 생성 시 현재 사용자의
+  Workspace 접근 권한과 `pr_review_sessions -> pr_review_rooms.workspace_id` 소속을 다시 검증한다.
+  URL의 `sessionId`는 힌트일 뿐 신뢰하지 않는다.
+- Tool registry는 선택 사항인 `contextRequirement: { surface }` metadata를 가진다. 선언이 없는 Tool은
+  global Tool이고, 선언이 있는 Tool은 같은 surface의 run에만 schema snapshot으로 전달하며 실행 직전에도
+  같은 조건을 다시 확인한다. Tool 이름으로 surface 조건을 하드코딩하지 않는다.
+- `recommend_pr_review_focus`는 `surface=pr_review`인 run에서만 사용 가능한 read-only contextual Tool이다.
+  입력은 선택 `focus` (`api`, `backend`, `frontend`, `test`)뿐이며, session ID나 Workspace ID를 받지 않는다.
+- Tool은 해당 revision의 파일 경로, 역할, 위험도, 변경 요약, 검토 포인트, 검토 상태와 파일 관계만 읽는다.
+  raw diff, 코드 원문, 사용자 comment, provider payload는 planner input·step output·log에 포함하지 않는다.
+- revision이 `analyzing` 또는 `failed`이면 추천을 만들지 않고 분석 완료 또는 재시도 안내를 반환한다.
+  읽기 전용이므로 confirmation과 Activity Log는 만들지 않는다. 기존 Agent run/tool step 실행 이력은 유지한다.
 
 ### Calendar
 

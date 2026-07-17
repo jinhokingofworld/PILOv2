@@ -47,11 +47,13 @@ import { cn } from "@/lib/utils";
 export type MeetingReportStatusFilter = "ALL" | MeetingReportStatus;
 
 type MeetingReportSectionProps = {
+  currentPage: number;
   hasPreviousPage: boolean;
   meetingData: MeetingWorkspaceData;
   nextCursor: string | null;
   onListFiltersChange: (filters: { from: string; q: string; to: string }) => void;
   onNextPage: () => void;
+  onPageChange: (page: number) => void;
   onPreviousPage: () => void;
   onStatusFilterChange: (status: MeetingReportStatusFilter) => void;
   onToastMessage: (message: string) => void;
@@ -550,6 +552,8 @@ function ActionItemReviewCard({
   }
 
   async function selectDeliveryType(nextType: "calendar_event" | "pilo_issue") {
+    if (!editing) return;
+
     setDeliveryType(nextType);
     setDeliveryOptionsError(null);
     if (nextType !== "pilo_issue" || issueOptions || loadingIssueOptions) return;
@@ -633,7 +637,12 @@ function ActionItemReviewCard({
           <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
             {getActionItemStatusLabel(actionItem.status)}
           </span>
-          {pending ? (
+          {pending && !editing ? (
+            <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              {deliveryType === "calendar_event" ? "일정" : "이슈"}
+            </span>
+          ) : null}
+          {pending && editing ? (
             <div aria-label="생성 대상 선택" className="flex rounded-md border bg-background p-0.5">
               <Button type="button" size="sm" variant={deliveryType === "calendar_event" ? "default" : "ghost"} className="h-7 px-2 text-xs" disabled={busy || loadingIssueOptions} onClick={() => void selectDeliveryType("calendar_event")}>
                 일정
@@ -1213,11 +1222,13 @@ function MeetingReportDetailModal({
 }
 
 export function MeetingReportSection({
+  currentPage,
   hasPreviousPage,
   meetingData,
   nextCursor,
   onListFiltersChange,
   onNextPage,
+  onPageChange,
   onPreviousPage,
   onStatusFilterChange,
   onToastMessage,
@@ -1259,6 +1270,10 @@ export function MeetingReportSection({
 
   const hasProcessingReport = reports.some((report) =>
     isReportInProgress(report.status)
+  );
+  const pageNumbers = Array.from(
+    { length: currentPage + (nextCursor ? 1 : 0) },
+    (_, index) => index + 1
   );
   const isInitialLoading = reportsStatus === "loading" && reports.length === 0;
   const showError = reportsStatus === "error" && reports.length === 0;
@@ -1734,7 +1749,7 @@ export function MeetingReportSection({
         )}
       </div>
 
-      <div className="mx-auto flex w-full max-w-5xl justify-end gap-2">
+      <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-center gap-2">
         <Button
           disabled={reportsStatus === "loading" || !hasPreviousPage}
           type="button"
@@ -1743,6 +1758,18 @@ export function MeetingReportSection({
         >
           이전
         </Button>
+        {pageNumbers.map((page) => (
+          <Button
+            key={page}
+            aria-current={page === currentPage ? "page" : undefined}
+            disabled={reportsStatus === "loading" || page === currentPage}
+            type="button"
+            variant={page === currentPage ? "default" : "outline"}
+            onClick={() => onPageChange(page)}
+          >
+            {page}
+          </Button>
+        ))}
         <Button
           disabled={reportsStatus === "loading" || !nextCursor}
           type="button"

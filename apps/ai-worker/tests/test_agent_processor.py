@@ -24,6 +24,7 @@ RUN_ID = "33333333-3333-3333-3333-333333333333"
 WORKSPACE_ID = "22222222-2222-2222-2222-222222222222"
 USER_ID = "11111111-1111-1111-1111-111111111111"
 SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777"
+PR_REVIEW_SESSION_ID = "88888888-8888-4888-8888-888888888888"
 STEP_ID = "44444444-4444-4444-4444-444444444444"
 _DEFAULT_CONTEXT = object()
 
@@ -291,6 +292,17 @@ def test_parse_agent_run_job_payload_preserves_validated_request_context() -> No
     ]:
         with pytest.raises(ValueError, match="requestContext"):
             parse_agent_run_job_payload(agent_payload(requestContext=invalid_context))
+
+
+def test_parse_agent_run_job_payload_preserves_pr_review_request_context() -> None:
+    request_context = {
+        "surface": "pr_review",
+        "sessionId": PR_REVIEW_SESSION_ID,
+    }
+
+    job = parse_agent_run_job_payload(agent_payload(requestContext=request_context))
+
+    assert job.request_context == request_context
 
 
 def test_contextual_tool_snapshot_emits_indeterminate_confirmation_metadata() -> None:

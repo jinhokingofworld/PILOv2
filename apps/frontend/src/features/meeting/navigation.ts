@@ -9,6 +9,7 @@ export const meetingNavigation: FeatureNavigationItem = {
   description: "회의 참여, 녹음, 회의록 확인과 재생성을 관리합니다.",
   action: "회의 입장",
   href: "/meeting",
+  navigateOnTrigger: false,
   icon: Mic2,
   items: [
     { title: "회의 입장", href: "/meeting" },

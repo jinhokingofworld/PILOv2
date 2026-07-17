@@ -4,6 +4,14 @@ import {
   MAX_CANVAS_AGENT_SHAPE_SUMMARIES,
 } from "./canvas-agent-shape-context.ts";
 import { focusCanvasAgentResult } from "./canvas-agent-camera.ts";
+import {
+  buildCanvasAgentHtmlInsertionPlan,
+  buildHtmlFileName,
+} from "./canvas-agent-html-insertion-plan.ts";
+import {
+  buildCanvasAgentSelectedScene,
+  CanvasAgentSelectedSceneError,
+} from "./canvas-agent-selected-scene.ts";
 
 function shape(id, x, text) {
   return {
@@ -13,6 +21,134 @@ function shape(id, x, text) {
     x,
     y: 20,
   };
+}
+
+{
+  const plan = buildCanvasAgentHtmlInsertionPlan(
+    { x: 100, y: 200, w: 1000, h: 800 },
+    { x: 100, y: 200, w: 1000, h: 800 },
+    { width: 460, height: 300 },
+  );
+
+  assert.deepEqual(plan.codeBlockPosition, { x: 1220, y: 450 });
+  assert.deepEqual(plan.connectorStart, { x: 1100, y: 600 });
+  assert.deepEqual(plan.connectorEnd, { x: 1220, y: 600 });
+  assert.equal(buildHtmlFileName("대시보드: 와이어프레임"), "대시보드- 와이어프레임.html");
+  assert.equal(buildHtmlFileName("dashboard.HTML"), "dashboard.HTML");
+  assert.equal(buildHtmlFileName("  "), "canvas-page.html");
+}
+
+{
+  const shapes = [
+    {
+      id: "shape:page",
+      type: "frame",
+      parentId: "page:page",
+      rotation: 0,
+      meta: { piloChildShapeCount: 2 },
+      props: { name: "대시보드", color: "white" },
+    },
+    {
+      id: "shape:section",
+      type: "frame",
+      parentId: "shape:page",
+      rotation: 0,
+      props: { name: "요약", color: "grey" },
+    },
+    {
+      id: "shape:title",
+      type: "text",
+      parentId: "shape:section",
+      rotation: 0,
+      props: { richText: { content: [{ text: "대시보드 요약" }] }, color: "black" },
+    },
+  ];
+  const bounds = new Map([
+    ["shape:page", { x: 100, y: 200, w: 1000, h: 800 }],
+    ["shape:section", { x: 200, y: 300, w: 600, h: 300 }],
+    ["shape:title", { x: 240, y: 340, w: 240, h: 48 }],
+  ]);
+  const editor = {
+    getCurrentPageShapes: () => shapes,
+    getSelectedShapeIds: () => ["shape:page", "shape:title"],
+    getShape: (id) => shapes.find((item) => item.id === id),
+    getShapePageBounds: (id) => bounds.get(String(id)),
+  };
+
+  const scene = buildCanvasAgentSelectedScene(editor);
+
+  assert.equal(scene.selectionMode, "frame");
+  assert.deepEqual(scene.rootShapeIds, ["shape:page"]);
+  assert.deepEqual(scene.bounds, { width: 1000, height: 800 });
+  assert.equal(scene.shapes.length, 3);
+  assert.equal(scene.shapes.find((item) => item.id === "shape:section").x, 100);
+  assert.equal(scene.shapes.find((item) => item.id === "shape:title").depth, 2);
+  assert.equal(scene.shapes.find((item) => item.id === "shape:title").text, "대시보드 요약");
+}
+
+{
+  const shapes = [
+    { id: "shape:left", type: "geo", parentId: "page:page", rotation: 0, props: {} },
+    { id: "shape:right", type: "geo", parentId: "page:page", rotation: 0, props: {} },
+  ];
+  const editor = {
+    getCurrentPageShapes: () => shapes,
+    getSelectedShapeIds: () => ["shape:right", "shape:left"],
+    getShape: (id) => shapes.find((item) => item.id === id),
+    getShapePageBounds: (id) => String(id) === "shape:left"
+      ? { x: 100, y: 100, w: 200, h: 100 }
+      : { x: 500, y: 300, w: 100, h: 100 },
+  };
+
+  const scene = buildCanvasAgentSelectedScene(editor);
+
+  assert.equal(scene.selectionMode, "multi-selection");
+  assert.deepEqual(scene.bounds, { width: 500, height: 300 });
+  assert.equal(scene.shapes.find((item) => item.id === "shape:left").x, 0);
+  assert.equal(scene.shapes.find((item) => item.id === "shape:right").x, 400);
+}
+
+{
+  const frame = {
+    id: "shape:frame",
+    type: "frame",
+    parentId: "page:page",
+    meta: { piloChildShapeCount: 2 },
+    props: {},
+  };
+  const editor = {
+    getCurrentPageShapes: () => [frame],
+    getSelectedShapeIds: () => [frame.id],
+    getShape: () => frame,
+    getShapePageBounds: () => ({ x: 0, y: 0, w: 500, h: 500 }),
+  };
+
+  assert.throws(
+    () => buildCanvasAgentSelectedScene(editor),
+    (error) => error instanceof CanvasAgentSelectedSceneError
+      && error.missingFrameIds.includes(frame.id),
+  );
+}
+
+{
+  const shapes = [
+    { id: "shape:a", type: "frame", parentId: "shape:b", props: {} },
+    { id: "shape:b", type: "frame", parentId: "shape:a", props: {} },
+  ];
+  const editor = {
+    getCurrentPageShapes: () => shapes,
+    getSelectedShapeIds: () => shapes.map((item) => item.id),
+    getShape: (id) => shapes.find((item) => item.id === id),
+    getShapePageBounds: (id) => String(id) === "shape:a"
+      ? { x: 0, y: 0, w: 100, h: 100 }
+      : { x: 120, y: 0, w: 100, h: 100 },
+  };
+
+  assert.throws(
+    () => buildCanvasAgentSelectedScene(editor),
+    (error) => error instanceof CanvasAgentSelectedSceneError
+      && error.message.includes("순환"),
+  );
 }
 
 {

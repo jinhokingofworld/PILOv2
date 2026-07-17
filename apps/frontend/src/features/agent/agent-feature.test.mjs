@@ -272,6 +272,29 @@ assert.equal(
   null
 );
 
+const prReviewSessionId = "99999999-9999-4999-8999-999999999999";
+const expectedPrReviewContext = {
+  surface: "pr_review",
+  sessionId: prReviewSessionId
+};
+
+assert.deepEqual(
+  readAgentRequestContext("/pr-review", `reviewSessionId=${prReviewSessionId}`),
+  expectedPrReviewContext
+);
+assert.equal(
+  readAgentRequestContext(
+    "/pr-review/rooms",
+    `reviewSessionId=${prReviewSessionId}`
+  ),
+  null
+);
+assert.equal(
+  readAgentRequestContext("/pr-review", "reviewSessionId=not-a-uuid"),
+  null
+);
+assert.match(agentChatWidget, /z-\[70\]/);
+
 const resourceSessionId = "88888888-8888-4888-8888-888888888888";
 const candidateSessionId = "77777777-7777-4777-8777-777777777777";
 const sqlErdCandidateRun = {

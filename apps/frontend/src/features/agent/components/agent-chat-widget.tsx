@@ -807,7 +807,7 @@ export function AgentChatWidget() {
       {isOpen ? (
         <section
           aria-labelledby={panelTitleId}
-          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[420px] flex-col border-l border-slate-200 bg-white shadow-2xl shadow-slate-950/15"
+          className="fixed inset-y-0 right-0 z-[70] flex w-full max-w-[420px] flex-col border-l border-slate-200 bg-white shadow-2xl shadow-slate-950/15"
         >
           <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
               <div className="flex min-w-0 items-center gap-3">
@@ -1007,7 +1007,7 @@ export function AgentChatWidget() {
               size="icon-lg"
               aria-label={isOpen ? "AI 채팅 접기" : "AI 채팅 열기"}
               className={cn(
-                "fixed bottom-4 right-4 z-40 size-14 rounded-full border border-slate-800 bg-slate-950 text-white shadow-xl shadow-slate-950/20 hover:bg-slate-800 sm:bottom-6 sm:right-6",
+                "fixed bottom-4 right-4 z-[70] size-14 rounded-full border border-slate-800 bg-slate-950 text-white shadow-xl shadow-slate-950/20 hover:bg-slate-800 sm:bottom-6 sm:right-6",
                 isOpen && "pointer-events-none opacity-0"
               )}
               onClick={() => setIsOpen((currentValue) => !currentValue)}

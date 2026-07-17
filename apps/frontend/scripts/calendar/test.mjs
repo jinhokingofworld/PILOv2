@@ -25,6 +25,7 @@ const calendarPanel = await readFile(
 );
 
 assert.match(calendarTypes, /export type CalendarEvent/);
+assert.match(calendarTypes, /googleSync/);
 assert.match(calendarTypes, /export type CreateCalendarEventInput/);
 assert.match(calendarTypes, /export type UpdateCalendarEventInput/);
 assert.match(calendarApiClient, /createCalendarApiClient/);
@@ -33,6 +34,10 @@ assert.match(calendarApiClient, /getEvent/);
 assert.match(calendarApiClient, /createEvent/);
 assert.match(calendarApiClient, /updateEvent/);
 assert.match(calendarApiClient, /deleteEvent/);
+assert.match(calendarApiClient, /getGoogleConnection/);
+assert.match(calendarApiClient, /startGoogleConnection/);
+assert.match(calendarApiClient, /selectGoogleCalendar/);
+assert.match(calendarApiClient, /enableGoogleSync/);
 assert.match(calendarApiClient, /Authorization/);
 assert.match(calendarApiClient, /credentials: "same-origin"/);
 assert.match(calendarApiClient, /success === true/);
@@ -82,6 +87,11 @@ assert.match(
   /function CalendarEventDialog\([\s\S]*?if \(!mode\) \{\s*return null;/
 );
 assert.match(calendarPanel, /CalendarEventCreateDialog/);
+assert.match(calendarPanel, /Google Calendar에 추가/);
+assert.match(calendarPanel, /GoogleCalendarPickerDialog/);
+assert.match(calendarPanel, /googleCalendarConnected/);
+assert.match(calendarPanel, /동기화 실패/);
+assert.match(calendarPanel, /retryGoogleSync/);
 assert.match(calendarPanel, /CalendarEventDetailDialog/);
 assert.match(calendarPanel, /CalendarEventsDialog/);
 assert.match(calendarPanel, /CalendarEventsDialogState/);

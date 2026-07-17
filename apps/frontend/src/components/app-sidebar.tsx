@@ -65,7 +65,13 @@ import { cn } from "@/lib/utils";
 
 export type AppSidebarItem = Pick<
   FeatureNavigationItem,
-  "description" | "href" | "icon" | "id" | "items" | "title"
+  | "description"
+  | "href"
+  | "icon"
+  | "id"
+  | "items"
+  | "navigateOnTrigger"
+  | "title"
 >;
 
 type AppSidebarProps = {
@@ -195,8 +201,12 @@ export function AppSidebar({
   const handleSelectItem = (
     itemId: string,
     href: string,
-    options: { closeMobile?: boolean } = {}
+    options: { closeMobile?: boolean; navigate?: boolean } = {}
   ) => {
+    if (options.navigate === false) {
+      return;
+    }
+
     onSelectItem?.(itemId);
     setActiveSubItemHref(href);
     router.push(href);
@@ -446,7 +456,11 @@ export function AppSidebar({
                       open={isOpen}
                     >
                       <CollapsibleTrigger
-                        onClick={() => handleSelectItem(item.id, item.href)}
+                        onClick={() =>
+                          handleSelectItem(item.id, item.href, {
+                            navigate: item.navigateOnTrigger
+                          })
+                        }
                         render={
                           <SidebarMenuButton
                             aria-current={isActive ? "page" : undefined}

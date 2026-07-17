@@ -10,6 +10,7 @@ const USER_ID = "11111111-1111-1111-1111-111111111111";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
+const PR_REVIEW_SESSION_ID = "88888888-8888-4888-8888-888888888888";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CREATED_AT = new Date("2026-07-08T00:00:00.000Z");
 const UPDATED_AT = new Date("2026-07-08T00:00:01.000Z");
@@ -803,8 +804,8 @@ function errorMessage(error) {
 
 {
   const requestContext = {
-    surface: "sql_erd",
-    sessionId: SQL_ERD_SESSION_ID
+    surface: "pr_review",
+    sessionId: PR_REVIEW_SESSION_ID
   };
   const state = {
     runs: [],
@@ -830,8 +831,8 @@ function errorMessage(error) {
       createRun({
         client_request_id: "request-1",
         request_context_json: {
-          sessionId: SQL_ERD_SESSION_ID,
-          surface: "sql_erd"
+          sessionId: PR_REVIEW_SESSION_ID,
+          surface: "pr_review"
         }
       })
     ],
@@ -845,8 +846,8 @@ function errorMessage(error) {
     timezone: state.runs[0].timezone,
     clientRequestId: "request-1",
     requestContext: {
-      surface: "sql_erd",
-      sessionId: SQL_ERD_SESSION_ID
+      surface: "pr_review",
+      sessionId: PR_REVIEW_SESSION_ID
     }
   });
 

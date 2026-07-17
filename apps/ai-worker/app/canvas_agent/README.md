@@ -2,8 +2,10 @@
 
 `canvas_agent`는 PILO Canvas 안에서만 동작하는 Canvas AI worker 영역이다.
 이 패키지는 Calendar, Issue, PR, Meeting 같은 외부 도메인 데이터를 직접 조회하거나 수정하지 않는다.
-Canvas 기능 설명과 Canvas 위 기존 shape 검색·선택·viewport 이동을 담당한다.
-새 shape 생성, 연결, 수정, 삭제와 diagram/code draft 생성은 하지 않는다.
+Canvas 기능 설명, 기존 shape 검색·viewport 이동, 선택 영역의 정적 HTML/CSS
+artifact 생성을 담당한다. Worker는 새 Canvas shape 생성, 연결, 수정, 삭제와
+Canvas diagram/code draft 생성을 직접 하지 않는다. `generate_html` artifact를 받은
+Canvas Frontend가 기존 tldraw 편집 경로로 코드블럭과 연결선을 생성한다.
 
 ## 폴더 구조
 
@@ -14,6 +16,7 @@ canvas_agent/
   embedding_processor.py
   planning/
     planner.py
+    html_generator.py
     prompts.py
     tool_catalog.py
     draft_schema.py
@@ -48,12 +51,21 @@ Canvas Agent run job의 실행 흐름을 담당한다.
 - terminal status 방어
 - LLM intent classifier로 검색어와 현재 로드된 shape 후보를 분류
 - 현재 shape 후보가 없으면 정리된 검색어로 semantic router 실행
+- `generate_html`이면 검증된 `selectedScene`을 정적 HTML/CSS로 변환
 - 분류 결과를 `route_intent` step으로 DB에 저장
+
+HTML 생성은 Canvas의 부모 관계, 섹션 순서, 상대 비율과 사용자 텍스트를 구조적
+와이어프레임으로 해석한다. 사용자 prompt에 시각 스타일이 있으면 그 스타일을
+적용하고, 별도 스타일 요청이 없으면 토스 계열의 밝고 정돈된 제품 UI를 기본값으로
+사용한다. Canvas의 작은 절대 크기와 임시 색상을 그대로 복사하지 않고 전체 브라우저
+영역을 채우는 grid/flex 레이아웃으로 구성하며, 필요한 정적 예시 버튼·카드·값을
+보완할 수 있다.
 
 중요한 원칙:
 
 - local semantic routing 실패는 Canvas AI 전체 실패로 만들지 않고 빈 검색 결과로 처리한다.
-- 실제 Canvas write는 worker가 직접 하지 않고 App Server action executor가 처리한다.
+- 실제 Canvas write는 worker가 직접 하지 않는다. HTML artifact의 코드블럭/연결선
+  삽입은 Canvas Frontend가 일반 tldraw shape patch 경로로 처리한다.
 
 ### `embedding_processor.py`
 
@@ -114,9 +126,9 @@ LLM intent classifier 호출과 응답 검증을 담당한다.
 
 주의:
 
-- classifier는 raw tldraw shape나 draft를 만들지 않는다.
-- 현재 일반 모드에서 허용되는 intent는 `find_shapes` 하나다.
-- mutation 표현도 실행 명령으로 해석하지 않고 기존 Canvas 검색어만 추출한다.
+- classifier는 raw tldraw shape나 Canvas draft를 만들지 않는다.
+- 일반 모드 intent는 `find_shapes`, `generate_html`, `unsupported`다.
+- mutation 표현을 검색으로 바꾸지 않고 `unsupported`로 분류한다.
 
 ### `planning/prompts.py`
 
@@ -131,11 +143,13 @@ LLM에 전달할 system prompt와 user prompt를 조립한다.
 
 ### `planning/tool_catalog.py`
 
-LLM에게 허용할 read-only Canvas intent 목록을 관리한다.
+LLM에게 허용할 non-mutating Canvas intent 목록을 관리한다.
 
 포함 내용:
 
 - `find_shapes`
+- `generate_html`
+- `unsupported`
 
 중요한 점:
 
@@ -169,11 +183,13 @@ LLM이 정리한 검색어의 DB semantic routing을 담당한다.
 
 - 현재 Canvas에 한정된 embedding 검색으로 기존 shape 후보 조회
 - shape 후보가 충분히 확실하면 `find_shapes` intent classification 생성
-- 별도의 DB 텍스트 검색은 수행하지 않음
+- embedding이 없거나 확신 기준을 넘지 못하면 DB 제목·본문 검색 수행
+- DB 검색은 `workspace_id`와 현재 `canvas_id`를 모두 일치시킨 뒤 최대 4건만 반환
 
 중요한 원칙:
 
 - embedding은 “기존 shape 후보 찾기”에만 사용한다.
+- DB 텍스트 검색은 embedding 이후의 fallback으로만 사용한다.
 - embedding과 action executor 모두 Canvas write를 하지 않는다.
 
 ## PILO AI 담당자가 Canvas AI를 사용할 때 필요한 점
@@ -193,6 +209,8 @@ PILO AI가 Canvas 관련 요청을 받으면 직접 Canvas용 LLM intent classif
 `requestContext`에는 가능하면 아래 값을 넣는다.
 
 - `selectedShapeIds`
+- `selectedScene`
+- `selectedSceneError`
 - `viewport`
 - `toolHelpMode`
 - `presentationMode`

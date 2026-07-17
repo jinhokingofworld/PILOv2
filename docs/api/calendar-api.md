@@ -1,5 +1,48 @@
 # Calendar API
 
+> Google Calendar outbound sync (implemented): PILO is the source of truth. Google
+> changes are not imported. The create dialog always shows an unchecked `Google
+> Calendar에 추가` checkbox. PILO saves first; when it is selected, a missing Google
+> connection is completed afterward and then the user selects one destination calendar.
+> Cancellation or failure leaves the PILO event unchanged and unsynced. Synced event
+> updates/deletes are appended to a durable outbox in the same database transaction,
+> with exponential-backoff retry up to five attempts. Disconnecting keeps existing
+> Google events.
+
+## Google Calendar endpoints
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `POST` | `/workspaces/{workspaceId}/calendar/events/{eventId}/google-sync` | Queue an event for outbound sync |
+| `POST` | `/workspaces/{workspaceId}/calendar/events/{eventId}/google-sync/retry` | Retry a failed outbound sync for an existing event |
+| `GET` | `/calendar/google/connection` | Read connection/target status |
+| `POST` | `/calendar/google/connection/start` | Start Calendar OAuth (`returnPath` optional) |
+| `GET` | `/calendar/google/callback` | Browser callback and frontend redirect |
+| `GET` | `/calendar/google/calendars` | List selectable calendars |
+| `PUT` | `/calendar/google/target` | Select `{ "calendarId": "primary" }` |
+| `DELETE` | `/calendar/google/connection` | Disconnect without remote deletion |
+
+Connection response: `{ "connected": true, "targetCalendarId": "primary", "targetCalendarSummary": "Sein" }`.
+Only title, description (maximum 8,000 characters), all-day status, and start/end values
+are sent. Color, participant data, identity fields, and OAuth tokens are never exposed.
+All-day Google end dates are exclusive, so PILO's inclusive end date is sent plus one day.
+
+Event payloads include `googleSync` when the event is connected to Google Calendar:
+
+```json
+{
+  "googleSync": {
+    "status": "pending | synced | failed",
+    "lastError": null
+  }
+}
+```
+
+The selected Google Calendar ID is stored per event. Changing the connection's default
+target affects only later opt-in events; existing mapped events keep updating and deleting
+in their original Google Calendar. A Google DELETE `404` or `410` is treated as successful
+because the desired remote state is already absent.
+
 ## 범위
 
 Calendar API는 Workspace 일정 CRUD를 담당한다. MVP Calendar는 GitHub issue, PR,

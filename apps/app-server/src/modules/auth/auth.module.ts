@@ -18,6 +18,7 @@ import { OAuthStateService } from "./oauth-state.service";
     OAuthStateService,
     GoogleOAuthClient,
     GithubLoginOAuthClient
-  ]
+  ],
+  exports: [AuthConfigService]
 })
 export class AuthModule {}

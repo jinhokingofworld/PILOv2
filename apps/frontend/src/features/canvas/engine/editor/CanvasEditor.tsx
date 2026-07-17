@@ -43,6 +43,8 @@ import {
   CanvasAiChatOverlay,
 } from "./overlays/CanvasAiChatOverlay";
 import { CanvasAgentVisualOverlay } from "./overlays/CanvasAgentVisualOverlay";
+import { CanvasRemoteConnectionPreviewOverlay } from "./overlays/CanvasRemoteConnectionPreviewOverlay";
+import { CanvasRemoteFreehandPreviewOverlay } from "./overlays/CanvasRemoteFreehandPreviewOverlay";
 import { PiloCollapsedFrameOverlay } from "./overlays/PiloCollapsedFrameOverlay";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
 import { SelectedGroupToolbar } from "../interactions/PiloCanvasGroupToolbar";
@@ -88,10 +90,9 @@ import {
   type PiloInsertableTool,
 } from "../shapes/pilo-canvas-shape-factory";
 import { piloCanvasShapeUtils } from "../shapes/pilo-canvas-shape-utils";
-import {
-  placePiloCanvasShapeAt,
-  type PiloPlacementRequest,
-} from "../interactions/pilo-canvas-placement";
+import { createPiloCanvasShapeInEmptyViewport } from "../interactions/pilo-canvas-instant-shape";
+import { placePiloCanvasShapeInEmptyViewport } from "../interactions/pilo-canvas-placement";
+import { getCanvasInteractionToolPath } from "../interactions/canvas-local-interaction-policy";
 import {
   hasCodeFileDrag,
   importCodeFilesFromDataTransfer,
@@ -125,7 +126,6 @@ import type {
   PiloDrawingPreset,
 } from "./canvas-editor-contracts";
 import { resetClassicCanvasCamera } from "./canvas-initial-camera";
-import { isCanvasFreehandInteractionActive } from "../interactions/canvas-local-interaction-policy";
 
 export type { PiloCanvasFreeformShape } from "../canvas-engine-types";
 export type { PiloInsertableTool } from "../shapes/pilo-canvas-shape-factory";
@@ -210,6 +210,7 @@ type CanvasEditorProps = {
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onFrameChildShapesUnload: (shapes: PiloCanvasFreeformShape[]) => void;
   onFrameChildrenRequest: (frameId: string) => void;
+  onFrameSubtreeRequest: (frameId: string) => Promise<void>;
   getPreservedFreeformShapeSnapshots?: () => PiloCanvasFreeformShape[];
   isShapePatchProtected: (shapeId: string) => boolean;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
@@ -237,17 +238,11 @@ const CANVAS_REMOTE_PREVIEW_DELETE_GRACE_MS = 8_000;
 const CANVAS_SHAPE_PREVIEW_THROTTLE_MS = 60;
 const EMPTY_REMOTE_SHAPE_PREVIEWS: readonly CanvasShapePreviewEventPayload[] = [];
 const emptyRemoteShapePreviewStore: CanvasRemoteShapePreviewStore = {
+  acknowledgeAppliedShapeIds: () => {},
   getSnapshot: () => EMPTY_REMOTE_SHAPE_PREVIEWS,
   subscribe: () => () => {},
 };
 
-function isEditorFreehandInteractionActive(editor: Editor) {
-  return isCanvasFreehandInteractionActive({
-    currentToolId: editor.getCurrentToolId(),
-    isDragging: editor.inputs.getIsDragging(),
-    isPointing: editor.inputs.getIsPointing(),
-  });
-}
 const CANVAS_PRESENCE_CURSOR_MIN_DISTANCE = 2;
 const CANVAS_PRESENCE_CURSOR_THROTTLE_MS = 60;
 const connectionTools = new Set<PiloCanvasTool>(["arrow", "line"]);
@@ -1054,6 +1049,7 @@ export function CanvasEditor({
   onViewChange,
   onFrameChildShapesUnload,
   onFrameChildrenRequest,
+  onFrameSubtreeRequest,
   getPreservedFreeformShapeSnapshots,
   isShapePatchProtected,
   onViewportBoundsChange,
@@ -1068,7 +1064,6 @@ export function CanvasEditor({
 }: CanvasEditorProps) {
   const editorRef = useRef<Editor | null>(null);
   const [canvasEditor, setCanvasEditor] = useState<Editor | null>(null);
-  const placementRequestRef = useRef<PiloPlacementRequest | null>(null);
   const returnToSelectAfterPlacementRef = useRef(false);
   const onOneShotToolCreatedRef = useRef(onOneShotToolCreated);
   const canvasAiChatPointerRef = useRef<CanvasAiChatAnchor | null>(null);
@@ -1106,7 +1101,7 @@ export function CanvasEditor({
     (CanvasAiChatAnchor & { progress: number }) | null
   >(null);
   const [isPiloEraserActive, setIsPiloEraserActive] = useState(false);
-  const [isLocalFreehandDrawing, setIsLocalFreehandDrawing] = useState(false);
+  const [localInteractionVersion, setLocalInteractionVersion] = useState(0);
   const isCanvasAiChatVisible = Boolean(canvasAiChatAnchor || canvasAiChatHoldProgress);
   const handleCanvasAgentApplied = useCallback(() => {
     const editor = editorRef.current;
@@ -1125,6 +1120,7 @@ export function CanvasEditor({
     editor: canvasEditor,
     enabled: canvasAgentEnabled,
     onApplied: handleCanvasAgentApplied,
+    onFrameSubtreeRequest,
     workspaceId: board.workspaceId,
   });
   const scheduleShapePreviewSend = useCallback(
@@ -1346,7 +1342,7 @@ export function CanvasEditor({
   const handleLocalInteractionChange = useCallback(
     (state: PiloCanvasLocalInteractionState) => {
       const nextShapeIds = Array.from(
-        new Set(state.protectedShapeIds.filter(Boolean)),
+        new Set(state.activeMutationShapeIds.filter(Boolean)),
       );
       const nextPreviewPhase = getShapePreviewPhase(
         state.currentToolId,
@@ -1355,7 +1351,7 @@ export function CanvasEditor({
 
       localPreviewShapeIdsRef.current = nextShapeIds;
       localPreviewPhaseRef.current = nextPreviewPhase;
-      setIsLocalFreehandDrawing(state.isFreehandDrawing);
+      setLocalInteractionVersion((version) => version + 1);
 
       onLocalInteractionStateChange(state);
     },
@@ -1443,21 +1439,31 @@ export function CanvasEditor({
   useEffect(() => {
     const editor = editorRef.current;
 
-    if (
-      !editor ||
-      isLocalFreehandDrawing ||
-      isEditorFreehandInteractionActive(editor)
-    ) {
+    if (!editor) {
       return;
     }
 
+    const patch = consumeShapePatch();
+
     applyFreeformShapePatchIncrementally(
       editor,
-      consumeShapePatch(),
+      patch,
       pendingArrowBindingsRef,
       piloDefaultArrowKindHydrationGuardRef,
     );
-  }, [consumeShapePatch, isLocalFreehandDrawing, shapePatchVersion]);
+    presence?.remoteShapePreviewStore.acknowledgeAppliedShapeIds([
+      ...patch.deletedShapeIds,
+      ...patch.upsertShapes.flatMap((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+
+        return shapeId ? [shapeId] : [];
+      }),
+    ]);
+  }, [
+    consumeShapePatch,
+    presence?.remoteShapePreviewStore,
+    shapePatchVersion,
+  ]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1478,7 +1484,6 @@ export function CanvasEditor({
   }
 
   function activatePiloEraser(editor: Editor) {
-    placementRequestRef.current = null;
     returnToSelectAfterPlacementRef.current = false;
     piloEraserActiveRef.current = true;
     piloEraserPointerIdRef.current = null;
@@ -1740,7 +1745,6 @@ export function CanvasEditor({
       },
       openCanvasAiChat(anchor) {
         deactivatePiloEraser(editor);
-        placementRequestRef.current = null;
         returnToSelectAfterPlacementRef.current = false;
         editor.cancel();
         editor.setCurrentTool("select.idle");
@@ -1748,14 +1752,28 @@ export function CanvasEditor({
       },
       selectTool(tool) {
         deactivatePiloEraser(editor);
-        placementRequestRef.current = null;
+        editor.cancel();
+        editor.updateInstanceState({ isToolLocked: false });
+
+        if (tool === "frame" || tool === "text") {
+          returnToSelectAfterPlacementRef.current = false;
+
+          if (
+            createPiloCanvasShapeInEmptyViewport({
+              editor,
+              request: { type: tool },
+            })
+          ) {
+            onOneShotToolCreatedRef.current?.();
+          }
+
+          return;
+        }
+
         returnToSelectAfterPlacementRef.current =
           tool !== "select" &&
           tool !== "hand" &&
-          tool !== "text" &&
           !connectionTools.has(tool);
-        editor.cancel();
-        editor.updateInstanceState({ isToolLocked: false });
         editor.setCurrentTool(tool === "select" ? "select.idle" : tool);
       },
       selectDrawingPreset(preset) {
@@ -1765,7 +1783,6 @@ export function CanvasEditor({
         }
 
         deactivatePiloEraser(editor);
-        placementRequestRef.current = null;
         const shouldKeepDrawing = preset === "pen" || preset === "highlight";
         returnToSelectAfterPlacementRef.current = !shouldKeepDrawing;
         editor.cancel();
@@ -1780,7 +1797,23 @@ export function CanvasEditor({
         const geoStyle = piloGeoStyleByDrawingPreset[preset];
         if (geoStyle) {
           editor.setStyleForNextShapes(GeoShapeGeoStyle, geoStyle);
-          editor.setCurrentTool("geo");
+
+          if (
+            createPiloCanvasShapeInEmptyViewport({
+              editor,
+              request: {
+                geo: geoStyle,
+                preset: preset as Exclude<
+                  PiloDrawingPreset,
+                  "pen" | "highlight" | "eraser"
+                >,
+                type: "geo",
+              },
+            })
+          ) {
+            onOneShotToolCreatedRef.current?.();
+          }
+
           return;
         }
 
@@ -1902,30 +1935,50 @@ export function CanvasEditor({
       },
       createNote() {
         deactivatePiloEraser(editor);
-        placementRequestRef.current = null;
-        returnToSelectAfterPlacementRef.current = true;
+        returnToSelectAfterPlacementRef.current = false;
         editor.cancel();
         editor.updateInstanceState({ isToolLocked: false });
-        editor.setCurrentTool("note");
+
+        if (
+          createPiloCanvasShapeInEmptyViewport({
+            editor,
+            request: { type: "note" },
+          })
+        ) {
+          onOneShotToolCreatedRef.current?.();
+        }
       },
       createCodeBlock() {
         deactivatePiloEraser(editor);
         returnToSelectAfterPlacementRef.current = false;
         editor.cancel();
         editor.setCurrentTool("select.idle");
-        placementRequestRef.current = {
-          type: "code",
-        };
+        const result = placePiloCanvasShapeInEmptyViewport({
+          editor,
+          index: createdLocalCardsRef.current + 1,
+          placementRequest: { type: "code" },
+        });
+
+        if (result.placed) {
+          createdLocalCardsRef.current += result.createdCount;
+          onOneShotToolCreatedRef.current?.();
+        }
       },
       createInsertableShape(tool, url) {
         deactivatePiloEraser(editor);
         returnToSelectAfterPlacementRef.current = false;
         editor.cancel();
         editor.setCurrentTool("select.idle");
-        placementRequestRef.current = {
-          type: tool,
-          url,
-        };
+        const result = placePiloCanvasShapeInEmptyViewport({
+          editor,
+          index: createdLocalCardsRef.current + 1,
+          placementRequest: { type: tool, url },
+        });
+
+        if (result.placed) {
+          createdLocalCardsRef.current += result.createdCount;
+          onOneShotToolCreatedRef.current?.();
+        }
       },
       groupSelection() {
         const selectedShapeIds = editor.getSelectedShapeIds();
@@ -2030,7 +2083,6 @@ export function CanvasEditor({
       },
       clearSelection() {
         deactivatePiloEraser(editor);
-        placementRequestRef.current = null;
         returnToSelectAfterPlacementRef.current = false;
         editor.selectNone();
       },
@@ -2167,29 +2219,6 @@ export function CanvasEditor({
       y: (event.clientY - viewportBounds.y) / nextZoom - cursorPagePoint.y,
       z: nextZoom,
     });
-  }
-
-  function placePendingShapeAt(point: { x: number; y: number }) {
-    const editor = editorRef.current;
-    const placementRequest = placementRequestRef.current;
-
-    if (!editor || !placementRequest) return false;
-
-    placementRequestRef.current = null;
-    const result = placePiloCanvasShapeAt({
-      editor,
-      index: createdLocalCardsRef.current + 1,
-      placementRequest,
-      point,
-    });
-
-    if (result.placed) {
-      createdLocalCardsRef.current += result.createdCount;
-      editor.setCurrentTool("select.idle");
-      onOneShotToolCreatedRef.current?.();
-    }
-
-    return result.placed;
   }
 
   function requestShapeDetail(editor: Editor, shapeId: TLShapeId) {
@@ -2337,14 +2366,6 @@ export function CanvasEditor({
       x: event.clientX,
       y: event.clientY,
     });
-
-    if (placementRequestRef.current) {
-      if (placePendingShapeAt(pagePoint)) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-    }
 
     // Frame and shape detail selection are select-tool affordances. Let an
     // active drawing tool receive its first click so an arrow can start from
@@ -2521,13 +2542,22 @@ export function CanvasEditor({
           />
           <CanvasRealtimePreviewApplier
             committedShapes={freeformShapes}
-            isLocalFreehandDrawing={isLocalFreehandDrawing}
             isShapePatchProtected={isShapePatchProtected}
             originalShapesRef={remotePreviewOriginalShapesRef}
-            protectionVersion={shapePatchVersion}
+            protectionVersion={localInteractionVersion}
             previewShapeIdsRef={remotePreviewShapeIdsRef}
             previewStore={presence?.remoteShapePreviewStore}
           />
+          {presence ? (
+            <>
+              <CanvasRemoteConnectionPreviewOverlay
+                previewStore={presence.remoteShapePreviewStore}
+              />
+              <CanvasRemoteFreehandPreviewOverlay
+                previewStore={presence.remoteShapePreviewStore}
+              />
+            </>
+          ) : null}
           <CanvasHistoryStateReporter
             onHistoryStateChange={onHistoryStateChange}
           />
@@ -2553,6 +2583,7 @@ export function CanvasEditor({
       </CanvasRemotePresenceProvider>
       <CanvasAiChatOverlay
         anchor={canvasAiChatAnchor}
+        artifact={canvasAgent.artifact}
         draft={canvasAgent.draft}
         error={canvasAgent.error}
         holdProgress={canvasAiChatHoldProgress}
@@ -2575,7 +2606,6 @@ export function CanvasEditor({
 
 function CanvasRealtimePreviewApplier({
   committedShapes,
-  isLocalFreehandDrawing,
   isShapePatchProtected,
   originalShapesRef,
   protectionVersion,
@@ -2583,7 +2613,6 @@ function CanvasRealtimePreviewApplier({
   previewStore = emptyRemoteShapePreviewStore,
 }: {
   committedShapes: PiloCanvasFreeformShape[];
-  isLocalFreehandDrawing: boolean;
   isShapePatchProtected: (shapeId: string) => boolean;
   originalShapesRef: MutableRefObject<Map<string, PiloCanvasFreeformShape>>;
   protectionVersion: number;
@@ -2612,13 +2641,6 @@ function CanvasRealtimePreviewApplier({
     useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (
-      isLocalFreehandDrawing ||
-      isEditorFreehandInteractionActive(editor)
-    ) {
-      return;
-    }
-
     if (previewDeleteCleanupTimerRef.current) {
       clearTimeout(previewDeleteCleanupTimerRef.current);
       previewDeleteCleanupTimerRef.current = null;
@@ -2634,6 +2656,14 @@ function CanvasRealtimePreviewApplier({
         const shapeId = getFreeformShapeId(previewShape);
 
         if (!shapeId) return;
+        if (
+          previewShape.type === "draw" ||
+          previewShape.type === "highlight" ||
+          previewShape.type === "line" ||
+          previewShape.type === "arrow"
+        ) {
+          return;
+        }
         activePreviewShapeIds.add(shapeId);
         if (
           shapeId === locallyEditingShapeId ||
@@ -2844,7 +2874,6 @@ function CanvasRealtimePreviewApplier({
     committedShapes,
     editor,
     isShapePatchProtected,
-    isLocalFreehandDrawing,
     locallyEditingShapeId,
     originalShapesRef,
     previewDeleteCleanupVersion,
@@ -3305,7 +3334,7 @@ function CanvasPresenceReporter({
   );
   const currentToolId = useValue(
     "pilo-presence-current-tool-id",
-    () => editor.getCurrentToolId(),
+    () => getCanvasInteractionToolPath(editor),
     [editor],
   );
   const editingMode = getCanvasPresenceEditingMode({

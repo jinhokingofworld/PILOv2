@@ -78,6 +78,13 @@ output "pr_review_ai_worker_ecs_secrets" {
   }
 }
 
+output "workspace_indexer_worker_ecs_secrets" {
+  value = {
+    DATABASE_URL   = aws_secretsmanager_secret.this["ai-worker/DATABASE_URL"].arn
+    OPENAI_API_KEY = aws_secretsmanager_secret.this["ai-worker/OPENAI_API_KEY"].arn
+  }
+}
+
 output "livekit_host_secret_arns" {
   value = {
     for name in [

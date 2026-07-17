@@ -11,6 +11,7 @@ from app.agent_processor import (
 )
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
 from app.canvas_agent.embeddings import LocalSentenceTransformerCanvasEmbedder
+from app.canvas_agent.planning.html_generator import OpenAiCanvasAgentHtmlGenerator
 from app.canvas_agent.planning.planner import OpenAiCanvasAgentIntentClassifier
 from app.canvas_agent.processor import CanvasAgentProcessor
 from app.canvas_agent.repository import PgCanvasAgentRepository
@@ -190,6 +191,11 @@ def create_shared_ai_worker(
         resolved_settings.openai_agent_planner_model,
         resolved_settings.openai_agent_planner_timeout_seconds,
     )
+    canvas_agent_html_generator = OpenAiCanvasAgentHtmlGenerator(
+        resolved_settings.openai_api_key,
+        resolved_settings.openai_agent_planner_model,
+        resolved_settings.openai_agent_planner_timeout_seconds,
+    )
     canvas_embedder = LocalSentenceTransformerCanvasEmbedder()
     agent_run_repository = None
     agent_execution_handoff_client = None
@@ -221,6 +227,7 @@ def create_shared_ai_worker(
         canvas_agent_repository,
         canvas_agent_intent_classifier,
         CanvasSemanticRouter(canvas_agent_repository, canvas_embedder),
+        canvas_agent_html_generator,
     )
     canvas_embedding_processor = CanvasEmbeddingProcessor(
         canvas_agent_repository,

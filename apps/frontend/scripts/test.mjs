@@ -267,6 +267,27 @@ const canvasLocalInteractionPolicy = await readFile(
   ),
   "utf8"
 );
+const canvasRemoteFreehandPreviewOverlay = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/overlays/CanvasRemoteFreehandPreviewOverlay.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasRemoteConnectionPreviewOverlay = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/overlays/CanvasRemoteConnectionPreviewOverlay.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasRemoteConnectionPreview = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/overlays/canvas-remote-connection-preview.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const canvasRemoteCursorOverlay = await readFile(
   new URL("../src/shared/canvas-realtime/RemoteCursorOverlay.tsx", import.meta.url),
   "utf8"
@@ -362,6 +383,20 @@ const piloCodeBlockShapeTypes = await readFile(
 const piloCanvasPlacement = await readFile(
   new URL(
     "../src/features/canvas/engine/interactions/pilo-canvas-placement.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCanvasEmptyPlacement = await readFile(
+  new URL(
+    "../src/features/canvas/engine/interactions/pilo-canvas-empty-placement.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCanvasInstantShape = await readFile(
+  new URL(
+    "../src/features/canvas/engine/interactions/pilo-canvas-instant-shape.ts",
     import.meta.url
   ),
   "utf8"
@@ -924,9 +959,12 @@ assert.match(canvasRuntime, /isRemoteShapeDeletionProtected/);
 assert.match(canvasRuntime, /flushDeferredRoomShapeChanges/);
 assert.match(canvasRuntime, /pendingRoomShapeAckCountsRef/);
 assert.match(canvasRuntime, /isCanvasShapePatchProtected/);
-assert.match(canvasRuntime, /localInteractionState\.isFreehandDrawing/);
-assert.match(canvasRuntime, /shouldDeferForLocalFreehand/);
-assert.match(canvasRuntime, /state\.isFreehandDrawing/);
+assert.match(canvasRuntime, /localInteractionState\.activeMutationShapeIds/);
+assert.doesNotMatch(canvasRuntime, /shouldDeferForLocalFreehand/);
+assert.doesNotMatch(
+  canvasRuntime,
+  /localInteractionState\.isFreehandDrawing\s*\|\|/,
+);
 assert.match(canvasRuntime, /queueCanvasSurfaceShapePatch/);
 assert.match(canvasRuntime, /consumeCanvasSurfaceShapePatch/);
 assert.match(canvasRuntime, /canvasShapePatchVersion/);
@@ -939,8 +977,9 @@ assert.match(piloTldrawCanvas, /editingMode/);
 assert.match(piloTldrawCanvas, /RemoteCursorOverlay/);
 assert.match(piloTldrawCanvas, /CanvasRemotePresenceProvider/);
 assert.match(piloTldrawCanvas, /CanvasRealtimePreviewApplier/);
-assert.match(piloTldrawCanvas, /isEditorFreehandInteractionActive/);
-assert.match(piloTldrawCanvas, /isLocalFreehandDrawing/);
+assert.match(piloTldrawCanvas, /activeMutationShapeIds/);
+assert.doesNotMatch(piloTldrawCanvas, /isEditorFreehandInteractionActive/);
+assert.doesNotMatch(piloTldrawCanvas, /isLocalFreehandDrawing/);
 assert.match(piloTldrawCanvas, /useSyncExternalStore/);
 assert.match(piloTldrawCanvas, /handleRealtimePreviewDraftChange/);
 assert.match(piloTldrawCanvas, /CANVAS_SHAPE_PREVIEW_THROTTLE_MS = 60/);
@@ -966,8 +1005,33 @@ assert.match(canvasPresenceHook, /remoteShapePreviewStore/);
 assert.doesNotMatch(canvasPresenceHook, /setRemoteShapePreviews/);
 assert.match(canvasRemoteShapePreviewStore, /createCanvasRemoteShapePreviewStore/);
 assert.match(canvasRemoteShapePreviewStore, /removeShapeIds/);
+assert.match(canvasRemoteShapePreviewStore, /markCommittedShapeIds/);
+assert.match(canvasRemoteShapePreviewStore, /acknowledgeAppliedShapeIds/);
 assert.match(canvasRemoteShapePreviewStore, /sweepStale/);
+assert.match(piloTldrawCanvas, /CanvasRemoteFreehandPreviewOverlay/);
+assert.match(piloTldrawCanvas, /CanvasRemoteConnectionPreviewOverlay/);
+assert.match(
+  piloTldrawCanvas,
+  /previewShape\.type === "draw"[\s\S]*previewShape\.type === "highlight"[\s\S]*previewShape\.type === "line"[\s\S]*previewShape\.type === "arrow"/,
+);
+assert.match(canvasRemoteFreehandPreviewOverlay, /useSyncExternalStore/);
+assert.match(canvasRemoteFreehandPreviewOverlay, /requestAnimationFrame/);
+assert.match(canvasRemoteFreehandPreviewOverlay, /b64Vecs\.decodePoints/);
+assert.doesNotMatch(canvasRemoteFreehandPreviewOverlay, /editor\.createShapes/);
+assert.doesNotMatch(canvasRemoteFreehandPreviewOverlay, /editor\.updateShapes/);
+assert.match(canvasRemoteConnectionPreviewOverlay, /useSyncExternalStore/);
+assert.match(canvasRemoteConnectionPreviewOverlay, /requestAnimationFrame/);
+assert.doesNotMatch(canvasRemoteConnectionPreviewOverlay, /editor\.createShapes/);
+assert.doesNotMatch(canvasRemoteConnectionPreviewOverlay, /editor\.updateShapes/);
+assert.match(canvasRemoteConnectionPreview, /getRemoteConnectionPreviewPath/);
+assert.match(canvasRemoteConnectionPreview, /readRemoteConnectionPreviewShape/);
 assert.match(canvasLocalInteractionPolicy, /isCanvasFreehandInteractionActive/);
+assert.match(canvasLocalInteractionPolicy, /getCanvasActiveMutationShapeIds/);
+assert.match(canvasLocalInteractionPolicy, /getCanvasInteractionToolPath/);
+assert.match(
+  canvasLocalInteractionPolicy,
+  /isCanvasShapeMutationInteractionActive/,
+);
 assert.match(canvasAgentToolStepPlayback, /playbackState/);
 assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("playing"\)/);
 assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("complete"\)/);
@@ -1009,7 +1073,7 @@ assert.match(canvasRealtimeTypes, /previews: CanvasShapePreviewEventPayload\[\]/
 assert.match(canvasRealtimeTypes, /shapeLocks: CanvasShapeLockState\[\]/);
 assert.match(canvasRealtimeTypes, /deletedShapeIds/);
 assert.doesNotMatch(canvasPresenceHook, /remoteShapeLocks/);
-assert.match(canvasPresenceHook, /remoteShapePreviewStore\.removeShapeIds/);
+assert.match(canvasPresenceHook, /remoteShapePreviewStore\.markCommittedShapeIds/);
 assert.match(canvasPresenceHook, /remoteShapePreviewStore/);
 assert.match(canvasPresenceHook, /roomLoadedRegions/);
 assert.match(canvasPresenceHook, /getInitialViewportBounds/);
@@ -1068,7 +1132,7 @@ assert.match(canvasPresenceHook, /canvas:room:shapes:hydrate/);
 assert.match(canvasPresenceHook, /canvas:room:shape:patch/);
 assert.match(
   canvasPresenceHook,
-  /remoteShapePreviewStore\.removeShapeIds\(\s*payload\.actorUserId,\s*patchedShapeIds,/,
+  /remoteShapePreviewStore\.markCommittedShapeIds\(\s*payload\.actorUserId,\s*patchedShapeIds,/,
 );
 assert.match(canvasPresenceHook, /canvas:room:checkpoint/);
 assert.doesNotMatch(canvasPresenceHook, /ownedShapeLocks/);
@@ -1246,7 +1310,11 @@ assert.match(piloTldrawCanvas, /editor\.getEditingShapeId\(\)/);
 assert.match(piloTldrawCanvas, /editor\.setEditingShape\(editingShapeId\)/);
 assert.match(piloTldrawCanvas, /editor\.setSelectedShapes\(nextSelectedShapeIds\)/);
 assert.match(piloTldrawCanvas, /CanvasLocalInteractionReporter/);
-assert.match(canvasEditorStateReporters, /getProtectedShapeIds/);
+assert.match(canvasEditorStateReporters, /getCanvasActiveMutationShapeIds/);
+assert.match(canvasEditorStateReporters, /getCanvasInteractionToolPath\(editor\)/);
+assert.doesNotMatch(canvasEditorStateReporters, /editor\.getCurrentToolId\(\)/);
+assert.match(piloTldrawCanvas, /getCanvasInteractionToolPath\(editor\)/);
+assert.doesNotMatch(canvasEditorStateReporters, /getProtectedShapeIds/);
 assert.match(piloTldrawCanvas, /onLocalInteractionStateChange/);
 assert.match(piloTldrawCanvas, /freeformShapesRef\.current/);
 assert.match(piloTldrawCanvas, /pendingArrowBindingsRef/);
@@ -1265,7 +1333,9 @@ assert.match(piloTldrawCanvas, /onFreeformShapesChange\(nextFreeformShapes, fram
 assert.match(piloTldrawCanvas, /registerPendingRealtimePreviewGroup\(freehandShapes, "freehand"\)/);
 assert.match(piloTldrawCanvas, /PiloCollapsedFrameOverlay/);
 assert.match(piloTldrawCanvas, /onViewportBoundsChange/);
-assert.match(piloTldrawCanvas, /placePiloCanvasShapeAt/);
+assert.match(piloTldrawCanvas, /placePiloCanvasShapeInEmptyViewport/);
+assert.match(piloTldrawCanvas, /createPiloCanvasShapeInEmptyViewport/);
+assert.doesNotMatch(piloTldrawCanvas, /placementRequestRef/);
 assert.doesNotMatch(piloTldrawCanvas, /createCanvasShapeSyncQueue/);
 assert.doesNotMatch(piloTldrawCanvas, /writeCanvasStorage\(/);
 assert.match(piloCanvasStateReporter, /onFreeformShapesChange/);
@@ -1309,7 +1379,8 @@ assert.doesNotMatch(piloCanvasArrowBindings, /fetch\(/);
 assert.doesNotMatch(piloCanvasArrowBindings, /src\/shared\/tldraw/);
 assert.match(piloCanvasTypes, /export type PiloCanvasFreeformShape/);
 assert.match(piloCanvasTypes, /export type PiloCanvasLocalInteractionState/);
-assert.match(piloCanvasTypes, /protectedShapeIds: string\[\]/);
+assert.match(piloCanvasTypes, /activeMutationShapeIds: string\[\]/);
+assert.doesNotMatch(piloCanvasTypes, /protectedShapeIds: string\[\]/);
 assert.match(piloCanvasTypes, /export type PiloCanvasViewSetting/);
 assert.match(piloCanvasTypes, /export type PiloCanvasViewportBounds/);
 assert.match(piloCanvasTypes, /export type PiloCanvasShapeDetailRequest/);
@@ -1393,6 +1464,12 @@ assert.match(canvasCollapse, /piloChildShapeCount/);
 assert.match(canvasCollapse, /piloCodeBlockExpandedSize/);
 assert.match(piloCanvasPlacement, /PiloPlacementRequest/);
 assert.match(piloCanvasPlacement, /placePiloCanvasShapeAt/);
+assert.match(piloCanvasPlacement, /placePiloCanvasShapeInEmptyViewport/);
+assert.match(piloCanvasEmptyPlacement, /findPiloCanvasEmptyPlacementForEditor/);
+assert.match(piloCanvasEmptyPlacement, /getViewportPageBounds/);
+assert.match(piloCanvasEmptyPlacement, /getShapePageBounds/);
+assert.match(piloCanvasInstantShape, /startEditingShapeWithRichText/);
+assert.match(piloCanvasInstantShape, /getPiloCanvasInstantGeoSize/);
 assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_FILES = 30/);
 assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_SINGLE_FILE_BYTES = 200 \* 1024/);
 assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_TOTAL_BYTES = 2 \* 1024 \* 1024/);
@@ -1411,7 +1488,7 @@ assert.match(piloCanvasFileImport, /바이너리 파일은 제외했습니다/);
 assert.match(piloCanvasFileImport, /제외 폴더입니다/);
 assert.match(piloTldrawCanvas, /CanvasFileDropImporter/);
 assert.match(canvasEditorContracts, /createNote: \(\) => void/);
-assert.match(piloTldrawCanvas, /editor\.setCurrentTool\("note"\)/);
+assert.match(piloTldrawCanvas, /request: \{ type: "note" \}/);
 assert.match(canvasWorkspace, /setActiveCanvasTool\("note"\)/);
 assert.match(canvasWorkspace, /active=\{isCanvasToolActive\("note"\)\}/);
 assert.match(canvasEditorContracts, /setColor: \(color: PiloCanvasColor\) => void/);
@@ -1444,11 +1521,11 @@ assert.doesNotMatch(piloTldrawCanvas, /event\.button === 2/);
 assert.match(piloTldrawCanvas, /editor\.updateInstanceState\(\{ isToolLocked: false \}\)/);
 assert.match(piloTldrawCanvas, /preset === "pen" \|\| preset === "highlight"/);
 assert.match(piloTldrawCanvas, /isToolLocked: shouldKeepDrawing/);
-assert.match(piloTldrawCanvas, /function placePendingShapeAt/);
+assert.doesNotMatch(piloTldrawCanvas, /function placePendingShapeAt/);
 assert.match(piloTldrawCanvas, /onOneShotToolCreatedRef\.current\?\.\(\)/);
 assert.match(piloTldrawCanvas, /const connectionTools = new Set<PiloCanvasTool>\(\["arrow", "line"\]\)/);
 assert.match(piloTldrawCanvas, /!connectionTools\.has\(tool\)/);
-assert.match(piloTldrawCanvas, /tool !== "text"/);
+assert.match(piloTldrawCanvas, /tool === "frame" \|\| tool === "text"/);
 assert.match(piloTldrawCanvas, /function getArrowAtPoint/);
 assert.match(piloTldrawCanvas, /getShapesAtPoint\(pagePoint/);
 assert.match(piloTldrawCanvas, /getArrowAtPoint\(editor, pagePoint\) \?\? directShape/);
@@ -2086,6 +2163,7 @@ async function runScenarioBatchFallback(operations, runBatch) {
 
 await import("./calendar/test.mjs");
 await import("../src/features/agent/agent-feature.test.mjs");
+await import("../src/features/canvas/agent/canvas-agent-context.test.mjs");
 await import("./github-integration/test.mjs");
 await import("../src/features/board/board-feature.test.mjs");
 await import("../src/features/board/board-load.test.mjs");
