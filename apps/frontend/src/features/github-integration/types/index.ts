@@ -202,6 +202,8 @@ export type GithubSyncTarget =
 
 export type GithubSyncStatus = "queued" | "running" | "success" | "failed";
 
+export type GithubSyncTriggerSource = "manual" | "automatic" | "legacy";
+
 export type GithubSyncProgressStage =
   | "initializing"
   | "repositories"
@@ -219,6 +221,7 @@ export type GithubSyncRun = {
   id: string;
   target: GithubSyncTarget;
   status: GithubSyncStatus;
+  triggerSource: GithubSyncTriggerSource;
   installationId: string | null;
   repositoryId: string | null;
   projectV2Id: string | null;
@@ -275,6 +278,7 @@ export type StartGithubSyncRunInput = {
 export type ListGithubSyncRunsQuery = {
   target?: GithubSyncTarget;
   status?: GithubSyncStatus;
+  triggerSource?: GithubSyncTriggerSource;
   repositoryId?: string;
   projectV2Id?: string;
   page?: number;

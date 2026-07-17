@@ -274,6 +274,7 @@ export function GithubPanel() {
     const requestGeneration = syncRunsRequestGateRef.current.begin();
     const [syncRuns, queuedSyncRuns, runningSyncRuns] = await Promise.all([
       apiClient.listGithubSyncRuns(workspaceId, {
+        triggerSource: "manual",
         limit: 8
       }),
       apiClient.listGithubSyncRuns(workspaceId, {
@@ -399,6 +400,7 @@ export function GithubPanel() {
         }),
         apiClient.getWorkspaceActiveBoardSource(workspaceId),
         apiClient.listGithubSyncRuns(workspaceId, {
+          triggerSource: "manual",
           limit: 8
         }),
         apiClient.listGithubSyncRuns(workspaceId, {
