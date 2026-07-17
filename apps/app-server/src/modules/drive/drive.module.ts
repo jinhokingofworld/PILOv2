@@ -5,12 +5,13 @@ import { WorkspaceModule } from "../workspace/workspace.module";
 import { DriveController } from "./drive.controller";
 import { DriveStorageService } from "./drive-storage.service";
 import { DriveService } from "./drive.service";
+import { DocumentEmbeddingService } from "./document-embedding.service";
 import { DocumentService } from "./document.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule],
   controllers: [DriveController],
-  providers: [DocumentService, DriveService, DriveStorageService],
+  providers: [DocumentService, DocumentEmbeddingService, DriveService, DriveStorageService],
   exports: [DocumentService, DriveService]
 })
 export class DriveModule {}
