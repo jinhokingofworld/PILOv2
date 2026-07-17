@@ -280,11 +280,18 @@ export class AgentLoggingService {
         }
       }
 
+      const threadId = await this.findOrCreateActiveThread(
+        transaction,
+        workspaceId,
+        currentUserId
+      );
+
       const run = await transaction.queryOne<AgentRunRow>(
         `
           INSERT INTO agent_runs (
             workspace_id,
             requested_by_user_id,
+            thread_id,
             client_request_id,
             request_context_json,
             status,
@@ -292,7 +299,7 @@ export class AgentLoggingService {
             timezone,
             message
           )
-          VALUES ($1, $2, $3, $4, 'planning', $5, $6, $7)
+          VALUES ($1, $2, $3, $4, $5, 'planning', $6, $7, $8)
           ON CONFLICT (workspace_id, requested_by_user_id, client_request_id)
           WHERE client_request_id IS NOT NULL
             AND requested_by_user_id IS NOT NULL
@@ -302,6 +309,7 @@ export class AgentLoggingService {
         [
           workspaceId,
           currentUserId,
+          threadId,
           clientRequestId,
           requestContext,
           prompt,
@@ -361,6 +369,64 @@ export class AgentLoggingService {
         created: true
       };
     });
+  }
+
+  private async findOrCreateActiveThread(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    currentUserId: string
+  ): Promise<string> {
+    await transaction.execute(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+      [`agent-thread:${workspaceId}:${currentUserId}`]
+    );
+
+    const thread = await transaction.queryOne<{ id: string }>(
+      `
+        SELECT thread.id
+        FROM agent_threads AS thread
+        WHERE thread.workspace_id = $1
+          AND thread.requested_by_user_id = $2
+          AND (
+            (
+              thread.expires_at > now()
+              AND thread.last_activity_at > now() - INTERVAL '1 hour'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM agent_runs AS run
+              JOIN agent_confirmations AS confirmation
+                ON confirmation.run_id = run.id
+              WHERE run.thread_id = thread.id
+                AND confirmation.status = 'pending'
+                AND confirmation.expires_at > now()
+            )
+          )
+        ORDER BY thread.last_activity_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [workspaceId, currentUserId]
+    );
+
+    if (thread) {
+      await transaction.execute(
+        `UPDATE agent_threads SET last_activity_at = now() WHERE id = $1`,
+        [thread.id]
+      );
+      return thread.id;
+    }
+
+    const created = await transaction.queryOne<{ id: string }>(
+      `
+        INSERT INTO agent_threads (workspace_id, requested_by_user_id)
+        VALUES ($1, $2)
+        RETURNING id
+      `,
+      [workspaceId, currentUserId]
+    );
+    if (!created) throw new Error("Agent thread could not be created");
+    return created.id;
   }
 
   private mapIdempotentRun(

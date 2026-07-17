@@ -112,6 +112,14 @@ def test_completed_planner_decision_finishes_multi_tool_run() -> None:
     assert "unsupportedReason" not in normalized.output_summary
 
 
+def test_planner_prompt_limits_prior_thread_resource_reuse() -> None:
+    prompt = _agent_planner_system_prompt()
+
+    assert "previous resource" in prompt
+    assert "exact prior resource ID" in prompt
+    assert "different resource type" in prompt
+
+
 class FakeAgentRunRepository:
     def __init__(
         self,

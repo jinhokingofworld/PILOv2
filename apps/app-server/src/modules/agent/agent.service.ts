@@ -692,6 +692,25 @@ export class AgentService {
         `,
         [workspaceId, currentUserId, RETENTION_CLEANUP_BATCH_SIZE]
       );
+
+      await transaction.execute(
+        `
+          DELETE FROM agent_threads AS thread
+          WHERE thread.workspace_id = $1
+            AND thread.requested_by_user_id = $2
+            AND thread.expires_at <= now()
+            AND NOT EXISTS (
+              SELECT 1
+              FROM agent_runs AS run
+              JOIN agent_confirmations AS confirmation
+                ON confirmation.run_id = run.id
+              WHERE run.thread_id = thread.id
+                AND confirmation.status = 'pending'
+                AND confirmation.expires_at > now()
+            )
+        `,
+        [workspaceId, currentUserId]
+      );
     });
   }
 

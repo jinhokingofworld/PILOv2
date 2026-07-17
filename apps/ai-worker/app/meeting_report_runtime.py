@@ -1386,7 +1386,8 @@ class PgAgentRunRepository:
               run.status,
               run.prompt,
               run.timezone,
-              run.planner_turn_count
+              run.planner_turn_count,
+              run.thread_id
             FROM agent_runs AS run
             INNER JOIN agent_run_outbox AS outbox
               ON outbox.run_id = run.id
@@ -1406,6 +1407,65 @@ class PgAgentRunRepository:
 
         if row is None:
             return None
+
+        memory: list[str] = []
+        thread_id = row["thread_id"]
+        if thread_id is not None:
+            thread_runs = self.connection.execute(
+                """
+                SELECT id, prompt, final_answer
+                FROM agent_runs
+                WHERE thread_id = %s
+                  AND id <> %s
+                  AND workspace_id = %s
+                  AND requested_by_user_id = %s
+                  AND status = 'completed'
+                  AND final_answer IS NOT NULL
+                ORDER BY created_at DESC
+                LIMIT 6
+                """,
+                (thread_id, job.run_id, job.workspace_id, job.requested_by_user_id),
+            ).fetchall()
+            for thread_run in reversed(thread_runs):
+                prompt = str(thread_run["prompt"]).strip()[:1000]
+                answer = str(thread_run["final_answer"]).strip()[:2000]
+                if prompt:
+                    memory.append(f"previous user: {prompt}")
+                if answer:
+                    memory.append(f"previous assistant: {answer}")
+
+                ref_rows = self.connection.execute(
+                    """
+                    SELECT resource_refs
+                    FROM agent_steps
+                    WHERE run_id = %s
+                      AND step_type = 'tool'
+                      AND status = 'completed'
+                    ORDER BY step_order ASC
+                    """,
+                    (thread_run["id"],),
+                ).fetchall()
+                for ref_row in ref_rows:
+                    for resource_ref in ref_row["resource_refs"] or []:
+                        if not isinstance(resource_ref, dict):
+                            continue
+                        domain = resource_ref.get("domain")
+                        resource_type = resource_ref.get("resourceType")
+                        resource_id = resource_ref.get("resourceId")
+                        label = resource_ref.get("label")
+                        if not all(
+                            isinstance(value, str) and value.strip()
+                            for value in (domain, resource_type, resource_id)
+                        ):
+                            continue
+                        suffix = (
+                            f" label={str(label).strip()[:300]}"
+                            if isinstance(label, str) and label.strip()
+                            else ""
+                        )
+                        memory.append(
+                            f"previous resource {domain}:{resource_type} id={resource_id}{suffix}"
+                        )
 
         timeline_rows = self.connection.execute(
             """
@@ -1449,7 +1509,6 @@ class PgAgentRunRepository:
             """,
             (job.run_id, job.run_id),
         ).fetchall()
-        memory: list[str] = []
         for item in timeline_rows:
             if item["item_kind"] == "tool_step":
                 output = json.dumps(item["output_json"], ensure_ascii=False)[:3000]
