@@ -5062,6 +5062,94 @@ if (invalidPostgresTableWithFunction.ok) {
 }
 assert.equal(invalidPostgresTableWithFunction.error.code, "PARSE_FAILED");
 
+const mysqlFullDumpSourceText = `-- MySQL dump
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+SET @OLD_SQL_MODE=@@SQL_MODE;
+
+DELIMITER $$
+CREATE PROCEDURE rebuild_user_cache()
+BEGIN
+  CREATE TEMPORARY TABLE routine_only (id BIGINT PRIMARY KEY);
+  SET @ddl = 'CREATE TABLE string_only (id BIGINT PRIMARY KEY)';
+  SET @delimiter_text = '$$';
+END$$
+
+CREATE TRIGGER users_before_insert
+BEFORE INSERT ON users
+FOR EACH ROW
+BEGIN
+  SET NEW.email = LOWER(NEW.email);
+END$$
+DELIMITER ;
+
+CREATE TABLE users (
+  id BIGINT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL
+);
+
+CREATE TEMPORARY TABLE staging_users (
+  id BIGINT PRIMARY KEY
+);
+
+CREATE TABLE sessions (
+  id BIGINT PRIMARY KEY,
+  user_id BIGINT NOT NULL
+);
+
+ALTER TABLE sessions
+  ADD CONSTRAINT fk_sessions_user
+  FOREIGN KEY (user_id) REFERENCES users(id);
+
+LOCK TABLES users WRITE;
+INSERT INTO users VALUES (1, 'USER@example.com');
+UNLOCK TABLES;`;
+const mysqlFullDumpParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: mysqlFullDumpSourceText
+});
+
+assert.equal(mysqlFullDumpParseResult.ok, true);
+if (!mysqlFullDumpParseResult.ok) {
+  throw new Error(mysqlFullDumpParseResult.error.message);
+}
+assert.deepEqual(
+  mysqlFullDumpParseResult.modelJson.schema.tables.map(({ name }) => name),
+  ["users", "staging_users", "sessions"]
+);
+assert.equal(mysqlFullDumpParseResult.modelJson.schema.relations.length, 1);
+assert.equal(
+  mysqlFullDumpParseResult.sourceMap.sourceText,
+  mysqlFullDumpSourceText
+);
+
+const invalidMySqlTableWithRoutine =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "mysql",
+    sourceText: `DELIMITER $$
+CREATE PROCEDURE noop() BEGIN SELECT 1; END$$
+DELIMITER ;
+CREATE TABLE broken_table (id BIGINT NOT NULL;`
+  });
+
+assert.equal(invalidMySqlTableWithRoutine.ok, false);
+if (invalidMySqlTableWithRoutine.ok) {
+  throw new Error("Invalid MySQL CREATE TABLE must fail");
+}
+assert.equal(invalidMySqlTableWithRoutine.error.code, "PARSE_FAILED");
+
+const mysqlRoutineOnlyParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: `DELIMITER $$
+CREATE PROCEDURE noop() BEGIN SELECT '$$'; END$$
+DELIMITER ;`
+});
+
+assert.equal(mysqlRoutineOnlyParseResult.ok, false);
+if (mysqlRoutineOnlyParseResult.ok) {
+  throw new Error("MySQL routine-only dump must not create an ERD");
+}
+assert.equal(mysqlRoutineOnlyParseResult.error.code, "NO_CREATE_TABLE");
+
 const mysqlSourceText = `CREATE TABLE users (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
@@ -5119,6 +5207,83 @@ assert.equal(
   ),
   "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
 );
+
+const sqliteFullDumpSourceText = `PRAGMA foreign_keys=OFF;
+BEGIN TRANSACTION;
+
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  note TEXT
+);
+
+CREATE TEMP TABLE staging_users (
+  id INTEGER PRIMARY KEY
+);
+
+CREATE TABLE posts (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id)
+);
+
+CREATE VIEW user_posts AS
+SELECT users.id, posts.id AS post_id
+FROM users JOIN posts ON posts.user_id = users.id;
+
+CREATE INDEX idx_posts_user_id ON posts(user_id);
+
+CREATE TRIGGER users_after_insert
+AFTER INSERT ON users
+BEGIN
+  UPDATE users
+  SET note = 'CREATE TABLE string_only (id INTEGER);'
+  WHERE id = NEW.id;
+END;
+
+INSERT INTO users VALUES (1, 'seed');
+COMMIT;`;
+const sqliteFullDumpParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "sqlite",
+  sourceText: sqliteFullDumpSourceText
+});
+
+assert.equal(sqliteFullDumpParseResult.ok, true);
+if (!sqliteFullDumpParseResult.ok) {
+  throw new Error(sqliteFullDumpParseResult.error.message);
+}
+assert.deepEqual(
+  sqliteFullDumpParseResult.modelJson.schema.tables.map(({ name }) => name),
+  ["users", "staging_users", "posts"]
+);
+assert.equal(sqliteFullDumpParseResult.modelJson.schema.relations.length, 1);
+assert.equal(
+  sqliteFullDumpParseResult.sourceMap.sourceText,
+  sqliteFullDumpSourceText
+);
+
+const invalidSqliteTableWithPragma =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "sqlite",
+    sourceText: `PRAGMA foreign_keys=ON;
+CREATE TABLE broken_table (id INTEGER NOT NULL;`
+  });
+
+assert.equal(invalidSqliteTableWithPragma.ok, false);
+if (invalidSqliteTableWithPragma.ok) {
+  throw new Error("Invalid SQLite CREATE TABLE must fail");
+}
+assert.equal(invalidSqliteTableWithPragma.error.code, "PARSE_FAILED");
+
+const sqliteMetadataOnlyParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "sqlite",
+  sourceText: `PRAGMA foreign_keys=ON;
+CREATE VIEW empty_view AS SELECT 1;`
+});
+
+assert.equal(sqliteMetadataOnlyParseResult.ok, false);
+if (sqliteMetadataOnlyParseResult.ok) {
+  throw new Error("SQLite metadata-only dump must not create an ERD");
+}
+assert.equal(sqliteMetadataOnlyParseResult.error.code, "NO_CREATE_TABLE");
 
 const sqliteSourceText = `CREATE TABLE users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
