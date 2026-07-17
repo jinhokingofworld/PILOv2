@@ -501,6 +501,7 @@ class PgMeetingReportRepository:
               failure_code = %s,
               failure_detail = %s::jsonb,
               transcript_text = NULL,
+              title = NULL,
               summary = NULL,
               discussion_points = NULL,
               decisions = NULL,
@@ -530,6 +531,7 @@ class PgMeetingReportRepository:
               failure_code = NULL,
               failure_detail = NULL,
               transcript_text = %s,
+              title = %s,
               summary = %s,
               discussion_points = %s,
               decisions = %s,
@@ -540,6 +542,7 @@ class PgMeetingReportRepository:
             """,
                 (
                     report.transcript_text,
+                    report.title,
                     report.summary,
                     report.discussion_points,
                     report.decisions,
@@ -564,7 +567,8 @@ class PgMeetingReportRepository:
                 (report_id,),
             )
             self.connection.execute(
-                "DELETE FROM meeting_report_decision_items WHERE meeting_report_id = %s",
+                "DELETE FROM meeting_report_decision_items "
+                "WHERE meeting_report_id = %s AND user_text IS NULL",
                 (report_id,),
             )
             for source_index, decision in enumerate(
@@ -577,6 +581,9 @@ class PgMeetingReportRepository:
                     INSERT INTO meeting_report_decision_items
                       (meeting_report_id, source_index, text)
                     VALUES (%s, %s, %s)
+                    ON CONFLICT (meeting_report_id, source_index) DO UPDATE
+                    SET text = EXCLUDED.text
+                    WHERE meeting_report_decision_items.user_text IS NULL
                     """,
                     (report_id, source_index, decision),
                 )
@@ -2841,6 +2848,7 @@ def _meeting_report_system_prompt(evidence_repair_code: str | None = None) -> st
         "You generate concise meeting reports from transcripts and optional Activity evidence. "
         "Return only JSON matching the provided schema. "
         "Use the transcript language. "
+        "Return title as a concise, specific meeting title in the transcript language. "
         "Use only the [index] values shown in the transcript for evidence.segmentIndexes. "
         "Use only the [index] values shown in Activity evidence for "
         "activityEvidenceReferences.activityIndexes. "
@@ -2947,6 +2955,7 @@ def _meeting_report_schema() -> dict[str, object]:
         "type": "object",
         "additionalProperties": False,
         "required": [
+            "title",
             "summary",
             "discussionPoints",
             "decisions",
@@ -2956,6 +2965,7 @@ def _meeting_report_schema() -> dict[str, object]:
             "activityEvidenceReferences",
         ],
         "properties": {
+            "title": {"type": "string"},
             "summary": {"type": "string"},
             "discussionPoints": {"type": "string"},
             "decisions": {"type": "string"},

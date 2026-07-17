@@ -51,6 +51,13 @@ const meetingReportFailureDiagnosticsMigration = await readFile(
   ),
   "utf8"
 );
+const meetingReportContentEditsMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/097_add_meeting_report_content_edits.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 assert.match(meetingStateRealtimePublisher, /MEETING_STATE_REDIS_CHANNEL = "meeting:state-events"/);
 assert.match(meetingStateRealtimePublisher, /event: "meeting:state:updated"/);
@@ -106,6 +113,14 @@ assert.match(meetingServiceSource, /COUNT\(DISTINCT user_id\)::int/);
 assert.match(meetingServiceSource, /SELECT DISTINCT ON \(meeting_participants\.user_id\)/);
 assert.match(participantSessionMigration, /is_legacy_session boolean NOT NULL DEFAULT false/);
 assert.match(meetingReportFailureDiagnosticsMigration, /ADD COLUMN failure_code TEXT/);
+assert.match(meetingReportContentEditsMigration, /ADD COLUMN title TEXT/);
+assert.match(meetingReportContentEditsMigration, /ADD COLUMN content_version INTEGER NOT NULL DEFAULT 1/);
+assert.match(meetingReportContentEditsMigration, /ADD COLUMN user_text TEXT/);
+assert.match(meetingReportContentEditsMigration, /ENABLE ROW LEVEL SECURITY/);
+assert.match(meetingControllerSource, /@Patch\("meeting-reports\/:reportId"\)/);
+assert.match(meetingServiceSource, /updateMeetingReportContent/);
+assert.match(meetingServiceSource, /content_version = content_version \+ 1/);
+assert.match(meetingServiceSource, /Only the workspace owner or a meeting participant can edit this report/);
 assert.match(meetingReportFailureDiagnosticsMigration, /ADD COLUMN failure_detail JSONB/);
 assert.match(meetingReportFailureDiagnosticsMigration, /failure_detail - ARRAY\['category', 'retryable', 'providerStatusCode'\]/);
 assert.match(meetingServiceSource, /failure_code = NULL/);
@@ -559,9 +574,15 @@ function meetingReportRow(overrides = {}) {
     error_message: null,
     failure_code: null,
     failure_detail: null,
+    title: "회의록 제목",
+    user_title: null,
     summary: "요약",
     discussion_points: "논의사항",
+    user_discussion_points: null,
     decisions: "결정사항",
+    content_version: 1,
+    content_edited_by_user_id: null,
+    content_edited_at: null,
     action_item_candidates: [{ title: "후속 작업" }],
     retry_count: 0,
     created_at: createdAt,
