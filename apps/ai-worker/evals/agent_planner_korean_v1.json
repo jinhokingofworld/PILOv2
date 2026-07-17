@@ -1198,7 +1198,7 @@
     },
     {
       "name": "focus_sql_erd_tables",
-      "description": "inspect_sql_erd_schema 결과의 compact table ref를 현재 session revision으로 검증하고 핵심 및 직접 관련 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session은 변경하지 않습니다.",
+      "description": "inspect_sql_erd_schema 결과의 compact table ref를 model fingerprint로 검증하고 핵심 및 직접 관련 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session은 변경하지 않습니다.",
       "riskLevel": "low",
       "executionMode": "auto",
       "inputSchema": {
@@ -1206,6 +1206,7 @@
         "required": [
           "sessionId",
           "sessionRevision",
+          "modelFingerprint",
           "featureLabel",
           "primaryTableRefs",
           "relatedTableRefs",
@@ -1216,6 +1217,10 @@
         "properties": {
           "sessionId": { "type": "string", "format": "uuid" },
           "sessionRevision": { "type": "integer", "minimum": 1 },
+          "modelFingerprint": {
+            "type": "string",
+            "pattern": "^fnv1a32:[0-9a-f]{8}$"
+          },
           "featureLabel": { "type": "string", "minLength": 1, "maxLength": 100 },
           "primaryTableRefs": {
             "type": "array",
