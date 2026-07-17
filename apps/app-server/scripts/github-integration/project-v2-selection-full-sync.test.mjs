@@ -215,7 +215,7 @@ await assertFullSyncOnlyDetailsSelectedProjects("Organization", [
         target: "full",
         installationId,
         projectV2Id: selectedProjectId
-      }),
+      }, "manual"),
     (error) => error.getResponse().error.message === "projectV2Id is not allowed for full sync"
   );
   await assert.rejects(
@@ -223,7 +223,7 @@ await assertFullSyncOnlyDetailsSelectedProjects("Organization", [
       service.startGithubSyncRun("user", workspaceId, {
         target: "project_v2_fields",
         installationId
-      }),
+      }, "manual"),
     (error) => error.getResponse().error.message === "projectV2Id is required for this sync target"
   );
 }

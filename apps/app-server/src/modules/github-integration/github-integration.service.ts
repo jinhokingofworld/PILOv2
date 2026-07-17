@@ -735,7 +735,8 @@ export class GithubIntegrationService {
     return this.githubSyncRunService.startGithubSyncRun(
       currentUserId,
       workspaceId,
-      input
+      input,
+      "manual"
     );
   }
 

@@ -194,11 +194,36 @@ assert.match(githubPanel, /clear:\s*\(timer\) => clearTimeout/);
 assert.match(githubPanel, /apiClient\.listGithubSyncRuns/);
 assert.match(githubPanel, /status:\s*"running"/);
 assert.match(githubPanel, /status:\s*"queued"/);
+assert.match(
+  githubPanel,
+  /apiClient\.listGithubSyncRuns\(workspaceId, \{\s*status:\s*"queued",\s*limit:\s*1\s*\}\)/,
+  "queued-run detection must continue to include every trigger source"
+);
+assert.match(
+  githubPanel,
+  /apiClient\.listGithubSyncRuns\(workspaceId, \{\s*status:\s*"running",\s*limit:\s*1\s*\}\)/,
+  "running-run detection must continue to include every trigger source"
+);
+assert.match(
+  githubPanel,
+  /apiClient\.listGithubSyncRuns\(workspaceId, \{\s*triggerSource:\s*"manual",\s*limit:\s*8\s*\}\)/,
+  "visible history must request only manual sync runs"
+);
 assert.match(githubPanel, /createGithubSyncRequestGate/);
 assert.match(githubPanel, /createGithubSyncPollLoop/);
 assert.match(githubPanel, /syncPollingError/);
 
 assert.match(githubConnectSidebar, /getGithubSyncProgress/);
 assert.match(githubConnectSidebar, /getGithubSyncProgressStageLabel/);
-assert.match(githubConnectSidebar, /\{progress\}%/);
+assert.match(githubConnectSidebar, /title="최근 수동 동기화"/);
+assert.match(githubConnectSidebar, /수동 동기화 기록/);
+assert.match(githubConnectSidebar, /아직 수동으로 실행한 동기화가 없습니다\./);
+assert.match(githubConnectSidebar, /조회 \{syncRun\.fetchedCount\}/);
+assert.match(githubConnectSidebar, /추가\{" "\}/);
+assert.match(githubConnectSidebar, /업데이트 \{syncRun\.updatedCount\}/);
+assert.match(
+  githubConnectSidebar,
+  /isGithubSyncActiveStatus\(syncRun\.status\) \? \([\s\S]*?<GithubConnectProgress value=\{progress\} \/>[\s\S]*?\{progress\}%[\s\S]*?\) : null/,
+  "progress must render only for queued or running sync runs"
+);
 assert.match(githubConnectPrimitives, /aria-valuenow=\{value\}/);

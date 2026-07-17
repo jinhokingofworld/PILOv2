@@ -73,6 +73,8 @@ assert.match(githubTypes, /export type GithubRepository/);
 assert.match(githubTypes, /export type GithubProjectV2/);
 assert.match(githubTypes, /export type GithubPullRequest/);
 assert.match(githubTypes, /export type GithubSyncRun/);
+assert.match(githubTypes, /export type GithubSyncTriggerSource/);
+assert.match(githubTypes, /triggerSource: GithubSyncTriggerSource/);
 assert.match(githubTypes, /export type StartGithubSyncRunInput/);
 assert.match(githubApiClient, /createGithubIntegrationApiClient/);
 assert.match(githubApiClient, /GithubIntegrationApiError/);

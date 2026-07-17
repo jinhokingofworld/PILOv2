@@ -310,13 +310,13 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     async queryOne(text, values) {
       calls.push({ text, values });
       if (/FROM github_installations/.test(text)) return { id: installationId, workspace_id: workspaceId, github_installation_id: 1, account_login: "org", account_type: "Organization" };
-      if (/INSERT INTO github_sync_runs/.test(text)) return { id: syncRunId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", status: "queued", started_at: "2026-01-01T00:00:00.000Z", finished_at: null, fetched_count: 0, created_count: 0, updated_count: 0, skipped_count: 0, error_message: null, cursor: {} };
+      if (/INSERT INTO github_sync_runs/.test(text)) return { id: syncRunId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", status: "queued", trigger_source: "manual", started_at: "2026-01-01T00:00:00.000Z", finished_at: null, fetched_count: 0, created_count: 0, updated_count: 0, skipped_count: 0, error_message: null, cursor: {} };
       throw new Error(`Unexpected query: ${text}`);
     }
   };
   const queued = [];
   const service = new GithubSyncRunService(database, {}, { assertWorkspaceAccess: async () => {} }, {}, {}, { enqueueSyncJob: async (...args) => queued.push(args) });
-  const run = await service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId });
+  const run = await service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId }, "manual");
   assert.equal(run.status, "queued");
   assert.deepEqual(queued, [[syncRunId, userId]]);
   assert.match(calls[1].text, /'queued'/);

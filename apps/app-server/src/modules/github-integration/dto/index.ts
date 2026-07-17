@@ -75,6 +75,7 @@ export interface StartGithubSyncRunRequest {
 export interface ListGithubSyncRunsQuery {
   target?: unknown;
   status?: unknown;
+  triggerSource?: unknown;
   repositoryId?: unknown;
   projectV2Id?: unknown;
   page?: unknown;

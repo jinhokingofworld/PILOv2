@@ -294,6 +294,7 @@ function syncRunRow(overrides = {}) {
     project_v2_id: projectV2Id,
     target: "full",
     status: "success",
+    trigger_source: "manual",
     started_at: "2026-07-05T10:00:00.000Z",
     finished_at: "2026-07-05T10:01:00.000Z",
     fetched_count: 5,
@@ -510,12 +511,14 @@ function projectV2ItemApiItem(overrides = {}) {
         assert.match(text, /status = \$3/i);
         assert.match(text, /repository_id = \$4/i);
         assert.match(text, /project_v2_id = \$5/i);
+        assert.match(text, /trigger_source = \$6/i);
         assert.deepEqual(values, [
           workspaceId,
           "full",
           "success",
           repositoryId,
-          projectV2Id
+          projectV2Id,
+          "manual"
         ]);
         return { total: "1" };
       }
@@ -530,6 +533,7 @@ function projectV2ItemApiItem(overrides = {}) {
           "success",
           repositoryId,
           projectV2Id,
+          "manual",
           20,
           0
         ]);
@@ -546,6 +550,7 @@ function projectV2ItemApiItem(overrides = {}) {
     status: "success",
     repositoryId,
     projectV2Id,
+    triggerSource: "manual",
     page: "1",
     limit: "20"
   });
@@ -557,6 +562,7 @@ function projectV2ItemApiItem(overrides = {}) {
         id: syncRunId,
         target: "full",
         status: "success",
+        triggerSource: "manual",
         installationId,
         repositoryId,
         projectV2Id,
@@ -605,6 +611,7 @@ function projectV2ItemApiItem(overrides = {}) {
     id: syncRunId,
     target: "full",
     status: "success",
+    triggerSource: "manual",
     installationId,
     repositoryId,
     projectV2Id,
@@ -643,12 +650,14 @@ function projectV2ItemApiItem(overrides = {}) {
       },
       (text, values) => {
         assert.match(text, /INSERT INTO github_sync_runs/i);
+        assert.match(text, /trigger_source/i);
         assert.deepEqual(values, [
           workspaceId,
           installationId,
           null,
           null,
-          "repositories"
+          "repositories",
+          "manual"
         ]);
         return syncRunRow({
           target: "repositories",
@@ -710,6 +719,7 @@ function projectV2ItemApiItem(overrides = {}) {
     installationId,
     repositoryId: null,
     projectV2Id: null,
+    triggerSource: "manual",
     startedAt: "2026-07-05T10:00:00.000Z",
     finishedAt: "2026-07-05T10:01:00.000Z",
     fetchedCount: 2,
@@ -748,7 +758,8 @@ function projectV2ItemApiItem(overrides = {}) {
           installationId,
           repositoryId,
           null,
-          "issues"
+          "issues",
+          "manual"
         ]);
         return syncRunRow({
           target: "issues",
@@ -839,7 +850,8 @@ function projectV2ItemApiItem(overrides = {}) {
           installationId,
           repositoryId,
           null,
-          "pull_requests"
+          "pull_requests",
+          "manual"
         ]);
         return syncRunRow({
           target: "pull_requests",
@@ -929,7 +941,8 @@ function projectV2ItemApiItem(overrides = {}) {
           installationId,
           null,
           null,
-          "full"
+          "full",
+          "manual"
         ]);
         return syncRunRow({
           target: "full",
@@ -1379,7 +1392,8 @@ function projectV2ItemApiItem(overrides = {}) {
           installationId,
           null,
           projectV2Id,
-          "project_v2"
+          "project_v2",
+          "manual"
         ]);
         return syncRunRow({
           target: "project_v2",

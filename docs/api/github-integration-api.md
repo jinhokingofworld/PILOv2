@@ -442,6 +442,7 @@ Sync run 목록:
 | --- | --- |
 | `target` | `source`, `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full` |
 | `status` | `queued`, `running`, `success`, `failed` |
+| `triggerSource` | `manual`, `automatic`, `legacy` |
 | `repositoryId` | 특정 repository 관련 run만 조회 |
 | `projectV2Id` | 특정 ProjectV2 관련 run만 조회 |
 | `page`, `limit` | 기본 `1`, `20`; 최대 limit `100` |
@@ -469,6 +470,11 @@ durable job을 발행한 뒤 `202 Accepted`를 즉시 반환한다. worker가
 반환한다. 요청 validation, Workspace 범위, installation/repository/project lookup 실패도
 일반 API error로 반환한다.
 
+수동 API가 만든 run의 `triggerSource`는 `manual`이다. 설치 callback, ProjectV2
+선택/Board 활성화, ProjectV2 polling이 만든 run은 `automatic`이며, migration 이전
+기존 기록은 출처를 추정하지 않고 `legacy`로 보존한다. 사용자용 최근 이력은
+`triggerSource=manual`로 조회한다.
+
 `202 Accepted` 응답 예시:
 
 ```json
@@ -478,6 +484,7 @@ durable job을 발행한 뒤 `202 Accepted`를 즉시 반환한다. worker가
     "id": "sync_run_uuid",
     "target": "full",
     "status": "queued",
+    "triggerSource": "manual",
     "installationId": "installation_uuid",
     "repositoryId": "repository_uuid",
     "projectV2Id": "project_v2_uuid",

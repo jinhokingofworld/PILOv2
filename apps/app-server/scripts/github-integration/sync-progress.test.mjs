@@ -481,6 +481,7 @@ function fullSyncContext(reportProgress) {
     project_v2_id: null,
     target: "repositories",
     status: "running",
+    trigger_source: "manual",
     started_at: "2026-07-10T00:00:00.000Z",
     finished_at: null,
     fetched_count: 0,
@@ -555,7 +556,7 @@ function fullSyncContext(reportProgress) {
   const result = await service.startGithubSyncRun("user-id", workspaceId, {
     target: "repositories",
     installationId
-  });
+  }, "manual");
 
   assert.equal(result.status, "success");
   assert.equal(executedQueries.length, 1);

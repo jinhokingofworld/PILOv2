@@ -391,7 +391,8 @@ export class GithubProjectV2PollingService {
             repository_id,
             project_v2_id,
             target,
-            status
+            status,
+            trigger_source
           )
           SELECT
             schedule.workspace_id,
@@ -399,7 +400,8 @@ export class GithubProjectV2PollingService {
             schedule.repository_id,
             schedule.project_v2_id,
             'project_v2_items',
-            'queued'
+            'queued',
+            'automatic'
           FROM candidate_schedules AS schedule
           WHERE schedule.reusable_sync_run_id IS NULL
           RETURNING id, repository_id, project_v2_id

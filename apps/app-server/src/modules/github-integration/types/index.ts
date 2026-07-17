@@ -469,6 +469,8 @@ export type GithubSyncTarget =
 
 export type GithubSyncStatus = "queued" | "running" | "success" | "failed";
 
+export type GithubSyncTriggerSource = "manual" | "automatic" | "legacy";
+
 export type GithubSyncProgressStage =
   | "initializing"
   | "repositories"
@@ -486,6 +488,7 @@ export interface GithubSyncRunPayload {
   id: string;
   target: GithubSyncTarget;
   status: GithubSyncStatus;
+  triggerSource: GithubSyncTriggerSource;
   installationId: string | null;
   repositoryId: string | null;
   projectV2Id: string | null;

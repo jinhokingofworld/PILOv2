@@ -238,7 +238,8 @@ export class GithubAppInstallationService {
       const syncRun = await this.syncRunService.startGithubSyncRun(
         storedState.userId,
         storedState.workspaceId,
-        { installationId: row.id, target: "source" }
+        { installationId: row.id, target: "source" },
+        "automatic"
       );
       syncRunId = syncRun.id;
     } catch (error) {

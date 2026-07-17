@@ -82,8 +82,8 @@ class FakeGithubSyncRunService {
     this.calls = [];
   }
 
-  async startGithubSyncRun(currentUserId, workspaceId, input) {
-    this.calls.push({ currentUserId, workspaceId, input });
+  async startGithubSyncRun(currentUserId, workspaceId, input, triggerSource) {
+    this.calls.push({ currentUserId, workspaceId, input, triggerSource });
     if (this.error) {
       throw this.error;
     }
@@ -422,7 +422,8 @@ function createService({
     input: {
       installationId: "33333333-3333-4333-8333-333333333333",
       target: "source"
-    }
+    },
+    triggerSource: "automatic"
   }]);
 }
 
@@ -735,7 +736,8 @@ for (const {
     input: {
       installationId: "33333333-3333-4333-8333-333333333333",
       target: "source"
-    }
+    },
+    triggerSource: "automatic"
   }]);
 }
 

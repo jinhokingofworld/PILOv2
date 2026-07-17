@@ -14,6 +14,29 @@ const pullRequestMergeServiceFile = await readFile(
   new URL("github-pull-request-merge.service.ts", moduleDirectory),
   "utf8"
 );
+const triggerSourceMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/088_add_github_sync_run_trigger_source.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+
+assert.match(triggerSourceMigration, /^BEGIN;[\s\S]*COMMIT;\s*$/i);
+assert.match(triggerSourceMigration, /ADD COLUMN trigger_source TEXT/i);
+assert.match(
+  triggerSourceMigration,
+  /SET trigger_source = 'legacy'[\s\S]*ALTER COLUMN trigger_source SET DEFAULT 'legacy'/i
+);
+assert.match(triggerSourceMigration, /ALTER COLUMN trigger_source SET NOT NULL/i);
+assert.match(
+  triggerSourceMigration,
+  /CHECK \(trigger_source IN \('manual', 'automatic', 'legacy'\)\)/i
+);
+assert.match(
+  triggerSourceMigration,
+  /\(workspace_id, trigger_source, started_at DESC, id DESC\)/i
+);
 const compactServiceFile = serviceFile.replace(/\s+/g, "");
 const entries = await readdir(moduleDirectory, { withFileTypes: true });
 const fileNames = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
@@ -210,7 +233,7 @@ const delegatedMethods = [
   {
     methodName: "startGithubSyncRun",
     serviceName: "githubSyncRunService",
-    args: "currentUserId, workspaceId, input"
+    args: "currentUserId, workspaceId, input, \"manual\""
   },
   {
     methodName: "listGithubSyncRuns",

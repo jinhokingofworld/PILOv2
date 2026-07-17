@@ -26,6 +26,7 @@ import type {
   GithubSyncRunDetailPayload,
   GithubSyncRunPayload,
   GithubSyncStatus,
+  GithubSyncTriggerSource,
   GithubSyncTarget
 } from "./types";
 
@@ -37,6 +38,7 @@ interface GithubSyncRunRow extends QueryResultRow {
   project_v2_id: string | null;
   target: GithubSyncTarget;
   status: GithubSyncStatus;
+  trigger_source: GithubSyncTriggerSource;
   started_at: Date | string;
   finished_at: Date | string | null;
   fetched_count: string | number;
@@ -79,6 +81,11 @@ const GITHUB_SYNC_STATUSES: readonly GithubSyncStatus[] = [
   "success",
   "failed"
 ];
+const GITHUB_SYNC_TRIGGER_SOURCES: readonly GithubSyncTriggerSource[] = [
+  "manual",
+  "automatic",
+  "legacy"
+];
 
 @Injectable()
 export class GithubSyncRunService {
@@ -94,7 +101,8 @@ export class GithubSyncRunService {
   async startGithubSyncRun(
     currentUserId: string,
     workspaceId: string,
-    input: StartGithubSyncRunRequest | undefined
+    input: StartGithubSyncRunRequest | undefined,
+    triggerSource: Exclude<GithubSyncTriggerSource, "legacy">
   ): Promise<GithubSyncRunPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
@@ -144,7 +152,8 @@ export class GithubSyncRunService {
       installationId,
       repositoryId,
       projectV2Id,
-      target
+      target,
+      triggerSource
     });
 
     if (this.syncJobService) {
@@ -183,6 +192,10 @@ export class GithubSyncRunService {
     const pagination = this.normalizePagination(query, 20);
     const target = this.readOptionalGithubSyncTarget(query.target, "target");
     const status = this.readOptionalGithubSyncStatus(query.status, "status");
+    const triggerSource = this.readOptionalGithubSyncTriggerSource(
+      query.triggerSource,
+      "triggerSource"
+    );
     const repositoryId = this.readOptionalStringId(
       query.repositoryId,
       "repositoryId"
@@ -193,7 +206,8 @@ export class GithubSyncRunService {
       target,
       status,
       repositoryId,
-      projectV2Id
+      projectV2Id,
+      triggerSource
     );
     const count = await this.countRows(
       `SELECT COUNT(*)::int AS total FROM github_sync_runs WHERE ${whereSql}`,
@@ -252,6 +266,7 @@ export class GithubSyncRunService {
       id: row.id,
       target: row.target,
       status: row.status,
+      triggerSource: row.trigger_source,
       installationId: row.installation_id,
       repositoryId: row.repository_id,
       projectV2Id: row.project_v2_id,
@@ -281,6 +296,7 @@ export class GithubSyncRunService {
     repositoryId: string | null;
     projectV2Id: string | null;
     target: GithubSyncTarget;
+    triggerSource: Exclude<GithubSyncTriggerSource, "legacy">;
   }): Promise<GithubSyncRunRow> {
     const row = await this.database.queryOne<GithubSyncRunRow>(
       `
@@ -290,9 +306,10 @@ export class GithubSyncRunService {
           repository_id,
           project_v2_id,
           target,
-          status
+          status,
+          trigger_source
         )
-        VALUES ($1, $2, $3, $4, $5, 'queued')
+        VALUES ($1, $2, $3, $4, $5, 'queued', $6)
         RETURNING
           id,
           workspace_id,
@@ -301,6 +318,7 @@ export class GithubSyncRunService {
           project_v2_id,
           target,
           status,
+          trigger_source,
           started_at,
           finished_at,
           fetched_count,
@@ -315,7 +333,8 @@ export class GithubSyncRunService {
         input.installationId,
         input.repositoryId,
         input.projectV2Id,
-        input.target
+        input.target,
+        input.triggerSource
       ]
     );
 
@@ -383,6 +402,7 @@ export class GithubSyncRunService {
           project_v2_id,
           target,
           status,
+          trigger_source,
           started_at,
           finished_at,
           fetched_count,
@@ -429,6 +449,7 @@ export class GithubSyncRunService {
           project_v2_id,
           target,
           status,
+          trigger_source,
           started_at,
           finished_at,
           fetched_count,
@@ -554,7 +575,8 @@ export class GithubSyncRunService {
     target: GithubSyncTarget | null,
     status: GithubSyncStatus | null,
     repositoryId: string | null,
-    projectV2Id: string | null
+    projectV2Id: string | null,
+    triggerSource: GithubSyncTriggerSource | null
   ): { whereSql: string; values: unknown[] } {
     const values: unknown[] = [workspaceId];
     const filters = ["workspace_id = $1"];
@@ -579,6 +601,11 @@ export class GithubSyncRunService {
       filters.push(`project_v2_id = $${values.length}`);
     }
 
+    if (triggerSource) {
+      values.push(triggerSource);
+      filters.push(`trigger_source = $${values.length}`);
+    }
+
     return {
       whereSql: filters.join(" AND "),
       values
@@ -595,6 +622,7 @@ export class GithubSyncRunService {
         project_v2_id,
         target,
         status,
+        trigger_source,
         started_at,
         finished_at,
         fetched_count,
@@ -695,6 +723,30 @@ export class GithubSyncRunService {
     throw badRequest(`${field} must be one of ${GITHUB_SYNC_STATUSES.join(", ")}`);
   }
 
+  private readOptionalGithubSyncTriggerSource(
+    value: unknown,
+    field: string
+  ): GithubSyncTriggerSource | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    if (Array.isArray(value) || typeof value !== "string" || !value.trim()) {
+      throw badRequest(
+        `${field} must be one of ${GITHUB_SYNC_TRIGGER_SOURCES.join(", ")}`
+      );
+    }
+
+    const triggerSource = value.trim();
+    if (this.isGithubSyncTriggerSource(triggerSource)) {
+      return triggerSource;
+    }
+
+    throw badRequest(
+      `${field} must be one of ${GITHUB_SYNC_TRIGGER_SOURCES.join(", ")}`
+    );
+  }
+
   private readOptionalStringId(value: unknown, field: string): string | null {
     if (value === undefined || value === null || value === "") {
       return null;
@@ -732,6 +784,14 @@ export class GithubSyncRunService {
 
   private isGithubSyncStatus(value: string): value is GithubSyncStatus {
     return GITHUB_SYNC_STATUSES.includes(value as GithubSyncStatus);
+  }
+
+  private isGithubSyncTriggerSource(
+    value: string
+  ): value is GithubSyncTriggerSource {
+    return GITHUB_SYNC_TRIGGER_SOURCES.includes(
+      value as GithubSyncTriggerSource
+    );
   }
 
   private validateRequiredString(value: unknown, message: string): string {

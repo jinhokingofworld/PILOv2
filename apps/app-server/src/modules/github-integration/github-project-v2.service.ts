@@ -335,11 +335,16 @@ export class GithubProjectV2Service {
       return { ...selection, syncRunId: null, syncStatus: null, syncError: null };
     }
     try {
-      const syncRun = await this.syncRunService.startGithubSyncRun(currentUserId, workspaceId, {
-        installationId,
-        repositoryId,
-        target: "full"
-      });
+      const syncRun = await this.syncRunService.startGithubSyncRun(
+        currentUserId,
+        workspaceId,
+        {
+          installationId,
+          repositoryId,
+          target: "full"
+        },
+        "automatic"
+      );
       return { ...selection, syncRunId: syncRun.id, syncStatus: "queued", syncError: null };
     } catch (error) {
       if (error instanceof GithubSyncJobEnqueueError) {
@@ -441,12 +446,17 @@ export class GithubProjectV2Service {
   ): Promise<void> {
     if (!this.syncRunService) return;
     for (const target of ["project_v2_fields", "project_v2_items"] as const) {
-      await this.syncRunService.startGithubSyncRun(currentUserId, workspaceId, {
-        installationId: source.installationId,
-        repositoryId: source.repositoryId,
-        projectV2Id: source.projectV2Id,
-        target
-      });
+      await this.syncRunService.startGithubSyncRun(
+        currentUserId,
+        workspaceId,
+        {
+          installationId: source.installationId,
+          repositoryId: source.repositoryId,
+          projectV2Id: source.projectV2Id,
+          target
+        },
+        "automatic"
+      );
     }
   }
 

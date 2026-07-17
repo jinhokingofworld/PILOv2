@@ -143,14 +143,14 @@ export function GithubConnectSidebar({
 
       <GithubConnectPanel
         collapsible
-        title="최근 작업"
-        subtitle={`${formatGithubConnectNumber(syncRunsTotal)}개 sync run 기록`}
+        title="최근 수동 동기화"
+        subtitle={`${formatGithubConnectNumber(syncRunsTotal)}개 수동 동기화 기록`}
       >
         {isLoading ? (
           <LoadingStack rows={3} />
         ) : syncRuns.length === 0 ? (
           <GithubConnectEmptyState>
-            아직 실행된 GitHub 동기화 작업이 없습니다.
+            아직 수동으로 실행한 동기화가 없습니다.
           </GithubConnectEmptyState>
         ) : (
           <div className="job-list space-y-3">
@@ -191,16 +191,20 @@ export function GithubConnectSidebar({
                     {getGithubConnectSyncStatusLabel(syncRun.status)}
                   </GithubConnectPill>
                 </div>
-                <div className="mt-3">
-                  <GithubConnectProgress value={progress} />
-                </div>
-                <div className="mt-2 flex items-center justify-between gap-3 text-[12px] text-[#7a8497]">
-                  <span>{getGithubSyncProgressStageLabel(syncRun.progressStage)}</span>
-                  <span className="font-semibold text-[#3157d5]">{progress}%</span>
-                </div>
+                {isGithubSyncActiveStatus(syncRun.status) ? (
+                  <>
+                    <div className="mt-3">
+                      <GithubConnectProgress value={progress} />
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-3 text-[12px] text-[#7a8497]">
+                      <span>{getGithubSyncProgressStageLabel(syncRun.progressStage)}</span>
+                      <span className="font-semibold text-[#3157d5]">{progress}%</span>
+                    </div>
+                  </>
+                ) : null}
                 <p className="mt-2 text-[12px] text-[#7a8497]">
-                  fetched {syncRun.fetchedCount} · created{" "}
-                  {syncRun.createdCount} · updated {syncRun.updatedCount}
+                  조회 {syncRun.fetchedCount} · 추가{" "}
+                  {syncRun.createdCount} · 업데이트 {syncRun.updatedCount}
                 </p>
                 {syncRun.errorMessage ? (
                   <p className="mt-2 text-[12px] leading-5 text-[#b42318]">

@@ -159,6 +159,11 @@ class FakeDatabase {
   );
   assert.match(claim.text, /INSERT INTO github_sync_runs/i);
   assert.match(claim.text, /'project_v2_items'/i);
+  assert.match(
+    claim.text,
+    /trigger_source[\s\S]*?'automatic'/i,
+    "polling-created sync runs must be recorded as automatic"
+  );
   assert.match(claim.text, /active_sync_run_id = claimed_run\.sync_run_id/i);
   assert.match(
     claim.text,
