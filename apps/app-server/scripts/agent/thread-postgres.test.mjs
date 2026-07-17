@@ -101,8 +101,17 @@ try {
   );
   await client.query(`
     CREATE TEMP TABLE agent_logs (
-      workspace_id uuid, run_id uuid, actor_type text, actor_user_id uuid, level text,
-      event_type text, message text, metadata_json jsonb, resource_refs jsonb
+      workspace_id uuid,
+      run_id uuid,
+      step_id uuid,
+      confirmation_id uuid,
+      actor_type text,
+      actor_user_id uuid,
+      level text,
+      event_type text,
+      message text,
+      metadata_json jsonb,
+      resource_refs jsonb
     )
   `);
   await client.query(

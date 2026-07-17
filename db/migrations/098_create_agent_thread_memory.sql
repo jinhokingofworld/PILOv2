@@ -19,6 +19,9 @@ CREATE TABLE public.agent_threads (
 CREATE INDEX idx_agent_threads_requester_last_activity
   ON public.agent_threads(workspace_id, requested_by_user_id, last_activity_at DESC);
 
+CREATE INDEX idx_agent_threads_requested_by_user_id
+  ON public.agent_threads(requested_by_user_id);
+
 CREATE INDEX idx_agent_threads_expires_at
   ON public.agent_threads(expires_at);
 
