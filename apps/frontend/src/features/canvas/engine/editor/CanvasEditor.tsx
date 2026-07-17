@@ -126,7 +126,6 @@ import type {
   PiloDrawingPreset,
 } from "./canvas-editor-contracts";
 import { resetClassicCanvasCamera } from "./canvas-initial-camera";
-import { isCanvasFreehandInteractionActive } from "../interactions/canvas-local-interaction-policy";
 
 export type { PiloCanvasFreeformShape } from "../canvas-engine-types";
 export type { PiloInsertableTool } from "../shapes/pilo-canvas-shape-factory";
@@ -243,13 +242,6 @@ const emptyRemoteShapePreviewStore: CanvasRemoteShapePreviewStore = {
   subscribe: () => () => {},
 };
 
-function isEditorFreehandInteractionActive(editor: Editor) {
-  return isCanvasFreehandInteractionActive({
-    currentToolId: editor.getCurrentToolId(),
-    isDragging: editor.inputs.getIsDragging(),
-    isPointing: editor.inputs.getIsPointing(),
-  });
-}
 const CANVAS_PRESENCE_CURSOR_MIN_DISTANCE = 2;
 const CANVAS_PRESENCE_CURSOR_THROTTLE_MS = 60;
 const connectionTools = new Set<PiloCanvasTool>(["arrow", "line"]);
@@ -1108,7 +1100,7 @@ export function CanvasEditor({
     (CanvasAiChatAnchor & { progress: number }) | null
   >(null);
   const [isPiloEraserActive, setIsPiloEraserActive] = useState(false);
-  const [isLocalFreehandDrawing, setIsLocalFreehandDrawing] = useState(false);
+  const [localInteractionVersion, setLocalInteractionVersion] = useState(0);
   const isCanvasAiChatVisible = Boolean(canvasAiChatAnchor || canvasAiChatHoldProgress);
   const handleCanvasAgentApplied = useCallback(() => {
     const editor = editorRef.current;
@@ -1348,7 +1340,7 @@ export function CanvasEditor({
   const handleLocalInteractionChange = useCallback(
     (state: PiloCanvasLocalInteractionState) => {
       const nextShapeIds = Array.from(
-        new Set(state.protectedShapeIds.filter(Boolean)),
+        new Set(state.activeMutationShapeIds.filter(Boolean)),
       );
       const nextPreviewPhase = getShapePreviewPhase(
         state.currentToolId,
@@ -1357,7 +1349,7 @@ export function CanvasEditor({
 
       localPreviewShapeIdsRef.current = nextShapeIds;
       localPreviewPhaseRef.current = nextPreviewPhase;
-      setIsLocalFreehandDrawing(state.isFreehandDrawing);
+      setLocalInteractionVersion((version) => version + 1);
 
       onLocalInteractionStateChange(state);
     },
@@ -1445,11 +1437,7 @@ export function CanvasEditor({
   useEffect(() => {
     const editor = editorRef.current;
 
-    if (
-      !editor ||
-      isLocalFreehandDrawing ||
-      isEditorFreehandInteractionActive(editor)
-    ) {
+    if (!editor) {
       return;
     }
 
@@ -1471,7 +1459,6 @@ export function CanvasEditor({
     ]);
   }, [
     consumeShapePatch,
-    isLocalFreehandDrawing,
     presence?.remoteShapePreviewStore,
     shapePatchVersion,
   ]);
@@ -2538,10 +2525,9 @@ export function CanvasEditor({
           />
           <CanvasRealtimePreviewApplier
             committedShapes={freeformShapes}
-            isLocalFreehandDrawing={isLocalFreehandDrawing}
             isShapePatchProtected={isShapePatchProtected}
             originalShapesRef={remotePreviewOriginalShapesRef}
-            protectionVersion={shapePatchVersion}
+            protectionVersion={localInteractionVersion}
             previewShapeIdsRef={remotePreviewShapeIdsRef}
             previewStore={presence?.remoteShapePreviewStore}
           />
@@ -2597,7 +2583,6 @@ export function CanvasEditor({
 
 function CanvasRealtimePreviewApplier({
   committedShapes,
-  isLocalFreehandDrawing,
   isShapePatchProtected,
   originalShapesRef,
   protectionVersion,
@@ -2605,7 +2590,6 @@ function CanvasRealtimePreviewApplier({
   previewStore = emptyRemoteShapePreviewStore,
 }: {
   committedShapes: PiloCanvasFreeformShape[];
-  isLocalFreehandDrawing: boolean;
   isShapePatchProtected: (shapeId: string) => boolean;
   originalShapesRef: MutableRefObject<Map<string, PiloCanvasFreeformShape>>;
   protectionVersion: number;
@@ -2634,13 +2618,6 @@ function CanvasRealtimePreviewApplier({
     useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (
-      isLocalFreehandDrawing ||
-      isEditorFreehandInteractionActive(editor)
-    ) {
-      return;
-    }
-
     if (previewDeleteCleanupTimerRef.current) {
       clearTimeout(previewDeleteCleanupTimerRef.current);
       previewDeleteCleanupTimerRef.current = null;
@@ -2872,7 +2849,6 @@ function CanvasRealtimePreviewApplier({
     committedShapes,
     editor,
     isShapePatchProtected,
-    isLocalFreehandDrawing,
     locallyEditingShapeId,
     originalShapesRef,
     previewDeleteCleanupVersion,

@@ -931,9 +931,12 @@ assert.match(canvasRuntime, /isRemoteShapeDeletionProtected/);
 assert.match(canvasRuntime, /flushDeferredRoomShapeChanges/);
 assert.match(canvasRuntime, /pendingRoomShapeAckCountsRef/);
 assert.match(canvasRuntime, /isCanvasShapePatchProtected/);
-assert.match(canvasRuntime, /localInteractionState\.isFreehandDrawing/);
-assert.match(canvasRuntime, /shouldDeferForLocalFreehand/);
-assert.match(canvasRuntime, /state\.isFreehandDrawing/);
+assert.match(canvasRuntime, /localInteractionState\.activeMutationShapeIds/);
+assert.doesNotMatch(canvasRuntime, /shouldDeferForLocalFreehand/);
+assert.doesNotMatch(
+  canvasRuntime,
+  /localInteractionState\.isFreehandDrawing\s*\|\|/,
+);
 assert.match(canvasRuntime, /queueCanvasSurfaceShapePatch/);
 assert.match(canvasRuntime, /consumeCanvasSurfaceShapePatch/);
 assert.match(canvasRuntime, /canvasShapePatchVersion/);
@@ -946,8 +949,9 @@ assert.match(piloTldrawCanvas, /editingMode/);
 assert.match(piloTldrawCanvas, /RemoteCursorOverlay/);
 assert.match(piloTldrawCanvas, /CanvasRemotePresenceProvider/);
 assert.match(piloTldrawCanvas, /CanvasRealtimePreviewApplier/);
-assert.match(piloTldrawCanvas, /isEditorFreehandInteractionActive/);
-assert.match(piloTldrawCanvas, /isLocalFreehandDrawing/);
+assert.match(piloTldrawCanvas, /activeMutationShapeIds/);
+assert.doesNotMatch(piloTldrawCanvas, /isEditorFreehandInteractionActive/);
+assert.doesNotMatch(piloTldrawCanvas, /isLocalFreehandDrawing/);
 assert.match(piloTldrawCanvas, /useSyncExternalStore/);
 assert.match(piloTldrawCanvas, /handleRealtimePreviewDraftChange/);
 assert.match(piloTldrawCanvas, /CANVAS_SHAPE_PREVIEW_THROTTLE_MS = 60/);
@@ -987,6 +991,11 @@ assert.match(canvasRemoteFreehandPreviewOverlay, /b64Vecs\.decodePoints/);
 assert.doesNotMatch(canvasRemoteFreehandPreviewOverlay, /editor\.createShapes/);
 assert.doesNotMatch(canvasRemoteFreehandPreviewOverlay, /editor\.updateShapes/);
 assert.match(canvasLocalInteractionPolicy, /isCanvasFreehandInteractionActive/);
+assert.match(canvasLocalInteractionPolicy, /getCanvasActiveMutationShapeIds/);
+assert.match(
+  canvasLocalInteractionPolicy,
+  /isCanvasShapeMutationInteractionActive/,
+);
 assert.match(canvasAgentToolStepPlayback, /playbackState/);
 assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("playing"\)/);
 assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("complete"\)/);
@@ -1265,7 +1274,8 @@ assert.match(piloTldrawCanvas, /editor\.getEditingShapeId\(\)/);
 assert.match(piloTldrawCanvas, /editor\.setEditingShape\(editingShapeId\)/);
 assert.match(piloTldrawCanvas, /editor\.setSelectedShapes\(nextSelectedShapeIds\)/);
 assert.match(piloTldrawCanvas, /CanvasLocalInteractionReporter/);
-assert.match(canvasEditorStateReporters, /getProtectedShapeIds/);
+assert.match(canvasEditorStateReporters, /getCanvasActiveMutationShapeIds/);
+assert.doesNotMatch(canvasEditorStateReporters, /getProtectedShapeIds/);
 assert.match(piloTldrawCanvas, /onLocalInteractionStateChange/);
 assert.match(piloTldrawCanvas, /freeformShapesRef\.current/);
 assert.match(piloTldrawCanvas, /pendingArrowBindingsRef/);
@@ -1328,7 +1338,8 @@ assert.doesNotMatch(piloCanvasArrowBindings, /fetch\(/);
 assert.doesNotMatch(piloCanvasArrowBindings, /src\/shared\/tldraw/);
 assert.match(piloCanvasTypes, /export type PiloCanvasFreeformShape/);
 assert.match(piloCanvasTypes, /export type PiloCanvasLocalInteractionState/);
-assert.match(piloCanvasTypes, /protectedShapeIds: string\[\]/);
+assert.match(piloCanvasTypes, /activeMutationShapeIds: string\[\]/);
+assert.doesNotMatch(piloCanvasTypes, /protectedShapeIds: string\[\]/);
 assert.match(piloCanvasTypes, /export type PiloCanvasViewSetting/);
 assert.match(piloCanvasTypes, /export type PiloCanvasViewportBounds/);
 assert.match(piloCanvasTypes, /export type PiloCanvasShapeDetailRequest/);
