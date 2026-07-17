@@ -12,6 +12,9 @@ const { MeetingAgentToolsService } = require(
 const { MeetingAgentResourceResolver } = require(
   "../../dist/modules/agent/tools/meeting-agent-resource-resolver.service.js"
 );
+const { AgentCandidateSelectionService } = require(
+  "../../dist/modules/agent/agent-candidate-selection.service.js"
+);
 const { MeetingActionItemDeliveryService } = require(
   "../../dist/modules/meeting/meeting-action-item-delivery.service.js"
 );
@@ -67,11 +70,33 @@ const meetingServiceSource = await readFile(
   new URL("../../src/modules/meeting/meeting.service.ts", import.meta.url),
   "utf8"
 );
+const candidateSelectionMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/099_create_agent_candidate_selections.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 assert.match(
   meetingAgentWorkflowMigration,
   /pilo_issue_id BIGINT[\s\S]*?REFERENCES public\.pilo_issues\(id\) ON DELETE RESTRICT/,
   "The applied 074 migration must keep the Board target FK type compatible"
+);
+assert.match(
+  candidateSelectionMigration,
+  /CREATE TABLE public\.agent_candidate_selections[\s\S]*?run_id UUID NOT NULL REFERENCES public\.agent_runs\(id\) ON DELETE CASCADE/,
+  "Meeting candidate records must be bound to one Agent run"
+);
+assert.match(
+  candidateSelectionMigration,
+  /expires_at TIMESTAMPTZ NOT NULL DEFAULT \(now\(\) \+ INTERVAL '15 minutes'\)[\s\S]*?consumed_at TIMESTAMPTZ/,
+  "Meeting candidate records must be short-lived and one-time consumable"
+);
+assert.match(
+  candidateSelectionMigration,
+  /ALTER TABLE public\.agent_candidate_selections ENABLE ROW LEVEL SECURITY/,
+  "Meeting candidate records must remain server-only behind all-deny RLS"
 );
 assert.match(
   deliveryTargetPreservationMigration,
@@ -497,6 +522,105 @@ const context = {
   assert.equal(result.outputSummary.sourceCount, 1);
   assert.deepEqual(result.outputSummary.sourceIds, ["99999999-9999-4999-8999-999999999999"]);
   assert.doesNotMatch(JSON.stringify(result.outputSummary), /원문/);
+}
+
+class FakeCandidateSelectionDatabase {
+  constructor() {
+    this.id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    this.resourceId = MEETING_ROOM_ID;
+    this.consumed = false;
+  }
+
+  async transaction(callback) {
+    return callback(this);
+  }
+
+  async queryOne(text, values = []) {
+    if (text.includes("INSERT INTO agent_candidate_selections")) {
+      return {
+        id: this.id,
+        resource_type: "meeting_room",
+        resource_id: this.resourceId,
+        report_id: null,
+        label: "기본 회의실",
+        description: "기본 회의방",
+        status: null
+      };
+    }
+    if (text.includes("FROM agent_candidate_selections")) {
+      const [id, workspaceId, userId, runId] = values;
+      if (
+        this.consumed ||
+        id !== this.id ||
+        workspaceId !== WORKSPACE_ID ||
+        userId !== USER_ID ||
+        runId !== RUN_ID
+      ) {
+        return null;
+      }
+      return {
+        id: this.id,
+        resource_type: "meeting_room",
+        resource_id: this.resourceId,
+        report_id: null,
+        label: "기본 회의실",
+        description: "기본 회의방",
+        status: null
+      };
+    }
+    if (text.includes("UPDATE agent_candidate_selections SET consumed_at")) {
+      if (this.consumed || values[0] !== this.id) return null;
+      this.consumed = true;
+      return { id: this.id };
+    }
+    return null;
+  }
+}
+
+{
+  const database = new FakeCandidateSelectionDatabase();
+  const resolver = {
+    async revalidateReference(_context, reference) {
+      return reference.resourceId === MEETING_ROOM_ID ? reference : null;
+    }
+  };
+  const service = new AgentCandidateSelectionService(database, resolver);
+  const context = {
+    currentUserId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    runId: RUN_ID,
+    requestContext: null
+  };
+  const [candidate] = await service.createMeetingCandidates(context, [
+    {
+      reference: { resourceType: "meeting_room", resourceId: MEETING_ROOM_ID },
+      candidate: {
+        resourceType: "meeting_room",
+        label: "기본 회의실",
+        description: "기본 회의방",
+        status: null
+      }
+    }
+  ]);
+  assert.deepEqual(candidate, {
+    candidateSelectionId: database.id,
+    resourceType: "meeting_room",
+    label: "기본 회의실",
+    description: "기본 회의방",
+    status: null
+  });
+  assert.doesNotMatch(JSON.stringify(candidate), new RegExp(MEETING_ROOM_ID));
+  assert.deepEqual(
+    await service.consumeMeetingCandidate(context, candidate.candidateSelectionId),
+    {
+      label: "기본 회의실",
+      reference: { resourceType: "meeting_room", resourceId: MEETING_ROOM_ID }
+    }
+  );
+  await assert.rejects(
+    () => service.consumeMeetingCandidate(context, candidate.candidateSelectionId),
+    (error) => error.getStatus?.() === 400
+  );
 }
 
 {

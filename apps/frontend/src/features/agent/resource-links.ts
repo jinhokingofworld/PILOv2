@@ -16,11 +16,71 @@ export type SqlErdSessionCandidate = {
   relationCount: number;
 };
 
+export type MeetingCandidateSelection = {
+  candidateSelectionId: string;
+  resourceType:
+    | "meeting_room"
+    | "meeting"
+    | "meeting_report"
+    | "workspace_member"
+    | "meeting_report_action_item";
+  label: string;
+  description: string | null;
+  status: string | null;
+};
+
 const SQL_ERD_SESSION_PATH = "/sql-erd/session";
 const CANVAS_PATH = "/canvas";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_SQL_ERD_SESSION_CANDIDATES = 5;
+const MAX_MEETING_CANDIDATES = 3;
+
+export function getMeetingCandidateSelections(
+  run: Pick<AgentRun, "status" | "steps"> | null | undefined
+): MeetingCandidateSelection[] {
+  if (run?.status !== "waiting_user_input") return [];
+  const latestCompletedToolStep = [...run.steps]
+    .filter((step) => step.type === "tool" && step.status === "completed")
+    .sort((left, right) => right.order - left.order)[0];
+  if (
+    latestCompletedToolStep?.outputSummary?.status !== "needs_clarification" ||
+    !Array.isArray(latestCompletedToolStep.outputSummary.candidateSelections)
+  ) {
+    return [];
+  }
+  const rawCandidates = latestCompletedToolStep.outputSummary.candidateSelections;
+  if (rawCandidates.length === 0 || rawCandidates.length > MAX_MEETING_CANDIDATES) {
+    return [];
+  }
+  const seenIds = new Set<string>();
+  return rawCandidates.flatMap((candidate) => {
+    if (!isPlainObject(candidate)) return [];
+    const candidateSelectionId = candidate.candidateSelectionId;
+    const label = normalizeCandidateTitle(candidate.label);
+    const description = normalizeOptionalCandidateText(candidate.description, 1000);
+    const status = normalizeOptionalCandidateText(candidate.status, 100);
+    if (
+      typeof candidateSelectionId !== "string" ||
+      !UUID_PATTERN.test(candidateSelectionId) ||
+      seenIds.has(candidateSelectionId) ||
+      !label ||
+      !isMeetingResourceType(candidate.resourceType)
+    ) {
+      return [];
+    }
+    seenIds.add(candidateSelectionId);
+    return [
+      {
+        candidateSelectionId,
+        resourceType: candidate.resourceType,
+        label,
+        description,
+        status
+      }
+    ];
+  });
+}
 
 export function getSqlErdSessionCandidates(
   run: Pick<AgentRun, "status" | "steps"> | null | undefined
@@ -134,6 +194,28 @@ function toCanvasLink(
     key: `canvas:agent-run:${resourceRef.resourceId}`,
     label: "캔버스에서 열기"
   };
+}
+
+function isMeetingResourceType(
+  value: unknown
+): value is MeetingCandidateSelection["resourceType"] {
+  return typeof value === "string" && [
+    "meeting_room",
+    "meeting",
+    "meeting_report",
+    "workspace_member",
+    "meeting_report_action_item"
+  ].includes(value);
+}
+
+function normalizeOptionalCandidateText(
+  value: unknown,
+  maxLength: number
+): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized && [...normalized].length <= maxLength ? normalized : null;
 }
 
 function toSqlErdSessionLink(

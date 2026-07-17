@@ -35,6 +35,7 @@ import {
   createAgentApiClient
 } from "@/features/agent/api/client";
 import { AgentConfirmationCard } from "@/features/agent/components/agent-confirmation-card";
+import { AgentMeetingCandidateSelections } from "@/features/agent/components/agent-meeting-candidate-selections";
 import { AgentResourceLinks } from "@/features/agent/components/agent-resource-links";
 import { AgentSqlErdSessionCandidates } from "@/features/agent/components/agent-sql-erd-session-candidates";
 import { AgentCanvasArtifact } from "@/features/agent/components/agent-canvas-artifact";
@@ -940,6 +941,17 @@ export function AgentChatWidget() {
                           }
                           onReject={() =>
                             void handleConfirmationAction(message, "reject")
+                          }
+                        />
+                      ) : null}
+                      {message.run ? (
+                        <AgentMeetingCandidateSelections
+                          run={message.run}
+                          disabled={
+                            !accessToken?.trim() || hasActiveAgentRequest
+                          }
+                          onSelect={(input) =>
+                            void appendRunInput(message, input)
                           }
                         />
                       ) : null}
