@@ -234,7 +234,7 @@ def test_fixed_korean_suite_loads() -> None:
     suite = load_evaluation_suite(suite_path)
 
     assert suite.version == "agent-planner-korean:v1"
-    assert len(suite.cases) == 47
+    assert len(suite.cases) == 48
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
         "create_calendar_event",
@@ -266,6 +266,8 @@ def test_fixed_korean_suite_loads() -> None:
         "assign_board_issue_safely",
         "diagnose_board_freshness",
         "generate_sql_erd",
+        "inspect_sql_erd_schema",
+        "focus_sql_erd_tables",
     }
     expectations = {case.case_id: case.expectation for case in suite.cases}
     assert expectations["calendar_today"].input_contains == {
@@ -300,5 +302,9 @@ def test_fixed_korean_suite_loads() -> None:
     assert expectations["meeting_recording_missing_id"].missing_fields == ("meetingId",)
     assert expectations["sql_erd_generate"].tool_name == "generate_sql_erd"
     assert expectations["sql_erd_generate"].requires_confirmation is None
+    assert expectations["sql_erd_focus_payment_tables"].tool_name == "inspect_sql_erd_schema"
+    assert expectations["sql_erd_focus_payment_tables"].input_contains == {
+        "featureQuery": "결제 기능"
+    }
     assert expectations["sql_erd_missing_entities"].status == "needs_clarification"
     assert expectations["sql_erd_database_execution"].status == "unsupported"

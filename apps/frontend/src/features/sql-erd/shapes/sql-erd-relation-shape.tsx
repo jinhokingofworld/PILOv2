@@ -15,7 +15,9 @@ import {
 } from "tldraw";
 
 import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shape";
+import { useSqlErdTableFocus } from "@/features/sql-erd/components/sql-erd-table-focus-context";
 import type { ErdRelation } from "@/features/sql-erd/types";
+import { getSqlErdFocusedRelationRole } from "@/features/sql-erd/utils/agent-table-focus";
 import type { SqlErdRelationCardinality } from "@/features/sql-erd/utils/model";
 
 export const SQLTOERD_RELATION_SHAPE_TYPE = "sqltoerd_relation";
@@ -781,7 +783,12 @@ function SqlErdCardinalityMarker({
 
 function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
   const editor = useEditor();
+  const tableFocus = useSqlErdTableFocus();
   const [isHovered, setIsHovered] = useState(false);
+  const focusRole = tableFocus
+    ? getSqlErdFocusedRelationRole(tableFocus, shape.props.relationId)
+    : null;
+  const isFocusDimmed = focusRole === "dimmed";
   const isSelected = useValue(
     `sqltoerd-relation-selected-${shape.id}`,
     () => editor.getOnlySelectedShape()?.id === shape.id,
@@ -806,6 +813,9 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
   );
 
   function handlePointerEnter() {
+    if (isFocusDimmed) {
+      return;
+    }
     setIsHovered(true);
     emitSqlErdRelationHover(shape, true);
   }
@@ -823,20 +833,24 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
   return (
     <SVGContainer
       style={{
+        filter: isFocusDimmed ? "blur(1px) saturate(0.4)" : undefined,
         height: shape.props.h,
+        opacity: isFocusDimmed ? 0.12 : 1,
         overflow: "visible",
-        pointerEvents: "auto",
+        pointerEvents: isFocusDimmed ? "none" : "auto",
+        transition: "filter 160ms ease, opacity 160ms ease",
         width: shape.props.w
       }}
     >
       <path
+        data-sqltoerd-relation-focus-role={focusRole ?? undefined}
         data-sqltoerd-relation-hit-target
         d={pathData}
         fill="none"
         onClick={handleClick}
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
-        pointerEvents="stroke"
+        pointerEvents={isFocusDimmed ? "none" : "stroke"}
         stroke="transparent"
         strokeLinecap="round"
         strokeLinejoin="round"

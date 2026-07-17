@@ -1178,6 +1178,75 @@
           }
         }
       }
+    },
+    {
+      "name": "inspect_sql_erd_schema",
+      "description": "Workspace SQLtoERD session의 테이블 이름, 주요 컬럼과 FK 관계를 제한된 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용하며 session이 여러 개면 사용자가 선택할 후보를 반환합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "required": ["featureQuery"],
+        "additionalProperties": false,
+        "properties": {
+          "featureQuery": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "sessionId": { "type": "string", "format": "uuid" },
+          "sessionSelectionToken": { "type": "string", "format": "uuid" },
+          "sessionTitle": { "type": "string", "minLength": 1, "maxLength": 120 }
+        }
+      }
+    },
+    {
+      "name": "focus_sql_erd_tables",
+      "description": "inspect_sql_erd_schema 결과의 compact table ref를 현재 session revision으로 검증하고 핵심 및 직접 관련 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session은 변경하지 않습니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "sessionRevision",
+          "featureLabel",
+          "primaryTableRefs",
+          "relatedTableRefs",
+          "confidence",
+          "reasons"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": { "type": "string", "format": "uuid" },
+          "sessionRevision": { "type": "integer", "minimum": 1 },
+          "featureLabel": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "primaryTableRefs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^t[1-9][0-9]*$" }
+          },
+          "relatedTableRefs": {
+            "type": "array",
+            "maxItems": 30,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^t[1-9][0-9]*$" }
+          },
+          "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+          "reasons": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "required": ["tableRef", "reason"],
+              "additionalProperties": false,
+              "properties": {
+                "tableRef": { "type": "string", "pattern": "^t[1-9][0-9]*$" },
+                "reason": { "type": "string", "minLength": 1, "maxLength": 240 }
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "cases": [
@@ -1706,6 +1775,18 @@
       "prompt": "이 SQL을 운영 데이터베이스에 바로 실행해줘",
       "expected": {
         "status": "unsupported"
+      }
+    },
+    {
+      "id": "sql_erd_focus_payment_tables",
+      "prompt": "SQLtoERD에서 결제 기능과 관련된 테이블만 집중해서 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "inspect_sql_erd_schema",
+        "inputContains": {
+          "featureQuery": "결제 기능"
+        },
+        "requiresConfirmation": false
       }
     }
   ]

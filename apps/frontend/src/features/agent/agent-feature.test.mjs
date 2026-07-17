@@ -6,7 +6,19 @@ import {
   getLatestAgentRunMessageSequence
 } from "./run-input-recovery.ts";
 import { readAgentRequestContext } from "./request-context.ts";
-import { getAgentResourceLinks } from "./resource-links.ts";
+import {
+  getAgentResourceLinks,
+  parseSqlErdAgentTableFocusResource
+} from "./resource-links.ts";
+import {
+  consumeStagedSqlErdAgentTableFocus,
+  createSqlErdModelFingerprint,
+  getSqlErdFocusedRelationRole,
+  getSqlErdFocusedTableRole,
+  isSqlErdAgentTableFocusCurrent,
+  isSqlErdShapeDimmedByTableFocus,
+  stageSqlErdAgentTableFocus
+} from "../sql-erd/utils/agent-table-focus.ts";
 
 async function readFeatureFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
@@ -174,6 +186,8 @@ assert.doesNotMatch(agentChatWidget, /Mockup/);
 
 assert.match(agentResourceLinks, /getAgentResourceLinks/);
 assert.match(agentResourceLinks, /<Link/);
+assert.match(agentResourceLinks, /stageSqlErdAgentTableFocus/);
+assert.match(agentResourceLinks, /link\.focus/);
 
 const previousMessages = [
   {
@@ -264,6 +278,240 @@ assert.deepEqual(getAgentResourceLinks(completedRun), [
     label: "ERD 및 DDL 열기"
   }
 ]);
+
+const focusedResourceRef = {
+  ...validResourceRef,
+  status: "focused",
+  metadata: {
+    version: 1,
+    view: "table_focus",
+    sessionRevision: 7,
+    modelFingerprint: createSqlErdModelFingerprint({
+      version: 1,
+      schema: { tables: [{ id: "table-orders" }], relations: [] }
+    }),
+    featureLabel: "결제 기능",
+    primaryTableIds: ["table-orders", "table-payments"],
+    relatedTableIds: ["table-payment-attempts"],
+    relationIds: ["relation-orders-attempts", "relation-payments-attempts"],
+    confidence: "medium"
+  }
+};
+const expectedFocus = {
+  version: 1,
+  view: "table_focus",
+  sessionId: resourceSessionId,
+  sessionRevision: 7,
+  modelFingerprint: createSqlErdModelFingerprint({
+    version: 1,
+    schema: { tables: [{ id: "table-orders" }], relations: [] }
+  }),
+  featureLabel: "결제 기능",
+  primaryTableIds: ["table-orders", "table-payments"],
+  relatedTableIds: ["table-payment-attempts"],
+  relationIds: ["relation-orders-attempts", "relation-payments-attempts"],
+  confidence: "medium"
+};
+assert.equal(
+  createSqlErdModelFingerprint({
+    schema: { relations: [], tables: [{ id: "table-orders" }] },
+    version: 1
+  }),
+  "fnv1a32:276fb69c"
+);
+
+assert.deepEqual(
+  parseSqlErdAgentTableFocusResource(focusedResourceRef),
+  expectedFocus
+);
+assert.deepEqual(
+  getAgentResourceLinks({
+    ...completedRun,
+    steps: [{ ...completedRun.steps[0], resourceRefs: [focusedResourceRef] }]
+  }),
+  [
+    {
+      focus: expectedFocus,
+      href: `/sql-erd/session?sessionId=${resourceSessionId}`,
+      key: `sqltoerd:session:${resourceSessionId}`,
+      label: "집중 보기 열기"
+    }
+  ]
+);
+assert.deepEqual(
+  getAgentResourceLinks({
+    ...completedRun,
+    steps: [
+      {
+        ...completedRun.steps[0],
+        resourceRefs: [{ ...focusedResourceRef, status: "created" }]
+      }
+    ]
+  }),
+  [
+    {
+      href: `/sql-erd/session?sessionId=${resourceSessionId}`,
+      key: `sqltoerd:session:${resourceSessionId}`,
+      label: "ERD 및 DDL 열기"
+    }
+  ]
+);
+
+for (const invalidMetadata of [
+  { ...focusedResourceRef.metadata, sessionRevision: 0 },
+  { ...focusedResourceRef.metadata, primaryTableIds: [] },
+  {
+    ...focusedResourceRef.metadata,
+    relatedTableIds: ["table-orders"]
+  },
+  { ...focusedResourceRef.metadata, confidence: "certain" },
+  { ...focusedResourceRef.metadata, primaryTableIds: ["", "table-orders"] }
+]) {
+  assert.equal(
+    parseSqlErdAgentTableFocusResource({
+      ...focusedResourceRef,
+      metadata: invalidMetadata
+    }),
+    null
+  );
+}
+
+assert.equal(getSqlErdFocusedTableRole(expectedFocus, "table-orders"), "primary");
+assert.equal(
+  getSqlErdFocusedTableRole(expectedFocus, "table-payment-attempts"),
+  "related"
+);
+assert.equal(getSqlErdFocusedTableRole(expectedFocus, "table-users"), "dimmed");
+assert.equal(
+  getSqlErdFocusedRelationRole(expectedFocus, "relation-orders-attempts"),
+  "focused"
+);
+assert.equal(
+  getSqlErdFocusedRelationRole(expectedFocus, "relation-users-orders"),
+  "dimmed"
+);
+assert.equal(
+  isSqlErdAgentTableFocusCurrent(expectedFocus, {
+    sessionId: resourceSessionId,
+    sessionRevision: 7,
+    modelJson: {
+      schema: { relations: [], tables: [{ id: "table-orders" }] },
+      version: 1
+    },
+    revisionValidated: false
+  }),
+  true
+);
+assert.equal(
+  isSqlErdAgentTableFocusCurrent(expectedFocus, {
+    sessionId: resourceSessionId,
+    sessionRevision: 8,
+    modelJson: {
+      schema: { relations: [], tables: [{ id: "table-orders" }] },
+      version: 1
+    },
+    revisionValidated: false
+  }),
+  false
+);
+assert.equal(
+  isSqlErdAgentTableFocusCurrent(expectedFocus, {
+    sessionId: resourceSessionId,
+    sessionRevision: 8,
+    modelJson: {
+      schema: { relations: [], tables: [{ id: "table-orders" }] },
+      version: 1
+    },
+    revisionValidated: true
+  }),
+  true
+);
+assert.equal(
+  isSqlErdAgentTableFocusCurrent(expectedFocus, {
+    sessionId: resourceSessionId,
+    sessionRevision: 8,
+    modelJson: {
+      schema: { relations: [], tables: [{ id: "table-payments" }] },
+      version: 1
+    },
+    revisionValidated: true
+  }),
+  false
+);
+assert.equal(
+  isSqlErdShapeDimmedByTableFocus(expectedFocus, {
+    type: "sqltoerd_table",
+    props: { tableId: "table-users" }
+  }),
+  true
+);
+assert.equal(
+  isSqlErdShapeDimmedByTableFocus(expectedFocus, {
+    type: "sqltoerd_table",
+    props: { tableId: "table-orders" }
+  }),
+  false
+);
+assert.equal(
+  isSqlErdShapeDimmedByTableFocus(expectedFocus, {
+    type: "sqltoerd_relation",
+    props: { relationId: "relation-users-orders" }
+  }),
+  true
+);
+assert.equal(
+  isSqlErdShapeDimmedByTableFocus(expectedFocus, {
+    type: "sqltoerd_note",
+    props: { noteId: "note-1" }
+  }),
+  false
+);
+
+const stagedFocusStorage = new Map();
+const stagedFocusEvents = [];
+const previousCustomEvent = globalThis.CustomEvent;
+const previousWindow = globalThis.window;
+globalThis.CustomEvent = class {
+  constructor(type, init) {
+    this.type = type;
+    this.detail = init?.detail;
+  }
+};
+globalThis.window = {
+  dispatchEvent(event) {
+    stagedFocusEvents.push(event);
+  },
+  sessionStorage: {
+    getItem(key) {
+      return stagedFocusStorage.get(key) ?? null;
+    },
+    removeItem(key) {
+      stagedFocusStorage.delete(key);
+    },
+    setItem(key, value) {
+      stagedFocusStorage.set(key, value);
+    }
+  }
+};
+stageSqlErdAgentTableFocus(expectedFocus);
+assert.equal(stagedFocusStorage.size, 1);
+assert.deepEqual(stagedFocusEvents[0].detail, expectedFocus);
+assert.deepEqual(
+  consumeStagedSqlErdAgentTableFocus(resourceSessionId),
+  expectedFocus
+);
+assert.equal(stagedFocusStorage.size, 0);
+assert.equal(consumeStagedSqlErdAgentTableFocus(resourceSessionId), null);
+if (previousWindow === undefined) {
+  delete globalThis.window;
+} else {
+  globalThis.window = previousWindow;
+}
+if (previousCustomEvent === undefined) {
+  delete globalThis.CustomEvent;
+} else {
+  globalThis.CustomEvent = previousCustomEvent;
+}
 assert.deepEqual(
   getAgentResourceLinks({ ...completedRun, status: "running" }),
   []

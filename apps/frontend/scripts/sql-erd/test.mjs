@@ -222,6 +222,14 @@ async function compileSqlErdRuntimeModules() {
         [
           /from "@\/features\/sql-erd\/shapes\/sql-erd-table-shape"/g,
           'from "./table-shape-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/components\/sql-erd-table-focus-context"/g,
+          'from "./table-focus-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/utils\/agent-table-focus"/g,
+          'from "./table-focus-stub.mjs"'
         ]
       ]
     );
@@ -237,6 +245,14 @@ async function compileSqlErdRuntimeModules() {
         [
           /from "@\/features\/sql-erd\/utils\/table-card-layout"/g,
           'from "./table-card-layout.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/components\/sql-erd-table-focus-context"/g,
+          'from "./table-focus-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/utils\/agent-table-focus"/g,
+          'from "./table-focus-stub.mjs"'
         ]
       ]
     );
@@ -347,6 +363,14 @@ async function compileSqlErdRuntimeModules() {
     await writeFile(
       join(outputDir, "model-stub.mjs"),
       "export function getTableDisplayName(table) { return table.schemaName ? `${table.schemaName}.${table.name}` : table.name; }\n"
+    );
+    await writeFile(
+      join(outputDir, "table-focus-stub.mjs"),
+      [
+        "export function useSqlErdTableFocus() { return null; }",
+        "export function getSqlErdFocusedTableRole() { return 'dimmed'; }",
+        "export function getSqlErdFocusedRelationRole() { return 'dimmed'; }"
+      ].join("\n")
     );
 
     const [
@@ -6889,6 +6913,13 @@ assert.match(canvasSurface, /zoomToFit/);
 assert.match(canvasSurface, /createSqltoerdAutoLayout/);
 assert.match(canvasSurface, /markHistoryStoppingPoint\("sqltoerd auto layout"\)/);
 assert.match(canvasSurface, /data-sqltoerd-auto-layout/);
+assert.match(canvasSurface, /SqlErdTableFocusProvider/);
+assert.match(canvasSurface, /SqlErdTableFocusInteractionGuard/);
+assert.match(canvasSurface, /editor\.setSelectedShapes\(allowedShapeIds\)/);
+assert.match(canvasSurface, /registerBeforeChangeHandler\(\s*"shape"/);
+assert.match(canvasSurface, /registerBeforeDeleteHandler\(\s*"shape"/);
+assert.match(canvasSurface, /getSqlErdFocusedTableRole/);
+assert.match(canvasSurface, /getSqlErdFocusedRelationRole/);
 assert.match(canvasSurface, /SQLTOERD_MINIMUM_READABLE_ZOOM/);
 assert.match(canvasSurface, /resetSqlErdCanvas\(editor, shapes\)/);
 assert.match(
@@ -6939,6 +6970,14 @@ assert.match(
 );
 assert.match(tableShape, /aria-pressed=\{isSelected\}/);
 assert.match(tableShape, /function handleTableKeyDown/);
+assert.match(
+  tableShape,
+  /function handleTableClick\(\) \{\s*if \(isFocusDimmed\) return;/
+);
+assert.match(
+  tableShape,
+  /function handleColumnClick\(columnId: string\) \{\s*if \(isFocusDimmed\) return;/
+);
 assert.match(tableShape, /override onClick\(shape: SqlErdTableShape\)/);
 assert.match(tableShape, /isSqlErdColumnPointerDrag/);
 assert.match(tableShape, /columnPointerStartRef/);
@@ -6951,7 +6990,9 @@ assert.match(tableShape, /isHighlighted/);
 assert.match(tableShape, /data-sqltoerd-column-highlighted/);
 assert.match(tableShape, /data-sqltoerd-table-selected/);
 assert.match(tableShape, /pointer-events-auto/);
-assert.match(tableShape, /pointerEvents: "all"/);
+assert.match(tableShape, /pointerEvents: isFocusDimmed \? "none" : "all"/);
+assert.match(tableShape, /data-sqltoerd-table-focus-role/);
+assert.match(tableShape, /blur\(2px\)/);
 assert.match(tableShape, /justify-self-end/);
 assert.match(tableShape, /minmax\(max-content, 1fr\)/);
 assert.doesNotMatch(tableShape, /const BADGE_COLUMN_WIDTH = 72/);
@@ -7000,6 +7041,18 @@ assert.match(relationShape, /data-sqltoerd-cardinality-marker/);
 assert.match(relationShape, /getSqlErdCardinalityMarkerGeometry/);
 assert.match(relationShape, /stroke="transparent"/);
 assert.match(relationShape, /SQLTOERD_RELATION_HIT_STROKE_WIDTH/);
+assert.match(relationShape, /data-sqltoerd-relation-focus-role/);
+assert.match(relationShape, /blur\(1px\)/);
+assert.match(panel, /consumeStagedSqlErdAgentTableFocus/);
+assert.match(panel, /revisionValidated/);
+assert.match(panel, /modelJson: sqlErdViewSession\.modelJson/);
+assert.match(panel, /data-sqltoerd-status-banners/);
+assert.match(
+  panel,
+  /data-sqltoerd-status-banners[\s\S]*?AutosavePausedBanner[\s\S]*?AgentTableFocusBanner/
+);
+assert.match(panel, /전체 보기/);
+assert.match(panel, /집중 보기/);
 assert.doesNotMatch(relationShape, /canCull\(\)/);
 
 assert.match(annotationShape, /SQLTOERD_ANNOTATION_SHAPE_TYPE/);
