@@ -3,7 +3,11 @@ import { BoardAgentToolsService } from "./tools/board-agent-tools.service";
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
-import type { AgentToolDefinition } from "./types/agent-tool.types";
+import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service";
+import type {
+  AgentRunRequestContext,
+  AgentToolDefinition
+} from "./types/agent-tool.types";
 
 @Injectable()
 export class AgentToolRegistryService {
@@ -13,7 +17,8 @@ export class AgentToolRegistryService {
     calendarAgentToolsService?: CalendarAgentToolsService,
     meetingAgentToolsService?: MeetingAgentToolsService,
     boardAgentToolsService?: BoardAgentToolsService,
-    sqlErdAgentToolsService?: SqlErdAgentToolsService
+    sqlErdAgentToolsService?: SqlErdAgentToolsService,
+    prReviewAgentToolsService?: PrReviewAgentToolsService
   ) {
     if (calendarAgentToolsService) {
       this.registerMany(calendarAgentToolsService.listDefinitions());
@@ -30,14 +35,46 @@ export class AgentToolRegistryService {
     if (sqlErdAgentToolsService) {
       this.registerMany(sqlErdAgentToolsService.listDefinitions());
     }
+
+    if (prReviewAgentToolsService) {
+      this.registerMany(prReviewAgentToolsService.listDefinitions());
+    }
   }
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
     return [...this.definitions.values()];
   }
 
+  listDefinitionsForContext(
+    requestContext: AgentRunRequestContext
+  ): AgentToolDefinition<unknown>[] {
+    return this.listDefinitions().filter((definition) =>
+      this.isAvailableForContext(definition, requestContext)
+    );
+  }
+
   getDefinition(name: string): AgentToolDefinition<unknown> | null {
     return this.definitions.get(name) ?? null;
+  }
+
+  getDefinitionForContext(
+    name: string,
+    requestContext: AgentRunRequestContext
+  ): AgentToolDefinition<unknown> | null {
+    const definition = this.getDefinition(name);
+    return definition && this.isAvailableForContext(definition, requestContext)
+      ? definition
+      : null;
+  }
+
+  private isAvailableForContext(
+    definition: AgentToolDefinition<unknown>,
+    requestContext: AgentRunRequestContext
+  ): boolean {
+    return (
+      !definition.contextRequirement ||
+      definition.contextRequirement.surface === requestContext?.surface
+    );
   }
 
   private registerMany(definitions: AgentToolDefinition<unknown>[]): void {

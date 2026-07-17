@@ -1705,6 +1705,24 @@ POST /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/m
 - review session status는 별도 `merged` 상태로 바꾸지 않고 기존 `submitted` 상태를 유지한다.
 - GitHub token, raw provider error, secret은 API 응답이나 로그에 노출하지 않는다.
 
+## Agent 핵심 파일 추천
+
+PR Review Canvas에서도 기존 우측 하단 Agent 버튼과 side panel을 사용할 수 있다. PR Review URL의
+`reviewSessionId`가 유효한 UUID이면 Frontend는 Agent run에 아래 context를 보낸다.
+
+```json
+{
+  "surface": "pr_review",
+  "sessionId": "review_session_uuid"
+}
+```
+
+이는 화면 힌트이며 서버는 현재 Workspace 접근 권한과 review session의 room Workspace 소속을 재검증한다.
+해당 context에서는 `recommend_pr_review_focus`가 현재 revision의 핵심 검토 파일을 최대 3개, 연결 확인
+파일을 최대 2개까지 추천할 수 있다. 결과에는 파일 경로, 위험도, 역할, 변경 요약, 검토 포인트, 결정 상태,
+파일 관계만 포함한다. raw diff, 코드 원문, 사용자 comment는 Agent로 전달하거나 Agent 실행 이력에 저장하지
+않는다. `analyzing` 또는 `failed` session은 추천 대신 완료 또는 재시도 안내를 반환한다.
+
 ## MVP 제외
 
 - GitHub inline review comment

@@ -190,15 +190,20 @@ export class AgentExecutionService {
     }
   ): Promise<AgentExecutionResult> {
     const candidate = this.parsePlannerOutput(input.plannerOutput);
-    const definition = this.agentToolRegistryService.getDefinition(
-      candidate.toolName
+    const requestContext =
+      input.requestContext === undefined
+        ? await this.findRunRequestContext(currentUserId, workspaceId, runId)
+        : input.requestContext;
+    const definition = this.agentToolRegistryService.getDefinitionForContext(
+      candidate.toolName,
+      requestContext
     );
 
     if (!definition) {
       return this.failRun(currentUserId, workspaceId, runId, {
-        errorCode: "AGENT_TOOL_NOT_EXECUTABLE",
-        errorMessage: "Agent tool is not registered",
-        message: "요청을 처리할 수 있는 Agent 도구가 없습니다."
+        errorCode: "AGENT_TOOL_CONTEXT_UNAVAILABLE",
+        errorMessage: "Agent tool is unavailable for this context",
+        message: "현재 화면에서는 요청을 처리할 수 있는 Agent 도구가 없습니다."
       });
     }
 
@@ -228,11 +233,6 @@ export class AgentExecutionService {
     if (!validatedInput.ok) {
       return validatedInput.result;
     }
-
-    const requestContext =
-      input.requestContext === undefined
-        ? await this.findRunRequestContext(currentUserId, workspaceId, runId)
-        : input.requestContext;
 
     if (definition.executionMode === "contextual") {
       return this.executeContextualTool(

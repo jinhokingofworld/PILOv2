@@ -4,6 +4,7 @@ import { DatabaseModule } from "../../database/database.module";
 import { BoardModule } from "../board/board.module";
 import { CalendarModule } from "../calendar/calendar.module";
 import { MeetingModule } from "../meeting/meeting.module";
+import { PrReviewModule } from "../pr-review/pr-review.module";
 import { SqlErdModule } from "../sql-erd/sql-erd.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { AgentConfirmationService } from "./agent-confirmation.service";
@@ -24,6 +25,7 @@ import { BoardContextResolverService } from "./tools/board-context-resolver.serv
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
+import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service";
 
 @Module({
   imports: [
@@ -33,7 +35,8 @@ import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
     CalendarModule,
     MeetingModule,
     BoardModule,
-    SqlErdModule
+    SqlErdModule,
+    PrReviewModule
   ],
   controllers: [AgentController, AgentInternalController],
   providers: [
@@ -52,7 +55,8 @@ import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
     BoardAgentToolsService,
     CalendarAgentToolsService,
     MeetingAgentToolsService,
-    SqlErdAgentToolsService
+    SqlErdAgentToolsService,
+    PrReviewAgentToolsService
   ]
 })
 export class AgentModule {}

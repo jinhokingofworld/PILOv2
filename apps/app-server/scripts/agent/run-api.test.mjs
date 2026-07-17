@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -13,6 +13,7 @@ const OTHER_USER_ID = "99999999-9999-9999-9999-999999999999";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
+const PR_REVIEW_SESSION_ID = "88888888-8888-4888-8888-888888888888";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CONFIRMATION_ID = "55555555-5555-5555-5555-555555555555";
 const MESSAGE_ID = "66666666-6666-4666-8666-666666666666";
@@ -26,6 +27,28 @@ const contextualExecutionMigration = readFileSync(
     import.meta.url
   ),
   "utf8"
+);
+const prReviewRequestContextMigrationPath = new URL(
+  "../../../../db/migrations/093_add_pr_review_agent_request_context.sql",
+  import.meta.url
+);
+
+assert.equal(
+  existsSync(prReviewRequestContextMigrationPath),
+  true,
+  "PR Review request context migration should exist"
+);
+const prReviewRequestContextMigration = readFileSync(
+  prReviewRequestContextMigrationPath,
+  "utf8"
+);
+assert.match(
+  prReviewRequestContextMigration,
+  /request_context_json->>'surface' IN \('sql_erd', 'pr_review'\)/
+);
+assert.match(
+  prReviewRequestContextMigration,
+  /request_context_json - 'surface' - 'sessionId'\) = '\{\}'::jsonb/
 );
 
 assert.match(
@@ -308,6 +331,19 @@ class FakeDatabaseService {
       const [sessionId, workspaceId] = values;
       return (
         (this.state.sessionRows ?? []).find(
+          (session) =>
+            session.id === sessionId && session.workspace_id === workspaceId
+        ) ?? null
+      );
+    }
+
+    if (
+      text.includes("FROM pr_review_sessions AS review_session") &&
+      text.includes("JOIN pr_review_rooms AS review_room")
+    ) {
+      const [sessionId, workspaceId] = values;
+      return (
+        (this.state.prReviewSessionRows ?? []).find(
           (session) =>
             session.id === sessionId && session.workspace_id === workspaceId
         ) ?? null
@@ -788,6 +824,73 @@ class FakeRunInputDatabaseService {
 
   assert.deepEqual(result.run.requestContext, requestContext);
   assert.deepEqual(agentLoggingService.calls[0].input.requestContext, requestContext);
+}
+
+{
+  const requestContext = {
+    surface: "pr_review",
+    sessionId: PR_REVIEW_SESSION_ID
+  };
+  const { service, agentLoggingService } = createService({
+    loggingResult: {
+      run: createStoredRun({ requestContext }),
+      created: true
+    },
+    state: {
+      listRows: [],
+      runRows: [],
+      stepRows: [],
+      confirmationRows: [],
+      prReviewSessionRows: [
+        {
+          id: PR_REVIEW_SESSION_ID,
+          workspace_id: WORKSPACE_ID
+        }
+      ]
+    }
+  });
+
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "이 PR에서 먼저 검토할 파일을 추천해줘",
+    requestContext
+  });
+
+  assert.deepEqual(result.run.requestContext, requestContext);
+  assert.deepEqual(agentLoggingService.calls[0].input.requestContext, requestContext);
+}
+
+{
+  const { service, agentLoggingService } = createService({
+    state: {
+      listRows: [],
+      runRows: [],
+      stepRows: [],
+      confirmationRows: [],
+      prReviewSessionRows: [
+        {
+          id: PR_REVIEW_SESSION_ID,
+          workspace_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        }
+      ]
+    }
+  });
+
+  await assert.rejects(
+    () =>
+      service.createRun(USER_ID, WORKSPACE_ID, {
+        prompt: "이 PR에서 먼저 검토할 파일을 추천해줘",
+        requestContext: {
+          surface: "pr_review",
+          sessionId: PR_REVIEW_SESSION_ID
+        }
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 404);
+      assert.equal(errorMessage(error), "PR Review session not found");
+      return true;
+    }
+  );
+  assert.equal(agentLoggingService.calls.length, 0);
 }
 
 {

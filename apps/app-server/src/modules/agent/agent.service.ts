@@ -676,7 +676,7 @@ export class AgentService {
     if (
       !this.isPlainObject(value) ||
       Object.keys(value).length !== 2 ||
-      value.surface !== "sql_erd" ||
+      (value.surface !== "sql_erd" && value.surface !== "pr_review") ||
       typeof value.sessionId !== "string" ||
       !UUID_PATTERN.test(value.sessionId) ||
       Buffer.byteLength(JSON.stringify(value), "utf8") >
@@ -686,7 +686,7 @@ export class AgentService {
     }
 
     return {
-      surface: "sql_erd",
+      surface: value.surface,
       sessionId: value.sessionId
     };
   }
@@ -699,19 +699,38 @@ export class AgentService {
       return;
     }
 
+    if (requestContext.surface === "sql_erd") {
+      const session = await this.database.queryOne<{ id: string }>(
+        `
+          SELECT id
+          FROM sql_erd_sessions
+          WHERE id = $1
+            AND workspace_id = $2
+            AND deleted_at IS NULL
+        `,
+        [requestContext.sessionId, workspaceId]
+      );
+
+      if (!session) {
+        throw notFound("SQLtoERD session not found");
+      }
+      return;
+    }
+
     const session = await this.database.queryOne<{ id: string }>(
       `
-        SELECT id
-        FROM sql_erd_sessions
-        WHERE id = $1
-          AND workspace_id = $2
-          AND deleted_at IS NULL
+        SELECT review_session.id
+        FROM pr_review_sessions AS review_session
+        JOIN pr_review_rooms AS review_room
+          ON review_room.id = review_session.room_id
+        WHERE review_session.id = $1
+          AND review_room.workspace_id = $2
       `,
       [requestContext.sessionId, workspaceId]
     );
 
     if (!session) {
-      throw notFound("SQLtoERD session not found");
+      throw notFound("PR Review session not found");
     }
   }
 

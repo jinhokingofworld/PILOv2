@@ -123,7 +123,7 @@ export class AgentOutboxPublisherService
         requestContext: claim.request_context_json,
         turnSequence: Number(claim.turn_sequence),
         toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
-        tools: this.buildToolSchemaSnapshot()
+        tools: this.buildToolSchemaSnapshot(claim.request_context_json)
       });
       await this.markDelivered(claim);
     } catch {
@@ -315,13 +315,17 @@ export class AgentOutboxPublisherService
     }
   }
 
-  private buildToolSchemaSnapshot(): AgentToolSchemaSnapshotItem[] {
-    return this.agentToolRegistryService.listDefinitions().map((definition) => ({
+  private buildToolSchemaSnapshot(
+    requestContext: AgentRunRequestContext
+  ): AgentToolSchemaSnapshotItem[] {
+    return this.agentToolRegistryService
+      .listDefinitionsForContext(requestContext)
+      .map((definition) => ({
       name: definition.name,
       description: definition.description,
       riskLevel: definition.riskLevel,
       executionMode: definition.executionMode,
       inputSchema: definition.inputSchema
-    }));
+      }));
   }
 }
