@@ -61,11 +61,42 @@ def test_user_prompt_exposes_only_current_canvas_intents() -> None:
     normal_intents = {intent["name"] for intent in normal_payload["allowedIntents"]}
     tool_help_intents = {intent["name"] for intent in tool_help_payload["allowedIntents"]}
 
-    assert normal_intents == {"find_shapes"}
-    assert tool_help_intents == {"find_shapes"}
+    assert normal_intents == {"find_shapes", "generate_html", "unsupported"}
+    assert tool_help_intents == {"find_shapes", "generate_html", "unsupported"}
     assert "allowedActions" not in normal_payload
     assert "availableCanvasTools" not in normal_payload
     assert "intent classifier" in system_prompt()
+
+
+def test_parse_intent_classification_accepts_html_generation() -> None:
+    result = parse_canvas_agent_intent_classification(
+        json.dumps(
+            {
+                "intent": "generate_html",
+                "message": "선택 영역을 HTML로 변환합니다.",
+                "arguments": {"query": "", "shapeIds": []},
+            }
+        )
+    )
+
+    assert result.intent == "generate_html"
+    assert result.arguments == {}
+
+
+def test_classifier_prompt_redacts_full_selected_scene() -> None:
+    context = run_context(tool_help_mode=False)
+    context.request_context["selectedScene"] = {
+        "selectionMode": "frame",
+        "shapes": [{"id": "shape:secret", "text": "페이지 내용"}],
+    }
+
+    payload = json.loads(user_prompt(context))
+
+    assert payload["requestContext"]["selectedScene"] == {
+        "available": True,
+        "selectionMode": "frame",
+        "shapeCount": 1,
+    }
 
 
 def run_context(tool_help_mode: bool) -> CanvasAgentRunContext:

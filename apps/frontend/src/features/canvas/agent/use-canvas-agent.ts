@@ -18,16 +18,14 @@ import {
 } from "./canvas-agent-tool-targets";
 import { focusCanvasAgentResult } from "./canvas-agent-camera";
 import { buildCanvasAgentShapeSummaries } from "./canvas-agent-shape-context";
+import {
+  buildCanvasAgentSelectedScene,
+  CanvasAgentSelectedSceneError,
+} from "./canvas-agent-selected-scene";
 
 const ACTIVE_STATUSES = new Set(["queued", "planning", "executing"]);
 const COMPLETED_PROGRESS_HIDE_DELAY_MS = 8000;
 const LONG_RUNNING_NOTICE_DELAY_MS = 25_000;
-const CANVAS_AGENT_DESIGN_DRAFT_ERROR_MESSAGE = "디자인 초안을 만드는 중 오류가 났어요. 다시 시도해 주세요.";
-
-function isDesignDraftPrompt(prompt: string) {
-  return /(디자인|와이어|페이지|화면|초안|그려|만들|생성)/.test(prompt);
-}
-
 function buildLastTaskContext(run: CanvasAgentRun | null, draft: CanvasAgentDraft | null) {
   if (!run) return null;
   return {
@@ -44,18 +42,21 @@ export function useCanvasAgent({
   editor,
   enabled,
   onApplied,
+  onFrameSubtreeRequest,
   workspaceId,
 }: {
   canvasId: string;
   editor: Editor | null;
   enabled: boolean;
   onApplied: () => void;
+  onFrameSubtreeRequest?: (frameId: string) => Promise<void> | void;
   workspaceId: string;
 }) {
   const client = useMemo(() => createCanvasAgentClient(), []);
   const [run, setRun] = useState<CanvasAgentRun | null>(null);
   const [draft, setDraft] = useState<CanvasAgentDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
   const runIdRef = useRef<string | null>(null);
   const focusRetryTimerRef = useRef<number | null>(null);
   const progressHideTimerRef = useRef<number | null>(null);
@@ -137,6 +138,7 @@ export function useCanvasAgent({
         return;
       }
       setError(null);
+      setLocalMessage(null);
       setRun(null);
       setDraft(null);
       clearProgressHideTimer();
@@ -169,6 +171,7 @@ export function useCanvasAgent({
                   toolTargetLabel: toolResolution.tool.label,
                 }
               : null,
+            artifact: null,
             createdAt: now,
             completedAt: now,
             expiresAt: now,
@@ -190,6 +193,7 @@ export function useCanvasAgent({
             summary: overview,
             canvasRevision: null,
             progress: null,
+            artifact: null,
             createdAt: now,
             completedAt: now,
             expiresAt: now,
@@ -211,6 +215,7 @@ export function useCanvasAgent({
           summary: message,
           canvasRevision: null,
           progress: null,
+          artifact: null,
           createdAt: now,
           completedAt: now,
           expiresAt: now,
@@ -238,12 +243,46 @@ export function useCanvasAgent({
             }
           : undefined;
       try {
+        let selectedScene = null;
+        let selectedSceneError: string | null = null;
+        try {
+          selectedScene = buildCanvasAgentSelectedScene(editor);
+        } catch (sceneError) {
+          if (
+            sceneError instanceof CanvasAgentSelectedSceneError
+            && sceneError.missingFrameIds.length
+            && onFrameSubtreeRequest
+          ) {
+            setLocalMessage("선택 영역을 불러오는 중입니다.");
+            try {
+              await Promise.all(
+                sceneError.missingFrameIds.map((frameId) => onFrameSubtreeRequest(frameId)),
+              );
+              await waitForCanvasEditorHydration();
+              selectedScene = buildCanvasAgentSelectedScene(editor);
+            } catch (hydrationError) {
+              selectedSceneError = hydrationError instanceof CanvasAgentSelectedSceneError
+                ? hydrationError.message
+                : "선택 영역을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
+            } finally {
+              setLocalMessage(null);
+            }
+          } else {
+            selectedSceneError = sceneError instanceof CanvasAgentSelectedSceneError
+              ? sceneError.message
+              : "선택 영역을 코드 생성용으로 읽지 못했습니다.";
+          }
+        }
+        const shapeSummaries = buildCanvasAgentShapeSummaries(editor);
+        const selectedShapeIds = editor.getSelectedShapeIds().map(String);
         const result = await client.createRun(workspaceId, canvasId, {
           prompt,
           conversationContext,
           presentationMode: options?.presentationMode ?? "interactive",
-          selectedShapeIds: editor.getSelectedShapeIds().map(String),
-          shapeSummaries: buildCanvasAgentShapeSummaries(editor),
+          selectedShapeIds,
+          selectedScene,
+          selectedSceneError,
+          shapeSummaries: selectedShapeIds.length ? shapeSummaries.slice(0, 20) : shapeSummaries,
           viewport,
           toolHelpMode: options?.toolHelpMode === true,
           clientRequestId: crypto.randomUUID(),
@@ -262,6 +301,7 @@ export function useCanvasAgent({
       draft,
       editor,
       enabled,
+      onFrameSubtreeRequest,
       presentRun,
       run,
       workspaceId,
@@ -357,11 +397,10 @@ export function useCanvasAgent({
   }, [clearFocusRetryTimer, clearLongRunningTimer, clearProgressHideTimer]);
 
   const message = error
-    ?? (run?.status === "failed"
-      ? isDesignDraftPrompt(run.prompt)
-        ? CANVAS_AGENT_DESIGN_DRAFT_ERROR_MESSAGE
-        : run.message
-      : run?.progress?.message ?? run?.message ?? null);
+    ?? localMessage
+    ?? run?.progress?.message
+    ?? run?.message
+    ?? null;
 
   return {
     applyDraft,
@@ -371,8 +410,13 @@ export function useCanvasAgent({
     error,
     isRunning: run ? ACTIVE_STATUSES.has(run.status) : false,
     message,
+    artifact: run?.artifact ?? null,
     progress: visibleProgress,
     presentationMode: run?.presentationMode ?? "interactive",
     submit,
   };
+}
+
+function waitForCanvasEditorHydration() {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, 120));
 }

@@ -12,7 +12,7 @@ export const CANVAS_AGENT_ACTION_NAMES = [
   "finish"
 ] as const;
 
-export const CANVAS_AGENT_INTENT_NAMES = ["find_shapes"] as const;
+export const CANVAS_AGENT_INTENT_NAMES = ["find_shapes", "generate_html", "unsupported"] as const;
 export type CanvasAgentIntentName = (typeof CANVAS_AGENT_INTENT_NAMES)[number];
 
 export type CanvasAgentActionName = (typeof CANVAS_AGENT_ACTION_NAMES)[number];
@@ -141,10 +141,48 @@ export interface CanvasAgentShapeSummary {
   height: number;
 }
 
+export interface CanvasAgentSelectedSceneShape {
+  id: string;
+  shapeType: string;
+  parentId: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  zIndex: number;
+  depth: number;
+  title: string | null;
+  text: string | null;
+  assetRef: string | null;
+  style: Record<string, string | number | boolean | null>;
+}
+
+export interface CanvasAgentSelectedScene {
+  selectionMode: "frame" | "multi-selection";
+  bounds: { width: number; height: number };
+  rootShapeIds: string[];
+  shapes: CanvasAgentSelectedSceneShape[];
+  options: {
+    styleMode: "faithful";
+    responsive: false;
+    includeJavaScript: false;
+  };
+}
+
+export interface CanvasAgentHtmlArtifact {
+  kind: "html";
+  title: string;
+  html: string;
+  sourceShapeIds: string[];
+}
+
 export interface CreateCanvasAgentRunRequest {
   prompt?: unknown;
   selectedShapeIds?: unknown;
   shapeSummaries?: unknown;
+  selectedScene?: unknown;
+  selectedSceneError?: unknown;
   presentationMode?: unknown;
   toolHelpMode?: unknown;
   viewport?: unknown;
@@ -161,6 +199,8 @@ export interface CanvasAgentRequestContext {
   presentationMode: CanvasAgentPresentationMode;
   selectedShapeIds: string[];
   shapeSummaries: CanvasAgentShapeSummary[];
+  selectedScene: CanvasAgentSelectedScene | null;
+  selectedSceneError: string | null;
   toolHelpMode: boolean;
   viewport: CanvasAgentViewport | null;
 }
@@ -255,6 +295,7 @@ export interface CanvasAgentRunPayload {
   summary: string | null;
   canvasRevision: number | null;
   progress: CanvasAgentProgressPayload | null;
+  artifact: CanvasAgentHtmlArtifact | null;
   createdAt: string;
   completedAt: string | null;
   expiresAt: string;

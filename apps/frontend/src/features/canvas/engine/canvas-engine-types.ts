@@ -9,12 +9,12 @@ export type PiloCanvasLocalShapeChange = {
 };
 
 export type PiloCanvasLocalInteractionState = {
+  activeMutationShapeIds: string[];
   currentToolId: string;
   editingShapeId: string | null;
   focusedGroupId: string | null;
   isFreehandDrawing: boolean;
   isFocused: boolean;
-  protectedShapeIds: string[];
   selectedShapeIds: string[];
 };
 

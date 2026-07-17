@@ -237,7 +237,11 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
 
       try {
         const result = await this.actions.execute(claimed.run, claimed.step);
-        const output = { progress: result.progress, summary: result.summary };
+        const output = {
+          progress: result.progress,
+          summary: result.summary,
+          ...(result.artifact ? { artifact: result.artifact } : {})
+        };
         await this.repository.completeStep(claimed.step.id, output, result.resourceRefs);
         if (result.shouldContinue) {
           const steps = await this.repository.listSteps(claimed.run.id);
@@ -346,6 +350,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       summary: row.result_summary,
       canvasRevision: row.canvas_revision === null ? null : Number(row.canvas_revision),
       progress,
+      artifact: this.readHtmlArtifact(row.result_json),
       createdAt: this.iso(row.created_at),
       completedAt: row.completed_at === null ? null : this.iso(row.completed_at),
       expiresAt: this.iso(row.expires_at)
@@ -365,6 +370,10 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
               typeof item === "object" && item !== null && !Array.isArray(item)
           )
         : [],
+      selectedScene: context.selectedScene && typeof context.selectedScene === "object" && !Array.isArray(context.selectedScene)
+        ? context.selectedScene
+        : null,
+      selectedSceneError: typeof context.selectedSceneError === "string" ? context.selectedSceneError : null,
       toolHelpMode: context.toolHelpMode === true,
       viewport: this.readContextViewport(context.viewport)
     };
@@ -413,6 +422,19 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       ? payload.toolTargetLabel.trim()
       : null;
     return { message: payload.message, highlightedShapeIds, targetViewport, toolTarget, toolTargetLabel };
+  }
+
+  private readHtmlArtifact(value: Record<string, unknown>) {
+    const artifact = value.artifact;
+    if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) return null;
+    const payload = artifact as Record<string, unknown>;
+    if (payload.kind !== "html" || typeof payload.title !== "string" || typeof payload.html !== "string") {
+      return null;
+    }
+    const sourceShapeIds = Array.isArray(payload.sourceShapeIds)
+      ? payload.sourceShapeIds.filter((item): item is string => typeof item === "string").slice(0, 160)
+      : [];
+    return { kind: "html" as const, title: payload.title, html: payload.html, sourceShapeIds };
   }
 
   private readContextViewport(value: unknown) {
