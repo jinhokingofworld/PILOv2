@@ -26,6 +26,9 @@ const { BoardAgentToolsService } = require(
 const { BoardContextResolverService } = require(
   "../../dist/modules/agent/tools/board-context-resolver.service.js"
 );
+const { SqlErdAgentToolsService } = require(
+  "../../dist/modules/agent/tools/sql-erd-agent-tools.service.js"
+);
 const { badRequest } = require("../../dist/common/api-error.js");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -35,6 +38,7 @@ const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CONFIRMATION_ID = "55555555-5555-5555-5555-555555555555";
 const REPORT_ID = "66666666-6666-4666-8666-666666666666";
 const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
+const SQL_ERD_SECOND_SESSION_ID = "88888888-8888-4888-8888-888888888888";
 
 function plannerOutput(overrides = {}) {
   return {
@@ -759,21 +763,59 @@ class SmokeBoardService {
   }
 }
 
+class SmokeSqlErdService {
+  constructor() {
+    this.calls = [];
+    this.sessions = [
+      {
+        id: SQL_ERD_SESSION_ID,
+        title: "주문 ERD",
+        updatedAt: "2026-07-16T00:00:00.000Z",
+        tableCount: 4,
+        relationCount: 3
+      },
+      {
+        id: SQL_ERD_SECOND_SESSION_ID,
+        title: "결제 ERD",
+        updatedAt: "2026-07-17T00:00:00.000Z",
+        tableCount: 3,
+        relationCount: 2
+      }
+    ];
+  }
+
+  async listSessions(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listSessions",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return {
+      items: this.sessions,
+      nextCursor: null
+    };
+  }
+}
+
 function createSmokeRegistry() {
   const calendarService = new SmokeCalendarService();
   const meetingService = new SmokeMeetingService();
   const boardService = new SmokeBoardService();
+  const sqlErdService = new SmokeSqlErdService();
   const boardContextResolver = new BoardContextResolverService(boardService);
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService(calendarService),
     new MeetingAgentToolsService(meetingService),
-    new BoardAgentToolsService(boardService, boardContextResolver)
+    new BoardAgentToolsService(boardService, boardContextResolver),
+    new SqlErdAgentToolsService(sqlErdService)
   );
 
   return {
     calendarService,
     meetingService,
     boardService,
+    sqlErdService,
     registry
   };
 }
@@ -1522,12 +1564,69 @@ function formatterMeetingReport(index, overrides = {}) {
     "resolve_board_context",
     "get_board_briefing",
     "assign_board_issue_safely",
-    "diagnose_board_freshness"
+    "diagnose_board_freshness",
+    "generate_sql_erd",
+    "inspect_sql_erd_schema",
+    "focus_sql_erd_tables"
   ]);
   assert.equal(
     registry.getDefinition("move_board_issue_status").executionMode,
     "confirmation_required"
   );
+}
+
+{
+  const { registry, sqlErdService } = createSmokeRegistry();
+  const inspectDefinition = registry.getDefinition("inspect_sql_erd_schema");
+  const { confirmationService, loggingService, service } =
+    createExecutionServiceWithRegistry(
+      plannerOutput({
+        toolName: inspectDefinition.name,
+        riskLevel: inspectDefinition.riskLevel,
+        executionMode: inspectDefinition.executionMode,
+        requiresConfirmation:
+          inspectDefinition.executionMode === "contextual" ? null : false,
+        input: {
+          featureQuery: "결제 기능"
+        }
+      }),
+      registry,
+      {
+        prompt: "결제 기능과 관련된 테이블만 보여줘",
+        timezone: "Asia/Seoul"
+      }
+    );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.equal(result.status, "waiting_user_input");
+  assert.equal(result.run.status, "waiting_user_input");
+  assert.equal(result.run.finalAnswer, null);
+  assert.match(result.run.message, /세션을 선택/);
+  assert.equal(confirmationService.calls.length, 0);
+  assert.deepEqual(sqlErdService.calls, [
+    {
+      method: "listSessions",
+      currentUserId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      query: { limit: 100 }
+    }
+  ]);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
+  );
+  const outputSummary = loggingService.calls[1].input.outputSummary;
+  assert.equal(outputSummary.reason, "multiple_sessions");
+  assert.deepEqual(
+    outputSummary.candidates.map((candidate) => candidate.selectionToken),
+    [SQL_ERD_SESSION_ID, SQL_ERD_SECOND_SESSION_ID]
+  );
+  assert.equal(loggingService.calls[1].input.waitForUserInput, true);
 }
 
 {
