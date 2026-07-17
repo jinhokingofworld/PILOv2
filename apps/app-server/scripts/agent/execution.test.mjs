@@ -453,6 +453,16 @@ class FakeAgentToolRegistryService {
       }
     };
   }
+
+  getDefinitionForContext(name, requestContext) {
+    this.calls.push({ method: "getDefinitionForContext", name, requestContext });
+
+    if (this.state.contextUnavailable) {
+      return null;
+    }
+
+    return this.getDefinition(name);
+  }
 }
 
 function createSmokeEvent(overrides = {}) {
@@ -1176,7 +1186,7 @@ function formatterMeetingReport(index, overrides = {}) {
   assert.equal(database.calls.length, 4);
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
-    ["getDefinition", "validateInput", "execute"]
+    ["getDefinitionForContext", "getDefinition", "validateInput", "execute"]
   );
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
@@ -1267,6 +1277,35 @@ function formatterMeetingReport(index, overrides = {}) {
 }
 
 {
+  const requestContext = {
+    surface: "sql_erd",
+    sessionId: SQL_ERD_SESSION_ID
+  };
+  const { service, loggingService, toolRegistryService } = createService({
+    requestContext,
+    registryState: {
+      contextUnavailable: true
+    }
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: plannerOutput(),
+    requestContext
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.run.errorCode, "AGENT_TOOL_CONTEXT_UNAVAILABLE");
+  assert.deepEqual(
+    toolRegistryService.calls.map((call) => call.method),
+    ["getDefinitionForContext"]
+  );
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["failRun"]
+  );
+}
+
+{
   const planner = plannerOutput({
     toolName: "create_calendar_event",
     riskLevel: "medium",
@@ -1300,7 +1339,12 @@ function formatterMeetingReport(index, overrides = {}) {
   assert.deepEqual(loggingService.calls, []);
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
-    ["getDefinition", "validateInput", "buildConfirmation"]
+    [
+      "getDefinitionForContext",
+      "getDefinition",
+      "validateInput",
+      "buildConfirmation"
+    ]
   );
   assert.equal(confirmationService.calls[0].input.toolName, "create_calendar_event");
   assert.equal(confirmationService.calls[0].input.riskLevel, "medium");
@@ -1331,10 +1375,16 @@ function formatterMeetingReport(index, overrides = {}) {
   assert.equal(result.reason, "already_started");
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
-    ["getDefinition", "validateInput", "prepareExecution", "execute"]
+    [
+      "getDefinitionForContext",
+      "getDefinition",
+      "validateInput",
+      "prepareExecution",
+      "execute"
+    ]
   );
-  assert.equal(toolRegistryService.calls[2].context.requestContext, null);
   assert.equal(toolRegistryService.calls[3].context.requestContext, null);
+  assert.equal(toolRegistryService.calls[4].context.requestContext, null);
   assert.deepEqual(confirmationService.calls, []);
 }
 
@@ -1394,7 +1444,7 @@ function formatterMeetingReport(index, overrides = {}) {
   });
 
   assert.equal(result.status, "waiting_confirmation");
-  assert.deepEqual(toolRegistryService.calls[2].context.requestContext, requestContext);
+  assert.deepEqual(toolRegistryService.calls[3].context.requestContext, requestContext);
   assert.deepEqual(confirmationService.calls[0].input.plan, choicePlan);
 }
 
@@ -1410,14 +1460,14 @@ function formatterMeetingReport(index, overrides = {}) {
   });
 
   assert.equal(result.status, "failed");
-  assert.equal(result.run.errorCode, "AGENT_TOOL_NOT_EXECUTABLE");
+  assert.equal(result.run.errorCode, "AGENT_TOOL_CONTEXT_UNAVAILABLE");
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
     ["failRun"]
   );
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
-    ["getDefinition"]
+    ["getDefinitionForContext", "getDefinition"]
   );
 }
 
@@ -1457,7 +1507,7 @@ function formatterMeetingReport(index, overrides = {}) {
   assert.equal(loggingService.calls[0].input.errorMessage, "start is required");
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
-    ["getDefinition", "validateInput"]
+    ["getDefinitionForContext", "getDefinition", "validateInput"]
   );
 }
 

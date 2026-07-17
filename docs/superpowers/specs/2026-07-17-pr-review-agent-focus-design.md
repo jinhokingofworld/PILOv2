@@ -192,6 +192,9 @@ type RecommendPrReviewFocusOutput = {
 
 - `/pr-review?reviewSessionId=<uuid>`일 때 Agent requestContext를
   `{ surface: "pr_review", sessionId }`로 생성
+- 기존 우측 하단 원형 AI 버튼과 우측 사이드 패널은 화면별로 새로 만들지 않는다. PR Review Canvas의
+  fullscreen layer보다 높은 stacking level을 사용해, 기존과 같은 위치와 동작으로 revision 화면에서도
+  접근할 수 있게 한다.
 - App Server와 AI Worker가 새 context를 배포한 뒤에만 Frontend 전송을 배포
 
 ## 오류와 기록 규칙
@@ -221,6 +224,8 @@ Frontend를 먼저 배포하면 구형 App Server 또는 Worker가 `pr_review` c
 - run 생성 뒤 session/room/Workspace가 유효하지 않으면 prepareExecution이 실행을 거부한다.
 - DB check constraint와 Worker parser가 `pr_review` context를 보존한다.
 - clientRequestId는 requestContext가 같을 때만 재사용되고 다르면 기존 conflict 규칙을 유지한다.
+- PR Review Canvas에서도 기존 우측 하단 AI 버튼과 우측 사이드 패널이 가려지지 않고, 현재 URL의
+  `reviewSessionId`를 requestContext로 사용한다.
 - analyzing, failed, 빈 분석 결과가 raw data 없이 안전한 안내를 반환한다.
 - 추천 결과는 mustReview 3개, relatedFiles 2개 및 모든 문자열 경계를 초과하지 않는다.
 - raw diff, 코드, patch, comment가 Tool input/output과 Agent run/step 저장값에 없음을 검증한다.

@@ -190,13 +190,43 @@ class FakeOutboxJobService {
 }
 
 class FakeOutboxToolRegistryService {
+  constructor() {
+    this.calls = [];
+  }
+
   listDefinitions() {
+    return this.definitions();
+  }
+
+  listDefinitionsForContext(requestContext) {
+    this.calls.push({ method: "listDefinitionsForContext", requestContext });
+    return this.definitions().filter(
+      (definition) =>
+        !definition.contextRequirement ||
+        definition.contextRequirement.surface === requestContext?.surface
+    );
+  }
+
+  definitions() {
     return [
       {
         name: "list_calendar_events",
         description: "Calendar 일정 목록을 조회합니다.",
         riskLevel: "low",
         executionMode: "auto",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false
+        }
+      },
+      {
+        name: "pr_review_fixture",
+        description: "PR Review fixture",
+        riskLevel: "low",
+        executionMode: "contextual",
+        contextRequirement: {
+          surface: "pr_review"
+        },
         inputSchema: {
           type: "object",
           additionalProperties: false
@@ -314,10 +344,11 @@ try {
       dueRows: [{ run_id: payload.runId }]
     });
     const jobService = new FakeOutboxJobService();
+    const registry = new FakeOutboxToolRegistryService();
     const publisher = new AgentOutboxPublisherService(
       database,
       jobService,
-      new FakeOutboxToolRegistryService()
+      registry
     );
 
     await publisher.publishDueEvents();
@@ -338,6 +369,9 @@ try {
           additionalProperties: false
         }
       }
+    ]);
+    assert.deepEqual(registry.calls, [
+      { method: "listDefinitionsForContext", requestContext: null }
     ]);
     assert.match(
       database.calls.find((call) => call.method === "queryOne").text,
@@ -361,6 +395,34 @@ try {
     assert.deepEqual(delivered.values, [
       "44444444-4444-4444-4444-444444444444",
       "55555555-5555-5555-5555-555555555555"
+    ]);
+  }
+
+  {
+    const requestContext = {
+      surface: "pr_review",
+      sessionId: "77777777-7777-4777-8777-777777777777"
+    };
+    const database = new FakeOutboxDatabaseService({
+      claim: createOutboxClaim({ request_context_json: requestContext }),
+      dueRows: [{ run_id: payload.runId }]
+    });
+    const jobService = new FakeOutboxJobService();
+    const registry = new FakeOutboxToolRegistryService();
+    const publisher = new AgentOutboxPublisherService(
+      database,
+      jobService,
+      registry
+    );
+
+    await publisher.publishDueEvents();
+
+    assert.deepEqual(
+      jobService.calls[0].tools.map((tool) => tool.name),
+      ["list_calendar_events", "pr_review_fixture"]
+    );
+    assert.deepEqual(registry.calls, [
+      { method: "listDefinitionsForContext", requestContext }
     ]);
   }
 

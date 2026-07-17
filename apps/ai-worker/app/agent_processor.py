@@ -543,14 +543,14 @@ def _parse_request_context(value: object) -> dict[str, str] | None:
 
     surface = value.get("surface")
     session_id = value.get("sessionId")
-    if surface != "sql_erd" or not isinstance(session_id, str):
+    if surface not in {"sql_erd", "pr_review"} or not isinstance(session_id, str):
         raise ValueError("Invalid requestContext")
     try:
         UUID(session_id)
     except (ValueError, AttributeError, TypeError) as error:
         raise ValueError("Invalid requestContext") from error
 
-    return {"surface": "sql_erd", "sessionId": session_id}
+    return {"surface": surface, "sessionId": session_id}
 
 
 def _optional_positive_int(

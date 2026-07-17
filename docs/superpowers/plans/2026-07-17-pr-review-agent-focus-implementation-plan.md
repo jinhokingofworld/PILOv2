@@ -26,7 +26,7 @@
 
 | 파일 | 책임 |
 | --- | --- |
-| `db/migrations/090_add_pr_review_agent_request_context.sql` | `pr_review` requestContext DB check constraint 허용 |
+| `db/migrations/093_add_pr_review_agent_request_context.sql` | `pr_review` requestContext DB check constraint 허용 |
 | `apps/app-server/src/modules/agent/types/agent-tool.types.ts` | Agent surface/context requirement 타입 |
 | `apps/app-server/src/modules/agent/agent.service.ts` | run 생성 requestContext parsing과 PR session/room Workspace 검증 |
 | `apps/app-server/src/modules/agent/agent-tool-registry.service.ts` | context별 Tool 목록과 실행 가능한 Tool 조회 |
@@ -38,6 +38,7 @@
 | `apps/app-server/src/modules/agent/agent.module.ts` | PrReviewModule와 PR Review Tool provider 연결 |
 | `apps/frontend/src/features/agent/request-context.ts` | PR Review URL을 requestContext로 변환 |
 | `apps/frontend/src/features/agent/types.ts` | Frontend requestContext union |
+| `apps/frontend/src/features/agent/components/agent-chat-widget.tsx` | Canvas 위에서도 기존 우측 하단 AI 진입점과 사이드 패널 유지 |
 | `docs/api/agent-api.md`, `docs/api/pr-review-api.md` | 공통 Agent contract와 PR Tool 안전 경계 문서화 |
 
 ## Task 1: Agent requestContext에 PR Review surface를 추가한다
@@ -46,7 +47,7 @@
 
 **Files:**
 
-- Create: `db/migrations/090_add_pr_review_agent_request_context.sql`
+- Create: `db/migrations/093_add_pr_review_agent_request_context.sql`
 - Modify: `apps/app-server/src/modules/agent/types/agent-tool.types.ts`
 - Modify: `apps/app-server/src/modules/agent/agent.service.ts`
 - Modify: `apps/ai-worker/app/agent_processor.py`
@@ -62,7 +63,7 @@
 
 - [ ] **Step 1: Write migration and API-contract assertions first**
 
-  Extend `run-api.test.mjs` to require migration `090` and to assert that the DB constraint accepts both surfaces but rejects extra keys or invalid UUIDs.
+  Extend `run-api.test.mjs` to require migration `093` and to assert that the DB constraint accepts both surfaces but rejects extra keys or invalid UUIDs.
 
   ```js
   assert.match(migration, /request_context_json->>'surface' IN \('sql_erd', 'pr_review'\)/);
@@ -75,11 +76,11 @@
 
   Run: `node scripts/agent/run-api.test.mjs`
 
-  Expected: FAIL because migration `090` and the `pr_review` parser branch do not exist.
+  Expected: FAIL because migration `093` and the `pr_review` parser branch do not exist.
 
 - [ ] **Step 3: Add the migration and shared TypeScript context union**
 
-  Create migration `090_add_pr_review_agent_request_context.sql`. Drop and recreate only
+  Create migration `093_add_pr_review_agent_request_context.sql`. Drop and recreate only
   `agent_runs_request_context_shape_check`; preserve the existing JSON object and 2 KiB checks.
 
   ```sql
@@ -161,7 +162,7 @@
   Update `docs/api/agent-api.md` with the two allowed context shapes, server-side session/room validation, context-aware idempotency, and the DB/App Server/Worker-before-Frontend rollout order.
 
   ```bash
-  git add db/migrations/090_add_pr_review_agent_request_context.sql apps/app-server/src/modules/agent apps/ai-worker/app/agent_processor.py apps/ai-worker/tests/test_agent_processor.py apps/app-server/scripts/agent/run-api.test.mjs apps/app-server/scripts/agent/logging.test.mjs apps/app-server/scripts/agent/agent-job.test.mjs docs/api/agent-api.md
+  git add db/migrations/093_add_pr_review_agent_request_context.sql apps/app-server/src/modules/agent apps/ai-worker/app/agent_processor.py apps/ai-worker/tests/test_agent_processor.py apps/app-server/scripts/agent/run-api.test.mjs apps/app-server/scripts/agent/logging.test.mjs apps/app-server/scripts/agent/agent-job.test.mjs docs/api/agent-api.md
   git commit -m "feat(agent,db): PR Review request context 추가 (#1221)"
   ```
 
@@ -460,6 +461,7 @@
 
 - Modify: `apps/frontend/src/features/agent/types.ts`
 - Modify: `apps/frontend/src/features/agent/request-context.ts`
+- Modify: `apps/frontend/src/features/agent/components/agent-chat-widget.tsx`
 - Modify: `apps/frontend/src/features/agent/agent-feature.test.mjs`
 - Modify: `docs/api/agent-api.md`
 - Modify: `docs/api/pr-review-api.md`
@@ -482,6 +484,9 @@
 
   Also assert invalid UUIDs and unrelated routes return null.
 
+  Add a UI contract assertion that the existing floating trigger and side panel have a stacking level above
+  `PrReviewCanvasShell`'s `z-[60]` layer. Do not add a PR Review-only duplicate trigger.
+
 - [ ] **Step 2: Run the Frontend focused test and observe the expected failure**
 
   Run: `node --experimental-strip-types ./src/features/agent/agent-feature.test.mjs`
@@ -503,7 +508,14 @@
 
   The parser does not grant access; its output remains an App Server-validated hint.
 
-- [ ] **Step 4: Document PR Review Agent behavior and rollout**
+- [ ] **Step 4: Keep the existing floating AI entry point above the PR Review Canvas**
+
+  Raise the existing Agent widget trigger and side panel stacking levels above the Canvas fullscreen layer while
+  preserving their current bottom-right placement, size, tooltip, and panel behavior. This is a shared visual-layer
+  correction, not a second PR Review button. The widget continues to derive `pr_review` context from the current URL
+  only after the user opens it and submits a message.
+
+- [ ] **Step 5: Document PR Review Agent behavior and rollout**
 
   Add to `docs/api/pr-review-api.md`:
 
@@ -515,7 +527,7 @@
 
   In `docs/api/agent-api.md`, document optional context requirements and the required deployment order: DB/App Server/Worker, then Tool registration, then Frontend context transmission.
 
-- [ ] **Step 5: Run Frontend and App Server focused tests**
+- [ ] **Step 6: Run Frontend and App Server focused tests**
 
   Run:
 
@@ -528,10 +540,10 @@
 
   Expected: PR Review route emits only the correct context shape and App Server continues to reject invalid or cross-Workspace values.
 
-- [ ] **Step 6: Commit the UI context and documents**
+- [ ] **Step 7: Commit the UI context and documents**
 
   ```bash
-  git add apps/frontend/src/features/agent/types.ts apps/frontend/src/features/agent/request-context.ts apps/frontend/src/features/agent/agent-feature.test.mjs docs/api/agent-api.md docs/api/pr-review-api.md
+  git add apps/frontend/src/features/agent/types.ts apps/frontend/src/features/agent/request-context.ts apps/frontend/src/features/agent/components/agent-chat-widget.tsx apps/frontend/src/features/agent/agent-feature.test.mjs docs/api/agent-api.md docs/api/pr-review-api.md
   git commit -m "feat(pr-review,agent): PR Review 화면 context 연결 (#1221)"
   ```
 
