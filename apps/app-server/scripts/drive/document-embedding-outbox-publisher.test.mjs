@@ -59,6 +59,15 @@ class FakeWorkspaceIndexingJobService {
 
   await publisher.publishDue();
 
+  const recovery = database.calls.find(
+    (call) => call.method === "execute" && call.text.includes("recovered_jobs")
+  );
+  assert.ok(recovery, "current superseded document jobs must be recovered");
+  assert.match(recovery.text, /document\.latest_snapshot_id = job\.snapshot_id/);
+  assert.match(recovery.text, /SET status = 'queued'/);
+  assert.match(recovery.text, /UPDATE document_embedding_outbox/);
+  assert.match(recovery.text, /SET status = 'pending'/);
+
   assert.deepEqual(queue.messages, [{
     version: 1,
     source: "document",
