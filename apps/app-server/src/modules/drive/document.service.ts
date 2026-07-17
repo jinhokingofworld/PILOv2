@@ -26,6 +26,7 @@ import type {
   SaveDocumentSnapshotRequest
 } from "./document.types";
 import type { DriveItemRow } from "./drive.types";
+import { DocumentEmbeddingService } from "./document-embedding.service";
 import {
   validateCreateDocumentRequest,
   DEFAULT_DOCUMENT_NAME,
@@ -55,7 +56,8 @@ export class DocumentService {
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
     private readonly activityLogService: ActivityLogService,
-    @Optional() private readonly idFactory: DocumentIdFactory = defaultDocumentIdFactory
+    @Optional() private readonly idFactory: DocumentIdFactory = defaultDocumentIdFactory,
+    @Optional() private readonly documentEmbeddingService?: DocumentEmbeddingService
   ) {}
 
   async createDocument(
@@ -323,6 +325,12 @@ export class DocumentService {
         [documentId, workspaceId, nextVersion, snapshot.id]
       );
       if (!document) throw badRequest("Document could not be saved");
+
+      await this.documentEmbeddingService?.queueSnapshot(transaction, {
+        workspaceId,
+        documentId,
+        snapshotId: snapshot.id
+      });
 
       await transaction.execute(
         `
