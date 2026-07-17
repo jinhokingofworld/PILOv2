@@ -91,7 +91,8 @@ SQLtoERD action의 `title`, `previousTitle`은 공백을 정리한 최대 160자
 token, password, secret, OAuth 또는 private key 형태가 감지되면 `contentSummary`는 빈
 문자열이고 `contentOmitted`가 `true`다. note 삭제에는 삭제 전 본문을 저장하지 않는다.
 SQL source, model/layout JSON, writer lease, Meeting/recording ID도 SQLtoERD metadata에 넣지
-않는다. note 위치·크기, viewport, 조회, polling과 재시도 반환은 기록하지 않는다.
+않는다. note 본문은 같은 공백 정규화 결과끼리 비교하므로 공백만 바꾼 수정은 기록하지
+않는다. note 위치·크기, viewport, 조회, polling과 재시도 반환도 기록하지 않는다.
 
 ## 새 action 추가 절차
 
