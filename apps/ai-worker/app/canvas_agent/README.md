@@ -183,11 +183,13 @@ LLM이 정리한 검색어의 DB semantic routing을 담당한다.
 
 - 현재 Canvas에 한정된 embedding 검색으로 기존 shape 후보 조회
 - shape 후보가 충분히 확실하면 `find_shapes` intent classification 생성
-- 별도의 DB 텍스트 검색은 수행하지 않음
+- embedding이 없거나 확신 기준을 넘지 못하면 DB 제목·본문 검색 수행
+- DB 검색은 `workspace_id`와 현재 `canvas_id`를 모두 일치시킨 뒤 최대 4건만 반환
 
 중요한 원칙:
 
 - embedding은 “기존 shape 후보 찾기”에만 사용한다.
+- DB 텍스트 검색은 embedding 이후의 fallback으로만 사용한다.
 - embedding과 action executor 모두 Canvas write를 하지 않는다.
 
 ## PILO AI 담당자가 Canvas AI를 사용할 때 필요한 점

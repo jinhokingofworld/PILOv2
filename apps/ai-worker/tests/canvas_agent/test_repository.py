@@ -10,14 +10,21 @@ from app.canvas_agent.repository import (
 class FakeCursor:
     rowcount = 1
 
+    def __init__(self, rows=None) -> None:
+        self.rows = rows or []
+
+    def fetchall(self):
+        return self.rows
+
 
 class FakeConnection:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[object, ...]]] = []
+        self.rows: list[dict[str, object]] = []
 
     def execute(self, query: str, parameters: tuple[object, ...]) -> FakeCursor:
         self.calls.append((query, parameters))
-        return FakeCursor()
+        return FakeCursor(self.rows)
 
 
 def repository() -> tuple[PgCanvasAgentRepository, FakeConnection]:
@@ -68,3 +75,22 @@ def test_retry_exhaustion_uses_generic_failure_message() -> None:
         GENERIC_FAILURE_MESSAGE,
         "run-1",
     )
+
+
+def test_text_search_is_scoped_to_workspace_and_canvas() -> None:
+    canvas_repository, connection = repository()
+    connection.rows = [{"id": "shape:dashboard", "similarity": 1.0}]
+
+    matches = canvas_repository.search_text_shapes(
+        "workspace-1",
+        "canvas-1",
+        "대시보드 와이어프레임",
+    )
+
+    query, parameters = connection.calls[-1]
+    assert "INNER JOIN canvas board ON board.id = shape.canvas_id" in query
+    assert "board.workspace_id = %s" in query
+    assert "board.id = %s" in query
+    assert "shape.canvas_id = %s" in query
+    assert parameters[:3] == ("workspace-1", "canvas-1", "canvas-1")
+    assert [match.shape_id for match in matches] == ["shape:dashboard"]

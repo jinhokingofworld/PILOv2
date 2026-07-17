@@ -58,6 +58,7 @@ For a shape-finding request, Canvas Agent uses this bounded route:
 Structured GPT intent classification over a bounded client shape summary
   -> use matching currently loaded shape ids when present
   -> current-Canvas-only pgvector search with the extracted query otherwise
+  -> workspace-and-current-Canvas-scoped DB title/text search when embedding is unavailable or ambiguous
   -> App Server find_shapes handler
 ```
 
@@ -68,9 +69,12 @@ Structured GPT intent classification over a bounded client shape summary
   found without waiting for the DB checkpoint or embedding refresh flow.
 - A pre-checkpoint shape outside the requester's loaded regions is not included
   in that snapshot. It becomes searchable after it is loaded by the client or
-  after the normal checkpoint and embedding refresh flow.
-- DB fallback uses only pgvector similarity search scoped to the authenticated
-  path Canvas. Canvas Agent does not run a separate DB `ILIKE` text search.
+  after the normal checkpoint writes it to DB.
+- DB fallback tries pgvector first. If no current embedding exists or the best
+  match is below the confidence/margin thresholds, it searches only active
+  shapes whose Canvas matches both the run `workspaceId` and `canvasId`. The
+  bounded title/text search returns at most four rows and never scans shapes
+  from another Workspace or Canvas.
 - The configured local model is `intfloat/multilingual-e5-small` (384
   dimensions). Queries use `query: ` and indexed Canvas text uses `passage: `.
 - The default pgvector shape-result thresholds are shape similarity `0.78` and

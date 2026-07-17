@@ -285,6 +285,7 @@ export class CanvasAgentActionService {
   private routingPrefix(input: Record<string, unknown>): string {
     if (input.routingSource === "client_shape_context") return "현재 캔버스에서 ";
     if (input.routingSource === "shape_embedding") return "임베딩 검색으로 ";
+    if (input.routingSource === "database_text") return "DB 검색으로 ";
     if (input.routingSource === "llm_intent_classifier") return "Canvas AI가 검색어를 해석해서 ";
     return "";
   }

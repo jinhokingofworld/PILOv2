@@ -33,13 +33,19 @@ class FailingEmbedder:
 
 
 class FakeRepository:
-    def __init__(self, *, has_shapes=True, shapes=None) -> None:
+    def __init__(self, *, has_shapes=True, shapes=None, text_shapes=None) -> None:
         self.has_shapes = has_shapes
         self.shapes = shapes or []
+        self.text_shapes = text_shapes or {}
         self.search_calls = 0
+        self.text_search_calls: list[tuple[str, str, str]] = []
 
     def has_semantic_shapes(self, _workspace_id, _canvas_id):
         return self.has_shapes
+
+    def search_text_shapes(self, workspace_id, canvas_id, query, limit=4):
+        self.text_search_calls.append((workspace_id, canvas_id, query))
+        return self.text_shapes.get(query, [])[:limit]
 
     def search_semantic_shapes(self, _workspace_id, _canvas_id, _embedding, limit=4):
         self.search_calls += 1
@@ -92,6 +98,7 @@ def test_semantic_router_classifies_confident_canvas_shape_match() -> None:
     assert classification.intent == "find_shapes"
     assert classification.arguments["shapeIds"] == ["shape:auth", "shape:login"]
     assert classification.arguments["focusResult"] is True
+    assert repository.text_search_calls == []
 
 
 def test_semantic_router_classifies_direct_shape_search_prompt() -> None:
@@ -104,6 +111,7 @@ def test_semantic_router_classifies_direct_shape_search_prompt() -> None:
     assert classification is not None
     assert classification.intent == "find_shapes"
     assert classification.arguments["shapeIds"] == ["shape:auth"]
+    assert repository.text_search_calls == []
 
 
 def test_semantic_router_skips_embedding_when_canvas_has_no_indexed_shapes() -> None:
@@ -115,6 +123,58 @@ def test_semantic_router_skips_embedding_when_canvas_has_no_indexed_shapes() -> 
 
     assert classification is None
     assert repository.search_calls == 0
+    assert repository.text_search_calls == [
+        ("workspace-1", "canvas-1", "인증 화면 어디 있어?"),
+    ]
+
+
+def test_semantic_router_uses_scoped_db_text_after_ambiguous_embedding() -> None:
+    repository = FakeRepository(
+        shapes=[
+            CanvasSemanticShapeMatch("shape:other-a", 0.8),
+            CanvasSemanticShapeMatch("shape:other-b", 0.79),
+        ],
+        text_shapes={
+            "대시보드 와이어프레임": [
+                CanvasSemanticShapeMatch("shape:dashboard", 1.0),
+            ],
+        },
+    )
+
+    classification = CanvasSemanticRouter(repository, FakeEmbedder()).classify(
+        context("대시보드 와이어프레임 어디 있어?"),
+        "대시보드 와이어프레임",
+    )
+
+    assert classification is not None
+    assert classification.arguments["shapeIds"] == ["shape:dashboard"]
+    assert classification.arguments["routingSource"] == "database_text"
+    assert repository.search_calls == 1
+    assert repository.text_search_calls == [
+        ("workspace-1", "canvas-1", "대시보드 와이어프레임"),
+    ]
+
+
+def test_semantic_router_uses_scoped_db_text_without_embedding_index() -> None:
+    repository = FakeRepository(
+        has_shapes=False,
+        text_shapes={
+            "회의 메모": [CanvasSemanticShapeMatch("shape:meeting", 1.0)],
+        },
+    )
+
+    classification = CanvasSemanticRouter(repository, FailingEmbedder()).classify(
+        context("회의 메모 찾아줘"),
+        "회의 메모",
+    )
+
+    assert classification is not None
+    assert classification.arguments["shapeIds"] == ["shape:meeting"]
+    assert classification.arguments["routingSource"] == "database_text"
+    assert repository.search_calls == 0
+    assert repository.text_search_calls == [
+        ("workspace-1", "canvas-1", "회의 메모"),
+    ]
 
 
 def test_semantic_router_treats_mutation_wording_as_existing_shape_search() -> None:

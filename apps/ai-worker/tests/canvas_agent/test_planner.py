@@ -66,6 +66,8 @@ def test_user_prompt_exposes_only_current_canvas_intents() -> None:
     assert "allowedActions" not in normal_payload
     assert "availableCanvasTools" not in normal_payload
     assert "intent classifier" in system_prompt()
+    assert "same language as the user's prompt" in system_prompt()
+    assert "never translate them" in system_prompt()
 
 
 def test_parse_intent_classification_accepts_html_generation() -> None:
