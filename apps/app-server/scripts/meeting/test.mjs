@@ -137,6 +137,7 @@ const participantId = "44444444-4444-4444-4444-444444444444";
 const recordingId = "55555555-5555-5555-5555-555555555555";
 const secondRecordingId = "66666666-6666-6666-6666-666666666666";
 const reportId = "77777777-7777-7777-7777-777777777777";
+const decisionItemId = "abababab-abab-abab-abab-abababababab";
 const actionItemId = "12121212-1212-1212-1212-121212121212";
 const otherUserId = "88888888-8888-8888-8888-888888888888";
 const otherParticipantId = "99999999-9999-9999-9999-999999999999";
@@ -633,6 +634,9 @@ function meetingReportRegenerationRow(overrides = {}) {
       retry_count: 1
     }),
     transcript_text: "이전 전문",
+    ai_title: "회의록 제목",
+    ai_discussion_points: "이전 논의사항",
+    ai_decisions: "이전 결정사항",
     recording_status: "COMPLETED",
     recording_audio_file_key: `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`,
     ...overrides
@@ -686,6 +690,15 @@ async function assertConflict(action, messagePattern) {
   await assert.rejects(action, (error) => {
     assert.equal(error.getStatus(), 409);
     assert.equal(error.getResponse().error.code, "CONFLICT");
+    assert.match(error.getResponse().error.message, messagePattern);
+    return true;
+  });
+}
+
+async function assertForbidden(action, messagePattern) {
+  await assert.rejects(action, (error) => {
+    assert.equal(error.getStatus(), 403);
+    assert.equal(error.getResponse().error.code, "FORBIDDEN");
     assert.match(error.getResponse().error.message, messagePattern);
     return true;
   });
@@ -2525,6 +2538,163 @@ async function assertError(action, messagePattern) {
   assert.deepEqual(result.report.actionItemCandidates, [{ title: "후속 작업" }]);
 }
 
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /FOR UPDATE OF meeting_reports/);
+          assert.match(text, /workspace_members\.role = 'owner'/);
+          assert.match(text, /FROM meeting_participants/);
+          assert.deepEqual(values, [workspaceId, currentUserId, reportId]);
+          return {
+            id: reportId,
+            status: "COMPLETED",
+            content_version: "2",
+            can_edit: true
+          };
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_reports/);
+          assert.match(text, /user_title = COALESCE\(\$2, user_title\)/);
+          assert.match(
+            text,
+            /user_discussion_points = COALESCE\(\$3, user_discussion_points\)/
+          );
+          assert.deepEqual(values, [reportId, "사용자 제목", "사용자 논의사항"]);
+          return { id: reportId };
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_report_decision_items/);
+          assert.match(text, /AND meeting_report_id = \$2/);
+          assert.deepEqual(values, [
+            decisionItemId,
+            reportId,
+            "사용자 결정사항",
+            currentUserId
+          ]);
+          return { id: decisionItemId };
+        },
+        (text, values) => {
+          assert.match(text, /content_version = content_version \+ 1/);
+          assert.deepEqual(values, [reportId, currentUserId]);
+          return { id: reportId };
+        },
+        () =>
+          meetingReportRow({
+            title: "사용자 제목",
+            user_title: "사용자 제목",
+            discussion_points: "사용자 논의사항",
+            user_discussion_points: "사용자 논의사항",
+            content_version: 3,
+            content_edited_by_user_id: currentUserId,
+            can_edit: true
+          })
+      ]
+    })
+  );
+
+  const result = await service.updateMeetingReportContent(
+    currentUserId,
+    workspaceId,
+    reportId,
+    {
+      expectedVersion: 2,
+      title: "사용자 제목",
+      discussionPoints: "사용자 논의사항",
+      decisionItems: [{ id: decisionItemId, text: "사용자 결정사항" }]
+    }
+  );
+
+  assert.equal(database.transactionCommitted, true);
+  assert.equal(result.report.title, "사용자 제목");
+  assert.equal(result.report.discussionPoints, "사용자 논의사항");
+  assert.equal(result.report.contentVersion, 3);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        {
+          id: reportId,
+          status: "COMPLETED",
+          content_version: 1,
+          can_edit: false
+        }
+      ]
+    })
+  );
+
+  await assertForbidden(
+    () =>
+      service.updateMeetingReportContent(currentUserId, workspaceId, reportId, {
+        expectedVersion: 1,
+        title: "권한 없는 수정"
+      }),
+    /Only the workspace owner or a meeting participant/
+  );
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        {
+          id: reportId,
+          status: "COMPLETED",
+          content_version: 2,
+          can_edit: true
+        }
+      ]
+    })
+  );
+
+  await assertConflict(
+    () =>
+      service.updateMeetingReportContent(currentUserId, workspaceId, reportId, {
+        expectedVersion: 1,
+        title: "오래된 수정"
+      }),
+    /updated by another user/
+  );
+}
+
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        {
+          id: reportId,
+          status: "COMPLETED",
+          content_version: 1,
+          can_edit: true
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_report_decision_items/);
+          assert.deepEqual(values, [
+            decisionItemId,
+            reportId,
+            "다른 회의의 결정사항",
+            currentUserId
+          ]);
+          return null;
+        }
+      ]
+    })
+  );
+
+  await assertBadRequest(
+    () =>
+      service.updateMeetingReportContent(currentUserId, workspaceId, reportId, {
+        expectedVersion: 1,
+        decisionItems: [{ id: decisionItemId, text: "다른 회의의 결정사항" }]
+      }),
+    /Invalid meeting report decision item/
+  );
+  assert.equal(database.transactionRolledBack, true);
+}
+
 assert.match(meetingServiceSource, /FROM meeting_report_activity_evidence/);
 assert.match(meetingServiceSource, /activityEvidence/);
 assert.match(meetingServiceSource, /AS activity_references/);
@@ -2938,8 +3108,9 @@ assert.doesNotMatch(meetingServiceSource, /AS references\b/);
           assert.match(text, /failed_step = \$3::meeting_report_failed_step/);
           assert.match(text, /failure_code = \$5/);
           assert.match(text, /failure_detail = \$6::jsonb/);
-          assert.match(text, /action_item_candidates = \$11::jsonb/);
-          assert.match(text, /retry_count = \$12/);
+          assert.match(text, /title = \$8/);
+          assert.match(text, /action_item_candidates = \$12::jsonb/);
+          assert.match(text, /retry_count = \$13/);
           assert.match(text, /AND status IN/);
           assert.deepEqual(values, [
             reportId,
@@ -2953,6 +3124,7 @@ assert.doesNotMatch(meetingServiceSource, /AS references\b/);
               providerStatusCode: null
             }),
             "이전 전문",
+            "회의록 제목",
             "이전 요약",
             "이전 논의사항",
             "이전 결정사항",
