@@ -765,9 +765,11 @@ function MeetingReportDetailModal({
   onDismissActionItem,
   onLoadIssueDeliveryOptions,
   onRegenerate,
+  onRetryActionItemExtraction,
   open,
   deleting,
   regenerating,
+  retryingActionItemExtraction,
   report
 }: {
   detailError: string | null;
@@ -784,9 +786,11 @@ function MeetingReportDetailModal({
     actionItem: MeetingReportActionItem
   ) => Promise<MeetingReportActionItemDeliveryOptions>;
   onRegenerate: (report: MeetingReportSummary) => void;
+  onRetryActionItemExtraction: (report: MeetingReportSummary) => void;
   open: boolean;
   deleting: boolean;
   regenerating: boolean;
+  retryingActionItemExtraction: boolean;
   report: MeetingReportDetail | null;
 }) {
   const actionItems = report?.actionItems ?? [];
@@ -1043,6 +1047,26 @@ function MeetingReportDetailModal({
                         )
                       )}
                     </ul>
+                  ) : report.actionItemExtraction?.status === "FAILED" ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                      <p className="text-destructive">
+                        {report.actionItemExtraction.errorMessage ?? "후속 작업을 생성하지 못했습니다."}
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={retryingActionItemExtraction}
+                        onClick={() => onRetryActionItemExtraction(report)}
+                      >
+                        {retryingActionItemExtraction ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                        후속 작업 다시 생성
+                      </Button>
+                    </div>
+                  ) : report.actionItemExtraction && ["PENDING", "PUBLISHING", "QUEUED", "PROCESSING"].includes(report.actionItemExtraction.status) ? (
+                    <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                      회의록은 완료되었습니다. 후속 작업을 추출하는 중입니다.
+                    </p>
                   ) : (
                     <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                       검토할 후속 작업이 없습니다.
@@ -1154,6 +1178,7 @@ export function MeetingReportSection({
     getMeetingReport,
     getMeetingReportActionItemDeliveryOptions,
     regenerateMeetingReport,
+    retryMeetingReportActionItemExtraction,
     reloadReports,
     reports,
     reportsError,
@@ -1169,6 +1194,8 @@ export function MeetingReportSection({
     useState<ReportDetailStatus>("idle");
   const [detailError, setDetailError] = useState<string | null>(null);
   const [regeneratingReportId, setRegeneratingReportId] =
+    useState<string | null>(null);
+  const [retryingActionItemExtractionReportId, setRetryingActionItemExtractionReportId] =
     useState<string | null>(null);
   const [mutatingActionItemId, setMutatingActionItemId] =
     useState<string | null>(null);
@@ -1302,6 +1329,22 @@ export function MeetingReportSection({
       }
     },
     [deleteMeetingReport, handleCloseReport, onToastMessage]
+  );
+
+  const handleRetryActionItemExtraction = useCallback(
+    async (report: MeetingReportSummary) => {
+      setRetryingActionItemExtractionReportId(report.id);
+      try {
+        await retryMeetingReportActionItemExtraction(report.id);
+        onToastMessage("후속 작업 생성을 다시 요청했습니다.");
+        await loadReportDetail(report.id, { silent: true });
+      } catch (error) {
+        onToastMessage(getReportRequestErrorMessage(error));
+      } finally {
+        setRetryingActionItemExtractionReportId(null);
+      }
+    },
+    [loadReportDetail, onToastMessage, retryMeetingReportActionItemExtraction]
   );
 
   const handleDismissActionItem = useCallback(
@@ -1644,6 +1687,10 @@ export function MeetingReportSection({
           Boolean(selectedReport?.id) &&
           regeneratingReportId === selectedReport?.id
         }
+        retryingActionItemExtraction={
+          Boolean(selectedReport?.id) &&
+          retryingActionItemExtractionReportId === selectedReport?.id
+        }
         report={selectedReport}
         onDeliverActionItem={handleActionItemDelivery}
         onClose={handleCloseReport}
@@ -1653,6 +1700,7 @@ export function MeetingReportSection({
         }
         onLoadIssueDeliveryOptions={handleLoadIssueDeliveryOptions}
         onRegenerate={(report) => void handleRegenerateReport(report)}
+        onRetryActionItemExtraction={(report) => void handleRetryActionItemExtraction(report)}
       />
     </section>
   );

@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 
 from app.job_dispatcher import JobDispatcher
+from app.meeting_action_item_extraction_processor import MeetingActionItemExtractionProcessor
 from app.meeting_report_processor import MeetingReportProcessor
 from app.meeting_report_runtime import (
     DEFAULT_MEETING_REPORT_EVENT_MAX_ATTEMPTS,
@@ -112,12 +113,23 @@ def create_meeting_worker(
         resolved_settings.meeting_report_event_max_attempts,
     )
     processor = MeetingReportProcessor(repository, storage, ai_client, event_publisher)
-    dispatcher = create_meeting_dispatcher(processor)
+    action_item_extraction_processor = MeetingActionItemExtractionProcessor(
+        repository,
+        ai_client,
+        event_publisher,
+    )
+    dispatcher = create_meeting_dispatcher(processor, action_item_extraction_processor)
     return SqsAiJobWorker(resolved_settings, dispatcher, sqs_client)
 
 
-def create_meeting_dispatcher(processor: MeetingReportProcessor) -> JobDispatcher:
-    return JobDispatcher(meeting_report_processor=processor)
+def create_meeting_dispatcher(
+    processor: MeetingReportProcessor,
+    action_item_extraction_processor: MeetingActionItemExtractionProcessor,
+) -> JobDispatcher:
+    return JobDispatcher(
+        meeting_report_processor=processor,
+        meeting_action_item_extraction_processor=action_item_extraction_processor,
+    )
 
 
 def run_meeting_worker() -> None:

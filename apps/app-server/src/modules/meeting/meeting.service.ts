@@ -42,6 +42,13 @@ type MeetingReportStatus =
   | "COMPLETED"
   | "FAILED";
 type MeetingReportFailedStep = "RECORDING" | "STT" | "LLM";
+type MeetingReportActionItemExtractionStatus =
+  | "PENDING"
+  | "PUBLISHING"
+  | "QUEUED"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "FAILED";
 type MeetingReportActionItemStatus =
   | "PENDING"
   | "DELIVERING"
@@ -152,6 +159,8 @@ interface MeetingReportRow extends QueryResultRow {
   participant_count?: number | string;
   participant_preview?: unknown;
   can_delete?: boolean;
+  action_item_extraction_status?: string | null;
+  action_item_extraction_failure_code?: string | null;
 }
 
 interface MeetingReportDetailRow extends MeetingReportRow {
@@ -369,11 +378,21 @@ export interface MeetingReportSummaryPayload {
   discussionPoints: string | null;
   decisions: string | null;
   actionItemCandidates: unknown[];
+  actionItemExtraction?: MeetingReportActionItemExtractionPayload;
   retryCount: number;
   participantSummary: MeetingReportParticipantSummaryPayload;
   canDelete?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MeetingReportActionItemExtractionPayload {
+  status: MeetingReportActionItemExtractionStatus;
+  errorMessage: string | null;
+}
+
+export interface MeetingReportActionItemExtractionRetryPayload {
+  actionItemExtraction: MeetingReportActionItemExtractionPayload;
 }
 
 export interface MeetingReportParticipantSummaryPayload {
@@ -1623,6 +1642,51 @@ export class MeetingService {
         actionItems,
         actionItemAssignees
       })
+    };
+  }
+
+  async retryMeetingReportActionItemExtraction(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string
+  ): Promise<MeetingReportActionItemExtractionRetryPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    if (!UUID_PATTERN.test(reportId)) {
+      throw notFound("Meeting report not found");
+    }
+    const extraction = await this.database.queryOne<{
+      status: string;
+    }>(
+      `UPDATE meeting_report_action_item_extractions AS extraction
+       SET
+         status = 'pending',
+         attempt_count = 0,
+         next_attempt_at = now(),
+         claim_token = NULL,
+         claimed_at = NULL,
+         delivered_at = NULL,
+         completed_at = NULL,
+         failure_code = NULL,
+         failure_detail = NULL,
+         updated_at = now()
+       FROM meeting_reports AS reports
+       JOIN meetings ON meetings.id = reports.meeting_id
+       WHERE extraction.meeting_report_id = reports.id
+         AND reports.id = $2
+         AND meetings.workspace_id = $1
+         AND reports.status = 'COMPLETED'
+         AND extraction.status = 'failed'
+       RETURNING extraction.status`,
+      [workspaceId, reportId]
+    );
+    if (!extraction) {
+      throw badRequest("Meeting report follow-up tasks cannot be retried");
+    }
+    return {
+      actionItemExtraction: {
+        status: "PENDING",
+        errorMessage: null
+      }
     };
   }
 
@@ -3194,6 +3258,8 @@ export class MeetingService {
           meeting_reports.retry_count,
           meeting_reports.created_at,
           meeting_reports.updated_at,
+          extraction.status AS action_item_extraction_status,
+          extraction.failure_code AS action_item_extraction_failure_code,
           (
             EXISTS (
               SELECT 1
@@ -3213,6 +3279,8 @@ export class MeetingService {
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
+        LEFT JOIN meeting_report_action_item_extractions AS extraction
+          ON extraction.meeting_report_id = meeting_reports.id
         ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
         WHERE meetings.workspace_id = $1
           ${statusCondition}
@@ -3266,6 +3334,8 @@ export class MeetingService {
           meeting_reports.retry_count,
           meeting_reports.created_at,
           meeting_reports.updated_at,
+          extraction.status AS action_item_extraction_status,
+          extraction.failure_code AS action_item_extraction_failure_code,
           (
             EXISTS (
               SELECT 1
@@ -3285,6 +3355,8 @@ export class MeetingService {
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
+        LEFT JOIN meeting_report_action_item_extractions AS extraction
+          ON extraction.meeting_report_id = meeting_reports.id
         ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
         WHERE meetings.workspace_id = $1
           AND meeting_reports.id = $3
@@ -4087,6 +4159,7 @@ export class MeetingService {
   private mapMeetingReportSummary(
     report: MeetingReportRow
   ): MeetingReportSummaryPayload {
+    const actionItemExtraction = this.mapActionItemExtraction(report);
     return {
       id: report.id,
       meetingId: report.meeting_id,
@@ -4098,6 +4171,9 @@ export class MeetingService {
       discussionPoints: report.discussion_points,
       decisions: report.decisions,
       actionItemCandidates: this.toJsonArray(report.action_item_candidates),
+      ...(actionItemExtraction
+        ? { actionItemExtraction }
+        : {}),
       retryCount: Number(report.retry_count),
       participantSummary: this.mapMeetingReportParticipantSummary(report),
       ...(typeof report.can_delete === "boolean"
@@ -4105,6 +4181,21 @@ export class MeetingService {
         : {}),
       createdAt: this.toIsoString(report.created_at),
       updatedAt: this.toIsoString(report.updated_at)
+    };
+  }
+
+  private mapActionItemExtraction(
+    report: MeetingReportRow
+  ): MeetingReportActionItemExtractionPayload | null {
+    const rawStatus = report.action_item_extraction_status;
+    if (typeof rawStatus !== "string") return null;
+    const status = rawStatus.toUpperCase() as MeetingReportActionItemExtractionStatus;
+    if (![
+      "PENDING", "PUBLISHING", "QUEUED", "PROCESSING", "COMPLETED", "FAILED"
+    ].includes(status)) return null;
+    return {
+      status,
+      errorMessage: status === "FAILED" ? "후속 작업을 생성하지 못했습니다." : null
     };
   }
 

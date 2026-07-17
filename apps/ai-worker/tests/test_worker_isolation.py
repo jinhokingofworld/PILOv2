@@ -5,6 +5,9 @@ from types import SimpleNamespace
 import app.shared_ai_worker_runtime as shared_ai_worker_runtime
 from app.agent_worker_runtime import AgentWorkerSettings, create_agent_dispatcher
 from app.job_dispatcher import JobDispatcher
+from app.meeting_action_item_extraction_processor import (
+    MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE,
+)
 from app.meeting_report_processor import ProcessResult
 from app.meeting_worker_runtime import (
     MeetingWorkerSettings,
@@ -18,9 +21,19 @@ from app.shared_ai_worker_runtime import (
     SharedAiWorkerSettings,
     create_shared_dispatcher,
 )
+from app.worker import supported_jobs
 
 
 class FakeMeetingReportProcessor:
+    def process_payload(self, _payload: dict[str, object]) -> ProcessResult:
+        return ProcessResult(
+            delete_message=True,
+            reason="completed",
+            report_id="report-1",
+        )
+
+
+class FakeActionItemExtractionProcessor:
     def process_payload(self, _payload: dict[str, object]) -> ProcessResult:
         return ProcessResult(
             delete_message=True,
@@ -44,12 +57,37 @@ def test_meeting_worker_uses_only_dedicated_queue_environment(monkeypatch) -> No
 
 
 def test_meeting_dispatcher_has_no_agent_or_pr_review_processor() -> None:
-    dispatcher = create_meeting_dispatcher(FakeMeetingReportProcessor())
+    dispatcher = create_meeting_dispatcher(
+        FakeMeetingReportProcessor(), FakeActionItemExtractionProcessor()
+    )
 
     assert isinstance(dispatcher, JobDispatcher)
     assert dispatcher.agent_run_processor is None
     assert dispatcher.canvas_agent_processor is None
     assert dispatcher.pr_review_analysis_processor is None
+
+
+def test_meeting_dispatcher_handles_action_item_extraction_job() -> None:
+    dispatcher = create_meeting_dispatcher(
+        FakeMeetingReportProcessor(), FakeActionItemExtractionProcessor()
+    )
+
+    result = dispatcher.process_message(
+        json.dumps(
+            {
+                "jobType": MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE,
+                "reportId": "report-1",
+            }
+        )
+    )
+
+    assert result.delete_message is True
+    assert result.reason == "completed"
+    assert result.job_type == MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE
+
+
+def test_worker_reports_action_item_extraction_as_supported_job() -> None:
+    assert MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE in supported_jobs()
 
 
 def test_shared_ai_worker_does_not_require_meeting_queue_environment(monkeypatch) -> None:

@@ -344,12 +344,21 @@ class MeetingReportProcessor:
 
             try:
                 transcript_text = "\n".join(segment.text for segment in transcript_segments)
-                report = self.ai_client.generate_report(
-                    transcript_text,
-                    transcript_segments,
-                    context.activity_evidence,
-                    context.document_change_evidence,
-                )
+                generate_core_report = getattr(self.ai_client, "generate_core_report", None)
+                if callable(generate_core_report):
+                    report = generate_core_report(
+                        transcript_text,
+                        transcript_segments,
+                        context.activity_evidence,
+                        context.document_change_evidence,
+                    )
+                else:
+                    report = self.ai_client.generate_report(
+                        transcript_text,
+                        transcript_segments,
+                        context.activity_evidence,
+                        context.document_change_evidence,
+                    )
             except ProviderBusinessError as error:
                 diagnostic, error_type = _safe_llm_failure_details(error)
                 LOGGER.warning(
@@ -404,6 +413,8 @@ def parse_generated_report_json(
     transcript_text: str,
     transcript_segments: list[TranscriptSegment],
     activity_evidence: list[ActivityEvidence] | None = None,
+    *,
+    include_action_items: bool = True,
 ) -> GeneratedMeetingReport:
     try:
         payload = json.loads(raw_text)
@@ -422,15 +433,25 @@ def parse_generated_report_json(
     if not isinstance(raw_action_items, list):
         raise ProviderBusinessError("Invalid action item candidates")
 
-    action_items = [_parse_action_item(item) for item in raw_action_items]
+    action_items = (
+        [_parse_action_item(item) for item in raw_action_items] if include_action_items else []
+    )
     evidence = _parse_evidence(
-        payload.get("evidence"),
+        (
+            _without_action_item_references(payload.get("evidence"))
+            if not include_action_items
+            else payload.get("evidence")
+        ),
         transcript_segments,
         len(action_items),
         len(decision_items),
     )
     activity_evidence_references = _parse_activity_evidence_references(
-        payload.get("activityEvidenceReferences", []),
+        (
+            _without_action_item_references(payload.get("activityEvidenceReferences", []))
+            if not include_action_items
+            else payload.get("activityEvidenceReferences", [])
+        ),
         activity_evidence or [],
         len(action_items),
         len(decision_items),
@@ -449,6 +470,16 @@ def parse_generated_report_json(
         activity_evidence_references=activity_evidence_references,
         decision_items=decision_items,
     )
+
+
+def _without_action_item_references(value: object) -> object:
+    if not isinstance(value, list):
+        return value
+    return [
+        item
+        for item in value
+        if not isinstance(item, dict) or item.get("sourceType") != "action_item"
+    ]
 
 
 def serialize_action_items(action_items: list[ActionItemCandidate]) -> str:
