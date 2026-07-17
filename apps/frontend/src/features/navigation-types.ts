@@ -12,6 +12,7 @@ export type FeatureNavigationItem = {
   description: string;
   action: string;
   href: string;
+  navigateOnTrigger?: boolean;
   icon: LucideIcon;
   items: FeatureNavigationSubItem[];
 };
