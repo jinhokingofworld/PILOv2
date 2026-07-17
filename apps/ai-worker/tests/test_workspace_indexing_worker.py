@@ -104,9 +104,7 @@ def test_workspace_indexing_message_accepts_document_jobs_only() -> None:
     assert parse_workspace_indexing_message("not-json") is None
     assert parse_workspace_indexing_message(
         '{"version":1,"source":"calendar","jobId":"job-1"}'
-    ) == (
-        WorkspaceIndexingMessage(version=1, source="calendar", job_id="job-1")
-    )
+    ) == (WorkspaceIndexingMessage(version=1, source="calendar", job_id="job-1"))
 
 
 def test_document_embedding_processor_chunks_and_completes_latest_snapshot() -> None:
