@@ -104,6 +104,7 @@ class FakeTransaction {
 
   async queryOne(text, values = []) {
     if (text.includes("FROM agent_threads AS thread")) {
+      this.state.threadLookupQuery = text;
       return this.findActiveThread(values);
     }
 
@@ -261,6 +262,7 @@ class FakeTransaction {
   }
 
   findActiveThread([workspaceId, currentUserId]) {
+    if (this.state.activeThread === false) return null;
     const thread = (this.state.threads ?? []).find(
       (candidate) =>
         candidate.workspace_id === workspaceId &&
@@ -272,7 +274,7 @@ class FakeTransaction {
   insertThread([workspaceId, currentUserId]) {
     this.state.threads ??= [];
     const thread = {
-      id: THREAD_ID,
+      id: this.state.threads.length === 0 ? THREAD_ID : "new-thread-id",
       workspace_id: workspaceId,
       requested_by_user_id: currentUserId,
       last_activity_at: new Date()
@@ -453,6 +455,30 @@ class FakeTransaction {
       resource_refs: parseJsonParameter(resourceRefs)
     });
   }
+}
+
+{
+  const state = {
+    runs: [], steps: [], logs: [], activeThread: false,
+    threads: [{ id: THREAD_ID, workspace_id: WORKSPACE_ID, requested_by_user_id: USER_ID }]
+  };
+  const { service } = createService(state);
+  await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "한 시간 뒤의 새 요청" });
+  assert.equal(state.threads.length, 2);
+  assert.equal(state.runs[0].thread_id, "new-thread-id");
+  assert.match(state.threadLookupQuery, /last_activity_at > now\(\) - INTERVAL '1 hour'/);
+}
+
+{
+  const state = {
+    runs: [], steps: [], logs: [], activeThread: true,
+    threads: [{ id: THREAD_ID, workspace_id: WORKSPACE_ID, requested_by_user_id: USER_ID }]
+  };
+  const { service } = createService(state);
+  await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "confirmation 대기 중인 요청" });
+  assert.equal(state.threads.length, 1);
+  assert.equal(state.runs[0].thread_id, THREAD_ID);
+  assert.match(state.threadLookupQuery, /confirmation\.status = 'pending'/);
 }
 
 function createService(state) {

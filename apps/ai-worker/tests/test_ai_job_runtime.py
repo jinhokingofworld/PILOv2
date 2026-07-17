@@ -224,9 +224,13 @@ class FakeAgentContextConnection:
         self,
         run_row: dict[str, object] | None,
         timeline_rows: list[dict[str, object]] | None = None,
+        thread_runs: list[dict[str, object]] | None = None,
+        resource_refs_by_run: dict[str, list[dict[str, object]]] | None = None,
     ) -> None:
         self.run_row = run_row
         self.timeline_rows = timeline_rows or []
+        self.thread_runs = thread_runs or []
+        self.resource_refs_by_run = resource_refs_by_run or {}
         self.executed: list[tuple[str, tuple[object, ...]]] = []
 
     def execute(self, query: str, values: tuple[object, ...]) -> FakeAgentContextCursor:
@@ -235,6 +239,10 @@ class FakeAgentContextConnection:
             return FakeAgentContextCursor(row=self.run_row)
         if "WITH timeline AS" in query:
             return FakeAgentContextCursor(rows=self.timeline_rows)
+        if "SELECT resource_refs" in query:
+            return FakeAgentContextCursor(rows=self.resource_refs_by_run.get(str(values[0]), []))
+        if "AND status = 'completed'" in query:
+            return FakeAgentContextCursor(rows=self.thread_runs)
         raise AssertionError(f"Unexpected query: {query}")
 
 
@@ -840,6 +848,7 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
             "prompt": "그 회의를 다시 연결해줘",
             "timezone": "Asia/Seoul",
             "planner_turn_count": 2,
+            "thread_id": None,
         },
         timeline_rows=[
             {
@@ -900,6 +909,68 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
     assert "LIMIT 17" in timeline_query
     assert "ORDER BY occurred_at ASC" in timeline_query
     assert timeline_values == (job.run_id, job.run_id)
+
+
+def test_agent_repository_adds_only_bounded_same_thread_memory() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    thread_runs = [
+        {"id": f"run-{index}", "prompt": f"prompt-{index}", "final_answer": f"answer-{index}"}
+        for index in range(1, 7)
+    ]
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-3333-3333-333333333333",
+            "workspace_id": "22222222-2222-2222-2222-222222222222",
+            "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+            "status": "planning",
+            "prompt": "그 회의록을 요약해줘",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 0,
+            "thread_id": "thread-1",
+        },
+        thread_runs=thread_runs,
+        resource_refs_by_run={
+            "run-6": [
+                {
+                    "resource_refs": [
+                        {
+                            "domain": "meeting",
+                            "resourceType": "meeting_report",
+                            "resourceId": "report-6",
+                            "label": "최근 회의",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    assert "previous user: prompt-1" in context.planning_context
+    assert "previous user: prompt-6" in context.planning_context
+    assert (
+        "previous resource meeting:meeting_report id=report-6 label=최근 회의"
+        in context.planning_context
+    )
+    assert len(context.planning_context.encode()) <= 12000
+    thread_query, thread_values = connection.executed[1]
+    assert "workspace_id = %s" in thread_query
+    assert "requested_by_user_id = %s" in thread_query
+    assert "LIMIT 6" in thread_query
+    assert thread_values == ("thread-1", job.run_id, job.workspace_id, job.requested_by_user_id)
 
 
 def test_agent_repository_appends_clarification_only_after_state_transition() -> None:
