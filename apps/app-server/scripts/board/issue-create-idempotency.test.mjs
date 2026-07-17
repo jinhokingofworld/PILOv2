@@ -350,12 +350,16 @@ const projectItemId = "55555555-5555-4555-8555-555555555555";
 const statusFieldId = "66666666-6666-4666-8666-666666666666";
 
 function createTargetRow() {
+  const installationId = "99999999-9999-4999-8999-999999999999";
+
   return {
     board_id: boardId,
     repository_id: repositoryId,
+    repository_installation_id: installationId,
     repository_owner_login: "Developer-EJ",
     repository_name: "PILO",
     project_v2_id: "77777777-7777-4777-8777-777777777777",
+    project_installation_id: installationId,
     github_project_node_id: "PVT_kwDOExample",
     status_field_id: statusFieldId,
     github_field_node_id: "PVTSSF_lADOExample",

@@ -280,6 +280,20 @@ DELETE /api/v1/workspaces/{workspaceId}/members/me
 - 나가기 후 접근 가능한 Workspace가 없으면 사용자는 onboarding 필요 상태가 될 수
   있다. 서버가 기본 Workspace를 자동 생성하지 않는다.
 
+## Membership 제거 후 Chat 접근 회수
+
+member 제거와 Workspace 나가기는 membership delete transaction이 commit된 뒤
+`workspace:membership-revocations` internal Redis channel에 exact V1
+`membership.revoked` event를 한 번 발행한다. Event에는 UUID `workspaceId`, UUID
+`userId`, canonical ISO `occurredAt`이 포함된다.
+
+Realtime Server는 event를 받으면 해당 사용자의 모든 Chat tab을 Workspace Chat room과
+target user room에서 제거한다. room leave가 하나라도 실패하면 socket을 강제 종료한다.
+Redis 연결 또는 publish 실패는 secret이나 Redis URL 없이 안전하게 기록하며, 이미
+commit된 membership 제거를 rollback하거나 성공 API 응답을 바꾸지 않는다. Transaction이
+실패하면 event를 발행하지 않는다. Redis event가 유실되어도 Chat fan-out 직전의 batch
+membership recheck가 제거된 사용자의 수신을 차단한다.
+
 ## 초대 목록 조회
 
 ```http

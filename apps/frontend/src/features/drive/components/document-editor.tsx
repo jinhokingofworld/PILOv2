@@ -1,6 +1,8 @@
 "use client";
 
 import Collaboration from "@tiptap/extension-collaboration";
+import CollaborationCaret from "@tiptap/extension-collaboration-caret";
+import Dropcursor from "@tiptap/extension-dropcursor";
 import type { EditorView } from "@tiptap/pm/view";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -33,6 +35,13 @@ import {
 } from "@/features/drive/api/client";
 import type { DocumentBootstrapPayload } from "@/features/drive/types";
 
+import {
+  createDocumentCollaborator,
+  createDocumentRealtimeProvider,
+  createDocumentSnapshotSaveQueue,
+  getDocumentRealtimeServerUrl,
+  shouldUseDocumentSnapshotFallback
+} from "../document-realtime";
 import styles from "./document-editor.module.css";
 import { DocumentBlockHandle } from "./document-block-handle";
 import { DocumentBubbleMenu } from "./document-bubble-menu";
@@ -40,10 +49,11 @@ import { DriveFileAttachment } from "./document-file-attachment";
 import { DocumentFilePicker } from "./document-file-picker";
 import { DocumentInlineTitle } from "./document-inline-title";
 import {
-  DocumentSlashMenu,
-  SLASH_COMMANDS,
-  type SlashCommandId
+  DocumentSlashMenu
 } from "./document-slash-menu";
+import {
+  type SlashCommandId
+} from "./document-slash-commands";
 
 type EditorLoadState =
   | { status: "loading" }
@@ -51,13 +61,20 @@ type EditorLoadState =
   | { status: "ready"; bootstrap: DocumentBootstrapPayload };
 
 type SaveState = "saved" | "saving" | "error" | "conflict";
+type RealtimeState = "connected" | "connecting" | "disabled" | "disconnected";
 
 type SlashMenuState = {
   position: { top: number; left: number };
   activeIndex: number;
+  query: string;
 };
 
-const AUTOSAVE_DELAY_MS = 800;
+type PendingSnapshot = {
+  contentJson: Record<string, unknown>;
+  yjsState: string;
+};
+
+const DOCUMENT_SNAPSHOT_AUTOSAVE_DELAY_MS = 1000;
 const SLASH_MENU_MAX_HEIGHT_PX = 384;
 
 function messageFromUnknown(error: unknown) {
@@ -131,18 +148,36 @@ function DocumentEditorSurface({
     return nextYDoc;
   }, [bootstrap.snapshot.id, bootstrap.snapshot.yjsState]);
   const currentVersionRef = useRef(bootstrap.document.currentVersion);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveQueueRef = useRef(Promise.resolve());
+  const editorRef = useRef<Editor | null>(null);
+  const pendingSnapshotRef = useRef<PendingSnapshot | null>(null);
   const slashMenuStateRef = useRef<SlashMenuState | null>(null);
-  const slashCommandExecutorRef = useRef<(commandId: SlashCommandId) => void>(() => {});
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [realtimeError, setRealtimeError] = useState<string | null>(null);
+  const [realtimeState, setRealtimeState] = useState<RealtimeState>("connecting");
   const [isEditorEmpty, setIsEditorEmpty] = useState(false);
   const [isFilePickerOpen, setIsFilePickerOpen] = useState(false);
   const [slashMenuState, setSlashMenuState] = useState<SlashMenuState | null>(null);
   const [documentName, setDocumentName] = useState(bootstrap.item.name);
+  const [realtimeProvider, setRealtimeProvider] =
+    useState<ReturnType<typeof createDocumentRealtimeProvider>>(null);
+  const currentCollaborator = useMemo(
+    () =>
+      createDocumentCollaborator({
+        displayName: authSession?.user.displayName ?? authSession?.user.name ?? "",
+        userId: authSession?.user.id ?? ""
+      }),
+    [authSession?.user.displayName, authSession?.user.id, authSession?.user.name]
+  );
   const driveClient = useMemo(
     () => createDriveApiClient({ accessToken }),
+    [accessToken]
+  );
+  const useSnapshotFallback = useMemo(
+    () =>
+      shouldUseDocumentSnapshotFallback(
+        Boolean(accessToken && getDocumentRealtimeServerUrl())
+      ),
     [accessToken]
   );
 
@@ -174,61 +209,80 @@ function DocumentEditorSurface({
     [accessToken, bootstrap.item.id, driveClient, workspaceId]
   );
 
-  const persistSnapshot = useCallback(
+  const captureSnapshot = useCallback(
     (editor: Editor) => {
-      const yjsState = toBase64(Y.encodeStateAsUpdate(yDoc));
-      const contentJson = editor.getJSON() as Record<string, unknown>;
-
-      saveQueueRef.current = saveQueueRef.current.then(async () => {
-        try {
-          const result = await driveClient.saveDocumentSnapshot(
-            workspaceId,
-            bootstrap.document.id,
-            {
-              expectedVersion: currentVersionRef.current,
-              yjsState,
-              contentJson
-            }
-          );
-          currentVersionRef.current = result.document.currentVersion;
-          setSaveState("saved");
-          setSaveError(null);
-        } catch (error) {
-          if (error instanceof DriveApiError && error.status === 409) {
-            editor.setEditable(false);
-            setSaveState("conflict");
-            setSaveError("다른 변경이 저장되어 최신 문서를 다시 불러와야 합니다.");
-            return;
-          }
-
-          setSaveState("error");
-          setSaveError(messageFromUnknown(error));
-        }
-      });
+      pendingSnapshotRef.current = {
+        contentJson: editor.getJSON() as Record<string, unknown>,
+        yjsState: toBase64(Y.encodeStateAsUpdate(yDoc))
+      };
     },
-    [bootstrap.document.id, driveClient, workspaceId, yDoc]
+    [yDoc]
   );
 
-  const queueSnapshot = useCallback(
-    (editor: Editor, immediately = false) => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
+  const persistSnapshot = useCallback(async () => {
+    const pendingSnapshot = pendingSnapshotRef.current;
+    if (!pendingSnapshot || !workspaceId || !accessToken) {
+      return;
+    }
+
+    async function saveCurrentSnapshot(snapshot: PendingSnapshot) {
+      return driveClient.saveDocumentSnapshot(workspaceId, bootstrap.document.id, {
+        expectedVersion: currentVersionRef.current,
+        yjsState: snapshot.yjsState,
+        contentJson: snapshot.contentJson
+      });
+    }
+
+    try {
+      let result;
+
+      try {
+        result = await saveCurrentSnapshot(pendingSnapshot);
+      } catch (error) {
+        if (!(error instanceof DriveApiError) || error.status !== 409) {
+          throw error;
+        }
+
+        const latest = await driveClient.getDocument(workspaceId, bootstrap.document.id);
+        Y.applyUpdate(yDoc, fromBase64(latest.snapshot.yjsState));
+        currentVersionRef.current = latest.document.currentVersion;
+        const activeEditor = editorRef.current;
+        if (!activeEditor) {
+          throw error;
+        }
+        captureSnapshot(activeEditor);
+        result = await saveCurrentSnapshot(pendingSnapshotRef.current!);
       }
 
-      setSaveState("saving");
+      currentVersionRef.current = result.document.currentVersion;
+      setSaveState("saved");
       setSaveError(null);
+    } catch (error) {
+      setSaveState("error");
+      setSaveError(messageFromUnknown(error));
+      throw error;
+    }
+  }, [accessToken, bootstrap.document.id, captureSnapshot, driveClient, workspaceId, yDoc]);
 
-      if (immediately) {
-        persistSnapshot(editor);
-        return;
-      }
-
-      saveTimerRef.current = setTimeout(() => {
-        persistSnapshot(editor);
-      }, AUTOSAVE_DELAY_MS);
-    },
+  const snapshotSaveQueue = useMemo(
+    () =>
+      createDocumentSnapshotSaveQueue({
+        delayMs: DOCUMENT_SNAPSHOT_AUTOSAVE_DELAY_MS,
+        save: persistSnapshot
+      }),
     [persistSnapshot]
   );
+
+  const retrySnapshot = useCallback(() => {
+    if (!useSnapshotFallback) {
+      return;
+    }
+
+    setSaveState("saving");
+    setSaveError(null);
+    snapshotSaveQueue.schedule();
+    void snapshotSaveQueue.flush().catch(() => undefined);
+  }, [snapshotSaveQueue, useSnapshotFallback]);
 
   const closeSlashMenu = useCallback(() => {
     slashMenuStateRef.current = null;
@@ -244,55 +298,17 @@ function DocumentEditorSurface({
     setSlashMenuState(nextState);
   }, []);
 
+  const setSlashMenuQuery = useCallback((query: string) => {
+    const currentState = slashMenuStateRef.current;
+    if (!currentState) return;
+
+    const nextState = { ...currentState, activeIndex: 0, query };
+    slashMenuStateRef.current = nextState;
+    setSlashMenuState(nextState);
+  }, []);
+
   const handleEditorKeyDown = useCallback(
     (view: EditorView, event: KeyboardEvent) => {
-      const currentMenuState = slashMenuStateRef.current;
-
-      if (currentMenuState) {
-        if (event.key === "ArrowDown") {
-          event.preventDefault();
-          setSlashMenuActiveIndex(
-            (currentMenuState.activeIndex + 1) % SLASH_COMMANDS.length
-          );
-          return true;
-        }
-
-        if (event.key === "ArrowUp") {
-          event.preventDefault();
-          setSlashMenuActiveIndex(
-            (currentMenuState.activeIndex - 1 + SLASH_COMMANDS.length) %
-              SLASH_COMMANDS.length
-          );
-          return true;
-        }
-
-        if (event.key === "Enter") {
-          event.preventDefault();
-          slashCommandExecutorRef.current(
-            SLASH_COMMANDS[currentMenuState.activeIndex].id
-          );
-          return true;
-        }
-
-        if (event.key === "Escape") {
-          event.preventDefault();
-          closeSlashMenu();
-          return true;
-        }
-
-        if (
-          event.isComposing ||
-          event.key === "Process" ||
-          event.key === "Dead" ||
-          event.key.length === 1 ||
-          event.key === "Backspace"
-        ) {
-          closeSlashMenu();
-        }
-
-        return false;
-      }
-
       const { selection } = view.state;
       if (
         event.key !== "/" ||
@@ -316,6 +332,7 @@ function DocumentEditorSurface({
           : Math.max(16, coordinates.top - 8 - availableMenuHeight);
       const nextState = {
         activeIndex: 0,
+        query: "",
         position: {
           top: menuTop,
           left: Math.max(16, Math.min(coordinates.left, window.innerWidth - 336))
@@ -325,14 +342,23 @@ function DocumentEditorSurface({
       setSlashMenuState(nextState);
       return true;
     },
-    [closeSlashMenu, setSlashMenuActiveIndex]
+    []
   );
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ undoRedo: false }),
+      StarterKit.configure({ undoRedo: false, dropcursor: false }),
       DriveFileAttachment,
-      Collaboration.configure({ document: yDoc })
+      Collaboration.configure({ document: yDoc }),
+      Dropcursor.configure({ color: "var(--primary)", width: 2 }),
+      ...(realtimeProvider
+        ? [
+            CollaborationCaret.configure({
+              provider: realtimeProvider,
+              user: currentCollaborator
+            })
+          ]
+        : [])
     ],
     immediatelyRender: false,
     editorProps: {
@@ -345,18 +371,92 @@ function DocumentEditorSurface({
     onUpdate: ({ editor: updatedEditor }) => {
       setIsEditorEmpty(updatedEditor.isEmpty);
       closeSlashMenu();
-      queueSnapshot(updatedEditor);
     },
     onSelectionUpdate: () => closeSlashMenu()
-  });
+  }, [currentCollaborator, realtimeProvider, yDoc]);
+
+  useEffect(() => {
+    editorRef.current = editor;
+
+    return () => {
+      if (editorRef.current === editor) {
+        editorRef.current = null;
+      }
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    if (!useSnapshotFallback) {
+      return;
+    }
+
+    let disposed = false;
+    const handleUpdate = () => {
+      queueMicrotask(() => {
+        if (disposed || !editorRef.current) {
+          return;
+        }
+
+        captureSnapshot(editorRef.current);
+        setSaveState("saving");
+        setSaveError(null);
+        snapshotSaveQueue.schedule();
+      });
+    };
+
+    yDoc.on("update", handleUpdate);
+    return () => {
+      disposed = true;
+      yDoc.off("update", handleUpdate);
+    };
+  }, [captureSnapshot, snapshotSaveQueue, useSnapshotFallback, yDoc]);
+
+  useEffect(() => {
+    const realtimeProvider = createDocumentRealtimeProvider({
+      accessToken,
+      document: yDoc,
+      room: {
+        documentId: bootstrap.document.id,
+        workspaceId
+      },
+      onAuthenticationFailed: () => {
+        setRealtimeError("실시간 공동 편집에 연결하지 못했습니다. 다시 불러오면 재연결합니다.");
+        setRealtimeState("disconnected");
+      },
+      onStatusChange: (status) => {
+        setRealtimeState(status);
+        if (status === "connected") {
+          setRealtimeError(null);
+        }
+      }
+    });
+
+    if (!realtimeProvider) {
+      setRealtimeState("disabled");
+      return;
+    }
+    setRealtimeProvider(realtimeProvider);
+
+    return () => {
+      setRealtimeProvider((currentProvider) =>
+        currentProvider === realtimeProvider ? null : currentProvider
+      );
+      realtimeProvider.flushPendingUpdates();
+      realtimeProvider.destroy();
+    };
+  }, [accessToken, bootstrap.document.id, workspaceId, yDoc]);
 
   useEffect(() => {
     return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
+      if (useSnapshotFallback) {
+        void snapshotSaveQueue.flush();
       }
-      yDoc.destroy();
+      snapshotSaveQueue.destroy();
     };
+  }, [snapshotSaveQueue, useSnapshotFallback]);
+
+  useEffect(() => {
+    return () => yDoc.destroy();
   }, [yDoc]);
 
   const executeSlashCommand = useCallback(
@@ -384,7 +484,16 @@ function DocumentEditorSurface({
     [closeSlashMenu, editor]
   );
 
-  slashCommandExecutorRef.current = executeSlashCommand;
+  const closeDocument = useCallback(async () => {
+    try {
+      if (useSnapshotFallback) {
+        await snapshotSaveQueue.flush();
+      }
+      onClose();
+    } catch {
+      // The save error state keeps the editor open for an explicit retry.
+    }
+  }, [onClose, snapshotSaveQueue, useSnapshotFallback]);
 
   const saveStateLabel =
     saveState === "saving"
@@ -394,11 +503,20 @@ function DocumentEditorSurface({
         : saveState === "conflict"
           ? "최신 문서 필요"
           : "저장 실패";
+  const realtimeStateLabel =
+    realtimeState === "connected"
+      ? "공동 편집 연결됨"
+      : realtimeState === "connecting"
+        ? "공동 편집 연결 중"
+        : realtimeState === "disabled"
+          ? "공동 편집 연결 안 됨"
+          : "공동 편집 재연결 중";
+  const editorError = saveError ?? realtimeError;
 
   return (
     <section className={styles.documentPage}>
       <div className={styles.documentHeader}>
-        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+        <Button type="button" variant="ghost" size="sm" onClick={() => void closeDocument()}>
           <ArrowLeft />
           파일
         </Button>
@@ -407,7 +525,7 @@ function DocumentEditorSurface({
             <DocumentInlineTitle name={documentName} onSave={renameDocument} />
           </h1>
           <p className={styles.documentStatus} role="status">
-            {saveStateLabel}
+            {saveStateLabel} · {realtimeStateLabel}
           </p>
         </div>
         <div className={styles.documentActions}>
@@ -417,18 +535,23 @@ function DocumentEditorSurface({
             size="icon-sm"
             aria-label="문서 저장"
             title="문서 저장"
-            disabled={!editor || saveState === "conflict"}
-            onClick={() => editor && queueSnapshot(editor, true)}
+            disabled={!editor || saveState === "conflict" || !useSnapshotFallback}
+            onClick={retrySnapshot}
           >
             {saveState === "saving" ? <Loader2 className="animate-spin" /> : <Save />}
           </Button>
         </div>
       </div>
 
-      {saveError ? (
+      {editorError ? (
         <div className={styles.inlineAlert} role="alert">
-          <span>{saveError}</span>
-          <Button type="button" variant="outline" size="sm" onClick={onReload}>
+          <span>{editorError}</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={saveError ? retrySnapshot : onReload}
+          >
             <RefreshCw />
             다시 불러오기
           </Button>
@@ -493,8 +616,15 @@ function DocumentEditorSurface({
       />
       <DocumentSlashMenu
         activeIndex={slashMenuState?.activeIndex ?? 0}
+        onActiveIndexChange={setSlashMenuActiveIndex}
+        onClose={() => {
+          closeSlashMenu();
+          editor?.commands.focus();
+        }}
+        onQueryChange={setSlashMenuQuery}
         onSelect={executeSlashCommand}
         position={slashMenuState?.position ?? null}
+        query={slashMenuState?.query ?? ""}
       />
     </section>
   );

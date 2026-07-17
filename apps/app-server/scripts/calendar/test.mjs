@@ -64,15 +64,26 @@ class FakeWorkspaceService {
   }
 }
 
+class FakeActivityLogService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ transaction, input });
+  }
+}
+
 function createSubject(database = new FakeDatabase()) {
   const workspaceService = new FakeWorkspaceService();
-  const activityLogService = { append: async () => undefined };
+  const activityLogService = new FakeActivityLogService();
   const service = new CalendarService(
     database,
     workspaceService,
     activityLogService
   );
   return {
+    activityLogService,
     database,
     service,
     workspaceService
@@ -180,7 +191,7 @@ async function assertBadRequest(action, messagePattern) {
       }
     ]
   });
-  const { service } = createSubject(database);
+  const { activityLogService, service } = createSubject(database);
 
   const event = await service.createEvent(currentUserId, workspaceId, {
     title: " Team meeting ",
@@ -193,6 +204,73 @@ async function assertBadRequest(action, messagePattern) {
   assert.equal(event.title, "Team meeting");
   assert.equal(event.endDate, "2026-07-03");
   assert.equal(event.endTime, "15:00");
+  assert.deepEqual(activityLogService.calls, [
+    {
+      transaction: database,
+      input: {
+        workspaceId,
+        actor: { type: "user", userId: currentUserId },
+        action: "calendar_event_created",
+        target: { type: "calendar_event", id: "1" },
+        dedupeKey: "calendar:calendar_event_created:1",
+        metadata: {
+          version: 1,
+          summary: "일정을 생성했습니다.",
+          data: { title: "Team meeting" }
+        }
+      }
+    }
+  ]);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      calendarRow({
+        title: "Existing event",
+        color: "#111111"
+      }),
+      calendarRow({
+        title: "Existing event",
+        color: "#111111"
+      })
+    ]
+  });
+  const { activityLogService, service } = createSubject(database);
+
+  await service.updateEvent(currentUserId, workspaceId, "1", {
+    color: "#111111"
+  });
+
+  assert.deepEqual(activityLogService.calls, []);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /INSERT INTO calendar_events/);
+        assert.equal(values[5], "2026-07-03");
+        assert.equal(values[6], "2026-07-03");
+        return calendarRow({
+          title: "종료일 없는 종일 일정",
+          is_all_day: true,
+          start_time: null,
+          end_time: null
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const event = await service.createEvent(currentUserId, workspaceId, {
+    title: "종료일 없는 종일 일정",
+    startDate: "2026-07-03"
+  });
+
+  assert.equal(event.endDate, "2026-07-03");
+  assert.equal(event.startTime, null);
+  assert.equal(event.endTime, null);
 }
 
 {
@@ -238,13 +316,16 @@ async function assertBadRequest(action, messagePattern) {
 {
   const database = new FakeDatabase({
     queryOneRows: [
-      calendarRow({
-        title: "Existing event",
-        description: "Before",
-        color: "#111111",
-        start_time: "14:00:00",
-        end_time: "15:00:00"
-      }),
+      (text) => {
+        assert.match(text, /FOR UPDATE/);
+        return calendarRow({
+          title: "Existing event",
+          description: "Before",
+          color: "#111111",
+          start_time: "14:00:00",
+          end_time: "15:00:00"
+        });
+      },
       (text, values) => {
         assert.match(text, /UPDATE calendar_events/);
         assert.deepEqual(values, [
@@ -269,7 +350,7 @@ async function assertBadRequest(action, messagePattern) {
       }
     ]
   });
-  const { service } = createSubject(database);
+  const { activityLogService, service } = createSubject(database);
 
   const event = await service.updateEvent(currentUserId, workspaceId, "1", {
     startTime: "16:00"
@@ -277,6 +358,64 @@ async function assertBadRequest(action, messagePattern) {
 
   assert.equal(event.startTime, "16:00");
   assert.equal(event.endTime, "17:00");
+  assert.deepEqual(activityLogService.calls, [
+    {
+      transaction: database,
+      input: {
+        workspaceId,
+        actor: { type: "user", userId: currentUserId },
+        action: "calendar_event_updated",
+        target: { type: "calendar_event", id: "1" },
+        dedupeKey: "calendar:calendar_event_updated:1:2026-07-03T01:00:00.000Z",
+        metadata: {
+          version: 1,
+          summary: "Existing event 일정을 변경했습니다.",
+          data: {
+            title: "Existing event",
+            changedFields: ["startTime", "endTime"],
+            before: { startTime: "14:00", endTime: "15:00" },
+            after: { startTime: "16:00", endTime: "17:00" }
+          }
+        }
+      }
+    }
+  ]);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      calendarRow({
+        title: "Existing event",
+        start_date: "2026-07-03",
+        end_date: "2026-07-03",
+        start_time: "14:00:00",
+        end_time: "15:00:00"
+      }),
+      (text, values) => {
+        assert.match(text, /UPDATE calendar_events/);
+        assert.equal(values[7], "2026-07-05");
+        assert.equal(values[8], "14:00");
+        assert.equal(values[9], "15:00");
+        return calendarRow({
+          title: "Existing event",
+          start_date: "2026-07-03",
+          end_date: "2026-07-05",
+          start_time: "14:00:00",
+          end_time: "15:00:00"
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const event = await service.updateEvent(currentUserId, workspaceId, "1", {
+    endDate: "2026-07-05"
+  });
+
+  assert.equal(event.endDate, "2026-07-05");
+  assert.equal(event.startTime, "14:00");
+  assert.equal(event.endTime, "15:00");
 }
 
 {
@@ -355,6 +494,10 @@ async function assertBadRequest(action, messagePattern) {
 {
   const database = new FakeDatabase({
     queryOneRows: [
+      calendarRow({
+        id: 3,
+        title: "Deleted event"
+      }),
       (text, values) => {
         assert.match(text, /DELETE FROM calendar_events/);
         assert.deepEqual(values, [workspaceId, 3]);
@@ -362,11 +505,28 @@ async function assertBadRequest(action, messagePattern) {
       }
     ]
   });
-  const { service } = createSubject(database);
+  const { activityLogService, service } = createSubject(database);
 
   const result = await service.deleteEvent(currentUserId, workspaceId, "3");
 
   assert.deepEqual(result, { id: 3 });
+  assert.deepEqual(activityLogService.calls, [
+    {
+      transaction: database,
+      input: {
+        workspaceId,
+        actor: { type: "user", userId: currentUserId },
+        action: "calendar_event_deleted",
+        target: { type: "calendar_event", id: "3" },
+        dedupeKey: "calendar:calendar_event_deleted:3:2026-07-03T01:00:00.000Z",
+        metadata: {
+          version: 1,
+          summary: "Deleted event 일정을 삭제했습니다.",
+          data: { title: "Deleted event" }
+        }
+      }
+    }
+  ]);
 }
 
 {

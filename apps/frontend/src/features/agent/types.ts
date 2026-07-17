@@ -30,9 +30,12 @@ export type AgentRunRequestContext =
   | null;
 
 export type AgentResourceRef = {
-  id?: string | number | null;
-  type?: string | null;
+  domain?: string | null;
   label?: string | null;
+  metadata?: Record<string, unknown> | null;
+  resourceId?: string | null;
+  resourceType?: string | null;
+  status?: string | null;
   url?: string | null;
   [key: string]: unknown;
 };

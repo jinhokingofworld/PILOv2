@@ -10,6 +10,10 @@ import {
   DatabaseService,
   type DatabaseTransaction
 } from "../../database/database.service";
+import {
+  ActivityLogService,
+  type ActivityLogInput
+} from "../../common/activity-log.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import {
   parseUnifiedDiffPatch,
@@ -69,6 +73,13 @@ import {
   PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
 } from "../canvas/canvas-review-shape-policy";
 import type { CanvasShapeRow } from "../canvas/canvas.types";
+import {
+  buildFileReviewDecisionCreatedActivityLog,
+  buildPrReviewConflictResolutionAppliedActivityLog,
+  buildPrReviewPullRequestMergedActivityLog,
+  buildPrReviewSessionCreatedActivityLog,
+  buildReviewSubmissionTerminalActivityLog
+} from "./pr-review-activity-log";
 import {
   buildPrReviewCanvasMaterialization,
   type PrReviewCanvasMaterializationFile,
@@ -157,6 +168,11 @@ interface PrReviewAnalysisJobInputRow extends QueryResultRow {
 }
 
 interface PrReviewAnalysisJobResultRow extends PrReviewAnalysisJobInputRow {}
+
+type SuccessorRevisionResult = {
+  created: boolean;
+  jobId: string | null;
+};
 
 interface PrReviewAnalysisJobQueryRunner {
   queryOne<T extends QueryResultRow = QueryResultRow>(
@@ -1047,6 +1063,10 @@ const CONFLICT_SUGGESTION_DRAFT_SOURCES: readonly PrReviewConflictSuggestionDraf
 const CONFLICT_STATUS_SETTLE_MAX_ATTEMPTS = 4;
 const CONFLICT_STATUS_SETTLE_DELAY_MS = 250;
 const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
+const PR_REVIEW_SESSION_CREATION_UNIQUE_CONSTRAINTS = new Set([
+  "idx_pr_review_sessions_room_head_active",
+  "idx_pr_review_sessions_room_analyzing"
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1062,6 +1082,7 @@ export class PrReviewService {
     private readonly githubDependency: PrReviewGithubDependencyService,
     private readonly analysisService: PrReviewAnalysisService,
     private readonly analysisJobPublisher: PrReviewAnalysisJobPublisherService,
+    private readonly activityLogService: ActivityLogService,
     private readonly decisionRealtimePublisher?: PrReviewDecisionRealtimePublisherService,
     private readonly conflictDraftRealtimePublisher?: PrReviewConflictDraftRealtimePublisherService,
     private readonly roomRealtimePublisher?: PrReviewRoomRealtimePublisherService
@@ -1169,6 +1190,15 @@ export class PrReviewService {
           workspaceId,
           headSha: detail.headSha
         });
+        await this.activityLogService.append(
+          transaction,
+          buildPrReviewSessionCreatedActivityLog({
+            currentUserId,
+            workspaceId,
+            pullRequestId,
+            reviewSessionId: session.id
+          })
+        );
 
         return { session, jobId: job.id, roomCreated };
       });
@@ -1180,7 +1210,7 @@ export class PrReviewService {
         roomCreated: created.roomCreated
       };
     } catch (error) {
-      if (!this.isUniqueConstraintViolation(error)) {
+      if (!this.isReviewSessionCreationUniqueConstraintViolation(error)) {
         throw error;
       }
 
@@ -2092,7 +2122,7 @@ export class PrReviewService {
       }
 
       if (file.changed) {
-        await this.insertReviewFileDecision(transaction, {
+        const decisionId = await this.insertReviewFileDecision(transaction, {
           reviewFileId: file.file.id,
           currentUserId,
           status: input.status,
@@ -2101,6 +2131,18 @@ export class PrReviewService {
         await this.syncReviewSessionReviewProgress(
           transaction,
           file.file.session_id
+        );
+        await this.activityLogService.append(
+          transaction,
+          buildFileReviewDecisionCreatedActivityLog({
+            currentUserId,
+            workspaceId,
+            decision: input.status,
+            decisionId,
+            filePath: targetFile.file_path,
+            reviewFileId: reviewFileUuid,
+            reviewSessionId: file.file.session_id
+          })
         );
       }
 
@@ -2517,16 +2559,35 @@ export class PrReviewService {
       );
     }
 
+    const conflictActivityLog =
+      buildPrReviewConflictResolutionAppliedActivityLog({
+        currentUserId,
+        workspaceId,
+        pullRequestId: session.pull_request_id,
+        reviewSessionId: session.id,
+        resolvedFileCount: resolvedFiles.length,
+        headShaAfter: applyResult.headShaAfter,
+        commitSha: applyResult.commitSha,
+        conflictStatusAfter: refreshedConflict.conflictStatus
+      });
+    let successorRevision: SuccessorRevisionResult = {
+      created: false,
+      jobId: null
+    };
     let successorRevisionCreated = true;
     try {
-      await this.createSuccessorReviewRevisionAfterConflictApply({
+      successorRevision = await this.createSuccessorReviewRevisionAfterConflictApply({
         currentUserId,
         workspaceId,
         previousSession: session,
         headShaAfter: applyResult.headShaAfter,
         conflictStatus: refreshedConflict.conflictStatus,
-        conflictCheckedAt: refreshedConflict.checkedAt
+        conflictCheckedAt: refreshedConflict.checkedAt,
+        conflictActivityLog
       });
+      if (successorRevision.jobId) {
+        await this.analysisJobPublisher.publishCreatedJob(successorRevision.jobId);
+      }
     } catch {
       successorRevisionCreated = false;
       this.logger.warn(
@@ -2534,15 +2595,21 @@ export class PrReviewService {
       );
     }
 
-    const appliedFileByPath = new Map(
-      applyResult.files.map((file) => [file.filePath, file])
-    );
-
     void this.clearConflictDraftsAfterApply({
       workspaceId,
       session,
       reviewFileIds: resolvedFiles.map(file => file.reviewFileId)
     });
+
+    if (!successorRevision.created) {
+      await this.database.transaction(transaction =>
+        this.activityLogService.append(transaction, conflictActivityLog)
+      );
+    }
+
+    const appliedFileByPath = new Map(
+      applyResult.files.map((file) => [file.filePath, file])
+    );
 
     return {
       reviewSessionId: session.id,
@@ -2662,6 +2729,21 @@ export class PrReviewService {
       );
     }
 
+    const conflictActivityLog =
+      buildPrReviewConflictResolutionAppliedActivityLog({
+        currentUserId,
+        workspaceId,
+        pullRequestId: file.pull_request_id,
+        reviewSessionId: file.session_id,
+        resolvedFileCount: 1,
+        headShaAfter: applyResult.headShaAfter,
+        commitSha: applyResult.commitSha,
+        conflictStatusAfter: refreshedConflict.conflictStatus
+      });
+    let successorRevision: SuccessorRevisionResult = {
+      created: false,
+      jobId: null
+    };
     let successorRevisionCreated = true;
     try {
       const previousSession = await this.findReviewSession(
@@ -2671,14 +2753,18 @@ export class PrReviewService {
       if (!previousSession) {
         throw notFound("Review session not found");
       }
-      await this.createSuccessorReviewRevisionAfterConflictApply({
+      successorRevision = await this.createSuccessorReviewRevisionAfterConflictApply({
         currentUserId,
         workspaceId,
         previousSession,
         headShaAfter: applyResult.headShaAfter,
         conflictStatus: refreshedConflict.conflictStatus,
-        conflictCheckedAt: refreshedConflict.checkedAt
+        conflictCheckedAt: refreshedConflict.checkedAt,
+        conflictActivityLog
       });
+      if (successorRevision.jobId) {
+        await this.analysisJobPublisher.publishCreatedJob(successorRevision.jobId);
+      }
     } catch {
       successorRevisionCreated = false;
       this.logger.warn(
@@ -2691,6 +2777,12 @@ export class PrReviewService {
       session,
       reviewFileIds: [file.id]
     });
+
+    if (!successorRevision.created) {
+      await this.database.transaction(transaction =>
+        this.activityLogService.append(transaction, conflictActivityLog)
+      );
+    }
 
     return {
       reviewFileId: file.id,
@@ -2776,22 +2868,34 @@ export class PrReviewService {
         }
       );
 
-    try {
-      await this.database.execute(
+    await this.database.transaction(async (transaction) => {
+      const completedRoom = await transaction.queryOne<{ id: string }>(
         `
           UPDATE pr_review_rooms
           SET status = 'completed',
               completion_reason = 'merged',
               completed_at = COALESCE($2::timestamptz, now())
           WHERE id = $1
+          RETURNING id
         `,
         [session.room_id, mergeResult.mergedAt]
       );
-    } catch {
-      this.logger.warn(
-        `GitHub pull request was merged but review room completion failed for ${session.room_id}`
+      if (!completedRoom) {
+        throw conflictError("PR Review room is no longer active");
+      }
+
+      await this.activityLogService.append(
+        transaction,
+        buildPrReviewPullRequestMergedActivityLog({
+          currentUserId,
+          workspaceId,
+          pullRequestId: session.pull_request_id,
+          reviewSessionId: session.id,
+          mergeMethod: mergeResult.mergeMethod,
+          mergeCommitSha: mergeResult.mergeCommitSha
+        })
       );
-    }
+    });
 
     return {
       reviewSessionId: session.id,
@@ -2869,7 +2973,23 @@ export class PrReviewService {
       );
     } catch (error) {
       const errorMessage = this.getSafeSubmissionErrorMessage(error);
-      await this.updateReviewSubmissionFailure(attempt.id, errorMessage);
+      await this.database.transaction(async (transaction) => {
+        await this.updateReviewSubmissionFailure(
+          transaction,
+          attempt.id,
+          errorMessage
+        );
+        await this.activityLogService.append(
+          transaction,
+          buildReviewSubmissionTerminalActivityLog({
+            currentUserId,
+            workspaceId,
+            reviewSessionId: session.id,
+            submissionId: attempt.id,
+            terminal: "failed"
+          })
+        );
+      });
 
       if (error instanceof ApiError) {
         throw error;
@@ -2890,6 +3010,16 @@ export class PrReviewService {
           }
         );
         await this.markReviewSessionSubmitted(transaction, session.id);
+        await this.activityLogService.append(
+          transaction,
+          buildReviewSubmissionTerminalActivityLog({
+            currentUserId,
+            workspaceId,
+            reviewSessionId: session.id,
+            submissionId: attempt.id,
+            terminal: "submitted"
+          })
+        );
         return updatedSubmission;
       }
     );
@@ -2995,7 +3125,8 @@ export class PrReviewService {
     headShaAfter: string;
     conflictStatus: PrReviewConflictStatus;
     conflictCheckedAt: string | null;
-  }): Promise<void> {
+    conflictActivityLog: ActivityLogInput;
+  }): Promise<SuccessorRevisionResult> {
     if (input.previousSession.head_sha === input.headShaAfter) {
       throw conflictError("Successor review revision head SHA is stale");
     }
@@ -3009,7 +3140,7 @@ export class PrReviewService {
       if (existing.room_id !== input.previousSession.room_id) {
         throw conflictError("Successor review revision room does not match");
       }
-      return;
+      return { created: false, jobId: null };
     }
 
     try {
@@ -3027,12 +3158,24 @@ export class PrReviewService {
           workspaceId: input.workspaceId,
           headSha: input.headShaAfter
         });
+        await this.activityLogService.append(
+          transaction,
+          buildPrReviewSessionCreatedActivityLog({
+            currentUserId: input.currentUserId,
+            workspaceId: input.workspaceId,
+            pullRequestId: input.previousSession.pull_request_id,
+            reviewSessionId: session.id
+          })
+        );
+        await this.activityLogService.append(
+          transaction,
+          input.conflictActivityLog
+        );
         return { session, jobId: job.id };
       });
-      await this.analysisJobPublisher.publishCreatedJob(created.jobId);
-      return;
+      return { created: true, jobId: created.jobId };
     } catch (error) {
-      if (!this.isUniqueConstraintViolation(error)) {
+      if (!this.isReviewSessionCreationUniqueConstraintViolation(error)) {
         throw error;
       }
     }
@@ -3045,6 +3188,7 @@ export class PrReviewService {
     if (!concurrent || concurrent.room_id !== input.previousSession.room_id) {
       throw conflictError("Successor review revision head SHA is stale");
     }
+    return { created: false, jobId: null };
   }
 
   private async refreshPendingReviewSessionConflictStatus<
@@ -3677,12 +3821,17 @@ export class PrReviewService {
     });
   }
 
-  private isUniqueConstraintViolation(error: unknown): boolean {
+  private isReviewSessionCreationUniqueConstraintViolation(error: unknown): boolean {
     if (typeof error !== "object" || error === null) {
       return false;
     }
 
-    return (error as { code?: unknown }).code === "23505";
+    const candidate = error as { code?: unknown; constraint?: unknown };
+    return (
+      candidate.code === "23505" &&
+      typeof candidate.constraint === "string" &&
+      PR_REVIEW_SESSION_CREATION_UNIQUE_CONSTRAINTS.has(candidate.constraint)
+    );
   }
 
   private async findAnalysisJobForHandoff(
@@ -4778,10 +4927,11 @@ export class PrReviewService {
   }
 
   private async updateReviewSubmissionFailure(
+    transaction: DatabaseTransaction,
     submissionId: string,
     errorMessage: string
   ): Promise<void> {
-    const submission = await this.database.queryOne<{ id: string }>(
+    const submission = await transaction.queryOne<{ id: string }>(
       `
         UPDATE review_submissions
         SET github_submit_status = 'failed',
@@ -4935,7 +5085,7 @@ export class PrReviewService {
       status: PrReviewDecisionStatus;
       comment: string | null;
     }
-  ): Promise<void> {
+  ): Promise<string> {
     const decision = await transaction.queryOne<{ id: string }>(
       `
         INSERT INTO file_review_decisions (
@@ -4953,6 +5103,8 @@ export class PrReviewService {
     if (!decision) {
       throw badRequest("Review decision could not be saved");
     }
+
+    return decision.id;
   }
 
   private async syncReviewSessionReviewProgress(

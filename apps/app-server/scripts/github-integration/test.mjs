@@ -192,6 +192,8 @@ await import("./board-invalidation.test.mjs");
 await import("./oauth.test.mjs");
 await import("./oauth-connection.test.mjs");
 await import("./installation.test.mjs");
+await import("./project-v2-reconnect-identity-migration.test.mjs");
+await import("./project-v2-reconnect-identity-postgres.test.mjs");
 await import("./github-app-client.test.mjs");
 await import("./issue-assignees.test.mjs");
 await import("./callback-redirect.test.mjs");

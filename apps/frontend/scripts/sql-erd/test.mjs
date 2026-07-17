@@ -2545,6 +2545,30 @@ assert.deepEqual(selectedRelationFromCanvas, {
   type: "relation",
   relationId: "relation.orders.user_id.users.id"
 });
+const runtimeInteractiveSelectionEditor = {
+  selectedShapeIds: ["shape:sqltoerd-note-existing"],
+  getShapeAtPoint() {
+    return {
+      id: "shape:sqltoerd-frame-next",
+      type: "sqltoerd_frame",
+      props: { frameId: "frame.next" }
+    };
+  },
+  select(shapeId) {
+    this.selectedShapeIds = [shapeId];
+  }
+};
+
+assert.equal(
+  canvasSelectionRuntime.selectSqlErdCanvasShapeAtPoint(
+    runtimeInteractiveSelectionEditor,
+    { x: 120, y: 80 }
+  ),
+  true
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-frame-next"
+]);
 assert.deepEqual(
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
     {
@@ -4578,6 +4602,56 @@ assert.deepEqual(
   selectedPostgresRelationRanges.map((range) =>
     postgresSourceText.slice(range.from, range.to)
   ),
+  [
+    "user_id",
+    "id",
+    "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+  ]
+);
+const postgresAlterTableSourceText = `CREATE TABLE users (
+  id BIGSERIAL PRIMARY KEY
+);
+
+CREATE TABLE orders (
+  id BIGINT PRIMARY KEY,
+  user_id BIGINT NOT NULL
+);
+
+ALTER TABLE orders ADD CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id);`;
+const postgresAlterTableParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: postgresAlterTableSourceText
+});
+
+assert.equal(postgresAlterTableParseResult.ok, true);
+const postgresAlterTableRelation =
+  postgresAlterTableParseResult.modelJson.schema.relations[0];
+const postgresAlterTableRelationRanges =
+  postgresAlterTableParseResult.sourceMap.relationsById[
+    postgresAlterTableRelation.id
+  ];
+
+assert.ok(postgresAlterTableRelationRanges);
+assert.equal(
+  postgresAlterTableSourceText.slice(
+    postgresAlterTableRelationRanges.constraintRange.from,
+    postgresAlterTableRelationRanges.constraintRange.to
+  ),
+  "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+);
+assert.deepEqual(
+  sqlSourceMapRuntime
+    .getSelectedSqlErdRelationSourceRanges({
+      selection: {
+        type: "relation",
+        relationId: postgresAlterTableRelation.id
+      },
+      sourceMap: postgresAlterTableParseResult.sourceMap,
+      sourceText: postgresAlterTableSourceText
+    })
+    .map((range) =>
+      postgresAlterTableSourceText.slice(range.from, range.to)
+    ),
   [
     "user_id",
     "id",
@@ -6801,6 +6875,7 @@ assert.doesNotMatch(canvasSurface, /onLayoutChange/);
 assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
 assert.match(canvasSurface, /getSqlErdSelectionFromSelectedShapes/);
+assert.match(canvasSurface, /selectSqlErdCanvasShapeAtPoint/);
 assert.match(canvasSurface, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(canvasSurface, /editor\.getSelectedShapes/);
 assert.match(canvasSurface, /SQLTOERD_TABLE_SHAPE_TYPE/);

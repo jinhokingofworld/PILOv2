@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const { BoardReadQueries } = require("../../dist/modules/board/queries/board-read.queries.js");
+const { BoardIssueCreateQueries } = require("../../dist/modules/board/queries/board-issue-create.queries.js");
 const {
   BoardIssueReadService
 } = require("../../dist/modules/board/board-issue-read.service.js");
@@ -62,7 +63,11 @@ class FakeWorkspaceService {
 function createSubject(database = new FakeDatabase()) {
   const workspaceService = new FakeWorkspaceService();
   const readQueries = new BoardReadQueries(database);
-  const readService = new BoardReadService(readQueries, workspaceService);
+  const readService = new BoardReadService(
+    readQueries,
+    workspaceService,
+    new BoardIssueCreateQueries(database)
+  );
   const issueReadService = new BoardIssueReadService(
     readQueries,
     workspaceService

@@ -1,6 +1,6 @@
 {
   "version": "agent-planner-korean:v1",
-  "toolSchemaVersion": "agent-tools:v3",
+  "toolSchemaVersion": "agent-tools:v4",
   "tools": [
     {
       "name": "list_calendar_events",
@@ -30,15 +30,14 @@
     },
     {
       "name": "create_calendar_event",
-      "description": "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다. 반복 일정은 지원하지 않습니다. 여러 날짜 일정은 종일 여부를 명시하거나 시간을 제공해야 합니다. 종료 시각이 없으면 생략하고, 시작·종료 시각이 같거나 역전되면 추가 정보를 요청합니다.",
+      "description": "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다. 종료 날짜가 없으면 시작 날짜와 같게, 시간 일정의 종료 시각이 없으면 시작 시각 1시간 뒤로 정규화합니다. 종일 일정에는 시간을 넣지 않습니다. 반복 일정은 지원하지 않습니다.",
       "riskLevel": "medium",
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
         "required": [
           "title",
-          "startDate",
-          "endDate"
+          "startDate"
         ],
         "additionalProperties": false,
         "properties": {
@@ -376,7 +375,7 @@
     },
     {
       "name": "search_meeting_transcript",
-      "description": "권한이 있는 MeetingReport transcript에서 질문과 의미적으로 관련된 발언을 검색하고 근거 기반 답변을 생성합니다.",
+      "description": "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 질문과 의미적으로 관련된 근거를 검색하고, 출처 유형을 구분한 근거 기반 답변을 생성합니다.",
       "riskLevel": "low",
       "executionMode": "auto",
       "inputSchema": {
@@ -843,6 +842,340 @@
             "minLength": 1,
             "maxLength": 160,
             "description": "owner/repository 형식의 정확한 GitHub repository 이름"
+          }
+        }
+      }
+    },
+    {
+      "name": "generate_sql_erd",
+      "description": "자연어 요구사항을 구조화한 SqlErdSchemaSpecV1으로 SQL DDL과 ERD를 생성합니다. 완성된 DDL 문자열이 아니라 전체 schemaSpec을 전달해야 하며, 실제 데이터베이스에는 실행하지 않습니다.",
+      "riskLevel": "medium",
+      "executionMode": "contextual",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "version",
+          "title",
+          "requestedDialect",
+          "tables",
+          "relations",
+          "unsupportedFeatures"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "const": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "requestedDialect": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "postgresql",
+              "mysql",
+              "sqlite",
+              null
+            ]
+          },
+          "tables": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/$defs/table"
+            }
+          },
+          "relations": {
+            "type": "array",
+            "maxItems": 300,
+            "items": {
+              "$ref": "#/$defs/relation"
+            }
+          },
+          "unsupportedFeatures": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "check_constraints",
+                "comments",
+                "database_execution",
+                "enums",
+                "indexes",
+                "partitions",
+                "permissions_rls",
+                "raw_default_expressions",
+                "stored_procedures",
+                "triggers",
+                "views"
+              ]
+            }
+          }
+        },
+        "$defs": {
+          "dataType": {
+            "type": "object",
+            "required": [
+              "kind",
+              "length",
+              "precision",
+              "scale"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "bigint",
+                  "binary",
+                  "boolean",
+                  "char",
+                  "date",
+                  "decimal",
+                  "double",
+                  "integer",
+                  "json",
+                  "real",
+                  "smallint",
+                  "text",
+                  "time",
+                  "timestamp",
+                  "timestamp_tz",
+                  "uuid",
+                  "varchar"
+                ]
+              },
+              "length": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "precision": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "scale": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            }
+          },
+          "defaultValue": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "required": [
+              "kind",
+              "value"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "current_date",
+                  "current_timestamp",
+                  "literal"
+                ]
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          },
+          "column": {
+            "type": "object",
+            "required": [
+              "key",
+              "name",
+              "dataType",
+              "nullable",
+              "autoIncrement",
+              "defaultValue"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "dataType": {
+                "$ref": "#/$defs/dataType"
+              },
+              "nullable": {
+                "type": "boolean"
+              },
+              "autoIncrement": {
+                "type": "boolean"
+              },
+              "defaultValue": {
+                "$ref": "#/$defs/defaultValue"
+              }
+            }
+          },
+          "keyConstraint": {
+            "type": "object",
+            "required": [
+              "name",
+              "columnKeys"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256
+              },
+              "columnKeys": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            }
+          },
+          "table": {
+            "type": "object",
+            "required": [
+              "key",
+              "name",
+              "schemaName",
+              "columns",
+              "primaryKey",
+              "uniqueConstraints"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "schemaName": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256
+              },
+              "columns": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 200,
+                "items": {
+                  "$ref": "#/$defs/column"
+                }
+              },
+              "primaryKey": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/keyConstraint"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "uniqueConstraints": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "$ref": "#/$defs/keyConstraint"
+                }
+              }
+            }
+          },
+          "relation": {
+            "type": "object",
+            "required": [
+              "key",
+              "name",
+              "fromTableKey",
+              "fromColumnKeys",
+              "toTableKey",
+              "toColumnKeys"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 256
+              },
+              "fromTableKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "fromColumnKeys": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "toTableKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "toColumnKeys": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            }
           }
         }
       }
@@ -1332,6 +1665,46 @@
     {
       "id": "unsupported_calendar_delete",
       "prompt": "일정 42번을 삭제해줘",
+      "expected": {
+        "status": "unsupported"
+      }
+    },
+    {
+      "id": "sql_erd_generate",
+      "prompt": "사용자와 주문, 주문 항목이 있는 쇼핑몰 ERD를 PostgreSQL로 만들어줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "generate_sql_erd",
+        "inputContains": {
+          "version": 1,
+          "requestedDialect": "postgresql"
+        },
+        "requiresConfirmation": null
+      }
+    },
+    {
+      "id": "sql_erd_generate_ddl",
+      "prompt": "도서 대여 서비스의 테이블 관계를 설계하고 MySQL DDL과 ERD를 생성해줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "generate_sql_erd",
+        "inputContains": {
+          "version": 1,
+          "requestedDialect": "mysql"
+        },
+        "requiresConfirmation": null
+      }
+    },
+    {
+      "id": "sql_erd_missing_entities",
+      "prompt": "ERD를 하나 만들어줘",
+      "expected": {
+        "status": "needs_clarification"
+      }
+    },
+    {
+      "id": "sql_erd_database_execution",
+      "prompt": "이 SQL을 운영 데이터베이스에 바로 실행해줘",
       "expected": {
         "status": "unsupported"
       }

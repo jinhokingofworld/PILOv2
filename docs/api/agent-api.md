@@ -88,10 +88,17 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 받지 않는다.
 
 `search_meeting_transcript`는 read-only tool이지만 일반 formatter로 즉시 완료하지 않는다. App Server가
-현재 사용자 권한으로 query embedding과 pgvector 검색을 수행하고, chunk ID만 가진
-`agent_grounded_answer_outbox`를 저장한다. AI Worker는 내부 인증 endpoint에서만 bounded transcript
-excerpt를 일회성으로 받아 두 번째 LLM 호출을 수행한다. excerpt와 embedding은 Agent run/step/log,
-outbox, SQS payload에 저장하지 않는다. final citation은 outbox의 source ID 부분집합만 허용한다.
+현재 사용자 권한으로 query embedding과 pgvector 검색을 수행한다. 검색 대상은 current transcript chunk와
+`meeting_report_activity_evidence`의 안전한 snapshot(`occurredAt`, `action`, `summary`) chunk다. raw
+`activity_logs.metadata`, 원본 도메인 객체, transcript 전문은 RAG table·outbox·SQS·Agent run/step/log에
+저장하지 않는다. App Server는 namespaced source ID(`transcript:<uuid>`, `activity:<uuid>`)만 가진
+`agent_grounded_answer_outbox`를 저장한다. AI Worker는 내부 인증 endpoint에서만 bounded evidence excerpt를
+일회성으로 받아 두 번째 LLM 호출을 수행한다. 직접 decision/action item에 연결된 Activity evidence에는 제한된
+relevance boost만 적용한다. 두 source type이 모두 있으면 transcript와 Activity를 각각 최소 한 건씩 보존하고,
+후보 chunk 사이 cosine distance가 0.12 이하인 경우에는 의미 중복 group 안에서 source type별 최상위 후보만
+남긴다. 따라서 직접 연결된 Activity가 많아도 transcript가 전부 밀려나지 않으며, 같은 근거를 여러 chunk가
+차지하지 않는다. final citation은 outbox source ID의 부분집합만 허용하며, answer step에는 source type과 안전한
+시간/summary metadata만 저장해 UI가 구분 표시한다.
 
 ## 실행 모델
 
@@ -110,8 +117,9 @@ outbox, SQS payload에 저장하지 않는다. final citation은 outbox의 sourc
   confirmation, clarification 중 하나를 결정한다. AI Worker는 이 모드의 `requiresConfirmation`을
   `null`로 기록한다.
 - `search_meeting_transcript`는 `query`와 선택 `reportId`만 받고, Workspace 전체의 owner 또는 해당
-  회의의 현재·과거 참여자가 접근 가능한 current transcript chunk만 상위 5개 검색한다. 결과가 없으면
-  LLM answer phase를 호출하지 않는다.
+  회의의 현재·과거 참여자가 접근 가능한 current transcript chunk와 Activity evidence chunk를 합쳐 최대 5개
+  검색한다. 두 source type이 모두 있으면 최소 한 건씩 포함하며, 의미 중복 chunk는 source type별 대표만
+  포함한다. 결과가 없으면 LLM answer phase를 호출하지 않는다.
 - write 요청은 `waiting_confirmation` 상태의 run과 pending confirmation을 만든다.
 - 사용자가 승인하면 서버는 confirmation에 저장된 plan만 실행한다.
 - 승인 transaction은 `running` tool step을 execution claim으로 함께 만든다. 승인 직후 process가
@@ -232,6 +240,25 @@ outbox, SQS payload에 저장하지 않는다. final citation은 outbox의 sourc
 
 `inputSummary`와 `outputSummary`에는 긴 원문, transcript, provider raw, token, secret을
 포함하지 않는다.
+
+### AgentResourceRef
+
+tool step의 `resourceRefs`는 다음 bounded object 배열이다.
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `domain` | string | resource 소유 도메인 |
+| `resourceType` | string | 도메인 안의 resource 종류 |
+| `resourceId` | string | 서버가 검증한 resource 식별자 |
+| `label` | string \| undefined | 사용자 표시용 짧은 이름 |
+| `url` | string \| undefined | 앱 내부에서 검증 후 사용할 상대 경로 |
+| `status` | string \| undefined | 생성·수정 등 bounded 결과 상태 |
+| `metadata` | object \| undefined | 화면 표시에 필요한 bounded metadata |
+
+클라이언트는 `url`을 그대로 신뢰하지 않는다. SQLtoERD session 링크는 run과 tool step이
+모두 `completed`일 때만 표시하고, `/sql-erd/session?sessionId={resourceId}`와 정확히
+일치하는 same-origin 상대 경로만 허용한다. 외부 origin, protocol-relative URL, 추가
+query/hash, 중복·불일치 session ID는 거부한다. 링크 표시는 자동 navigation을 발생시키지 않는다.
 
 ### AgentConfirmation
 
@@ -748,11 +775,30 @@ Status code: `200 OK`
 | `get_board_briefing` | `low` | 가능 | Board 상세, column, filter option의 사실 기반 요약 |
 | `assign_board_issue_safely` | `medium` | 불가 | `GET .../assignee-options`, Agent 전용 내부 add/remove Board service |
 | `diagnose_board_freshness` | `low` | 가능 | active source, Board/issue/PR cache freshness와 Unmapped 진단 |
+| `generate_sql_erd` | `medium` | 상황별 | `SqlErdSchemaSpecV1`을 검증해 새 session을 만들거나 현재 operations_v1 session의 schema를 교체 |
 
 > `assign_board_issue_safely`는 공개 assignee option 조회 계약을 사용하지만, 실행은 내부 add/remove
 > Board service 경로를 사용한다. 별도의 공개 endpoint는 추가하지 않는다.
 
 ## 도메인별 실행 규칙
+
+### SQLtoERD
+
+- `generate_sql_erd`는 완성된 DDL 문자열이 아니라 전체 `SqlErdSchemaSpecV1` object만
+  planner input으로 받는다. App Server가 같은 schema를 다시 검증하고 DDL·modelJson·layoutJson을
+  결정적으로 생성하며 실제 데이터베이스에는 실행하지 않는다.
+- planner input에는 `targetMode`, `sessionId`, `workspaceId`, `userId`, `currentUserId`를 넣지 않는다.
+  현재 사용자·Workspace·run은 `AgentToolContext`에서만 주입한다.
+- SQLtoERD request context가 없으면 새 session을 즉시 생성한다. context가 있으면 App Server가
+  session 접근과 write protocol을 다시 검증한다. `snapshot` session에서는 `new_session`만 제공하고,
+  `operations_v1` session에서는 `replace_current`도 제공한다. 클라이언트는 선택한 `choiceId`만 보내며
+  저장된 schemaSpec과 session ID는 서버가 복원한다.
+- 결과 step에는 sourceText, DDL, modelJson, layoutJson을 저장하지 않는다. `outputSummary`는 action,
+  title, dialect, table/relation count, warning code만 포함한다.
+- 생성·교체된 session은 `domain=sqltoerd`, `resourceType=session` resource ref 하나로 반환한다.
+  Frontend는 검증된 링크를 `ERD 및 DDL 열기`로 표시하고 자동으로 이동하지 않는다.
+- 지원 범위를 벗어난 schema 기능은 `unsupportedFeatures`에 명시한다. DB 실행·배포만 요구하는
+  요청은 `unsupported`이며, 요구 entity/table 정보가 없으면 먼저 clarification을 요청한다.
 
 ### Calendar
 
@@ -771,7 +817,7 @@ Status code: `200 OK`
   `이번 주말`은 현재 날짜에서 아직 완전히 지나지 않은 가장 가까운 토요일·일요일이며, 토요일에는
   당일을 포함하고 일요일에는 다음 주말을 사용한다. `다음 주 월요일`은 바로 다가오는 월요일,
   `다다음 주 화요일`은 바로 다가오는 화요일보다 한 주 뒤의 화요일로 해석한다.
-- 시간 지정 일정에서 `endTime`이 없으면 Calendar API의 `startTime + 1시간` 정규화를 따른다.
+- Calendar 생성에서 `endDate`가 없으면 `startDate`와 같은 날짜로, 시간 지정 일정에서 `endTime`이 없으면 Calendar API의 `startTime + 1시간`으로 정규화해 confirmation과 실행에 같은 값을 사용한다. 종일 일정에는 시간을 넣지 않는다.
 - `list_calendar_events`는 날짜 범위만 지원한다. 제목·키워드·참석자·현재 시각 조건을 요청하면
   해당 조건을 무시하고 조회하지 않으며, 현재 Agent 범위에서 지원하지 않는다고 안내한다.
 - 시간 지정 일정의 `endTime`이 `startTime`과 같거나 같은 날짜에서 더 이르면 confirmation을 만들지 않고
@@ -811,8 +857,8 @@ Status code: `200 OK`
 - 특정 MeetingReport 상세/요약은 UUID `reportId`가 필요하다. ID가 없으면 같은 run의 후속 planner
   turn에서 목록 조회 결과를 사용하거나 사용자에게 필요한 선택만 요청한다.
 - 상세 조회의 `transcriptText`는 답변 생성에 사용할 수 있지만 Agent run/step/confirmation에는 전문 저장하지 않는다.
-- `search_meeting_transcript`는 `query`와 선택적 `reportId`를 받는다. transcript 원문을
-  Agent run/step에 저장하지 않고, 권한 있는 source ID만 grounded-answer 경로에 전달한다.
+- `search_meeting_transcript`는 `query`와 선택적 `reportId`를 받는다. transcript 원문과 raw Activity Log를
+  Agent run/step에 저장하지 않고, 권한 있는 namespaced source ID만 grounded-answer 경로에 전달한다.
 - 실패한 회의록 재생성은 `regenerate_meeting_report` confirmation 뒤 요청할 수 있다.
 
 ### Board

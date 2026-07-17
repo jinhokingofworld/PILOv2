@@ -4,6 +4,7 @@ import { AppService } from "./app.service";
 import { AgentModule } from "./modules/agent/agent.module";
 import { BoardModule } from "./modules/board/board.module";
 import { CalendarModule } from "./modules/calendar/calendar.module";
+import { ChatModule } from "./modules/chat/chat.module";
 import { CanvasModule } from "./modules/canvas/canvas.module";
 import { DriveModule } from "./modules/drive/drive.module";
 import { GithubIntegrationModule } from "./modules/github-integration/github-integration.module";
@@ -29,6 +30,7 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
     BoardModule,
     MeetingModule,
     CalendarModule,
+    ChatModule,
     CanvasModule,
     DriveModule,
     SqlErdModule

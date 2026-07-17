@@ -534,6 +534,21 @@ class SmokeCalendarService {
     return createSmokeEvent(body);
   }
 
+  normalizeCreateEventInput(body) {
+    const startDate = body.startDate;
+    const isAllDay = body.isAllDay ?? !body.startTime;
+    return {
+      title: body.title,
+      description: body.description ?? null,
+      color: body.color ?? "#3B82F6",
+      isAllDay,
+      startDate,
+      endDate: body.endDate ?? startDate,
+      startTime: isAllDay ? null : body.startTime ?? null,
+      endTime: isAllDay ? null : body.endTime ?? "16:00"
+    };
+  }
+
   async updateEvent(currentUserId, workspaceId, eventId, body) {
     this.calls.push({
       method: "updateEvent",

@@ -12,6 +12,7 @@ const { MeetingAgentToolsService } = require(
 const { MeetingActionItemDeliveryService } = require(
   "../../dist/modules/meeting/meeting-action-item-delivery.service.js"
 );
+const { HttpException, HttpStatus } = require("@nestjs/common");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
@@ -106,8 +107,8 @@ assert.match(
 );
 assert.match(
   meetingActionItemDeliverySource,
-  /await this\.validateDeliveryDraft\([\s\S]*?INSERT INTO meeting_report_action_item_deliveries/,
-  "A user-invalid draft must be validated before a delivery row is created"
+  /await this\.normalizeDeliveryDraft\([\s\S]*?INSERT INTO meeting_report_action_item_deliveries/,
+  "A user-invalid draft must be normalized and validated before a delivery row is created"
 );
 assert.match(
   meetingActionItemDeliverySource,
@@ -118,6 +119,11 @@ assert.doesNotMatch(
   meetingActionItemDeliverySource,
   /Promise\.all\([\s\S]*?listBoardColumns/,
   "Delivery options must not issue one Board-column query per Board"
+);
+assert.match(
+  meetingActionItemDeliverySource,
+  /GITHUB_PROJECT_OAUTH_RECONNECT_REQUIRED/,
+  "Delivery failures must expose a safe reconnection action for ProjectV2 OAuth"
 );
 assert.match(
   meetingServiceSource,
@@ -895,7 +901,7 @@ class FakeActionItemDeliveryDatabase {
       assert.equal(values[3], this.delivery.claim_token);
       assert.match(
         text,
-        /target_resource_id = COALESCE\(\$2::text, \$3::text\)/,
+        /target_resource_id = COALESCE\(\$2::bigint::text, \$3::bigint::text\)/,
         "Delivery completion must store the immutable target ID snapshot"
       );
       assert.equal(values[1], null);
@@ -995,12 +1001,32 @@ class FakeInvalidCalendarDeliveryDatabase {
 }
 
 {
+  const service = new MeetingActionItemDeliveryService({}, {}, {}, {});
+  const error = new HttpException(
+    {
+      success: false,
+      error: {
+        code: "BAD_REQUEST",
+        message:
+          "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes"
+      }
+    },
+    HttpStatus.BAD_REQUEST
+  );
+
+  assert.equal(
+    service.toSafeErrorCode(error),
+    "GITHUB_PROJECT_OAUTH_RECONNECT_REQUIRED"
+  );
+}
+
+{
   const database = new FakeInvalidCalendarDeliveryDatabase();
   const service = new MeetingActionItemDeliveryService(
     database,
     { async assertWorkspaceAccess() {} },
     {
-      validateCreateEventInput(input) {
+      normalizeCreateEventInput(input) {
         assert.equal(input.startDate, "2026-07-09");
         assert.equal(input.endDate, "2026-07-08");
         const error = new Error("endDate must be on or after startDate");

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Inbox, Loader2 } from "lucide-react";
+import { Bell, Inbox, Loader2, MessageCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +24,14 @@ import {
   rejectCurrentUserWorkspaceInvitation,
   type CurrentUserWorkspaceInvitation
 } from "@/features/auth/api/client";
+import { useChatRuntime } from "@/features/chat/realtime/chat-runtime-provider";
+import {
+  formatChatNotificationBadgeCount,
+  formatChatNotificationDateTime,
+  formatChatNotificationTime,
+  getNotificationUnreadCount,
+  navigateToChatMention
+} from "@/features/chat/utils/chat-notification";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +44,7 @@ type InvitationAction = "accepting" | "rejecting" | null;
 export function HeaderNotificationDropdown() {
   const router = useRouter();
   const authSession = useAuthSession();
+  const { markMentionRead, mentions, summary } = useChatRuntime();
   const meetingRuntime = useMeetingRuntime();
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [workspaceInvitations, setWorkspaceInvitations] = useState<
@@ -55,13 +64,17 @@ export function HeaderNotificationDropdown() {
     string | null
   >(null);
   const [isLoadingInvitations, setIsLoadingInvitations] = useState(false);
-  const unreadCount = isReadStateReady
+  const invitationUnreadCount = isReadStateReady
     ? workspaceInvitations.filter(
         (invitation) => !readInvitationIds.has(invitation.id)
       ).length
     : 0;
+  const unreadCount = getNotificationUnreadCount({
+    invitationUnread: invitationUnreadCount,
+    mentionUnread: summary.mentionUnreadCount
+  });
   const notificationLabel =
-    unreadCount > 0 ? `읽지 않은 워크스페이스 초대 ${unreadCount}개` : "알림";
+    unreadCount > 0 ? `읽지 않은 알림 ${unreadCount}개` : "알림";
 
   useEffect(() => {
     if (!authSession) {
@@ -251,7 +264,7 @@ export function HeaderNotificationDropdown() {
               aria-hidden="true"
               className="absolute -right-1 -top-1 inline-flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-4 text-destructive-foreground"
             >
-              {unreadCount > 99 ? "99+" : unreadCount}
+              {formatChatNotificationBadgeCount(unreadCount)}
             </span>
           ) : null}
         </PopoverTrigger>
@@ -267,7 +280,7 @@ export function HeaderNotificationDropdown() {
             <h2 className="font-semibold">알림</h2>
             <p className="text-xs text-muted-foreground">
               {unreadCount > 0
-                ? `읽지 않은 워크스페이스 초대 ${unreadCount}개`
+                ? `읽지 않은 알림 ${unreadCount}개`
                 : "새 알림이 없습니다"}
             </p>
           </div>
@@ -316,6 +329,64 @@ export function HeaderNotificationDropdown() {
               );
             })}
 
+            {mentions.map((mention) => {
+              const isUnread = mention.readAt === null;
+              const actorName =
+                mention.actor?.displayName ?? "알 수 없는 사용자";
+
+              return (
+                <button
+                  className={cn(
+                    "flex w-full items-start gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-muted/50",
+                    isUnread && "bg-primary/5"
+                  )}
+                  key={mention.id}
+                  onClick={() =>
+                    navigateToChatMention({
+                      closePopover: () => setIsPopoverOpen(false),
+                      markMentionRead,
+                      mentionId: mention.id,
+                      messageId: mention.messageId,
+                      navigate: (href) => router.push(href)
+                    })
+                  }
+                  type="button"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "mt-1.5 size-2 shrink-0 rounded-full",
+                      isUnread ? "bg-destructive" : "bg-transparent"
+                    )}
+                  />
+                  <MessageCircle
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {actorName}님의 채팅 멘션
+                    </span>
+                    <span className="mt-0.5 line-clamp-2 block text-xs text-muted-foreground">
+                      {mention.excerpt}
+                    </span>
+                    <span className="mt-1 flex flex-wrap items-center gap-x-1 text-[11px] text-muted-foreground">
+                      <span>{mention.workspaceName}</span>
+                      <span aria-hidden="true">·</span>
+                      <time
+                        dateTime={mention.createdAt}
+                        title={formatChatNotificationDateTime(
+                          mention.createdAt
+                        )}
+                      >
+                        {formatChatNotificationTime(mention.createdAt)}
+                      </time>
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+
             {invitationNotice ? (
               <p className="border-b px-4 py-2 text-xs text-muted-foreground">
                 {invitationNotice}
@@ -327,7 +398,9 @@ export function HeaderNotificationDropdown() {
               </p>
             ) : null}
 
-            {workspaceInvitations.length === 0 && !isLoadingInvitations ? (
+            {workspaceInvitations.length === 0 &&
+            mentions.length === 0 &&
+            !isLoadingInvitations ? (
               <div className="flex flex-col items-center gap-2 px-4 py-10 text-center text-muted-foreground">
                 <Inbox className="size-7" />
                 <p className="text-sm">표시할 알림이 없습니다.</p>

@@ -14,6 +14,9 @@ const baseInput = {
   comment: "확인이 필요합니다.",
   expectedDecisionVersion: 3
 };
+const workspaceId = "11111111-1111-4111-8111-111111111111";
+const reviewFileId = "22222222-2222-4222-8222-222222222222";
+const currentUserId = "44444444-4444-4444-8444-444444444444";
 
 function currentDecision(overrides = {}) {
   return {
@@ -84,6 +87,103 @@ function currentDecision(overrides = {}) {
 
   assert.equal(result.changed, false);
   assert.equal(queryCount, 2);
+}
+
+function createDecisionUpdateHarness() {
+  const transaction = { name: "decision-transaction" };
+  const calls = { append: 0, history: 0, progress: 0 };
+  const service = new PrReviewService(
+    {
+      async transaction(callback) {
+        return callback(transaction);
+      }
+    },
+    { async assertWorkspaceAccess() {} },
+    {},
+    {},
+    {},
+    {
+      async append() {
+        calls.append += 1;
+      }
+    }
+  );
+  const file = currentDecision({
+    id: reviewFileId,
+    session_id: "33333333-3333-4333-8333-333333333333"
+  });
+
+  service.findReviewFile = async () => file;
+  service.findReviewSession = async () => ({ id: file.session_id });
+  service.assertReviewSessionRoomWritable = () => {};
+  service.insertReviewFileDecision = async () => {
+    calls.history += 1;
+    return "55555555-5555-4555-8555-555555555555";
+  };
+  service.syncReviewSessionReviewProgress = async () => {
+    calls.progress += 1;
+  };
+  service.listReviewFileFlowMemberships = async () => [];
+  service.mapReviewFile = () => ({ id: reviewFileId });
+
+  return { calls, file, service, transaction };
+}
+
+{
+  const { calls, file, service } = createDecisionUpdateHarness();
+  service.updateReviewFileDecisionState = async () => ({
+    changed: false,
+    file
+  });
+
+  await service.updateReviewFileDecision(
+    currentUserId,
+    workspaceId,
+    reviewFileId,
+    {
+      status: baseInput.status,
+      comment: baseInput.comment,
+      expectedDecisionVersion: baseInput.expectedDecisionVersion
+    }
+  );
+
+  assert.deepEqual(calls, { append: 0, history: 0, progress: 0 });
+}
+
+{
+  let queryCount = 0;
+  const { calls, service } = createDecisionUpdateHarness();
+  service.updateReviewFileDecisionState = async (transaction) => {
+    queryCount = 0;
+    const conflictTransaction = {
+      async queryOne() {
+        queryCount += 1;
+        return queryCount === 1 ? null : currentDecision();
+      }
+    };
+    return PrReviewService.prototype.updateReviewFileDecisionState.call(
+      service,
+      conflictTransaction,
+      baseInput
+    );
+  };
+
+  await assert.rejects(
+    service.updateReviewFileDecision(
+      currentUserId,
+      workspaceId,
+      reviewFileId,
+      {
+        status: baseInput.status,
+        comment: baseInput.comment,
+        expectedDecisionVersion: baseInput.expectedDecisionVersion
+      }
+    ),
+    (error) => error.getStatus() === 409
+  );
+
+  assert.equal(queryCount, 2);
+  assert.deepEqual(calls, { append: 0, history: 0, progress: 0 });
 }
 
 {

@@ -7,6 +7,7 @@ import {
   unauthorized
 } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
+import { WorkspaceMembershipRevocationPublisherService } from "../workspace-membership-revocation/workspace-membership-revocation-publisher.service";
 
 export type AvatarMode = "provider" | "custom" | "initials";
 
@@ -25,6 +26,10 @@ interface UserRow extends QueryResultRow {
   avatar_color: string;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+interface DeletedWorkspaceMembershipRow extends QueryResultRow {
+  workspace_id: string;
 }
 
 interface ProfileSettingsRow extends QueryResultRow {
@@ -106,7 +111,10 @@ const PROFILE_FIELDS = new Set([
 
 @Injectable()
 export class UserService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly membershipRevocationPublisher: WorkspaceMembershipRevocationPublisherService
+  ) {}
 
   async getCurrentUser(currentUserId: string): Promise<UserProfile> {
     const user = await this.database.queryOne<UserRow>(
@@ -232,51 +240,81 @@ export class UserService {
       throw conflict("소유 중인 Workspace를 먼저 삭제하거나 소유권을 이전해주세요.");
     }
 
-    await this.database.transaction(async (transaction) => {
-      await transaction.execute(
-        `
-          UPDATE user_sessions
-          SET revoked_at = COALESCE(revoked_at, now())
-          WHERE user_id = $1
-        `,
-        [currentUserId]
-      );
-      await transaction.execute(
-        `
-          UPDATE github_oauth_connections
-          SET access_token_encrypted = NULL, revoked_at = COALESCE(revoked_at, now())
-          WHERE user_id = $1
-        `,
-        [currentUserId]
-      );
-      await transaction.execute(
-        `DELETE FROM workspace_members WHERE user_id = $1`,
-        [currentUserId]
-      );
-      await transaction.execute(`DELETE FROM user_settings WHERE user_id = $1`, [
-        currentUserId
-      ]);
-      await transaction.execute(
-        `
-          UPDATE users
-          SET
-            name = '탈퇴한 사용자',
-            email = NULL,
-            avatar_url = NULL,
-            github_user_id = NULL,
-            github_login = NULL,
-            google_user_id = NULL,
-            google_connected_at = NULL,
-            google_revoked_at = now(),
-            active_workspace_id = NULL,
-            deleted_at = now()
-          WHERE id = $1 AND deleted_at IS NULL
-        `,
-        [currentUserId]
-      );
-    });
+    const deletedWorkspaceIds = await this.database.transaction(
+      async transaction => {
+        await transaction.execute(
+          `
+            UPDATE user_sessions
+            SET revoked_at = COALESCE(revoked_at, now())
+            WHERE user_id = $1
+          `,
+          [currentUserId]
+        );
+        await transaction.execute(
+          `
+            UPDATE github_oauth_connections
+            SET access_token_encrypted = NULL, revoked_at = COALESCE(revoked_at, now())
+            WHERE user_id = $1
+          `,
+          [currentUserId]
+        );
+        const deletedMemberships =
+          await transaction.query<DeletedWorkspaceMembershipRow>(
+            `
+              DELETE FROM workspace_members
+              WHERE user_id = $1
+              RETURNING workspace_id
+            `,
+            [currentUserId]
+          );
+        await transaction.execute(
+          `DELETE FROM user_settings WHERE user_id = $1`,
+          [currentUserId]
+        );
+        await transaction.execute(
+          `
+            UPDATE users
+            SET
+              name = '탈퇴한 사용자',
+              email = NULL,
+              avatar_url = NULL,
+              github_user_id = NULL,
+              github_login = NULL,
+              google_user_id = NULL,
+              google_connected_at = NULL,
+              google_revoked_at = now(),
+              active_workspace_id = NULL,
+              deleted_at = now()
+            WHERE id = $1 AND deleted_at IS NULL
+          `,
+          [currentUserId]
+        );
+
+        return deletedMemberships.map(membership => membership.workspace_id);
+      }
+    );
+
+    await Promise.all(
+      [...new Set(deletedWorkspaceIds)].map(workspaceId =>
+        this.publishMembershipRevocation(workspaceId, currentUserId)
+      )
+    );
 
     return { deleted: true };
+  }
+
+  private async publishMembershipRevocation(
+    workspaceId: string,
+    userId: string
+  ): Promise<void> {
+    try {
+      await this.membershipRevocationPublisher.publishMembershipRevoked(
+        workspaceId,
+        userId
+      );
+    } catch {
+      // The publisher logs Redis failures. Account deletion remains committed.
+    }
   }
 
   async updateCurrentUserPresence(

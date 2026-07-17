@@ -6,17 +6,25 @@ import {
   getLatestAgentRunMessageSequence
 } from "./run-input-recovery.ts";
 import { readAgentRequestContext } from "./request-context.ts";
+import { getAgentResourceLinks } from "./resource-links.ts";
 
 async function readFeatureFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
 }
 
-const [agentTypes, agentApiClient, agentConfirmationCard, agentChatWidget] =
+const [
+  agentTypes,
+  agentApiClient,
+  agentConfirmationCard,
+  agentChatWidget,
+  agentResourceLinks
+] =
   await Promise.all([
     readFeatureFile("./types.ts"),
     readFeatureFile("./api/client.ts"),
     readFeatureFile("./components/agent-confirmation-card.tsx"),
-    readFeatureFile("./components/agent-chat-widget.tsx")
+    readFeatureFile("./components/agent-chat-widget.tsx"),
+    readFeatureFile("./components/agent-resource-links.tsx")
   ]);
 
 assert.match(agentTypes, /export type AgentRunStatus/);
@@ -32,6 +40,8 @@ assert.match(agentTypes, /messages: AgentRunMessage\[\]/);
 assert.match(agentTypes, /export type AgentRunDetailPayload/);
 assert.match(agentTypes, /export type AgentConfirmationActionPayload/);
 assert.match(agentTypes, /export type AgentRunRequestContext/);
+assert.match(agentTypes, /resourceId\?: string \| null/);
+assert.match(agentTypes, /resourceType\?: string \| null/);
 assert.match(agentTypes, /kind: "choice"/);
 assert.match(agentTypes, /selectedChoiceId: string \| null/);
 
@@ -73,13 +83,20 @@ assert.match(agentConfirmationCard, /expiresAtMs <= nowMs/);
 assert.match(agentConfirmationCard, /onApprove/);
 assert.match(agentConfirmationCard, /onReject/);
 assert.match(agentConfirmationCard, /plan\?\.summary/);
-assert.match(agentConfirmationCard, /plan\.toolName/);
 assert.match(agentConfirmationCard, /renderObjectSummary\(plan\.before\)/);
 assert.match(agentConfirmationCard, /renderObjectSummary\(plan\.after\)/);
-assert.match(agentConfirmationCard, /renderObjectSummary\(plan\.call\)/);
 assert.match(agentConfirmationCard, /plan\.kind === "choice"/);
 assert.match(agentConfirmationCard, /selectedChoiceId/);
 assert.match(agentConfirmationCard, /aria-pressed/);
+assert.match(agentConfirmationCard, /작업 대상/);
+assert.match(agentConfirmationCard, /pending: "선택 대기"/);
+assert.match(agentConfirmationCard, /approved: "승인됨"/);
+assert.match(agentConfirmationCard, /rejected: "거절됨"/);
+assert.match(agentConfirmationCard, /expired: "만료됨"/);
+assert.doesNotMatch(agentConfirmationCard, /riskLevelLabels/);
+assert.doesNotMatch(agentConfirmationCard, />Tool</);
+assert.doesNotMatch(agentConfirmationCard, /실행 호출 정보/);
+assert.doesNotMatch(agentConfirmationCard, /renderObjectSummary\(plan\.call\)/);
 assert.doesNotMatch(agentConfirmationCard, /<input/);
 assert.doesNotMatch(agentConfirmationCard, /<textarea/);
 
@@ -93,6 +110,13 @@ assert.match(agentChatWidget, /getRun/);
 assert.match(agentChatWidget, /approveConfirmation/);
 assert.match(agentChatWidget, /rejectConfirmation/);
 assert.match(agentChatWidget, /AgentConfirmationCard/);
+assert.match(agentChatWidget, /AgentResourceLinks/);
+assert.match(agentChatWidget, /GroundedCitationList/);
+assert.match(agentChatWidget, /getGroundedCitations/);
+assert.match(agentChatWidget, /sourceType === "transcript"/);
+assert.match(agentChatWidget, /회의 발언/);
+assert.match(agentChatWidget, /실제 활동/);
+assert.match(agentChatWidget, /citationSources/);
 assert.match(agentChatWidget, /handleConfirmationAction/);
 assert.match(agentChatWidget, /choiceId/);
 assert.match(agentChatWidget, /CONFIRMATION_EXPIRED/);
@@ -147,6 +171,9 @@ assert.match(agentChatWidget, /event\.shiftKey/);
 assert.match(agentChatWidget, /event\.nativeEvent\.isComposing/);
 assert.doesNotMatch(agentChatWidget, /createMockAssistantReply/);
 assert.doesNotMatch(agentChatWidget, /Mockup/);
+
+assert.match(agentResourceLinks, /getAgentResourceLinks/);
+assert.match(agentResourceLinks, /<Link/);
 
 const previousMessages = [
   {
@@ -209,4 +236,89 @@ assert.equal(
 assert.equal(
   readAgentRequestContext("/sql-erd/session/", "sessionId=not-a-uuid"),
   null
+);
+
+const resourceSessionId = "88888888-8888-4888-8888-888888888888";
+const validResourceRef = {
+  domain: "sqltoerd",
+  resourceType: "session",
+  resourceId: resourceSessionId,
+  label: "주문 관리",
+  url: `/sql-erd/session?sessionId=${resourceSessionId}`
+};
+const completedRun = {
+  status: "completed",
+  steps: [
+    {
+      id: "step-1",
+      status: "completed",
+      resourceRefs: [validResourceRef, validResourceRef]
+    }
+  ]
+};
+
+assert.deepEqual(getAgentResourceLinks(completedRun), [
+  {
+    href: `/sql-erd/session?sessionId=${resourceSessionId}`,
+    key: `sqltoerd:session:${resourceSessionId}`,
+    label: "ERD 및 DDL 열기"
+  }
+]);
+assert.deepEqual(
+  getAgentResourceLinks({ ...completedRun, status: "running" }),
+  []
+);
+assert.deepEqual(
+  getAgentResourceLinks({
+    ...completedRun,
+    steps: [
+      {
+        ...completedRun.steps[0],
+        status: "running"
+      }
+    ]
+  }),
+  []
+);
+
+for (const invalidUrl of [
+  `https://evil.example/sql-erd/session?sessionId=${resourceSessionId}`,
+  `//evil.example/sql-erd/session?sessionId=${resourceSessionId}`,
+  `javascript:alert(1)`,
+  `/sql-erd/session?sessionId=${resourceSessionId}#danger`,
+  `/sql-erd/session?sessionId=${resourceSessionId}&next=https://evil.example`,
+  `/sql-erd/session?sessionId=99999999-9999-4999-8999-999999999999`,
+  `/sql-erd/other?sessionId=${resourceSessionId}`,
+  `\\evil.example\sql-erd\session?sessionId=${resourceSessionId}`
+]) {
+  assert.deepEqual(
+    getAgentResourceLinks({
+      ...completedRun,
+      steps: [
+        {
+          ...completedRun.steps[0],
+          resourceRefs: [{ ...validResourceRef, url: invalidUrl }]
+        }
+      ]
+    }),
+    [],
+    `unsafe SQLtoERD resource URL should be rejected: ${invalidUrl}`
+  );
+}
+
+assert.deepEqual(
+  getAgentResourceLinks({
+    ...completedRun,
+    steps: [
+      {
+        ...completedRun.steps[0],
+        resourceRefs: [
+          { ...validResourceRef, domain: "calendar" },
+          { ...validResourceRef, resourceType: "table" },
+          { ...validResourceRef, resourceId: "not-a-uuid" }
+        ]
+      }
+    ]
+  }),
+  []
 );

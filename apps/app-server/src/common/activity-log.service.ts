@@ -31,6 +31,8 @@ export const ACTIVITY_LOG_ACTIONS = [
   "review_submission_created",
   "review_submission_submitted",
   "review_submission_failed",
+  "pr_review_conflict_resolution_applied",
+  "pr_review_pull_request_merged",
   "github_sync_started",
   "github_sync_succeeded",
   "github_sync_failed",

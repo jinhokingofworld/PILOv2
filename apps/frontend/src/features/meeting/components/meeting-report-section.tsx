@@ -31,12 +31,15 @@ import type {
   MeetingReportActionItem,
   MeetingReportActionItemDeliveryInput,
   MeetingReportActionItemDeliveryOptions,
-  MeetingReportActionItemAssignee,
   MeetingReportDetail,
   MeetingReportStatus,
-  MeetingReportSummary,
-  UpdateMeetingReportActionItemInput
+  MeetingReportSummary
 } from "@/features/meeting/types";
+import {
+  hasPiloIssueDeliverySelection,
+  hasPiloIssueDeliveryTarget,
+  resolvePiloIssueDeliverySelection
+} from "@/features/meeting/utils/action-item-delivery-flow";
 import { cn } from "@/lib/utils";
 
 export type MeetingReportStatusFilter = "ALL" | MeetingReportStatus;
@@ -420,31 +423,21 @@ function getActionItemDeliveryErrorMessage(errorCode: string | null) {
 
 function ActionItemReviewCard({
   actionItem,
-  assignees,
   busy,
   evidenceSegments,
   onDeliver,
   onDismiss,
   onEvidenceSelect,
-  onLoadIssueDeliveryOptions,
-  onSave
+  onLoadIssueDeliveryOptions
 }: {
   actionItem: MeetingReportActionItem;
-  assignees: MeetingReportActionItemAssignee[];
   busy: boolean;
   evidenceSegments: MeetingReportTranscriptSegment[];
   onDeliver: (input: MeetingReportActionItemDeliveryInput) => Promise<void>;
   onDismiss: () => void;
   onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
   onLoadIssueDeliveryOptions: () => Promise<MeetingReportActionItemDeliveryOptions>;
-  onSave: (body: UpdateMeetingReportActionItemInput) => void;
 }) {
-  const [title, setTitle] = useState(actionItem.title);
-  const [description, setDescription] = useState(actionItem.description);
-  const [priority, setPriority] = useState(actionItem.priority);
-  const [assigneeUserId, setAssigneeUserId] = useState(
-    actionItem.assignee?.userId ?? ""
-  );
   const [showDelivery, setShowDelivery] = useState(false);
   const [deliveryType, setDeliveryType] = useState<"calendar_event" | "pilo_issue">(
     "calendar_event"
@@ -466,33 +459,58 @@ function ActionItemReviewCard({
   const canDeliver = pending || actionItem.status === "DELIVERY_FAILED";
   const retryingDelivery = actionItem.status === "DELIVERY_FAILED";
   const selectedBoard = issueOptions?.boards.find((board) => board.id === selectedBoardId);
+  const hasIssueDeliveryTarget = issueOptions
+    ? hasPiloIssueDeliveryTarget(issueOptions)
+    : false;
+  const hasIssueDeliverySelection = issueOptions
+    ? hasPiloIssueDeliverySelection(
+        issueOptions,
+        selectedBoardId,
+        selectedColumnId
+      )
+    : false;
+  const hasStaleIssueDeliverySelection = Boolean(
+    issueOptions &&
+    hasIssueDeliveryTarget &&
+    (selectedBoardId || selectedColumnId) &&
+    !hasIssueDeliverySelection
+  );
 
   useEffect(() => {
-    setTitle(actionItem.title);
-    setDescription(actionItem.description);
-    setPriority(actionItem.priority);
-    setAssigneeUserId(actionItem.assignee?.userId ?? "");
     setDeliveryTitle(actionItem.title);
     setDeliveryDescription(actionItem.description);
     setShowDelivery(false);
   }, [actionItem]);
 
-  async function selectDeliveryType(nextType: "calendar_event" | "pilo_issue") {
-    setDeliveryType(nextType);
+  async function loadIssueDeliveryOptions(
+    preferredBoardId = selectedBoardId,
+    preferredColumnId = selectedColumnId
+  ) {
     setDeliveryOptionsError(null);
-    if (nextType !== "pilo_issue" || issueOptions || loadingIssueOptions) return;
+    setIssueOptions(null);
     setLoadingIssueOptions(true);
     try {
       const options = await onLoadIssueDeliveryOptions();
+      const selection = resolvePiloIssueDeliverySelection(
+        options,
+        preferredBoardId,
+        preferredColumnId
+      );
       setIssueOptions(options);
-      const firstBoard = options.boards[0];
-      setSelectedBoardId((current) => current || firstBoard?.id || "");
-      setSelectedColumnId((current) => current || firstBoard?.columns[0]?.id || "");
+      setSelectedBoardId(selection.boardId);
+      setSelectedColumnId(selection.columnId);
     } catch (error) {
       setDeliveryOptionsError(getReportRequestErrorMessage(error));
     } finally {
       setLoadingIssueOptions(false);
     }
+  }
+
+  async function selectDeliveryType(nextType: "calendar_event" | "pilo_issue") {
+    setDeliveryType(nextType);
+    setDeliveryOptionsError(null);
+    if (nextType !== "pilo_issue" || issueOptions || loadingIssueOptions) return;
+    await loadIssueDeliveryOptions();
   }
 
   function changeBoard(boardId: string) {
@@ -510,7 +528,7 @@ function ActionItemReviewCard({
       setDeliveryTitle(draft.calendar.title ?? actionItem.title);
       setDeliveryDescription(draft.calendar.description ?? actionItem.description);
       setStartDate(draft.calendar.startDate);
-      setEndDate(draft.calendar.endDate);
+      setEndDate(draft.calendar.endDate ?? draft.calendar.startDate);
       setIsAllDay(draft.calendar.isAllDay ?? true);
       setStartTime(draft.calendar.startTime ?? "");
       setEndTime(draft.calendar.endTime ?? "");
@@ -518,16 +536,17 @@ function ActionItemReviewCard({
       setDeliveryType("pilo_issue");
       setDeliveryTitle(draft.issue.title ?? actionItem.title);
       setDeliveryDescription(draft.issue.body ?? actionItem.description);
-      setSelectedBoardId(draft.issue.boardId);
-      setSelectedColumnId(draft.issue.columnId);
-      await selectDeliveryType("pilo_issue");
+      await loadIssueDeliveryOptions(
+        draft.issue.boardId,
+        draft.issue.columnId
+      );
     }
     setShowDelivery(true);
   }
 
   async function submitDelivery() {
     if (deliveryType === "calendar_event") {
-      if (!startDate || !endDate) return;
+      if (!startDate || (!isAllDay && !startTime)) return;
       await onDeliver({
         deliveryType,
         calendar: {
@@ -535,7 +554,9 @@ function ActionItemReviewCard({
           description: deliveryDescription.trim() || null,
           isAllDay,
           startDate,
-          endDate,
+          // Keep the field optional in the UI while remaining compatible with
+          // app-server versions that still require endDate in delivery input.
+          endDate: endDate || startDate,
           startTime: isAllDay ? null : startTime || null,
           endTime: isAllDay ? null : endTime || null
         }
@@ -565,60 +586,15 @@ function ActionItemReviewCard({
         </span>
       </div>
 
-      {pending ? (
-        <div className="grid gap-2">
-          <Input
-            aria-label="후속 작업 제목"
-            disabled={busy || retryingDelivery}
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-          />
-          <textarea
-            aria-label="후속 작업 설명"
-            className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            disabled={busy || retryingDelivery}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-          <div className="grid gap-2 sm:grid-cols-2">
-            <select
-              aria-label="후속 작업 우선순위"
-              className="h-9 rounded-md border bg-background px-3 text-sm"
-              disabled={busy}
-              value={priority}
-              onChange={(event) => setPriority(event.target.value as typeof priority)}
-            >
-              <option value="HIGH">높음</option>
-              <option value="MEDIUM">보통</option>
-              <option value="LOW">낮음</option>
-            </select>
-            <select
-              aria-label="후속 작업 담당자"
-              className="h-9 rounded-md border bg-background px-3 text-sm"
-              disabled={busy}
-              value={assigneeUserId}
-              onChange={(event) => setAssigneeUserId(event.target.value)}
-            >
-              <option value="">담당자 미지정</option>
-              {assignees.map((assignee) => (
-                <option key={assignee.userId} value={assignee.userId}>
-                  {assignee.name?.trim() || "이름 없음"}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      ) : (
-        <div>
-          <p className="break-words font-medium text-foreground">{actionItem.title}</p>
-          <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
-            {actionItem.description}
-          </p>
-          <p className="mt-2 text-xs text-muted-foreground">
-            {getActionPriorityLabel(actionItem.priority)} · {actionItem.assignee?.name?.trim() || "담당자 미지정"}
-          </p>
-        </div>
-      )}
+      <div>
+        <p className="break-words font-medium text-foreground">{actionItem.title}</p>
+        <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
+          {actionItem.description}
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {getActionPriorityLabel(actionItem.priority)} · {actionItem.assignee?.name?.trim() || "담당자 미지정"}
+        </p>
+      </div>
 
       {evidenceSegments.length ? (
         <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
@@ -691,10 +667,14 @@ function ActionItemReviewCard({
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="grid gap-1 text-xs text-muted-foreground">
                 시작 날짜
-                <Input type="date" disabled={busy || retryingDelivery} value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+                <Input type="date" disabled={busy || retryingDelivery} value={startDate} onChange={(event) => {
+                  const nextStartDate = event.target.value;
+                  setEndDate((currentEndDate) => currentEndDate === startDate ? nextStartDate : currentEndDate);
+                  setStartDate(nextStartDate);
+                }} />
               </label>
               <label className="grid gap-1 text-xs text-muted-foreground">
-                종료 날짜
+                종료 날짜 (비우면 시작 날짜)
                 <Input type="date" disabled={busy || retryingDelivery} value={endDate} onChange={(event) => setEndDate(event.target.value)} />
               </label>
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -710,20 +690,37 @@ function ActionItemReviewCard({
             </div>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
-              <select aria-label="Board 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || loadingIssueOptions || retryingDelivery} value={selectedBoardId} onChange={(event) => changeBoard(event.target.value)}>
-                <option value="">Board 선택</option>
-                {issueOptions?.boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
-              </select>
-              <select aria-label="Column 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || !selectedBoard || retryingDelivery} value={selectedColumnId} onChange={(event) => setSelectedColumnId(event.target.value)}>
-                <option value="">Column 선택</option>
-                {selectedBoard?.columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}
-              </select>
+              {loadingIssueOptions ? (
+                <p className="text-xs text-muted-foreground sm:col-span-2">
+                  생성 가능한 Board와 Column을 불러오는 중입니다.
+                </p>
+              ) : issueOptions && !hasIssueDeliveryTarget ? (
+                <p className="text-xs text-muted-foreground sm:col-span-2">
+                  생성 가능한 대상이 없습니다. GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board를 동기화한 뒤 다시 시도해주세요.
+                </p>
+              ) : (
+                <>
+                  <select aria-label="Board 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || retryingDelivery} value={selectedBoardId} onChange={(event) => changeBoard(event.target.value)}>
+                    <option value="">Board 선택</option>
+                    {issueOptions?.boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
+                  </select>
+                  <select aria-label="Column 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || !selectedBoard || retryingDelivery} value={selectedColumnId} onChange={(event) => setSelectedColumnId(event.target.value)}>
+                    <option value="">Column 선택</option>
+                    {selectedBoard?.columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}
+                  </select>
+                  {hasStaleIssueDeliverySelection ? (
+                    <p className="text-xs text-muted-foreground sm:col-span-2">
+                      선택한 Board 또는 Column을 사용할 수 없습니다. GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board와 Column을 동기화한 뒤 다시 시도해주세요.
+                    </p>
+                  ) : null}
+                </>
+              )}
               {deliveryOptionsError ? <p className="text-xs text-destructive sm:col-span-2">{deliveryOptionsError}</p> : null}
             </div>
           )}
           <div className="flex justify-end gap-2">
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setShowDelivery(false)}>취소</Button>
-            <Button type="button" size="sm" disabled={busy || !deliveryTitle.trim() || (deliveryType === "calendar_event" ? !startDate || !endDate : !selectedBoardId || !selectedColumnId)} onClick={() => void submitDelivery()}>
+            <Button type="button" size="sm" disabled={busy || !deliveryTitle.trim() || (deliveryType === "calendar_event" ? !startDate || (!isAllDay && !startTime) : deliveryType === "pilo_issue" && !hasIssueDeliverySelection)} onClick={() => void submitDelivery()}>
               {busy ? <Loader2 className="animate-spin" /> : null}
               확인하고 생성
             </Button>
@@ -741,22 +738,6 @@ function ActionItemReviewCard({
             onClick={() => onDismiss()}
           >
             반려
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy || !title.trim() || !description.trim()}
-            onClick={() =>
-              onSave({
-                title: title.trim(),
-                description: description.trim(),
-                priority,
-                assigneeUserId: assigneeUserId || null
-              })
-            }
-          >
-            수정 저장
           </Button>
           <Button type="button" size="sm" disabled={busy} onClick={() => void openDelivery()}>
             승인 및 생성
@@ -784,7 +765,6 @@ function MeetingReportDetailModal({
   onDismissActionItem,
   onLoadIssueDeliveryOptions,
   onRegenerate,
-  onUpdateActionItem,
   open,
   deleting,
   regenerating,
@@ -804,10 +784,6 @@ function MeetingReportDetailModal({
     actionItem: MeetingReportActionItem
   ) => Promise<MeetingReportActionItemDeliveryOptions>;
   onRegenerate: (report: MeetingReportSummary) => void;
-  onUpdateActionItem: (
-    actionItem: MeetingReportActionItem,
-    body: UpdateMeetingReportActionItemInput
-  ) => void;
   open: boolean;
   deleting: boolean;
   regenerating: boolean;
@@ -1057,14 +1033,12 @@ function MeetingReportDetailModal({
                           <ActionItemReviewCard
                             key={item.id}
                             actionItem={item}
-                            assignees={report.actionItemAssignees ?? []}
                             busy={mutatingActionItemId === item.id}
                             evidenceSegments={evidenceSegments}
                             onDeliver={(input) => onDeliverActionItem(item, input)}
                             onDismiss={() => onDismissActionItem(item)}
                             onEvidenceSelect={selectTranscriptSegment}
                             onLoadIssueDeliveryOptions={() => onLoadIssueDeliveryOptions(item)}
-                            onSave={(body) => onUpdateActionItem(item, body)}
                           />
                         )
                       )}
@@ -1183,8 +1157,7 @@ export function MeetingReportSection({
     reloadReports,
     reports,
     reportsError,
-    reportsStatus,
-    updateMeetingReportActionItem
+    reportsStatus
   } = meetingData;
   const [searchQuery, setSearchQuery] = useState("");
   const [fromDate, setFromDate] = useState("");
@@ -1331,26 +1304,13 @@ export function MeetingReportSection({
     [deleteMeetingReport, handleCloseReport, onToastMessage]
   );
 
-  const handleActionItemMutation = useCallback(
-    async (
-      actionItem: MeetingReportActionItem,
-      action: "dismiss" | "update",
-      body?: UpdateMeetingReportActionItemInput
-    ) => {
+  const handleDismissActionItem = useCallback(
+    async (actionItem: MeetingReportActionItem) => {
       if (!selectedReport) return;
       setMutatingActionItemId(actionItem.id);
       try {
-        if (action === "dismiss") {
-          await dismissMeetingReportActionItem(selectedReport.id, actionItem.id);
-          onToastMessage("후속 작업을 반려했습니다.");
-        } else if (body) {
-          await updateMeetingReportActionItem(
-            selectedReport.id,
-            actionItem.id,
-            body
-          );
-          onToastMessage("후속 작업을 수정했습니다.");
-        }
+        await dismissMeetingReportActionItem(selectedReport.id, actionItem.id);
+        onToastMessage("후속 작업을 반려했습니다.");
         await loadReportDetail(selectedReport.id, { silent: true });
       } catch (error) {
         onToastMessage(getReportRequestErrorMessage(error));
@@ -1362,8 +1322,7 @@ export function MeetingReportSection({
       dismissMeetingReportActionItem,
       loadReportDetail,
       onToastMessage,
-      selectedReport,
-      updateMeetingReportActionItem
+      selectedReport
     ]
   );
 
@@ -1690,13 +1649,10 @@ export function MeetingReportSection({
         onClose={handleCloseReport}
         onDelete={(report) => void handleDeleteReport(report)}
         onDismissActionItem={(actionItem) =>
-          void handleActionItemMutation(actionItem, "dismiss")
+          void handleDismissActionItem(actionItem)
         }
         onLoadIssueDeliveryOptions={handleLoadIssueDeliveryOptions}
         onRegenerate={(report) => void handleRegenerateReport(report)}
-        onUpdateActionItem={(actionItem, body) =>
-          void handleActionItemMutation(actionItem, "update", body)
-        }
       />
     </section>
   );

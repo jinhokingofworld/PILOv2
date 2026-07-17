@@ -438,9 +438,12 @@ wss://{realtime-origin}/sync/documents
 - provider의 document name은 `workspace:{workspaceId}:document:{documentId}:yjs` 형식이며, bearer token은 Hocuspocus 인증 메시지로 보낸다. URL query에 access token을 넣지 않는다.
 - realtime-server는 Hocuspocus 인증 hook에서 bearer session, Workspace membership, 삭제되지 않은 `document` Drive item을 검증한다.
 - Workspace `owner`, `member`는 연결과 편집이 가능하다. 인증되지 않았거나 권한이 없거나 삭제된 문서는 연결을 거부한다.
-- realtime room은 즉시 변경 relay와 awareness만 담당한다. raw Yjs update는 1차 MVP에서 `document_yjs_updates`에 저장하지 않는다.
-- collaboration provider는 병합된 문서를 마지막 변경 뒤 `1초` debounce로 기존 snapshot 저장 API에 전송하고, 마지막 editor가 나갈 때 pending 저장을 즉시 flush한다.
-- realtime-server가 재시작되면 browser는 최신 snapshot을 다시 읽어 bootstrap한다. 마지막 snapshot 뒤 최대 `1초`의 편집은 유실될 수 있다.
+- realtime-server는 room을 만들 때 기존 문서 조회 API로 최신 snapshot을 복원하고, Hocuspocus `onStoreDocument`의 `1초` debounce와 room mutex를 이용해 최신 병합 상태를 기존 snapshot 저장 API에 checkpoint한다. raw Yjs update는 1차 MVP에서 `document_yjs_updates`에 저장하지 않는다.
+- checkpoint 호출에는 Hocuspocus 인증 context의 bearer token을 메모리에서만 사용한다. token은 DB, Activity Log, metadata에 저장하지 않는다.
+- realtime URL과 bearer token이 설정된 browser는 Yjs sync/awareness만 수행하며 snapshot 저장 API를 직접 호출하지 않는다. realtime transport를 설정하지 않은 로컬/장애 fallback에서만 browser가 기존 `1초` debounce autosave와 unmount flush를 수행한다.
+- server checkpoint가 `409 CONFLICT`이면 최신 snapshot을 room Y.Doc에 병합하고 한 번만 재시도한다. 두 번째 충돌이나 네트워크 오류는 Hocuspocus 저장 실패로 남기며 browser가 저장 경쟁에 참여하지 않는다.
+- 마지막 연결이 종료되면 `unloadImmediately`가 보류 checkpoint를 즉시 실행하고, realtime-server 종료 시에도 pending checkpoint를 flush한다. 마지막 checkpoint 뒤 최대 `1초`의 편집은 유실될 수 있다.
+- document room은 현재 realtime-server process 메모리에 있다. multiple realtime task 배포 전에는 한 task로 운영하거나 load balancer가 `/sync/documents` WebSocket을 sticky routing해야 한다.
 
 ## Upload URL 발급
 

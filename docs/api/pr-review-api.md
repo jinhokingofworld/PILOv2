@@ -55,6 +55,53 @@ GitHub 원본 동기화, GitHub PR 원본 조회, GitHub inline comment, Project
 - Conflict resolution apply는 file review decision, review submission history, PR merge 상태를
   변경하지 않는다.
 
+## Server-side Activity Log 규칙
+
+이 규칙은 서버 내부 append-only 활동 기록에만 적용되며 기존 외부 request/response shape는 변경하지 않는다.
+PR Review service는 의미 있는 사용자 행동이 commit되는 DB transaction에서 공통
+`ActivityLogService.append`를 호출하고 `activity_logs`에 직접 `INSERT`하지 않는다.
+
+| 사용자 행동 | 기록하는 action | 기록하지 않는 no-op/중간 상태 |
+| --- | --- | --- |
+| 새 review revision 생성 | `pr_review_session_created` | 기존 room 합류와 같은 head revision 재사용 |
+| file decision 변경 | `file_review_decision_created` | status와 comment가 모두 같은 저장 요청 |
+| GitHub Review 제출 terminal 결과 | 성공 `review_submission_submitted`, 실패 `review_submission_failed` | 제출 시도 생성과 `submitting` 중간 상태 |
+| conflict resolution apply 성공 | `pr_review_conflict_resolution_applied` | suggestion/draft 저장, conflict 조회와 상태 재확인 |
+| GitHub PR merge 성공 | `pr_review_pull_request_merged` | merge 사전조건 거절과 GitHub merge 실패 |
+
+- 새 revision만 기록하며 기존 room 합류와 기존 revision 재사용은 Activity Log를 기록하지 않는다.
+- 실제 file decision 변경만 기록한다. 동일한 status와 comment를 다시 저장한 no-op은 기록하지 않는다.
+- file decision 기록은 repo-relative file path와 review file ID를 metadata에 포함하고, 같은 bounded
+  path를 `summary`에 넣어 MeetingReport 활동 근거에서 어떤 파일인지 식별할 수 있게 한다. path는
+  한 줄 최대 400자로 제한하며 긴 값은 파일명을 포함한 suffix를 보존한다. 기존 Activity Log와
+  MeetingReport snapshot은 소급 보강하지 않는다.
+- submission 성공/실패 terminal 결과만 기록한다. 제출 시도와 `submitting` 상태는 기록하지 않는다.
+- conflict apply와 PR merge 성공 결과를 기록한다. 조회, AI suggestion, draft 편집은 기록하지 않는다.
+- PR Review는 `meetingId`와 `recordingId`를 소유하지 않으며 요청이나 Activity Log metadata에 저장하지 않는다.
+- 민감 정보나 원문 payload를 metadata에 저장하지 않는다. GitHub/OAuth token, raw provider error,
+  review body, file decision comment, conflict `resolvedContent`, diff/patch 원문은 금지한다.
+
+stable dedupe key는 재시도에도 바뀌지 않는 commit 결과의 식별자로 만든다.
+
+| action | stable dedupe 기준 |
+| --- | --- |
+| `pr_review_session_created` | 생성된 review session ID |
+| `file_review_decision_created` | 실제 저장된 decision row ID |
+| `review_submission_submitted`, `review_submission_failed` | submission ID와 terminal 결과 |
+| `pr_review_conflict_resolution_applied` | pull request ID와 conflict apply commit SHA |
+| `pr_review_pull_request_merged` | pull request ID와 merge commit SHA |
+
+외부 GitHub mutation과 PILO DB transaction은 하나의 원자적 transaction이 아니다.
+
+- conflict apply의 GitHub head branch 갱신 뒤 conflict 재조회, cache 갱신 또는 successor revision 생성이
+  실패해도 GitHub commit은 되돌릴 수 없다. 이 local sync 실패는 기존 계약대로
+  `status: "applied"`, `localStateStatus: "sync_required"`로 반환한다. Activity Log append 자체가
+  실패한 경우에는 이를 `sync_required`로 숨기지 않고 API error로 응답하며, conflict apply commit
+  SHA를 복구와 dedupe 식별자로 사용한다.
+- GitHub PR merge가 성공한 뒤 후속 local room/activity transaction이 실패할 수 있다.
+  이 실패는 숨기지 않고 API error로 응답한다. GitHub에는 PR이 이미 merged 상태일 수 있으며,
+  merge commit SHA는 복구와 dedupe 식별자로 사용한다.
+
 ## 상태값
 
 | Field | Values |
@@ -1407,6 +1454,10 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
   알린다. conflict 상태 재조회 자체가 실패한 경우 `conflictStatus: "unknown"`과
   `conflictCheckedAt: null`을 반환한다. 모든 local 갱신이 성공하면
   `localStateStatus: "updated"`를 반환한다.
+- Activity Log append transaction의 최종 실패는 위 local state sync 실패와 구분한다. GitHub
+  branch 갱신이 이미 성공했더라도 이를 `sync_required`로 숨기지 않고 API error로 응답한다.
+  GitHub에 conflict apply commit이 남아 있을 수 있으며 응답 전에 확보한 `commitSha`를 복구와
+  dedupe 식별자로 사용한다.
 - GitHub branch 갱신 전에 head/base SHA가 바뀌거나 fast-forward가 거절되면
   `409 Conflict`를 반환한다.
 - `review_files.current_status`, `file_review_decisions`, `review_submissions`를 변경하지 않는다.
@@ -1648,6 +1699,9 @@ POST /api/v1/workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/m
 - GitHub 원격 PR `mergeable`이 `false`이면 conflict로 보고 merge를 막는다. `null`이면 GitHub mergeability 계산 중으로 보고 재시도를 안내한다.
 - Branch protection, required checks, required reviews, conversation resolution, merge method 제한은 PILO가 사전 판정하지 않고 GitHub merge API 응답을 안전한 API error로 매핑한다.
 - merge 성공 후 `github_pull_requests` cache의 PR state, merged timestamp, head SHA, mergeable 상태를 갱신한다.
+- GitHub merge 성공 뒤 local room completion/Activity Log transaction이 실패하면 실패를 숨기지
+  않고 API error로 응답한다. 이때 GitHub PR은 이미 merged 상태일 수 있으며, GitHub 응답에서
+  확보한 `mergeCommitSha`를 복구와 Activity Log dedupe 식별자로 사용한다.
 - review session status는 별도 `merged` 상태로 바꾸지 않고 기존 `submitted` 상태를 유지한다.
 - GitHub token, raw provider error, secret은 API 응답이나 로그에 노출하지 않는다.
 

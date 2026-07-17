@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertCircle, Download, Loader2, RefreshCw } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,14 @@ import { useAuthSession } from "@/features/auth";
 import { createDriveApiClient } from "@/features/drive/api/client";
 
 import styles from "./document-editor.module.css";
+
+const PdfCollaborationSurface = dynamic(
+  () =>
+    import("./pdf-collaboration-surface").then(
+      (module) => module.PdfCollaborationSurface,
+    ),
+  { ssr: false },
+);
 
 type PreviewState =
   | { status: "idle" }
@@ -124,10 +133,10 @@ export function PdfPreviewDialog({
               </Button>
             </div>
           ) : (
-            <iframe
-              className={styles.pdfPreviewFrame}
-              src={previewState.previewUrl}
-              title={`${fileName} PDF 미리보기`}
+            <PdfCollaborationSurface
+              fileId={fileId}
+              previewUrl={previewState.previewUrl}
+              workspaceId={workspaceId}
             />
           )}
         </div>

@@ -69,6 +69,7 @@ export type AppSidebarItem = Pick<
 >;
 
 type AppSidebarProps = {
+  itemBadges?: Record<string, number>;
   items: AppSidebarItem[];
   selectedItemId: string;
   onSelectItem?: (itemId: string) => void;
@@ -86,6 +87,7 @@ const ACTIVE_MEETING_LEAVE_FAILED_MESSAGE =
   "진행 중인 회의에서 나가지 못했습니다. 회의 상태를 확인한 뒤 다시 시도해주세요.";
 
 export function AppSidebar({
+  itemBadges,
   items,
   selectedItemId,
   onSelectItem
@@ -402,6 +404,10 @@ export function AppSidebar({
                 const isActive = selectedItemId === item.id;
                 const isOpen = openMenuIds[item.id] ?? false;
                 const hasSubItems = item.items.length > 0;
+                const rawBadgeCount = itemBadges?.[item.id] ?? 0;
+                const badgeCount = Number.isFinite(rawBadgeCount)
+                  ? Math.max(0, Math.floor(rawBadgeCount))
+                  : 0;
 
                 if (!hasSubItems) {
                   return (
@@ -418,6 +424,10 @@ export function AppSidebar({
                         <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
                           <span className="truncate">{item.title}</span>
                         </div>
+                        <SidebarItemBadge
+                          badgeCount={badgeCount}
+                          title={item.title}
+                        />
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -451,6 +461,10 @@ export function AppSidebar({
                         <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
                           <span className="truncate">{item.title}</span>
                         </div>
+                        <SidebarItemBadge
+                          badgeCount={badgeCount}
+                          title={item.title}
+                        />
                         <ChevronRight
                           className={cn(
                             "ml-auto size-4 transition-transform group-data-[collapsible=icon]:hidden",
@@ -612,4 +626,31 @@ function getUserInitials(name: string | null, email: string | null) {
 
 function getWorkspaceInitial(name: string) {
   return name.trim().slice(0, 1).toUpperCase() || "W";
+}
+
+function SidebarItemBadge({
+  badgeCount,
+  title
+}: {
+  badgeCount: number;
+  title: string;
+}) {
+  if (badgeCount <= 0) return null;
+
+  return (
+    <>
+      <span
+        aria-label={`${title} 읽지 않은 메시지 ${badgeCount}개`}
+        className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-5 text-primary-foreground group-data-[collapsible=icon]:hidden"
+        role="status"
+      >
+        {badgeCount > 99 ? "99+" : badgeCount}
+      </span>
+      <span
+        aria-label={`${title} 읽지 않은 메시지 ${badgeCount}개`}
+        className="absolute right-1.5 top-1.5 hidden size-2 rounded-full bg-primary group-data-[collapsible=icon]:block"
+        role="status"
+      />
+    </>
+  );
 }

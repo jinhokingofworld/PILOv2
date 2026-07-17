@@ -150,8 +150,8 @@
 }
 
 .blockHandle {
-  position: fixed;
-  z-index: 50;
+  display: flex;
+  align-items: center;
 }
 
 .slashMenuOption,
@@ -175,6 +175,32 @@
 .slashMenuOption:hover,
 .slashMenuOptionActive {
   background: var(--muted);
+}
+
+.slashMenuSearch {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.375rem 0.5rem 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.slashMenuSearch input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  outline: none;
+}
+
+.slashMenuEmpty {
+  margin: 0;
+  padding: 0.75rem 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
 }
 
 .slashMenuIcon {
@@ -265,11 +291,116 @@
   background: var(--muted);
 }
 
-.pdfPreviewFrame {
+.pdfCollaborationLayout {
+  display: flex;
   width: 100%;
   min-height: min(38rem, calc(100vh - 15rem));
-  border: 0;
+  flex-direction: column;
+}
+
+.pdfCollaborationToolbar,
+.pdfCollaborationControls,
+.pdfCollaborationPresence {
+  display: flex;
+  align-items: center;
+}
+
+.pdfCollaborationToolbar {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+  padding: 0.375rem 0.5rem;
+}
+
+.pdfCollaborationControls {
+  gap: 0.125rem;
+}
+
+.pdfPageCounter {
+  min-width: 4.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.pdfCollaborationPresence {
+  min-width: 0;
+  flex: 1 1 10rem;
+  justify-content: flex-end;
+  gap: 0.375rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.pdfCollaborationPresence > svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+}
+
+.pdfCollaborationMember {
+  overflow: hidden;
+  max-width: 7.5rem;
+  border-radius: 0.25rem;
+  background: var(--muted);
+  padding: 0.125rem 0.375rem;
+  text-overflow: ellipsis;
+}
+
+.pdfCollaborationViewport {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: start center;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.pdfPageFrame {
+  position: relative;
+  flex: none;
+  max-width: 100%;
   background: white;
+  box-shadow: 0 3px 12px color-mix(in srgb, black 18%, transparent);
+}
+
+.pdfPageFrame :global(.react-pdf__Document),
+.pdfPageFrame :global(.react-pdf__Page) {
+  line-height: 0;
+}
+
+.pdfPageFrame :global(.react-pdf__Page__canvas) {
+  max-width: 100%;
+  height: auto !important;
+}
+
+.pdfAnnotationLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.pdfRemotePointer {
+  position: absolute;
+  z-index: 2;
+  max-width: 9rem;
+  transform: translate(0.35rem, 0.35rem);
+  border-radius: 0.25rem;
+  background: var(--foreground);
+  padding: 0.125rem 0.375rem;
+  color: var(--background);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pdfPreviewState {
@@ -284,6 +415,17 @@
   color: var(--muted-foreground);
   font-size: 0.875rem;
   text-align: center;
+}
+
+@media (max-width: 40rem) {
+  .pdfCollaborationPresence {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .pdfCollaborationViewport {
+    padding: 0.5rem;
+  }
 }
 
 .loadingState,
@@ -305,8 +447,34 @@
 
 .editor :global(.tiptap) {
   min-height: 20rem;
-  padding: 1.5rem 0;
+  padding: 1.5rem 1rem 1.5rem 2rem;
   outline: none;
+}
+
+.editor :global(.collaboration-carets__caret) {
+  position: relative;
+  margin-right: -1px;
+  margin-left: -1px;
+  border-right: 1px solid;
+  border-left: 1px solid;
+  pointer-events: none;
+  word-break: normal;
+}
+
+.editor :global(.collaboration-carets__label) {
+  position: absolute;
+  top: -1.5em;
+  left: -1px;
+  border-radius: 0.1875rem 0.1875rem 0.1875rem 0;
+  padding: 0.1rem 0.3rem;
+  color: white;
+  font-size: 0.75rem;
+  font-style: normal;
+  font-weight: 600;
+  line-height: normal;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
 }
 
 .editor :global(.tiptap > * + *) {

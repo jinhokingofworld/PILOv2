@@ -282,6 +282,9 @@ await import("./issue-update.test.mjs");
 await import("./issue-create.test.mjs");
 await import("./issue-create-project-oauth.test.mjs");
 await import("./issue-create-operation-migration.test.mjs");
+if (process.env.BOARD_POSTGRES_TEST_URL) {
+  await import("./issue-create-operation-postgres.test.mjs");
+}
 await import("./issue-create-idempotency.test.mjs");
 await import("./activity-log.test.mjs");
 await import("./contract.test.mjs");
@@ -290,3 +293,4 @@ await import("./full-sync-project-items.test.mjs");
 await import("./project-v2-repository-links.test.mjs");
 await import("./project-item-position-hydration.test.mjs");
 await import("./board-hydration-timestamp-migration.test.mjs");
+await import("./delivery-options.test.mjs");

@@ -644,3 +644,22 @@ await import("./sqltoerd/operation-delivery.test.mjs");
 await import("./sqltoerd/source-snapshot.test.mjs");
 await import("./sqltoerd/operation-publisher.test.mjs");
 await import("./sqltoerd/operations-v1-cutover-manifest.test.mjs");
+await import("./chat/schema.test.mjs");
+await import("./chat/idempotency.test.mjs");
+await import("./chat/service.test.mjs");
+await import("./chat/contract.test.mjs");
+await import("./chat/publisher.test.mjs");
+await import("./workspace/membership-revocation.test.mjs");
+await import("./workspace/membership-revocation-publisher.test.mjs");
+await import("./user/account-deletion-revocation.test.mjs");
+if (process.env.CHAT_POSTGRES_TEST_URL) {
+  await import("./chat/postgres.test.mjs");
+}
+await import("./sqltoerd/schema-generator.test.mjs");
+if (process.env.DATABASE_URL) {
+  await import("./sqltoerd/schema-generator-postgres.test.mjs");
+}
+if (process.env.MYSQL_TEST_URL) {
+  await import("./sqltoerd/schema-generator-mysql.test.mjs");
+}
+await import("./sqltoerd/schema-mutation.test.mjs");

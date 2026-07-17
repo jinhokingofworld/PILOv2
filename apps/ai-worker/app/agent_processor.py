@@ -13,7 +13,7 @@ from app.meeting_report_processor import InfrastructureError
 
 AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
 AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE = "agent_grounded_answer_requested"
-AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v3"
+AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v4"
 AGENT_PLANNER_TURN_LIMIT_MESSAGE = (
     "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. "
     "다음 요청에서 계속 진행할 내용을 알려주세요."
@@ -114,7 +114,7 @@ class AgentProcessResult:
 
 
 class AgentGroundedAnswerProcessor:
-    """Keeps transcript text in-memory: only App Server internal HTTPS carries it."""
+    """Keeps bounded Meeting evidence in-memory: only App Server internal HTTPS carries it."""
 
     def __init__(
         self, handoff_client: object, api_key: str, model: str, timeout_seconds: float
@@ -156,7 +156,11 @@ class AgentGroundedAnswerProcessor:
                     {
                         "role": "system",
                         "content": (
-                            "Answer in Korean using only supplied meeting transcript sources. "
+                            "Answer in Korean using only supplied Meeting evidence sources. "
+                            "Sources have sourceType transcript (spoken content) or activity "
+                            "(an actual committed user action). Distinguish the source type in "
+                            "the answer when it affects the claim; do not present activity "
+                            "as speech. "
                             "Return JSON with answer and citations (sourceId array). "
                             "Do not invent citations."
                         ),
@@ -402,6 +406,7 @@ class AgentRunProcessor:
                 job,
                 prompt=context.prompt,
                 current_date=current_date,
+                planning_context=context.planning_context,
             )
             planner_step_completed = self.repository.complete_planner_step(
                 job.run_id,
@@ -610,6 +615,7 @@ def normalize_agent_planner_decision(
     job: AgentRunJob,
     prompt: str = "",
     current_date: str | None = None,
+    planning_context: str = "",
 ) -> NormalizedPlannerDecision:
     decision = _normalize_calendar_relative_date_query(
         decision,
@@ -670,7 +676,18 @@ def normalize_agent_planner_decision(
         elif status == "tool_candidate" and missing_fields:
             status = "needs_clarification"
             message = "요청을 처리할 정보가 부족합니다."
-            final_answer = _clarification_answer(missing_fields)
+            final_answer = _clarification_answer(missing_fields, tool.name)
+
+    completed_sql_erd_action = _completed_sql_erd_action(planning_context)
+    if completed_sql_erd_action:
+        status = "completed"
+        missing_fields = ()
+        unsupported_reason = None
+        if completed_sql_erd_action == "replaced":
+            final_answer = "현재 SQLtoERD 세션의 스키마를 교체했습니다."
+        else:
+            final_answer = "새 SQLtoERD 세션을 생성했습니다."
+        message = final_answer
 
     output_summary: dict[str, object] = {
         "status": status,
@@ -727,10 +744,36 @@ def _missing_required_tool_input_fields(
     for field in required:
         if not isinstance(field, str) or not field:
             continue
-        value = input_value.get(field)
-        if value is None or value == "" or value == {}:
+        if field not in input_value:
             missing.append(field)
+            continue
+        value = input_value[field]
+        property_schema = _tool_input_property_schema(tool, field)
+        if value is None:
+            allowed_types = property_schema.get("type")
+            if allowed_types == "null" or (
+                isinstance(allowed_types, list) and "null" in allowed_types
+            ):
+                continue
+            missing.append(field)
+        elif value == "" or value == {}:
+            missing.append(field)
+        elif isinstance(value, list):
+            min_items = property_schema.get("minItems")
+            if isinstance(min_items, int) and len(value) < min_items:
+                missing.append(field)
     return tuple(missing)
+
+
+def _tool_input_property_schema(
+    tool: AgentToolSchema,
+    field: str,
+) -> dict[str, object]:
+    properties = tool.input_schema.get("properties")
+    if not isinstance(properties, dict):
+        return {}
+    schema = properties.get(field)
+    return schema if isinstance(schema, dict) else {}
 
 
 def _missing_calendar_update_fields(
@@ -871,7 +914,13 @@ def _next_weekday(base_date: date, weekday: int) -> date:
     return base_date + timedelta(days=offset or 7)
 
 
-def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
+def _clarification_answer(
+    missing_fields: tuple[str, ...],
+    tool_name: str | None = None,
+) -> str:
+    if tool_name == "generate_sql_erd":
+        return "ERD에 포함할 핵심 테이블과 각 테이블의 주요 데이터 관계를 알려주세요."
+
     labels = {
         "eventId": "수정할 일정",
         "changes": "변경할 내용",
@@ -887,6 +936,24 @@ def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
     if not fields:
         return "요청을 처리하려면 추가 정보가 필요합니다."
     return f"요청을 처리하려면 {', '.join(fields)} 정보를 알려주세요."
+
+
+def _completed_sql_erd_action(planning_context: str) -> str | None:
+    prefix = "tool generate_sql_erd: "
+
+    for line in reversed(planning_context.splitlines()):
+        if not line.startswith(prefix):
+            continue
+
+        try:
+            output = json.loads(line[len(prefix) :])
+        except (TypeError, ValueError):
+            continue
+
+        if isinstance(output, dict) and output.get("action") in {"created", "replaced"}:
+            return str(output["action"])
+
+    return None
 
 
 class OpenAiAgentPlannerClient:
@@ -997,6 +1064,15 @@ def _agent_planner_system_prompt() -> str:
         "Calendar default can apply; never set endTime equal to startTime. "
         "When the user supplies a positive integer Calendar event ID with changes, use it and let "
         "the App Server verify that the event exists in the Workspace. "
+        "Use generate_sql_erd when the user asks to generate an ERD, database schema, or SQL DDL "
+        "from natural-language requirements. Its input must be one complete SqlErdSchemaSpecV1 "
+        "object matching the provided schema; never return raw DDL as tool input. Always include "
+        "unsupportedFeatures and list requested features the generator cannot represent instead "
+        "of silently omitting them. Actual database execution is not supported: a request only to "
+        "execute, deploy, or apply SQL to a database must be unsupported. Never include "
+        "targetMode, sessionId, workspaceId, userId, or currentUserId in generate_sql_erd input; "
+        "the App Server "
+        "resolves context and, when needed, asks the user whether to create or replace a session. "
         "Normalize relative dates using the provided timezone and currentDate. For Korean week "
         "phrases, '이번 주말' means the nearest Saturday-Sunday that is not fully past: include "
         "the current Saturday, but on Sunday use the following weekend. '다음 주 월요일' means "
@@ -1008,6 +1084,9 @@ def _agent_planner_system_prompt() -> str:
         "When planningContext contains completed tool results, use them to answer the user's "
         "original request. If the request is satisfied, return completed instead of "
         "repeating a tool. "
+        "When planningContext contains a completed generate_sql_erd result with "
+        "action=replaced, treat it as a successful schema replacement. Its title is the "
+        "existing session title and is not evidence that an older schema was generated. "
         "Write message and finalAnswerDraft in Korean. "
         "Put the selected tool input object into inputJson as a compact JSON string. "
         "Use null inputJson when there is no tool input. "

@@ -1,11 +1,16 @@
 import { Injectable } from "@nestjs/common";
 import { badRequest, notFound } from "../../common/api-error";
 import { WorkspaceService } from "../workspace/workspace.service";
+import {
+  isBoardIssueCreateTargetValid,
+  type ValidBoardIssueCreateTarget
+} from "./board-issue-create-target";
 import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
+import { BoardIssueCreateQueries } from "./queries/board-issue-create.queries";
+import type { BoardIssueCreateTargetRow } from "./queries/board-issue-create.queries";
 import { BoardReadQueries } from "./queries/board-read.queries";
 import type {
   BoardColumnRow,
-  BoardDeliveryOptionRow,
   BoardDetailRow,
   BoardIssueRow,
   BoardRow
@@ -50,7 +55,8 @@ const MAX_PAGE_LIMIT = 100;
 export class BoardReadService {
   constructor(
     private readonly boardReadQueries: BoardReadQueries,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly boardIssueCreateQueries: BoardIssueCreateQueries
   ) {}
 
   async listBoards(
@@ -121,8 +127,10 @@ export class BoardReadService {
   ): Promise<BoardDeliveryOptionPayload[]> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const rows = await this.boardReadQueries.listBoardDeliveryOptions(workspaceId);
-    return this.mapBoardDeliveryOptions(rows);
+    const rows = await this.boardIssueCreateQueries.listIssueCreateTargets(workspaceId);
+    return this.mapBoardDeliveryOptions(
+      rows.filter(isBoardIssueCreateTargetValid)
+    );
   }
 
   async listBoardIssues(
@@ -348,7 +356,7 @@ export class BoardReadService {
   }
 
   private mapBoardDeliveryOptions(
-    rows: BoardDeliveryOptionRow[]
+    rows: Array<ValidBoardIssueCreateTarget<BoardIssueCreateTargetRow>>
   ): BoardDeliveryOptionPayload[] {
     const boards = new Map<string, BoardDeliveryOptionPayload>();
 
@@ -359,9 +367,10 @@ export class BoardReadService {
         name: row.board_name,
         columns: []
       };
-      if (row.column_id !== null && row.column_name !== null) {
-        board.columns.push({ id: String(row.column_id), name: row.column_name });
-      }
+      board.columns.push({
+        id: String(row.target_column_id),
+        name: row.target_column_name
+      });
       boards.set(id, board);
     }
 

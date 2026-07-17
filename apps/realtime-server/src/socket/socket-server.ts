@@ -10,6 +10,14 @@ import { createBoardRoomService } from "../board/board-room.service";
 import { createBoardSourceRoomService } from "../board/board-source-room.service";
 import { registerBoardSocketHandlers } from "../board/board-socket-handlers";
 import { registerBoardSourceSocketHandlers } from "../board/board-source-socket-handlers";
+import { createChatAccessService } from "../chat/chat-access.service";
+import { createChatFanOut } from "../chat/chat-fan-out";
+import {
+  createChatMembershipRevocationHandler,
+  WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
+} from "../chat/chat-membership-revocation";
+import { registerChatSocketHandlers } from "../chat/chat-socket-handlers";
+import { createChatSubscriptionWorkQueue } from "../chat/chat-subscription-work";
 import { createGithubSourceAccessService } from "../github-source/github-source-access.service";
 import { createGithubSourceFanOut } from "../github-source/github-source-fan-out";
 import { createGithubSourceRoomService } from "../github-source/github-source-room.service";
@@ -74,6 +82,20 @@ import type {
   PageCursorPresenceState,
   PageCursorRoomRef,
 } from "../page-cursor/page-cursor-types";
+import { createPdfCollaborationAccessService } from "../pdf-collaboration/pdf-collaboration-access.service";
+import {
+  pdfCollaborationClientEvents,
+  pdfCollaborationServerEvents,
+} from "../pdf-collaboration/pdf-collaboration-events";
+import {
+  readPdfCollaborationPageUpdate,
+  readPdfCollaborationPointerUpdate,
+  readPdfCollaborationRoomRef,
+  readPdfCollaborationStrokeCommit,
+  readPdfCollaborationStrokeRemove,
+} from "../pdf-collaboration/pdf-collaboration-payload";
+import { createPdfCollaborationRoomName } from "../pdf-collaboration/pdf-collaboration-room";
+import { createPdfCollaborationRoomState } from "../pdf-collaboration/pdf-collaboration-room-state";
 import type {
   CanvasRoomRef,
 } from "../canvas/contracts/canvas-types";
@@ -148,6 +170,7 @@ const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
 const BOARD_SOURCE_REDIS_CHANNEL = "board:source-events";
 const GITHUB_SOURCE_INVALIDATION_REDIS_CHANNEL = "github:source-invalidations";
+const CHAT_REDIS_CHANNEL = "chat:events";
 
 function createConflictDraftShapeLockId(
   reviewSessionId: string,
@@ -388,6 +411,13 @@ function emitPageCursorError(socket: Socket, message: string) {
   );
 }
 
+function emitPdfCollaborationError(socket: Socket, message: string) {
+  socket.emit(
+    pdfCollaborationServerEvents.error,
+    createSocketErrorPayload("invalid_payload", message),
+  );
+}
+
 function isPageCursorPresenceState(
   value: unknown,
 ): value is PageCursorPresenceState {
@@ -468,10 +498,14 @@ export async function createRealtimeSocketServer({
 
   const sessionService = createRealtimeSessionService(database);
   const accessService = createCanvasAccessService(database);
+  const pdfCollaborationAccessService = createPdfCollaborationAccessService({
+    database,
+  });
   const sqlErdAccessService = createSqlErdAccessService(database);
   const boardAccessService = createBoardAccessService(database);
   const presenceService = createCanvasPresenceService();
   const roomStateService = createCanvasRoomStateService();
+  const pdfCollaborationRoomState = createPdfCollaborationRoomState();
   const sqlErdPresenceService = createSqlErdPresenceService();
   const shapeLockService = createCanvasShapeLockService({
     redisClient: redisAdapter?.stateClient ?? null,
@@ -505,6 +539,15 @@ export async function createRealtimeSocketServer({
   const workspacePresenceAccessService =
     createWorkspacePresenceAccessService(database);
   const workspacePresenceService = createWorkspacePresenceService();
+  const chatAccessService = createChatAccessService(database);
+  const chatFanOut = createChatFanOut({ database, io });
+  const chatMembershipRevocationHandler =
+    createChatMembershipRevocationHandler({ io });
+  const chatSubscriptionWork = createChatSubscriptionWorkQueue({
+    onRejected() {
+      console.error("Chat Redis subscription work failed");
+    },
+  });
   const boardRoomService = createBoardRoomService({
     accessService: boardAccessService,
   });
@@ -601,6 +644,27 @@ export async function createRealtimeSocketServer({
         },
       )
     : null;
+  const unsubscribeChatEvents = redisAdapter
+    ? await redisAdapter.subscribe(CHAT_REDIS_CHANNEL, (payload) => {
+        chatSubscriptionWork.enqueueChatEvent(async () => {
+          if (!(await chatFanOut.fanOut(payload))) {
+            console.error("Chat Redis payload or access recheck failed");
+          }
+        });
+      })
+    : null;
+  const unsubscribeWorkspaceMembershipRevocations = redisAdapter
+    ? await redisAdapter.subscribe(
+        WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
+        (payload) => {
+          chatSubscriptionWork.trackRevocation(async () => {
+            if (!(await chatMembershipRevocationHandler.handle(payload))) {
+              console.error("Workspace membership revocation handling failed");
+            }
+          });
+        },
+      )
+    : null;
   const unsubscribePrReviewDecisions = redisAdapter
     ? await redisAdapter.subscribe(PR_REVIEW_DECISION_REDIS_CHANNEL, (payload) => {
         if (!isPrReviewDecisionUpdatedEvent(payload)) {
@@ -674,6 +738,10 @@ export async function createRealtimeSocketServer({
   io.on("connection", (socket) => {
     const authedSocket = socket as AuthedSocket;
 
+    registerChatSocketHandlers({
+      accessService: chatAccessService,
+      socket,
+    });
     registerWorkspacePresenceSocketHandlers({
       accessService: workspacePresenceAccessService,
       io,
@@ -806,6 +874,48 @@ export async function createRealtimeSocketServer({
       });
     });
 
+    socket.on(pdfCollaborationClientEvents.join, async (payload) => {
+      const room = readPdfCollaborationRoomRef(payload);
+      if (!room) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:join payload is invalid");
+        return;
+      }
+
+      const access = await pdfCollaborationAccessService.getPdfCollaborationRoomAccess(
+        authedSocket.data.auth,
+        room,
+      );
+      if (!access) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("forbidden", "PDF collaboration room access denied"),
+        );
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(room);
+      await socket.join(roomName);
+      const snapshot = pdfCollaborationRoomState.join(room, socket.id, {
+        displayName: authedSocket.data.auth.displayName,
+        pageNumber: 1,
+        userId: authedSocket.data.auth.userId ?? socket.id,
+      });
+      socket.emit(pdfCollaborationServerEvents.joined, snapshot);
+    });
+
+    socket.on(pdfCollaborationClientEvents.leave, async (payload) => {
+      const room = readPdfCollaborationRoomRef(payload);
+      if (!room) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:leave payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(room);
+      const presence = pdfCollaborationRoomState.leave(room, socket.id);
+      await socket.leave(roomName);
+      if (presence) socket.to(roomName).emit(pdfCollaborationServerEvents.leave, presence);
+    });
+
     socket.on(sqlErdClientEvents.leave, async (payload) => {
       const room = readSqlErdRoomRef(payload);
 
@@ -905,6 +1015,114 @@ export async function createRealtimeSocketServer({
       socket.to(roomName).emit(pageCursorServerEvents.update, presence);
     });
 
+    socket.on(pdfCollaborationClientEvents.pageUpdate, (payload) => {
+      const update = readPdfCollaborationPageUpdate(payload);
+      if (!update) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:page:update payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(update);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before updating page"),
+        );
+        return;
+      }
+
+      const presence = pdfCollaborationRoomState.updatePage(
+        update,
+        socket.id,
+        update.pageNumber,
+      );
+      if (presence) socket.to(roomName).emit(pdfCollaborationServerEvents.pageUpdate, presence);
+    });
+
+    socket.on(pdfCollaborationClientEvents.pointerUpdate, (payload) => {
+      const update = readPdfCollaborationPointerUpdate(payload);
+      if (!update) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:pointer:update payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(update);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before updating pointer"),
+        );
+        return;
+      }
+
+      const pointer = pdfCollaborationRoomState.updatePointer(update, socket.id, update);
+      if (pointer) socket.to(roomName).emit(pdfCollaborationServerEvents.pointerUpdate, pointer);
+    });
+
+    socket.on(pdfCollaborationClientEvents.strokeCommit, (payload) => {
+      const commit = readPdfCollaborationStrokeCommit(payload);
+      if (!commit) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:stroke:commit payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(commit);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before drawing"),
+        );
+        return;
+      }
+
+      const stroke = pdfCollaborationRoomState.commitStroke(commit, commit);
+      socket.to(roomName).emit(pdfCollaborationServerEvents.strokeCommit, {
+        ...commit,
+        stroke,
+      });
+    });
+
+    socket.on(pdfCollaborationClientEvents.strokeRemove, (payload) => {
+      const remove = readPdfCollaborationStrokeRemove(payload);
+      if (!remove) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:stroke:remove payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(remove);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before erasing"),
+        );
+        return;
+      }
+
+      if (pdfCollaborationRoomState.removeStroke(remove, remove.pageNumber, remove.strokeId)) {
+        socket.to(roomName).emit(pdfCollaborationServerEvents.strokeRemove, remove);
+      }
+    });
+
+    socket.on(pdfCollaborationClientEvents.strokesClear, (payload) => {
+      const clear = readPdfCollaborationPageUpdate(payload);
+      if (!clear) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:strokes:clear payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(clear);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before clearing drawings"),
+        );
+        return;
+      }
+
+      pdfCollaborationRoomState.clearPageStrokes(clear, clear.pageNumber);
+      socket.to(roomName).emit(pdfCollaborationServerEvents.strokesClear, clear);
+    });
+
     socket.on(PR_REVIEW_CONFLICT_DRAFT_LOCK_CLAIM_EVENT, async payload => {
       if (!isPrReviewConflictDraftLockPayload(payload)) {
         emitCanvasError(socket, "pr-review:conflict-draft:lock:claim payload is invalid");
@@ -974,6 +1192,7 @@ export async function createRealtimeSocketServer({
         const pageCursorLeaveEvents: PageCursorPresenceState[] = Object.values(
           authedSocket.data.pageCursorPresenceByRoom,
         );
+        const pdfCollaborationLeaveEvents = pdfCollaborationRoomState.clearSocket(socket.id);
         authedSocket.data.pageCursorPresenceByRoom = {};
 
         for (const clearResult of sqlErdClearResults) {
@@ -990,6 +1209,11 @@ export async function createRealtimeSocketServer({
               workspaceId: pageCursorPresence.workspaceId,
             });
         }
+        for (const pdfCollaborationPresence of pdfCollaborationLeaveEvents) {
+          socket
+            .to(createPdfCollaborationRoomName(pdfCollaborationPresence))
+            .emit(pdfCollaborationServerEvents.leave, pdfCollaborationPresence);
+        }
       })().catch((error) => {
         console.error("Realtime socket disconnect cleanup failed", error);
       });
@@ -1005,6 +1229,9 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardInvalidations?.();
       await unsubscribeBoardSourceEvents?.();
       await unsubscribeGithubSourceInvalidations?.();
+      await unsubscribeChatEvents?.();
+      await unsubscribeWorkspaceMembershipRevocations?.();
+      await chatSubscriptionWork.drain();
       await unsubscribePrReviewDecisions?.();
       await unsubscribePrReviewRoomDeleted?.();
       await unsubscribePrReviewConflictDrafts?.();

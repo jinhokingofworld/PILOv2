@@ -56,7 +56,20 @@ assert.match(calendarPanel, /일정을 보려면 로그인이 필요합니다/);
 assert.match(calendarPanel, /createCalendarApiClient/);
 assert.match(calendarPanel, /getCalendarGridDates/);
 assert.match(calendarPanel, /getEventsForCalendarDate/);
+assert.match(calendarPanel, /getCalendarWeekEventBars/);
+assert.match(calendarPanel, /getCalendarDateBarLayout/);
+assert.match(calendarPanel, /dateBarLayout\.connectsToPrevious/);
+assert.match(calendarPanel, /dateBarLayout\.connectsToNext/);
+assert.match(calendarPanel, /border-l-0/);
+assert.match(calendarPanel, /border-r-0/);
+assert.match(calendarPanel, /dateBarLayout\.laneCount/);
+assert.match(calendarPanel, /CalendarEventBar/);
+assert.match(calendarPanel, /pointer-events-none absolute inset-x-0 top-10/);
 assert.match(calendarPanel, /CalendarEventDialog/);
+assert.match(
+  calendarPanel,
+  /function CalendarEventDialog\([\s\S]*?if \(!mode\) \{\s*return null;/
+);
 assert.match(calendarPanel, /CalendarEventCreateDialog/);
 assert.match(calendarPanel, /CalendarEventDetailDialog/);
 assert.match(calendarPanel, /CalendarEventsDialog/);
@@ -102,3 +115,5 @@ assert.doesNotMatch(calendarPanel, /pilo-local-workspace/);
 assert.doesNotMatch(calendarPanel, /localStorage/);
 assert.doesNotMatch(calendarPanel, /Workspace ID/);
 assert.doesNotMatch(calendarPanel, /워크스페이스 ID/);
+
+await import("../../src/features/calendar/calendar-event-bars.test.mjs");
