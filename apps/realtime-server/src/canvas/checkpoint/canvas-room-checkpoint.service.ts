@@ -13,8 +13,17 @@ const SPLITTABLE_CHECKPOINT_STATUSES = new Set([400, 409, 422]);
 
 export type CanvasRoomCheckpointService = {
   close: () => Promise<void>;
-  flushCheckpointNow: (room: CanvasRoomRef, token?: string) => Promise<void>;
-  scheduleCheckpoint: (room: CanvasRoomRef, token: string) => void;
+  flushCheckpointNow: (
+    room: CanvasRoomRef,
+    token?: string,
+    userId?: string,
+  ) => Promise<void>;
+  revokeRoomAuthorization: (room: CanvasRoomRef, userId: string) => void;
+  scheduleCheckpoint: (
+    room: CanvasRoomRef,
+    token: string,
+    userId: string,
+  ) => void;
 };
 
 export type CanvasRoomCheckpointServiceOptions = {
@@ -85,7 +94,10 @@ export function createCanvasRoomCheckpointService({
   roomStateService,
 }: CanvasRoomCheckpointServiceOptions): CanvasRoomCheckpointService {
   const timersByRoom = new Map<string, ReturnType<typeof setTimeout>>();
-  const tokensByRoom = new Map<string, string>();
+  const authorizationsByRoom = new Map<
+    string,
+    { token: string; userId: string }
+  >();
   const roomsByKey = new Map<string, CanvasRoomRef>();
   const runningCheckpointsByRoom = new Map<string, Promise<void>>();
   let isClosing = false;
@@ -207,9 +219,9 @@ export function createCanvasRoomCheckpointService({
 
   async function runCheckpoint(roomKey: string) {
     const room = roomsByKey.get(roomKey);
-    const token = tokensByRoom.get(roomKey);
+    const authorization = authorizationsByRoom.get(roomKey);
 
-    if (!room || !token) return;
+    if (!room || !authorization) return;
 
     const snapshot = roomStateService.getCheckpointSnapshot(room);
 
@@ -222,7 +234,11 @@ export function createCanvasRoomCheckpointService({
 
     try {
       emitCheckpointStatus(room, "saving", operations.length);
-      const result = await persistOperations(room, token, operations);
+      const result = await persistOperations(
+        room,
+        authorization.token,
+        operations,
+      );
       const completedAllOperations = result.failures.length === 0;
 
       result.successes.forEach((success, index) => {
@@ -302,13 +318,13 @@ export function createCanvasRoomCheckpointService({
       });
       timersByRoom.clear();
       await Promise.all(Array.from(roomsByKey.keys(), flushCheckpoint));
-      tokensByRoom.clear();
+      authorizationsByRoom.clear();
       roomsByKey.clear();
       runningCheckpointsByRoom.clear();
       isClosing = false;
     },
 
-    async flushCheckpointNow(room, token) {
+    async flushCheckpointNow(room, token, userId) {
       const roomKey = createRoomKey(room);
 
       if (isClosing) return;
@@ -321,20 +337,27 @@ export function createCanvasRoomCheckpointService({
       }
 
       roomsByKey.set(roomKey, room);
-      if (token) {
-        tokensByRoom.set(roomKey, token);
+      if (token && userId) {
+        authorizationsByRoom.set(roomKey, { token, userId });
       }
 
       await flushCheckpoint(roomKey);
     },
 
-    scheduleCheckpoint(room, token) {
+    revokeRoomAuthorization(room, userId) {
+      const roomKey = createRoomKey(room);
+      if (authorizationsByRoom.get(roomKey)?.userId === userId) {
+        authorizationsByRoom.delete(roomKey);
+      }
+    },
+
+    scheduleCheckpoint(room, token, userId) {
       const roomKey = createRoomKey(room);
 
       if (isClosing) return;
 
       roomsByKey.set(roomKey, room);
-      tokensByRoom.set(roomKey, token);
+      authorizationsByRoom.set(roomKey, { token, userId });
       scheduleRoomCheckpoint(roomKey);
     },
   };

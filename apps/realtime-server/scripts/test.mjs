@@ -319,6 +319,7 @@ await import("../src/chat/chat-events.test.mjs");
 await import("../src/chat/chat-membership-revocation.test.mjs");
 await import("../src/chat/chat-subscription-work.test.mjs");
 await import("../src/chat/chat-socket-lifecycle.test.mjs");
+await import("../src/canvas/socket/canvas-membership-revocation.test.mjs");
 await import("../src/documents/document-access.service.test.mjs");
 await import("../src/documents/document-app-server-client.test.mjs");
 await import("../src/documents/document-checkpoint.service.test.mjs");

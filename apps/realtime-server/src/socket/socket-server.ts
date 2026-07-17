@@ -36,6 +36,7 @@ import {
 } from "../canvas/state/canvas-room-state.service";
 import { createCanvasShapeLockService } from "../canvas/review-lock/canvas-shape-lock.service";
 import { createCanvasShapePreviewService } from "../canvas/preview/canvas-shape-preview.service";
+import { createClassicCanvasMembershipRevocationHandler } from "../canvas/socket/canvas-membership-revocation";
 import {
   assertCanvasRoomWritable,
   emitCanvasError,
@@ -168,6 +169,7 @@ type AuthedSocket = Socket & {
     canvasRoomAccess: Map<string, CanvasRoomAccess>;
     canvasRoomsByName: Map<string, CanvasRoomRef>;
     pageCursorPresenceByRoom: Record<string, PageCursorPresenceState>;
+    revokedClassicCanvasWorkspaceIds: Set<string>;
     sqlErdPresenceByRoom: Record<string, SqlErdPresenceState>;
     sqlErdRevokedWorkspaceIds: Set<string>;
     sqlErdRoomsByName: Map<string, SqlErdRoomRef>;
@@ -555,6 +557,17 @@ export async function createRealtimeSocketServer({
   const chatFanOut = createChatFanOut({ database, io });
   const chatMembershipRevocationHandler =
     createChatMembershipRevocationHandler({ io });
+  const classicCanvasMembershipRevocationHandler =
+    createClassicCanvasMembershipRevocationHandler({
+      emitLockReleases(payload) {
+        emitConflictDraftLockReleases(io, payload);
+      },
+      io,
+      presenceService,
+      roomCheckpointService,
+      shapeLockService,
+      shapePreviewService,
+    });
   const pdfCollaborationMembershipRevocationHandler =
     createPdfCollaborationMembershipRevocationHandler({
       io,
@@ -684,6 +697,7 @@ export async function createRealtimeSocketServer({
             const handled = await Promise.all(
               [
                 chatMembershipRevocationHandler.handle(payload),
+                classicCanvasMembershipRevocationHandler.handle(payload),
                 pdfCollaborationMembershipRevocationHandler.handle(payload),
                 sqlErdMembershipRevocationHandler.handle(payload),
                 ...membershipRevocationHandlers.map((handler) =>
@@ -762,6 +776,8 @@ export async function createRealtimeSocketServer({
         (socket as AuthedSocket).data.canvasRoomAccess = new Map();
         (socket as AuthedSocket).data.canvasRoomsByName = new Map();
         (socket as AuthedSocket).data.pageCursorPresenceByRoom = {};
+        (socket as AuthedSocket).data.revokedClassicCanvasWorkspaceIds =
+          new Set();
         (socket as AuthedSocket).data.sqlErdPresenceByRoom = {};
         (socket as AuthedSocket).data.sqlErdRevokedWorkspaceIds = new Set();
         (socket as AuthedSocket).data.sqlErdRoomsByName = new Map();

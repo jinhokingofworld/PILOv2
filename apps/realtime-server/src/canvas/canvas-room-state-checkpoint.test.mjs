@@ -139,12 +139,53 @@ test("already missing delete checkpoint clears its tombstone", async () => {
       roomStateService: service,
     });
 
-    await checkpointService.flushCheckpointNow(room, "test-token");
+    await checkpointService.flushCheckpointNow(
+      room,
+      "test-token",
+      "test-user",
+    );
 
     assert.deepEqual(service.getDirtyShapeIds(room), []);
     assert.deepEqual(service.getDeletedTombstones(room), []);
     assert.equal(checkpointStatuses.at(-1)?.status, "saved");
     assert.equal(checkpointStatuses.at(-1)?.pendingOperations, 0);
+
+    await checkpointService.close();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("revoked user checkpoint authorization is discarded without dropping dirty operations", async () => {
+  const originalFetch = globalThis.fetch;
+  const service = createCanvasRoomStateService();
+  let fetchCalls = 0;
+
+  service.applyShapePatch(room, {
+    deletedShapeIds: [],
+    upsertShapes: [createNote("pending")],
+  });
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("revoked authorization must not reach the App Server");
+  };
+
+  try {
+    const checkpointService = createCanvasRoomCheckpointService({
+      appServerUrl: "https://app-server.test",
+      roomStateService: service,
+    });
+
+    checkpointService.scheduleCheckpoint(
+      room,
+      "revoked-token",
+      "revoked-user",
+    );
+    checkpointService.revokeRoomAuthorization(room, "revoked-user");
+    await checkpointService.flushCheckpointNow(room);
+
+    assert.equal(fetchCalls, 0);
+    assert.deepEqual(service.getDirtyShapeIds(room), ["shape:checkpoint-note"]);
 
     await checkpointService.close();
   } finally {
