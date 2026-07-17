@@ -225,6 +225,15 @@ apply는 이 환경변수와 callback secret을 shared AI Worker에서 제거한
 | `OPENAI_PR_REVIEW_TIMEOUT_MS` | OpenAI 분석 timeout. dev 값: `180000` |
 | `AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS` | receive visibility timeout. dev 값: `900` |
 
+### Workspace Indexer Worker
+
+| 변수 | 설명 |
+| --- | --- |
+| `SQS_WORKSPACE_INDEXING_QUEUE_URL` | Drive 문서와 이후 Calendar 인덱싱 메시지를 받는 공유 SQS URL |
+| `DATABASE_SSL` | `DATABASE_URL`이 SSL을 요구하는 Postgres를 가리킬 때 `true` |
+| `OPENAI_WORKSPACE_INDEXING_EMBEDDING_MODEL` | 문서 청크 임베딩 모델. dev 값: `text-embedding-3-small`(1536차원) |
+| `AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS` | 메시지 처리 visibility timeout. dev 값: `900` |
+
 ### LiveKit Server / Egress
 
 | 변수 | 설명 |

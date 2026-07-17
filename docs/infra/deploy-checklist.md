@@ -277,7 +277,7 @@ role에는 state object read와 lockfile 생성·해제, 현재 Terraform state 
 - ECR push 성공
 - ECS service deployment 시작 확인
 - SQS consume log 확인
-- `ai-worker`, `agent-worker`, `meeting-worker`, `pr-review-ai-worker` ECS service가 같은 새 image로 안정화되는지 확인
+- `ai-worker`, `agent-worker`, `meeting-worker`, `pr-review-ai-worker`, `workspace-indexer-worker` ECS service가 같은 새 image로 안정화되는지 확인
 
 ### Frontend workflow
 

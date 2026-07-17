@@ -26,6 +26,10 @@ output "pr_review_ai_worker_task_role_arn" {
   value = aws_iam_role.pr_review_ai_worker_task.arn
 }
 
+output "workspace_indexer_worker_task_role_arn" {
+  value = aws_iam_role.workspace_indexer_worker_task.arn
+}
+
 output "github_sync_worker_task_role_arn" {
   value = aws_iam_role.github_sync_worker_task.arn
 }
