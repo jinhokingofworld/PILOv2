@@ -97,6 +97,7 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/083_preserve_github_project_v2_reconnect_identity.sql` makes the ProjectV2 installation link nullable with `ON DELETE SET NULL`, preserving repository, ProjectV2, repository link, and Board cache identities across GitHub App installation deletion and reconnect. It was applied to the Supabase dev project under history entry `20260716173438_083_preserve_github_project_v2_reconnect_identity`.
 - `migrations/085_add_sql_erd_activity_log_actions.sql` adds SQLtoERD session, schema, rename, delete, and meaningful note-content Activity Log actions.
 - `migrations/086_create_workspace_membership_revocation_outbox.sql` adds durable, reclaimable Workspace membership revocation delivery intents so Redis publish failures are retried without rolling back the committed membership deletion.
+- `migrations/088_add_github_sync_run_trigger_source.sql` classifies new GitHub sync runs as `manual` or `automatic`, preserves existing rows as `legacy`, and adds a recent-history lookup index by Workspace and trigger source.
 
 ## Operational Data Repairs
 
