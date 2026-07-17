@@ -43,14 +43,17 @@ component 연결만 담당하고, CodeMirror 설정과 code editor UI는 code-bl
 
 `runtime/`은 `ClassicCanvasRuntime`을 조립자로 두고 책임별 파일을 평평하게 나눈다.
 
-- `useCanvasRuntimeHydration`: board 변경 시 초기 shape와 view setting 복원
+- `useCanvasRuntimeHydration`: board 변경 시 초기 shape 복원과 고정 시작 카메라 reset
 - `useCanvasShapePersistence`: freeform shape 변경 감지, local/API 저장, dirty shape 방어
 - `useCanvasViewportQueries`: viewport shape summary 조회와 shape detail lazy loading
-- `useCanvasViewSettingPersistence`: zoom, viewportX, viewportY 저장
-- `useCanvasApiLifecycle`: Canvas enter/leave, unmount 시 queue flush와 pending view setting sync
+- `useCanvasApiLifecycle`: Canvas enter/leave와 unmount 시 shape queue flush
 - `CanvasZoomControls`: smart guide와 zoom controls UI
 - `canvas-runtime-utils`: runtime hook들이 공유하는 순수 계산 helper와 query key
 - `canvas-runtime-types`: runtime 내부 client/storage mode 타입
+
+Classic Canvas 카메라는 협업 저장 상태로 취급하지 않는다. 진입과 새로고침 시 실제
+tldraw 편집 viewport의 정중앙에 Canvas 좌표 `(0, 0)`을 배치하고 100% zoom으로
+시작한다. 사용 중 pan/zoom은 자유롭게 유지하며 `zoomToFit`은 별도 사용자 액션이다.
 
 `api/` 하위 폴더는 Canvas API client 경계를 책임별로 나눈다.
 

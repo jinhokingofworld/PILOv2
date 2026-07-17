@@ -146,9 +146,9 @@ const canvasShapePersistence = await readFile(
   ),
   "utf8"
 );
-const canvasViewSettingPersistence = await readFile(
+const canvasInitialCamera = await readFile(
   new URL(
-    "../src/features/canvas/engine/runtime/useCanvasViewSettingPersistence.ts",
+    "../src/features/canvas/engine/editor/canvas-initial-camera.ts",
     import.meta.url
   ),
   "utf8"
@@ -647,7 +647,7 @@ assert.match(canvasRuntime, /pendingLocalShapeVersionsRef/);
 assert.match(canvasRuntime, /useCanvasRuntimeHydration/);
 assert.match(canvasRuntime, /useCanvasApiLifecycle/);
 assert.match(canvasRuntime, /useCanvasShapePersistence/);
-assert.match(canvasRuntime, /useCanvasViewSettingPersistence/);
+assert.doesNotMatch(canvasRuntime, /useCanvasViewSettingPersistence/);
 assert.match(canvasRuntime, /useCanvasViewportQueries/);
 assert.match(canvasRuntime, /loadFrameChildren/);
 assert.match(canvasRuntime, /<CanvasZoomControls/);
@@ -658,7 +658,7 @@ assert.match(canvasRuntimeUtils, /getChangedFreeformShapeIds/);
 assert.match(canvasRuntimeUtils, /mergeLocalFreeformShapeChanges/);
 assert.match(canvasRuntimeUtils, /changedShapeIdSet\.has\(shapeId\)/);
 assert.match(canvasRuntimeHydration, /readCanvasStorage\("freeform-shapes"/);
-assert.match(canvasRuntimeHydration, /readCanvasStorage\("view-setting"/);
+assert.doesNotMatch(canvasRuntimeHydration, /readCanvasStorage\("view-setting"/);
 assert.match(canvasApiLifecycle, /createCanvasShapeSyncQueue/);
 assert.match(canvasApiLifecycle, /queryClient\s*\.\s*invalidateQueries/);
 assert.match(canvasApiLifecycle, /enterCanvas/);
@@ -700,7 +700,10 @@ assert.match(canvasViewportQueries, /MAX_LOADED_VIEWPORT_BOUNDS = 24/);
 assert.match(canvasViewportQueries, /loadedViewportBoundsRef/);
 assert.match(canvasViewportQueries, /currentLoadedViewport\.bounds\.some/);
 assert.match(canvasRuntimeUtils, /DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN/);
-assert.match(canvasRuntimeUtils, /DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 3_000/);
+assert.match(canvasInitialCamera, /CLASSIC_CANVAS_INITIAL_ZOOM = 1/);
+assert.match(canvasInitialCamera, /editor\.centerOnPoint\(CLASSIC_CANVAS_ORIGIN/);
+assert.match(canvasInitialCamera, /force: true/);
+assert.match(canvasInitialCamera, /immediate: true/);
 assert.match(
   canvasRuntimeUtils,
   /DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 700/,
@@ -709,13 +712,11 @@ assert.match(canvasRuntimeUtils, /CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE = 1_000/
 assert.match(canvasRuntimeUtils, /Math\.floor\(value \/ CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE\)/);
 assert.match(canvasRuntimeUtils, /Math\.round\(bounds\.zoom \* 4\) \/ 4/);
 assert.doesNotMatch(canvasRuntimeUtils, /round\(bounds\.x\)/);
-assert.match(canvasViewSettingPersistence, /storageMode === "api"/);
-assert.match(canvasViewSettingPersistence, /updateViewSetting/);
 assert.match(canvasShapePersistence, /writeCanvasStorage\([\s\S]*"freeform-shapes"/);
-assert.match(canvasViewSettingPersistence, /writeCanvasStorage\("view-setting"/);
+assert.doesNotMatch(canvasRuntime, /updateViewSetting/);
 assert.match(canvasRuntime, /onSnapStateChange/);
 assert.match(canvasRuntime, /INITIAL_CANVAS_VIEW_SETTING/);
-assert.match(canvasRuntime, /zoom: 0\.8/);
+assert.match(canvasRuntime, /zoom: CLASSIC_CANVAS_INITIAL_ZOOM/);
 assert.match(canvasRuntime, /canvasSnapState\.isSmartGuideEnabled/);
 assert.match(canvasRuntime, /setSmartGuidesEnabled/);
 assert.match(canvasZoomControls, /aria-label="스마트가이드"/);
@@ -1146,7 +1147,7 @@ assert.match(piloTldrawCanvas, /TldrawSurface/);
 assert.match(piloTldrawCanvas, /piloCanvasShapeUtils/);
 assert.match(piloTldrawCanvas, /hideUi/);
 assert.match(piloTldrawCanvas, /CanvasStateReporter/);
-assert.match(piloTldrawCanvas, /initialViewSetting/);
+assert.match(piloTldrawCanvas, /resetClassicCanvasCamera/);
 assert.match(piloTldrawCanvas, /editor\.setCamera/);
 assert.match(piloTldrawCanvas, /CanvasHistoryStateReporter/);
 assert.match(canvasEditorStateReporters, /editor\.getCanUndo/);
@@ -1212,7 +1213,7 @@ assert.match(piloTldrawCanvas, /SelectedGroupToolbar/);
 assert.doesNotMatch(piloTldrawCanvas, /PiloCanvasSmartGuides/);
 assert.doesNotMatch(piloTldrawCanvas, /applyPiloSmartSnap/);
 assert.doesNotMatch(piloTldrawCanvas, /SmartGuidesOverlay/);
-assert.match(piloTldrawCanvas, /cameraRestoreVersion/);
+assert.match(piloTldrawCanvas, /cameraResetVersion/);
 assert.match(piloTldrawCanvas, /resetFreeformShapes\(/);
 assert.match(piloTldrawCanvas, /preserveLocalState/);
 assert.match(piloTldrawCanvas, /editor\.getEditingShapeId\(\)/);

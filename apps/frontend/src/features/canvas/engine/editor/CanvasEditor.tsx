@@ -122,6 +122,7 @@ import type {
   PiloCanvasUserPreferenceState,
   PiloDrawingPreset,
 } from "./canvas-editor-contracts";
+import { resetClassicCanvasCamera } from "./canvas-initial-camera";
 
 export type { PiloCanvasFreeformShape } from "../canvas-engine-types";
 export type { PiloInsertableTool } from "../shapes/pilo-canvas-shape-factory";
@@ -190,10 +191,9 @@ function getCanvasUserPreferences(
 
 type CanvasEditorProps = {
   board: CanvasBoardDetail;
-  cameraRestoreVersion: number;
+  cameraResetVersion: number;
   consumeShapePatch: () => PiloCanvasShapePatch;
   hydrationVersion: number;
-  initialViewSetting: PiloCanvasViewSetting;
   freeformShapes: PiloCanvasFreeformShape[];
   onReady: (actions: PiloCanvasActions | null) => void;
   onFreeformShapesDraftChange: (
@@ -519,22 +519,6 @@ function hydrateFreeformShapes(
         history: "ignore",
       },
     );
-  });
-}
-
-function applyViewSetting(editor: Editor, viewSetting: PiloCanvasViewSetting) {
-  if (
-    !Number.isFinite(viewSetting.zoom) ||
-    !Number.isFinite(viewSetting.viewportX) ||
-    !Number.isFinite(viewSetting.viewportY)
-  ) {
-    return;
-  }
-
-  editor.setCamera({
-    x: viewSetting.viewportX,
-    y: viewSetting.viewportY,
-    z: viewSetting.zoom,
   });
 }
 
@@ -1044,11 +1028,10 @@ function getArrowAtPoint(editor: Editor, pagePoint: { x: number; y: number }) {
 
 export function CanvasEditor({
   board,
-  cameraRestoreVersion,
+  cameraResetVersion,
   consumeShapePatch,
   freeformShapes,
   hydrationVersion,
-  initialViewSetting,
   onReady,
   onFreeformShapesDraftChange,
   onFreeformShapesChange,
@@ -1100,7 +1083,6 @@ export function CanvasEditor({
   const lastHydratedSeedKeyRef = useRef<string | null>(null);
   const frameChildrenRequestTimerRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
-  const initialViewSettingRef = useRef(initialViewSetting);
   const seedKey = board.id;
   const [canvasAiChatAnchor, setCanvasAiChatAnchor] =
     useState<CanvasAiChatAnchor | null>(null);
@@ -1392,10 +1374,6 @@ export function CanvasEditor({
     return () => window.clearInterval(heartbeatTimer);
   }, [handleRealtimePreviewDraftChange, presence?.enabled]);
 
-  useEffect(() => {
-    initialViewSettingRef.current = initialViewSetting;
-  }, [initialViewSetting]);
-
   useEffect(
     () => () => {
       if (canvasAiChatHoldFrameRef.current !== null) {
@@ -1462,8 +1440,8 @@ export function CanvasEditor({
 
     if (!editor) return;
 
-    applyViewSetting(editor, initialViewSettingRef.current);
-  }, [cameraRestoreVersion, seedKey]);
+    resetClassicCanvasCamera(editor);
+  }, [cameraResetVersion, seedKey]);
 
   function deactivatePiloEraser(editor = editorRef.current) {
     piloEraserActiveRef.current = false;
@@ -1729,7 +1707,7 @@ export function CanvasEditor({
       pendingArrowBindingsRef,
       piloDefaultArrowKindHydrationGuardRef,
     );
-    applyViewSetting(editor, initialViewSetting);
+    resetClassicCanvasCamera(editor);
 
     onReady({
       markUiEventAsHandled(event) {

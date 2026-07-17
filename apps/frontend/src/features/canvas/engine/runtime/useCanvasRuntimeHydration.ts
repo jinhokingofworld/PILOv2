@@ -7,9 +7,7 @@ import type { PiloCanvasFreeformShape } from "../canvas-engine-types";
 import type {
   CanvasBoardDetail,
   CanvasRuntimeStorageMode,
-  CanvasViewSetting,
 } from "./canvas-runtime-types";
-import { normalizeViewSetting } from "./canvas-runtime-utils";
 
 type RuntimeRef<T> = {
   current: T;
@@ -20,14 +18,12 @@ type UseCanvasRuntimeHydrationOptions = {
   freeformShapesRef: RuntimeRef<PiloCanvasFreeformShape[]>;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
   pendingShapeDetailRef: RuntimeRef<string | null>;
-  setCameraRestoreVersion: (updater: (version: number) => number) => void;
+  setCameraResetVersion: (updater: (version: number) => number) => void;
   setCanvasHydrationVersion: (updater: (version: number) => number) => void;
   setFreeformShapes: (shapes: PiloCanvasFreeformShape[]) => void;
-  setViewSetting: (viewSetting: CanvasViewSetting) => void;
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
   shapeDetailRequestSeqRef: RuntimeRef<number>;
   storageMode: CanvasRuntimeStorageMode;
-  viewSettingRef: RuntimeRef<CanvasViewSetting>;
   viewportShapeLoadRequestSeqRef: RuntimeRef<number>;
 };
 
@@ -36,14 +32,12 @@ export function useCanvasRuntimeHydration({
   freeformShapesRef,
   pendingLocalShapeVersionsRef,
   pendingShapeDetailRef,
-  setCameraRestoreVersion,
+  setCameraResetVersion,
   setCanvasHydrationVersion,
   setFreeformShapes,
-  setViewSetting,
   shapeDetailCacheRef,
   shapeDetailRequestSeqRef,
   storageMode,
-  viewSettingRef,
   viewportShapeLoadRequestSeqRef,
 }: UseCanvasRuntimeHydrationOptions) {
   useEffect(() => {
@@ -57,14 +51,6 @@ export function useCanvasRuntimeHydration({
             readCanvasStorage("freeform-shapes", board.id),
           ) as PiloCanvasFreeformShape[])
         : boardFreeformShapes;
-    const storedViewSetting =
-      storageMode === "local"
-        ? normalizeViewSetting(
-            readCanvasStorage("view-setting", board.id),
-            board.viewSetting,
-          )
-        : board.viewSetting;
-
     queueMicrotask(() => {
       if (cancelled) return;
 
@@ -75,11 +61,9 @@ export function useCanvasRuntimeHydration({
       pendingLocalShapeVersionsRef.current.clear();
       freeformShapesRef.current = storedFreeformShapes;
       setFreeformShapes(storedFreeformShapes);
-      viewSettingRef.current = storedViewSetting;
-      setViewSetting(storedViewSetting);
 
       setCanvasHydrationVersion((version) => version + 1);
-      setCameraRestoreVersion((version) => version + 1);
+      setCameraResetVersion((version) => version + 1);
     });
 
     return () => {
@@ -88,18 +72,15 @@ export function useCanvasRuntimeHydration({
   }, [
     board.id,
     board.shapes,
-    board.viewSetting,
     freeformShapesRef,
     pendingLocalShapeVersionsRef,
     pendingShapeDetailRef,
-    setCameraRestoreVersion,
+    setCameraResetVersion,
     setCanvasHydrationVersion,
     setFreeformShapes,
-    setViewSetting,
     shapeDetailCacheRef,
     shapeDetailRequestSeqRef,
     storageMode,
-    viewSettingRef,
     viewportShapeLoadRequestSeqRef,
   ]);
 }

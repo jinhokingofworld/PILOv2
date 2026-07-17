@@ -5,7 +5,6 @@ import type {
 } from "../canvas-engine-types";
 import type { CanvasViewSetting } from "./canvas-runtime-types";
 
-export const DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 3_000;
 export const DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 700;
 export const DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN = 320;
 export const CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE = 1_000;
@@ -146,32 +145,6 @@ export function mergeLocalFreeformShapeChanges({
   return Array.from(new Set(orderedShapeIds))
     .map((shapeId) => currentShapeMap.get(shapeId))
     .filter((shape): shape is PiloCanvasFreeformShape => Boolean(shape));
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-export function normalizeViewSetting(
-  value: unknown,
-  fallback: CanvasViewSetting,
-): CanvasViewSetting {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value) ||
-    !isFiniteNumber((value as CanvasViewSetting).zoom) ||
-    !isFiniteNumber((value as CanvasViewSetting).viewportX) ||
-    !isFiniteNumber((value as CanvasViewSetting).viewportY)
-  ) {
-    return fallback;
-  }
-
-  return {
-    zoom: clampZoom((value as CanvasViewSetting).zoom),
-    viewportX: (value as CanvasViewSetting).viewportX,
-    viewportY: (value as CanvasViewSetting).viewportY,
-  };
 }
 
 export function buildViewportShapeQueryKey({
