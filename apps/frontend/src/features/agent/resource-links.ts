@@ -102,6 +102,8 @@ export function parseSqlErdAgentTableFocusResource(
     metadata.view !== "table_focus" ||
     !Number.isSafeInteger(metadata.sessionRevision) ||
     Number(metadata.sessionRevision) < 1 ||
+    typeof metadata.modelFingerprint !== "string" ||
+    !/^fnv1a32:[0-9a-f]{8}$/.test(metadata.modelFingerprint) ||
     typeof metadata.featureLabel !== "string" ||
     !isBoundedText(metadata.featureLabel, 100) ||
     typeof metadata.confidence !== "string" ||
@@ -125,6 +127,7 @@ export function parseSqlErdAgentTableFocusResource(
     view: "table_focus",
     sessionId: resourceRef.resourceId,
     sessionRevision: Number(metadata.sessionRevision),
+    modelFingerprint: metadata.modelFingerprint,
     featureLabel: metadata.featureLabel.trim().replace(/\s+/g, " "),
     primaryTableIds,
     relatedTableIds,

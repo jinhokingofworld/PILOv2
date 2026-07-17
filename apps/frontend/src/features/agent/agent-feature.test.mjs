@@ -12,9 +12,11 @@ import {
 } from "./resource-links.ts";
 import {
   consumeStagedSqlErdAgentTableFocus,
+  createSqlErdModelFingerprint,
   getSqlErdFocusedRelationRole,
   getSqlErdFocusedTableRole,
   isSqlErdAgentTableFocusCurrent,
+  isSqlErdShapeDimmedByTableFocus,
   stageSqlErdAgentTableFocus
 } from "../sql-erd/utils/agent-table-focus.ts";
 
@@ -284,6 +286,10 @@ const focusedResourceRef = {
     version: 1,
     view: "table_focus",
     sessionRevision: 7,
+    modelFingerprint: createSqlErdModelFingerprint({
+      version: 1,
+      schema: { tables: [{ id: "table-orders" }], relations: [] }
+    }),
     featureLabel: "결제 기능",
     primaryTableIds: ["table-orders", "table-payments"],
     relatedTableIds: ["table-payment-attempts"],
@@ -296,12 +302,23 @@ const expectedFocus = {
   view: "table_focus",
   sessionId: resourceSessionId,
   sessionRevision: 7,
+  modelFingerprint: createSqlErdModelFingerprint({
+    version: 1,
+    schema: { tables: [{ id: "table-orders" }], relations: [] }
+  }),
   featureLabel: "결제 기능",
   primaryTableIds: ["table-orders", "table-payments"],
   relatedTableIds: ["table-payment-attempts"],
   relationIds: ["relation-orders-attempts", "relation-payments-attempts"],
   confidence: "medium"
 };
+assert.equal(
+  createSqlErdModelFingerprint({
+    schema: { relations: [], tables: [{ id: "table-orders" }] },
+    version: 1
+  }),
+  "fnv1a32:276fb69c"
+);
 
 assert.deepEqual(
   parseSqlErdAgentTableFocusResource(focusedResourceRef),
@@ -374,11 +391,79 @@ assert.equal(
   "dimmed"
 );
 assert.equal(
-  isSqlErdAgentTableFocusCurrent(expectedFocus, resourceSessionId, 7),
+  isSqlErdAgentTableFocusCurrent(expectedFocus, {
+    sessionId: resourceSessionId,
+    sessionRevision: 7,
+    modelJson: {
+      schema: { relations: [], tables: [{ id: "table-orders" }] },
+      version: 1
+    },
+    revisionValidated: false
+  }),
   true
 );
 assert.equal(
-  isSqlErdAgentTableFocusCurrent(expectedFocus, resourceSessionId, 8),
+  isSqlErdAgentTableFocusCurrent(expectedFocus, {
+    sessionId: resourceSessionId,
+    sessionRevision: 8,
+    modelJson: {
+      schema: { relations: [], tables: [{ id: "table-orders" }] },
+      version: 1
+    },
+    revisionValidated: false
+  }),
+  false
+);
+assert.equal(
+  isSqlErdAgentTableFocusCurrent(expectedFocus, {
+    sessionId: resourceSessionId,
+    sessionRevision: 8,
+    modelJson: {
+      schema: { relations: [], tables: [{ id: "table-orders" }] },
+      version: 1
+    },
+    revisionValidated: true
+  }),
+  true
+);
+assert.equal(
+  isSqlErdAgentTableFocusCurrent(expectedFocus, {
+    sessionId: resourceSessionId,
+    sessionRevision: 8,
+    modelJson: {
+      schema: { relations: [], tables: [{ id: "table-payments" }] },
+      version: 1
+    },
+    revisionValidated: true
+  }),
+  false
+);
+assert.equal(
+  isSqlErdShapeDimmedByTableFocus(expectedFocus, {
+    type: "sqltoerd_table",
+    props: { tableId: "table-users" }
+  }),
+  true
+);
+assert.equal(
+  isSqlErdShapeDimmedByTableFocus(expectedFocus, {
+    type: "sqltoerd_table",
+    props: { tableId: "table-orders" }
+  }),
+  false
+);
+assert.equal(
+  isSqlErdShapeDimmedByTableFocus(expectedFocus, {
+    type: "sqltoerd_relation",
+    props: { relationId: "relation-users-orders" }
+  }),
+  true
+);
+assert.equal(
+  isSqlErdShapeDimmedByTableFocus(expectedFocus, {
+    type: "sqltoerd_note",
+    props: { noteId: "note-1" }
+  }),
   false
 );
 

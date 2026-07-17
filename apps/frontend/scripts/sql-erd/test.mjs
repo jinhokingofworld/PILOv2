@@ -6914,6 +6914,10 @@ assert.match(canvasSurface, /createSqltoerdAutoLayout/);
 assert.match(canvasSurface, /markHistoryStoppingPoint\("sqltoerd auto layout"\)/);
 assert.match(canvasSurface, /data-sqltoerd-auto-layout/);
 assert.match(canvasSurface, /SqlErdTableFocusProvider/);
+assert.match(canvasSurface, /SqlErdTableFocusInteractionGuard/);
+assert.match(canvasSurface, /editor\.setSelectedShapes\(allowedShapeIds\)/);
+assert.match(canvasSurface, /registerBeforeChangeHandler\(\s*"shape"/);
+assert.match(canvasSurface, /registerBeforeDeleteHandler\(\s*"shape"/);
 assert.match(canvasSurface, /getSqlErdFocusedTableRole/);
 assert.match(canvasSurface, /getSqlErdFocusedRelationRole/);
 assert.match(canvasSurface, /SQLTOERD_MINIMUM_READABLE_ZOOM/);
@@ -6966,6 +6970,14 @@ assert.match(
 );
 assert.match(tableShape, /aria-pressed=\{isSelected\}/);
 assert.match(tableShape, /function handleTableKeyDown/);
+assert.match(
+  tableShape,
+  /function handleTableClick\(\) \{\s*if \(isFocusDimmed\) return;/
+);
+assert.match(
+  tableShape,
+  /function handleColumnClick\(columnId: string\) \{\s*if \(isFocusDimmed\) return;/
+);
 assert.match(tableShape, /override onClick\(shape: SqlErdTableShape\)/);
 assert.match(tableShape, /isSqlErdColumnPointerDrag/);
 assert.match(tableShape, /columnPointerStartRef/);
@@ -7032,6 +7044,13 @@ assert.match(relationShape, /SQLTOERD_RELATION_HIT_STROKE_WIDTH/);
 assert.match(relationShape, /data-sqltoerd-relation-focus-role/);
 assert.match(relationShape, /blur\(1px\)/);
 assert.match(panel, /consumeStagedSqlErdAgentTableFocus/);
+assert.match(panel, /revisionValidated/);
+assert.match(panel, /modelJson: sqlErdViewSession\.modelJson/);
+assert.match(panel, /data-sqltoerd-status-banners/);
+assert.match(
+  panel,
+  /data-sqltoerd-status-banners[\s\S]*?AutosavePausedBanner[\s\S]*?AgentTableFocusBanner/
+);
 assert.match(panel, /전체 보기/);
 assert.match(panel, /집중 보기/);
 assert.doesNotMatch(relationShape, /canCull\(\)/);

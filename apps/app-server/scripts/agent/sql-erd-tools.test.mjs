@@ -11,6 +11,7 @@ const { SqlErdAgentToolsService } = require(
 );
 const {
   buildSqlErdAgentSchemaProjection,
+  createSqlErdModelFingerprint,
   resolveSqlErdAgentTableFocus
 } = require("../../dist/modules/agent/tools/sql-erd-table-focus.js");
 
@@ -18,6 +19,14 @@ const USER_ID = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const RUN_ID = "33333333-3333-4333-8333-333333333333";
 const SESSION_ID = "44444444-4444-4444-8444-444444444444";
+
+assert.equal(
+  createSqlErdModelFingerprint({
+    schema: { relations: [], tables: [{ id: "table-orders" }] },
+    version: 1
+  }),
+  "fnv1a32:276fb69c"
+);
 
 function column(key, name, kind = "bigint") {
   return {
@@ -677,6 +686,40 @@ const titledInspection = await multipleInspect.execute(
 );
 assert.equal(titledInspection.outputSummary.sessionId, secondSessionId);
 
+multipleSqlErdService.sessions = multipleSqlErdService.sessions.map((session) => ({
+  ...session,
+  title: "Untitled ERD"
+}));
+const duplicateTitlePreparation = await multipleInspect.prepareExecution(
+  context,
+  multipleInspect.validateInput({ featureQuery: "payment feature" })
+);
+assert.equal(duplicateTitlePreparation.kind, "needs_clarification");
+assert.deepEqual(
+  duplicateTitlePreparation.outputSummary.candidates.map(
+    (candidate) => candidate.selectionToken
+  ),
+  [SESSION_ID, secondSessionId]
+);
+assert.deepEqual(
+  await multipleInspect.prepareExecution(
+    context,
+    multipleInspect.validateInput({
+      featureQuery: "payment feature",
+      sessionSelectionToken: secondSessionId
+    })
+  ),
+  { kind: "execute" }
+);
+const tokenSelectedInspection = await multipleInspect.execute(
+  context,
+  multipleInspect.validateInput({
+    featureQuery: "payment feature",
+    sessionSelectionToken: secondSessionId
+  })
+);
+assert.equal(tokenSelectedInspection.outputSummary.sessionId, secondSessionId);
+
 const emptySqlErdService = new FakeSqlErdService();
 emptySqlErdService.sessions = [];
 const emptyInspect = new SqlErdAgentToolsService(emptySqlErdService)
@@ -724,6 +767,7 @@ assert.deepEqual(focused.resourceRefs, [
       version: 1,
       view: "table_focus",
       sessionRevision: 7,
+      modelFingerprint: createSqlErdModelFingerprint(focusModelJson()),
       featureLabel: "결제 기능",
       primaryTableIds: ["internal-payments-id"],
       relatedTableIds: ["internal-orders-id", "internal-attempts-id"],
@@ -782,6 +826,8 @@ for (const contract of [agentApiContract, sqlErdApiContract]) {
   assert.match(contract, /primaryTableIds/);
   assert.match(contract, /relatedTableIds/);
   assert.match(contract, /sessionRevision/);
+  assert.match(contract, /sessionSelectionToken/);
+  assert.match(contract, /modelFingerprint/);
   assert.match(contract, /SqlErdSchemaSpecV1/);
   assert.match(contract, /new_session/);
   assert.match(contract, /replace_current/);

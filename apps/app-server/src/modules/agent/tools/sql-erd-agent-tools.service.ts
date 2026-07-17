@@ -18,6 +18,7 @@ import type {
 } from "../types/agent-tool.types";
 import {
   buildSqlErdAgentSchemaProjection,
+  createSqlErdModelFingerprint,
   resolveSqlErdAgentTableFocus
 } from "./sql-erd-table-focus";
 
@@ -32,6 +33,7 @@ interface ConfirmedSqlErdAgentInput {
 interface InspectSqlErdSchemaInput {
   featureQuery: string;
   sessionId?: string;
+  sessionSelectionToken?: string;
   sessionTitle?: string;
 }
 
@@ -85,6 +87,7 @@ const INSPECT_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
   properties: {
     featureQuery: { type: "string", minLength: 1, maxLength: 200 },
     sessionId: { type: "string", format: "uuid" },
+    sessionSelectionToken: { type: "string", format: "uuid" },
     sessionTitle: { type: "string", minLength: 1, maxLength: 120 }
   }
 };
@@ -505,6 +508,7 @@ export class SqlErdAgentToolsService {
         reason: resolution.reason,
         question: this.inspectClarificationQuestion(resolution.reason),
         candidates: resolution.candidates.map((candidate) => ({
+          selectionToken: candidate.id,
           title: candidate.title,
           updatedAt: candidate.updatedAt,
           tableCount: candidate.tableCount,
@@ -604,6 +608,7 @@ export class SqlErdAgentToolsService {
             version: 1,
             view: "table_focus",
             sessionRevision: session.revision,
+            modelFingerprint: createSqlErdModelFingerprint(session.modelJson),
             featureLabel: input.featureLabel,
             primaryTableIds: resolved.primaryTableIds,
             relatedTableIds: resolved.relatedTableIds,
@@ -627,6 +632,17 @@ export class SqlErdAgentToolsService {
           context.currentUserId,
           context.workspaceId,
           input.sessionId
+        )
+      };
+    }
+
+    if (input.sessionSelectionToken) {
+      return {
+        kind: "selected",
+        session: await this.sqlErdService.getSession(
+          context.currentUserId,
+          context.workspaceId,
+          input.sessionSelectionToken
         )
       };
     }
@@ -726,7 +742,12 @@ export class SqlErdAgentToolsService {
     }
     this.assertAllowedFields(
       input,
-      ["featureQuery", "sessionId", "sessionTitle"],
+      [
+        "featureQuery",
+        "sessionId",
+        "sessionSelectionToken",
+        "sessionTitle"
+      ],
       "inspect_sql_erd_schema"
     );
     const featureQuery = this.readBoundedText(
@@ -742,7 +763,14 @@ export class SqlErdAgentToolsService {
       input.sessionTitle === undefined
         ? undefined
         : this.readBoundedText(input.sessionTitle, 120, "sessionTitle");
-    return { featureQuery, sessionId, sessionTitle };
+    const sessionSelectionToken =
+      input.sessionSelectionToken === undefined
+        ? undefined
+        : this.readUuid(
+            input.sessionSelectionToken,
+            "sessionSelectionToken"
+          );
+    return { featureQuery, sessionId, sessionSelectionToken, sessionTitle };
   }
 
   private validateFocusInput(input: unknown): FocusSqlErdTablesInput {

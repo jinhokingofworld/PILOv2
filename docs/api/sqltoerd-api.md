@@ -255,14 +255,16 @@ Activity Log도 남기지 않는다.
 type InspectSqlErdSchemaInput = {
   featureQuery: string; // trim/공백 정리 후 1~200자
   sessionId?: string; // exact UUID
+  sessionSelectionToken?: string; // clarification 후보가 반환한 opaque token
   sessionTitle?: string; // exact title, 1~120자
 };
 ```
 
-- 대상 선택 우선순위는 명시 `sessionId`, exact `sessionTitle`, 현재 SQLtoERD request
+- 대상 선택 우선순위는 명시 `sessionId`, 후보의 `sessionSelectionToken`, exact `sessionTitle`, 현재 SQLtoERD request
   context, Workspace의 유일한 활성 session 순서다.
 - session이 없거나 여러 개이면 실행하지 않고 `needs_clarification`을 반환한다. 후보는 최근
-  수정순 최대 5개이며 title, updatedAt, tableCount, relationCount만 보여준다.
+  수정순 최대 5개이며 후속 호출용 `selectionToken`, title, updatedAt, tableCount, relationCount를 보여준다.
+  같은 title의 후보를 골랐을 때는 title을 다시 보내지 않고 선택한 `selectionToken`을 그대로 사용한다.
 - 선택한 session의 modelJson을 table 선언 순서의 `t1`, `t2` compact ref로 투영한다.
   모든 FK edge를 유지하되 전체 projection은 JSON 직렬화 기준 최대 9,000자다.
 - projection에는 table name, 선택적인 schema/comment와 bounded 주요 column, compact FK만
@@ -302,6 +304,7 @@ type SqlErdTableFocusResourceRef = {
     version: 1;
     view: "table_focus";
     sessionRevision: number;
+    modelFingerprint: string; // fnv1a32:{8자리 hex}
     featureLabel: string;
     primaryTableIds: string[];
     relatedTableIds: string[];
@@ -312,10 +315,12 @@ type SqlErdTableFocusResourceRef = {
 ```
 
 Frontend는 기존 same-origin URL allowlist와 metadata를 모두 검증한 뒤 focus를 일회성
-`sessionStorage`와 same-page event로 전달한다. 대상 revision이 현재 session과 다르면 적용하지
-않는다. primary는 가장 강하게, related는 보조 강조하고 나머지 table과 FK relation은 흐리게
-표시하며 상호작용을 막는다. annotation은 이 필터 대상이 아니다. `전체 보기`, session 변경,
-새로고침으로 해제되며 DB나 URL에는 저장하지 않는다. blur는 보안 또는 권한 기능이 아니다.
+`sessionStorage`와 same-page event로 전달한다. 최초 적용 시 `sessionRevision`과
+`modelFingerprint`를 모두 검증한다. 활성화된 뒤에는 layout/annotation 변경으로 증가한 revision은
+focus를 해제하지 않고, 실제 `modelJson` fingerprint가 바뀔 때만 해제한다. primary는 가장 강하게,
+related는 보조 강조하고 나머지 table과 FK relation은 흐리게 표시하며 선택·transform·delete를
+막는다. annotation은 이 필터 대상이 아니다. `전체 보기`, session 변경, 새로고침으로 해제되며
+DB나 URL에는 저장하지 않는다. blur는 보안 또는 권한 기능이 아니다.
 
 ## Realtime Presence (Phase 1)
 

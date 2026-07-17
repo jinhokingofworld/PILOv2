@@ -11,6 +11,7 @@ export type SqlErdAgentTableFocus = {
   view: "table_focus";
   sessionId: string;
   sessionRevision: number;
+  modelFingerprint: string;
   featureLabel: string;
   primaryTableIds: string[];
   relatedTableIds: string[];
@@ -20,6 +21,26 @@ export type SqlErdAgentTableFocus = {
 
 export type SqlErdFocusedTableRole = "primary" | "related" | "dimmed";
 export type SqlErdFocusedRelationRole = "focused" | "dimmed";
+
+export function createSqlErdModelFingerprint(modelJson: unknown): string {
+  const serialized = JSON.stringify(modelJson, (_key, value) => {
+    if (!isPlainObject(value)) {
+      return value;
+    }
+    return Object.keys(value)
+      .sort()
+      .reduce<Record<string, unknown>>((result, key) => {
+        result[key] = value[key];
+        return result;
+      }, {});
+  });
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
 
 export function getSqlErdFocusedTableRole(
   focus: SqlErdAgentTableFocus,
@@ -40,14 +61,39 @@ export function getSqlErdFocusedRelationRole(
 
 export function isSqlErdAgentTableFocusCurrent(
   focus: SqlErdAgentTableFocus,
-  sessionId: string,
-  sessionRevision: number | null
+  context: {
+    sessionId: string;
+    sessionRevision: number | null;
+    modelJson: unknown;
+    revisionValidated: boolean;
+  }
 ): boolean {
   return (
-    focus.sessionId === sessionId &&
-    sessionRevision !== null &&
-    focus.sessionRevision === sessionRevision
+    focus.sessionId === context.sessionId &&
+    context.sessionRevision !== null &&
+    focus.modelFingerprint === createSqlErdModelFingerprint(context.modelJson) &&
+    (context.revisionValidated ||
+      focus.sessionRevision === context.sessionRevision)
   );
+}
+
+export function isSqlErdShapeDimmedByTableFocus(
+  focus: SqlErdAgentTableFocus,
+  shape: { type: string; props?: Record<string, unknown> }
+): boolean {
+  if (shape.type === "sqltoerd_table") {
+    return (
+      typeof shape.props?.tableId === "string" &&
+      getSqlErdFocusedTableRole(focus, shape.props.tableId) === "dimmed"
+    );
+  }
+  if (shape.type === "sqltoerd_relation") {
+    return (
+      typeof shape.props?.relationId === "string" &&
+      getSqlErdFocusedRelationRole(focus, shape.props.relationId) === "dimmed"
+    );
+  }
+  return false;
 }
 
 export function parseSqlErdAgentTableFocusResource(
@@ -65,6 +111,8 @@ export function parseSqlErdAgentTableFocusResource(
     metadata.view !== "table_focus" ||
     !Number.isSafeInteger(metadata.sessionRevision) ||
     Number(metadata.sessionRevision) < 1 ||
+    typeof metadata.modelFingerprint !== "string" ||
+    !/^fnv1a32:[0-9a-f]{8}$/.test(metadata.modelFingerprint) ||
     typeof metadata.featureLabel !== "string" ||
     !isBoundedText(metadata.featureLabel, 100) ||
     typeof metadata.confidence !== "string" ||
@@ -99,6 +147,7 @@ export function parseSqlErdAgentTableFocusResource(
     view: "table_focus",
     sessionId: resourceRef.resourceId,
     sessionRevision: Number(metadata.sessionRevision),
+    modelFingerprint: metadata.modelFingerprint,
     featureLabel: metadata.featureLabel.trim().replace(/\s+/g, " "),
     primaryTableIds,
     relatedTableIds,

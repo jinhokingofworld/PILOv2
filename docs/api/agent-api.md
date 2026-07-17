@@ -803,9 +803,11 @@ Status code: `200 OK`
 - 생성·교체된 session은 `domain=sqltoerd`, `resourceType=session` resource ref 하나로 반환한다.
   Frontend는 검증된 링크를 `ERD 및 DDL 열기`로 표시하고 자동으로 이동하지 않는다.
 - 기능 관련 테이블 집중 요청은 `inspect_sql_erd_schema`를 먼저 호출한다. input은 1~200자의
-  `featureQuery`와 선택적인 exact `sessionId` 또는 `sessionTitle`이다. 대상 우선순위는 명시 ID,
-  exact title, 현재 SQLtoERD request context, Workspace의 유일한 session 순서다. 남은 session이
-  여러 개거나 없으면 mutation 없이 `needs_clarification`과 최대 5개 후보를 반환한다.
+  `featureQuery`와 선택적인 exact `sessionId`, 후보의 `sessionSelectionToken` 또는 `sessionTitle`이다.
+  대상 우선순위는 명시 ID, selection token, exact title, 현재 SQLtoERD request context,
+  Workspace의 유일한 session 순서다. 남은 session이 여러 개거나 없으면 mutation 없이
+  `needs_clarification`과 최대 5개 후보를 반환한다. 각 후보는 같은 title도 구분 가능한
+  `selectionToken`을 포함하고, 후속 호출은 선택한 값을 `sessionSelectionToken`으로 그대로 보낸다.
 - inspect 결과의 table은 `t1`, `t2` 형태의 요청별 compact ref로 표시한다. projection은 최대
   9,000자이며 내부 table/column ID와 sourceText, DDL, 전체 modelJson을 Agent step에 복제하지 않는다.
 - `focus_sql_erd_tables`는 inspect 결과의 `sessionId`, `sessionRevision`, compact
@@ -814,10 +816,12 @@ Status code: `200 OK`
   허용한다. 기본 2-hop 확장은 하지 않는다.
 - App Server는 현재 session revision과 compact ref, primary/related 중복, primary-related 직접 FK를
   다시 검증한다. revision이 바뀌면 `409 CONFLICT`로 거부하고 inspect부터 다시 수행한다.
-- 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`,
+- 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`, `modelFingerprint`,
   `featureLabel`, `primaryTableIds`, `relatedTableIds`, `relationIds`, `confidence`를 가진 resource ref다.
   Frontend는 핵심·관련 table과 그 사이 relation만 선명하게 표시하고 나머지 table/relation을 흐리게
-  하며 상호작용을 막는다. `전체 보기`, session 변경, 새로고침으로 집중 상태를 해제한다.
+  하며 선택·transform·delete를 막는다. 최초 적용 시 revision과 model fingerprint를 검증하고,
+  활성화된 뒤에는 layout/annotation revision 증가가 아니라 실제 modelJson 변경 때만 해제한다.
+  `전체 보기`, session 변경, 새로고침으로 집중 상태를 해제한다.
 - 이 두 tool과 UI는 session을 저장·수정하지 않는 read-only view다. 따라서 SQLtoERD revision,
   writer lease, autosave와 Activity Log를 만들지 않으며 blur는 접근 제어나 보안 경계가 아니다.
 - 지원 범위를 벗어난 schema 기능은 `unsupportedFeatures`에 명시한다. DB 실행·배포만 요구하는

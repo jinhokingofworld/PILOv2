@@ -391,6 +391,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   const isFocusDimmed = focusRole === "dimmed";
 
   function handleTableClick() {
+    if (isFocusDimmed) return;
     selectSqlErdTableShape(editor, shape);
     selectSqlErdTable({ tableId: shape.props.tableId });
   }
@@ -406,6 +407,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   }
 
   function handleColumnClick(columnId: string) {
+    if (isFocusDimmed) return;
     selectSqlErdTableShapeColumn(editor, shape, columnId);
     selectSqlErdColumn({
       columnId,

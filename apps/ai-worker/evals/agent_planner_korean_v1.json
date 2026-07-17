@@ -1192,6 +1192,7 @@
         "properties": {
           "featureQuery": { "type": "string", "minLength": 1, "maxLength": 200 },
           "sessionId": { "type": "string", "format": "uuid" },
+          "sessionSelectionToken": { "type": "string", "format": "uuid" },
           "sessionTitle": { "type": "string", "minLength": 1, "maxLength": 120 }
         }
       }

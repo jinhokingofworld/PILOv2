@@ -148,6 +148,7 @@ import { getSqlErdPinnedTableCenter } from "@/features/sql-erd/utils/table-pin";
 import {
   getSqlErdFocusedRelationRole,
   getSqlErdFocusedTableRole,
+  isSqlErdShapeDimmedByTableFocus,
   type SqlErdAgentTableFocus
 } from "@/features/sql-erd/utils/agent-table-focus";
 import {
@@ -1284,6 +1285,122 @@ function SqlErdSelectionSync({
       window.removeEventListener(SQLTOERD_TABLE_SELECT_EVENT, handleTableSelect);
     };
   }, [editor, onSelectionChange]);
+
+  return null;
+}
+
+function SqlErdTableFocusInteractionGuard({
+  focus
+}: {
+  focus: SqlErdAgentTableFocus | null;
+}) {
+  const editor = useEditor();
+  const focusRef = useRef(focus);
+  const filteringSelectionRef = useRef(false);
+
+  useEffect(() => {
+    focusRef.current = focus;
+    if (!focus || filteringSelectionRef.current) {
+      return;
+    }
+    const selectedShapes = editor.getSelectedShapes();
+    const allowedShapeIds = selectedShapes
+      .filter(
+        (shape) =>
+          !isSqlErdShapeDimmedByTableFocus(
+            focus,
+            shape as unknown as {
+              type: string;
+              props?: Record<string, unknown>;
+            }
+          )
+      )
+      .map((shape) => shape.id);
+    if (allowedShapeIds.length !== selectedShapes.length) {
+      filteringSelectionRef.current = true;
+      editor.setSelectedShapes(allowedShapeIds);
+      filteringSelectionRef.current = false;
+    }
+  }, [editor, focus]);
+
+  useEffect(() => {
+    const removeSelectionListener = editor.store.listen(
+      () => {
+        const currentFocus = focusRef.current;
+        if (!currentFocus || filteringSelectionRef.current) {
+          return;
+        }
+        const selectedShapes = editor.getSelectedShapes();
+        const allowedShapeIds = selectedShapes
+          .filter(
+            (shape) =>
+              !isSqlErdShapeDimmedByTableFocus(
+                currentFocus,
+                shape as unknown as {
+                  type: string;
+                  props?: Record<string, unknown>;
+                }
+              )
+          )
+          .map((shape) => shape.id);
+        if (allowedShapeIds.length === selectedShapes.length) {
+          return;
+        }
+        filteringSelectionRef.current = true;
+        editor.setSelectedShapes(allowedShapeIds);
+        filteringSelectionRef.current = false;
+      },
+      { scope: "all", source: "user" }
+    );
+    const removeBeforeChangeHandler =
+      editor.sideEffects.registerBeforeChangeHandler(
+        "shape",
+        (previousShape, nextShape, source) => {
+          const currentFocus = focusRef.current;
+          if (
+            source === "user" &&
+            currentFocus &&
+            editor.getSelectedShapeIds().includes(previousShape.id) &&
+            isSqlErdShapeDimmedByTableFocus(
+              currentFocus,
+              previousShape as unknown as {
+                type: string;
+                props?: Record<string, unknown>;
+              }
+            )
+          ) {
+            return previousShape;
+          }
+          return nextShape;
+        }
+      );
+    const removeBeforeDeleteHandler =
+      editor.sideEffects.registerBeforeDeleteHandler(
+        "shape",
+        (shape, source) => {
+          const currentFocus = focusRef.current;
+          if (
+            source === "user" &&
+            currentFocus &&
+            isSqlErdShapeDimmedByTableFocus(
+              currentFocus,
+              shape as unknown as {
+                type: string;
+                props?: Record<string, unknown>;
+              }
+            )
+          ) {
+            return false;
+          }
+        }
+      );
+
+    return () => {
+      removeSelectionListener();
+      removeBeforeChangeHandler();
+      removeBeforeDeleteHandler();
+    };
+  }, [editor]);
 
   return null;
 }
@@ -3200,6 +3317,7 @@ export function SqlErdCanvas({
           canvasContentKey={canvasContentKey}
           shapes={shapes}
         />
+        <SqlErdTableFocusInteractionGuard focus={tableFocus} />
         <SqlErdRelationLayoutSync />
         <SqlErdRelationHighlightSync
           modelJson={modelJson}

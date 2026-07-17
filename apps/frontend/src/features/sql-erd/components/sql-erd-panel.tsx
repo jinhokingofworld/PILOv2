@@ -516,6 +516,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     useState<SqlErdSelection>({ type: "none" });
   const [agentTableFocus, setAgentTableFocus] =
     useState<SqlErdAgentTableFocus | null>(null);
+  const [agentTableFocusRevisionValidated, setAgentTableFocusRevisionValidated] =
+    useState(false);
   const [tablePinState, setTablePinState] = useState(() =>
     createSqlErdTablePinState()
   );
@@ -555,8 +557,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     agentTableFocus &&
     isSqlErdAgentTableFocusCurrent(
       agentTableFocus,
-      sessionId,
-      sqlErdViewSession.revision
+      {
+        sessionId,
+        sessionRevision: sqlErdViewSession.revision,
+        modelJson: sqlErdViewSession.modelJson,
+        revisionValidated: agentTableFocusRevisionValidated
+      }
     )
       ? agentTableFocus
       : null;
@@ -1994,6 +2000,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, []);
 
   useEffect(() => {
+    setAgentTableFocusRevisionValidated(false);
     setAgentTableFocus(consumeStagedSqlErdAgentTableFocus(sessionId));
 
     function handleAgentTableFocus(event: Event) {
@@ -2004,6 +2011,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           sessionId
         );
       if (focus) {
+        setAgentTableFocusRevisionValidated(false);
         setAgentTableFocus(focus);
       }
     }
@@ -2030,8 +2038,22 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (isSessionReady && agentTableFocus && !activeAgentTableFocus) {
       setAgentTableFocus(null);
+      setAgentTableFocusRevisionValidated(false);
+      return;
     }
-  }, [activeAgentTableFocus, agentTableFocus, isSessionReady]);
+    if (
+      isSessionReady &&
+      activeAgentTableFocus &&
+      !agentTableFocusRevisionValidated
+    ) {
+      setAgentTableFocusRevisionValidated(true);
+    }
+  }, [
+    activeAgentTableFocus,
+    agentTableFocus,
+    agentTableFocusRevisionValidated,
+    isSessionReady
+  ]);
 
   useEffect(() => {
     const panelContainer = panelContainerRef.current;
@@ -2235,7 +2257,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           onReloadSession={handleReloadPausedSession}
           onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
           onSelectionChange={setSelectedSqlErdObject}
-          onShowAllTables={() => setAgentTableFocus(null)}
+          onShowAllTables={() => {
+            setAgentTableFocus(null);
+            setAgentTableFocusRevisionValidated(false);
+          }}
           pinNavigationRequestId={tablePinState.navigationRequestId}
           pinnedTableId={tablePinState.pinnedTableId}
           realtimeConfig={realtimeConfig}
@@ -3052,18 +3077,25 @@ function CanvasShell({
         selectedSqlErdObject={selectedSqlErdObject}
         tableFocus={agentTableFocus}
       />
-      {agentTableFocus ? (
-        <AgentTableFocusBanner
-          focus={agentTableFocus}
-          onShowAllTables={onShowAllTables}
-        />
-      ) : null}
-      {autosavePausedBanner ? (
-        <AutosavePausedBanner
-          banner={autosavePausedBanner}
-          onReloadSession={onReloadSession}
-          onRetryLayoutAutosaveOnce={onRetryLayoutAutosaveOnce}
-        />
+      {agentTableFocus || autosavePausedBanner ? (
+        <div
+          className="absolute left-4 top-4 z-30 flex max-w-[calc(100%-2rem)] flex-col items-start gap-2"
+          data-sqltoerd-status-banners
+        >
+          {autosavePausedBanner ? (
+            <AutosavePausedBanner
+              banner={autosavePausedBanner}
+              onReloadSession={onReloadSession}
+              onRetryLayoutAutosaveOnce={onRetryLayoutAutosaveOnce}
+            />
+          ) : null}
+          {agentTableFocus ? (
+            <AgentTableFocusBanner
+              focus={agentTableFocus}
+              onShowAllTables={onShowAllTables}
+            />
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -3084,7 +3116,7 @@ function AgentTableFocusBanner({
         : "낮음";
 
   return (
-    <div className="absolute left-4 top-4 z-30 flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-blue-200 bg-white/95 px-3 py-2 text-sm text-slate-700 shadow-lg backdrop-blur">
+    <div className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-blue-200 bg-white/95 px-3 py-2 text-sm text-slate-700 shadow-lg backdrop-blur">
       <strong className="text-slate-950">{focus.featureLabel} 집중 보기</strong>
       <span>
         핵심 {focus.primaryTableIds.length} · 관련 {focus.relatedTableIds.length}
@@ -3113,7 +3145,7 @@ function AutosavePausedBanner({
   onRetryLayoutAutosaveOnce
 }: AutosavePausedBannerProps) {
   return (
-    <div className="absolute left-4 top-4 z-20 max-w-md rounded-md border border-destructive/30 bg-background/95 p-3 text-sm shadow-md backdrop-blur">
+    <div className="max-w-md rounded-md border border-destructive/30 bg-background/95 p-3 text-sm shadow-md backdrop-blur">
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-destructive">Autosave paused</p>
