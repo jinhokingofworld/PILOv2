@@ -6,7 +6,10 @@ import {
   getLatestAgentRunMessageSequence
 } from "./run-input-recovery.ts";
 import { readAgentRequestContext } from "./request-context.ts";
-import { getAgentResourceLinks } from "./resource-links.ts";
+import {
+  getAgentResourceLinks,
+  parseSqlErdAgentTableFocusResource
+} from "./resource-links.ts";
 
 async function readFeatureFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
@@ -174,6 +177,8 @@ assert.doesNotMatch(agentChatWidget, /Mockup/);
 
 assert.match(agentResourceLinks, /getAgentResourceLinks/);
 assert.match(agentResourceLinks, /<Link/);
+assert.match(agentResourceLinks, /stageSqlErdAgentTableFocus/);
+assert.match(agentResourceLinks, /link\.focus/);
 
 const previousMessages = [
   {
@@ -264,6 +269,70 @@ assert.deepEqual(getAgentResourceLinks(completedRun), [
     label: "ERD 및 DDL 열기"
   }
 ]);
+
+const focusedResourceRef = {
+  ...validResourceRef,
+  status: "focused",
+  metadata: {
+    version: 1,
+    view: "table_focus",
+    sessionRevision: 7,
+    featureLabel: "결제 기능",
+    primaryTableIds: ["table-orders", "table-payments"],
+    relatedTableIds: ["table-payment-attempts"],
+    relationIds: ["relation-orders-attempts", "relation-payments-attempts"],
+    confidence: "medium"
+  }
+};
+const expectedFocus = {
+  version: 1,
+  view: "table_focus",
+  sessionId: resourceSessionId,
+  sessionRevision: 7,
+  featureLabel: "결제 기능",
+  primaryTableIds: ["table-orders", "table-payments"],
+  relatedTableIds: ["table-payment-attempts"],
+  relationIds: ["relation-orders-attempts", "relation-payments-attempts"],
+  confidence: "medium"
+};
+
+assert.deepEqual(
+  parseSqlErdAgentTableFocusResource(focusedResourceRef),
+  expectedFocus
+);
+assert.deepEqual(
+  getAgentResourceLinks({
+    ...completedRun,
+    steps: [{ ...completedRun.steps[0], resourceRefs: [focusedResourceRef] }]
+  }),
+  [
+    {
+      focus: expectedFocus,
+      href: `/sql-erd/session?sessionId=${resourceSessionId}`,
+      key: `sqltoerd:session:${resourceSessionId}`,
+      label: "집중 보기 열기"
+    }
+  ]
+);
+
+for (const invalidMetadata of [
+  { ...focusedResourceRef.metadata, sessionRevision: 0 },
+  { ...focusedResourceRef.metadata, primaryTableIds: [] },
+  {
+    ...focusedResourceRef.metadata,
+    relatedTableIds: ["table-orders"]
+  },
+  { ...focusedResourceRef.metadata, confidence: "certain" },
+  { ...focusedResourceRef.metadata, primaryTableIds: ["", "table-orders"] }
+]) {
+  assert.equal(
+    parseSqlErdAgentTableFocusResource({
+      ...focusedResourceRef,
+      metadata: invalidMetadata
+    }),
+    null
+  );
+}
 assert.deepEqual(
   getAgentResourceLinks({ ...completedRun, status: "running" }),
   []
