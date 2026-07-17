@@ -53,6 +53,7 @@ interface ActionItemRow extends QueryResultRow {
   title: string;
   description: string;
   status: string;
+  assignee_github_login: string | null;
 }
 
 interface DeliveryRow extends QueryResultRow {
@@ -150,7 +151,10 @@ export class MeetingActionItemDeliveryService {
         {
           columnId: prepared.input.issue.columnId,
           title: prepared.input.issue.title ?? prepared.actionItem.title,
-          body: prepared.input.issue.body ?? prepared.actionItem.description
+          body: this.withAssigneeMention(
+            prepared.input.issue.body ?? prepared.actionItem.description,
+            prepared.actionItem.assignee_github_login
+          )
         },
         prepared.delivery.idempotency_key
       );
@@ -224,12 +228,15 @@ export class MeetingActionItemDeliveryService {
     return this.database.transaction(async (transaction) => {
       const actionItem = await transaction.queryOne<ActionItemRow>(
         `
-          SELECT action_items.id, action_items.title, action_items.description, action_items.status
+          SELECT action_items.id, action_items.title, action_items.description, action_items.status,
+                 users.github_login AS assignee_github_login
           FROM meeting_report_action_items AS action_items
           JOIN meeting_reports AS reports
             ON reports.id = action_items.meeting_report_id
           JOIN meetings
             ON meetings.id = reports.meeting_id
+          LEFT JOIN users
+            ON users.id = action_items.assignee_user_id
           WHERE action_items.id = $1
             AND reports.id = $2
             AND meetings.workspace_id = $3
@@ -631,6 +638,14 @@ export class MeetingActionItemDeliveryService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private withAssigneeMention(body: string, githubLogin: string | null): string {
+    const login = githubLogin?.trim();
+    if (!login) return body;
+    const mention = `@${login}`;
+    if (body.includes(mention)) return body;
+    return `${body}\n\n담당자: ${mention}`;
   }
 
   private normalizeRequiredDate(value: unknown, field: string): string {

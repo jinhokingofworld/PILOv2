@@ -64,8 +64,30 @@ class AudioObjectMetadata:
 class ActionItemCandidate:
     title: str
     description: str
-    assignee_user_id: None
+    assignee_user_id: str | None
     priority: str
+    delivery_suggestion: ActionItemDeliverySuggestion
+
+
+@dataclass(frozen=True)
+class ActionItemDeliverySuggestion:
+    delivery_type: str
+    calendar: ActionItemCalendarSuggestion | None
+
+
+@dataclass(frozen=True)
+class ActionItemCalendarSuggestion:
+    is_all_day: bool
+    start_date: str
+    end_date: str
+    start_time: str | None
+    end_time: str | None
+
+
+@dataclass(frozen=True)
+class ActionItemAssignee:
+    user_id: str
+    name: str
 
 
 @dataclass(frozen=True)
@@ -490,6 +512,20 @@ def serialize_action_items(action_items: list[ActionItemCandidate]) -> str:
                 "description": item.description,
                 "assigneeUserId": item.assignee_user_id,
                 "priority": item.priority,
+                "deliverySuggestion": {
+                    "deliveryType": item.delivery_suggestion.delivery_type,
+                    "calendar": (
+                        None
+                        if item.delivery_suggestion.calendar is None
+                        else {
+                            "isAllDay": item.delivery_suggestion.calendar.is_all_day,
+                            "startDate": item.delivery_suggestion.calendar.start_date,
+                            "endDate": item.delivery_suggestion.calendar.end_date,
+                            "startTime": item.delivery_suggestion.calendar.start_time,
+                            "endTime": item.delivery_suggestion.calendar.end_time,
+                        }
+                    ),
+                },
             }
             for item in action_items
         ],
@@ -497,14 +533,17 @@ def serialize_action_items(action_items: list[ActionItemCandidate]) -> str:
     )
 
 
-def _parse_action_item(value: object) -> ActionItemCandidate:
+def _parse_action_item(
+    value: object, allowed_assignee_ids: set[str] | None = None
+) -> ActionItemCandidate:
     if not isinstance(value, dict):
         raise ProviderBusinessError("Invalid action item")
 
     title = _require_action_item_text(value, "title", MAX_ACTION_ITEM_TITLE_BYTES)
     description = _require_action_item_text(value, "description", MAX_ACTION_ITEM_DESCRIPTION_BYTES)
     priority = _require_payload_string(value, "priority")
-    if "assigneeUserId" not in value:
+    raw_assignee_user_id = value.get("assigneeUserId")
+    if raw_assignee_user_id is not None and not isinstance(raw_assignee_user_id, str):
         raise ProviderBusinessError("Invalid action item assignee")
 
     if priority not in {"LOW", "MEDIUM", "HIGH"}:
@@ -513,9 +552,75 @@ def _parse_action_item(value: object) -> ActionItemCandidate:
     return ActionItemCandidate(
         title=title,
         description=description,
-        assignee_user_id=None,
+        assignee_user_id=(
+            raw_assignee_user_id
+            if isinstance(raw_assignee_user_id, str)
+            and allowed_assignee_ids is not None
+            and raw_assignee_user_id in allowed_assignee_ids
+            else None
+        ),
         priority=priority,
+        delivery_suggestion=_parse_action_item_delivery_suggestion(value.get("deliverySuggestion")),
     )
+
+
+def _parse_action_item_delivery_suggestion(value: object) -> ActionItemDeliverySuggestion:
+    # Older completed reports do not carry a suggestion. They remain safely
+    # deliverable as a Pilo issue rather than inventing a calendar date.
+    if value is None:
+        return ActionItemDeliverySuggestion("pilo_issue", None)
+    if not isinstance(value, dict):
+        raise ProviderBusinessError("Invalid action item delivery suggestion")
+    delivery_type = value.get("deliveryType")
+    if delivery_type == "pilo_issue":
+        if value.get("calendar") is not None:
+            raise ProviderBusinessError("Invalid action item issue suggestion")
+        return ActionItemDeliverySuggestion("pilo_issue", None)
+    if delivery_type != "calendar_event" or not isinstance(value.get("calendar"), dict):
+        raise ProviderBusinessError("Invalid action item calendar suggestion")
+    calendar = value["calendar"]
+    is_all_day = calendar.get("isAllDay")
+    start_date = calendar.get("startDate")
+    end_date = calendar.get("endDate")
+    start_time = calendar.get("startTime")
+    end_time = calendar.get("endTime")
+    if (
+        not isinstance(is_all_day, bool)
+        or not _is_iso_date(start_date)
+        or not _is_iso_date(end_date)
+        or end_date < start_date
+        or (start_time is not None and not _is_hhmm_time(start_time))
+        or (end_time is not None and not _is_hhmm_time(end_time))
+        or (is_all_day and (start_time is not None or end_time is not None))
+        or (not is_all_day and start_time is None)
+    ):
+        raise ProviderBusinessError("Invalid action item calendar suggestion")
+    return ActionItemDeliverySuggestion(
+        "calendar_event",
+        ActionItemCalendarSuggestion(is_all_day, start_date, end_date, start_time, end_time),
+    )
+
+
+def _is_iso_date(value: object) -> bool:
+    if not isinstance(value, str) or len(value) != 10:
+        return False
+    try:
+        from datetime import date
+
+        return date.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
+
+
+def _is_hhmm_time(value: object) -> bool:
+    if not isinstance(value, str) or len(value) != 5:
+        return False
+    try:
+        from datetime import time
+
+        return time.fromisoformat(value).strftime("%H:%M") == value
+    except ValueError:
+        return False
 
 
 def _parse_evidence(

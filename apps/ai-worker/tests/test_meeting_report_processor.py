@@ -1192,6 +1192,10 @@ def test_serialize_action_items_uses_api_shape() -> None:
             "description": "설명",
             "assigneeUserId": None,
             "priority": "MEDIUM",
+            "deliverySuggestion": {
+                "deliveryType": "pilo_issue",
+                "calendar": None,
+            },
         }
     ]
 

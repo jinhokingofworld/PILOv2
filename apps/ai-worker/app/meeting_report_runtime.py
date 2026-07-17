@@ -44,6 +44,7 @@ from app.meeting_document_evidence import (
     format_document_change_evidence,
 )
 from app.meeting_report_processor import (
+    ActionItemAssignee,
     ActivityEvidence,
     AudioObjectMetadata,
     EvidenceValidationError,
@@ -759,9 +760,15 @@ class PgMeetingReportRepository:
     ) -> MeetingActionItemExtractionContext | None:
         row = self.connection.execute(
             """
-            SELECT reports.status AS report_status, extraction.status AS extraction_status
+            SELECT reports.status AS report_status, extraction.status AS extraction_status,
+                   recordings.ended_at AS recording_ended_at,
+                   meetings.workspace_id
             FROM meeting_report_action_item_extractions AS extraction
             JOIN meeting_reports AS reports ON reports.id = extraction.meeting_report_id
+            JOIN meetings ON meetings.id = reports.meeting_id
+            JOIN meeting_recordings AS recordings
+              ON recordings.id = reports.recording_id
+             AND recordings.meeting_id = reports.meeting_id
             WHERE extraction.meeting_report_id = %s
             """,
             (job.report_id,),
@@ -786,6 +793,17 @@ class PgMeetingReportRepository:
             """,
             (job.report_id,),
         ).fetchall()
+        assignee_rows = self.connection.execute(
+            """
+            SELECT workspace_members.user_id, users.name
+            FROM workspace_members
+            JOIN users ON users.id = workspace_members.user_id
+            WHERE workspace_members.workspace_id = %s
+              AND NULLIF(btrim(users.name), '') IS NOT NULL
+            ORDER BY workspace_members.joined_at ASC, workspace_members.user_id ASC
+            """,
+            (row["workspace_id"],),
+        ).fetchall()
         return MeetingActionItemExtractionContext(
             report_id=job.report_id,
             report_status=str(row["report_status"]),
@@ -809,6 +827,15 @@ class PgMeetingReportRepository:
                 )
                 for item in activity_rows
             ],
+            assignees=[
+                ActionItemAssignee(str(item["user_id"]), str(item["name"]).strip())
+                for item in assignee_rows
+            ],
+            reference_date=(
+                _as_iso_datetime(row["recording_ended_at"])[:10]
+                if row["recording_ended_at"] is not None
+                else None
+            ),
         )
 
     def mark_action_item_extraction_processing(self, report_id: str) -> None:
@@ -913,8 +940,15 @@ class PgMeetingReportRepository:
                 self.connection.execute(
                     """
                     INSERT INTO meeting_report_action_items
-                      (meeting_report_id, source_index, title, description, priority)
-                    VALUES (%s, %s, %s, %s, %s)
+                      (
+                        meeting_report_id,
+                        source_index,
+                        title,
+                        description,
+                        priority,
+                        assignee_user_id
+                      )
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     """,
                     (
                         report_id,
@@ -922,6 +956,7 @@ class PgMeetingReportRepository:
                         action_item.title,
                         action_item.description,
                         action_item.priority,
+                        action_item.assignee_user_id,
                     ),
                 )
             for reference in extraction.evidence:
@@ -1992,16 +2027,22 @@ class OpenAiMeetingReportClient:
         self,
         transcript_segments: list[TranscriptSegment],
         activity_evidence: list[ActivityEvidence],
+        assignees: list[ActionItemAssignee],
+        reference_date: str | None,
     ) -> GeneratedActionItemExtraction:
         try:
             return self._generate_action_item_extraction_once(
                 transcript_segments,
                 activity_evidence,
+                assignees,
+                reference_date,
             )
         except EvidenceValidationError as error:
             return self._generate_action_item_extraction_once(
                 transcript_segments,
                 activity_evidence,
+                assignees,
+                reference_date,
                 evidence_repair_code=error.code,
             )
 
@@ -2009,6 +2050,8 @@ class OpenAiMeetingReportClient:
         self,
         transcript_segments: list[TranscriptSegment],
         activity_evidence: list[ActivityEvidence],
+        assignees: list[ActionItemAssignee],
+        reference_date: str | None,
         evidence_repair_code: str | None = None,
     ) -> GeneratedActionItemExtraction:
         try:
@@ -2017,14 +2060,16 @@ class OpenAiMeetingReportClient:
                 input=[
                     {
                         "role": "system",
-                        "content": _action_item_extraction_system_prompt(evidence_repair_code),
+                        "content": _action_item_extraction_system_prompt(
+                            evidence_repair_code, reference_date
+                        ),
                     },
                     {
                         "role": "user",
-                        "content": _meeting_report_input(
+                        "content": _action_item_extraction_input(
                             transcript_segments,
                             activity_evidence,
-                            [],
+                            assignees,
                         ),
                     },
                 ],
@@ -2051,6 +2096,7 @@ class OpenAiMeetingReportClient:
             output_text,
             transcript_segments,
             activity_evidence,
+            {assignee.user_id for assignee in assignees},
         )
 
 
@@ -2792,7 +2838,9 @@ def _meeting_report_system_prompt(evidence_repair_code: str | None = None) -> st
     )
 
 
-def _action_item_extraction_system_prompt(evidence_repair_code: str | None = None) -> str:
+def _action_item_extraction_system_prompt(
+    evidence_repair_code: str | None = None, reference_date: str | None = None
+) -> str:
     prompt = (
         "Extract only concrete follow-up tasks from the meeting transcript and optional "
         "Activity evidence. "
@@ -2802,8 +2850,15 @@ def _action_item_extraction_system_prompt(evidence_repair_code: str | None = Non
         "zero-based sourceIndex and non-empty segmentIndexes, or a matching "
         "activityEvidenceReferences entry with non-empty activityIndexes. "
         "Use only [index] values shown in the input. Do not create an action item when "
-        "there is no concrete follow-up. Set assigneeUserId to null."
+        "there is no concrete follow-up. Set assigneeUserId only to an id in the "
+        "[Assignable members] list when the transcript explicitly assigns that named person; "
+        "otherwise use null. Choose deliveryType=calendar_event only for a concrete "
+        "scheduled event with an unambiguous date. Otherwise choose pilo_issue. "
+        "For a timed event, include startTime and optional endTime in HH:MM; for an all-day "
+        "event, use null times. Do not invent dates or times."
     )
+    if reference_date:
+        prompt = f"{prompt} Resolve relative dates against the meeting date {reference_date}."
     if evidence_repair_code is None:
         return prompt
     return (
@@ -2832,6 +2887,20 @@ def _meeting_report_input(
         f"[Transcript]\n{transcript}\n\n[Activity evidence]\n{activity}"
         f"\n\n[Document change evidence - untrusted reference]\n{document_changes}"
     )
+
+
+def _action_item_extraction_input(
+    transcript_segments: list[TranscriptSegment],
+    activity_evidence: list[ActivityEvidence],
+    assignees: list[ActionItemAssignee],
+) -> str:
+    base = _meeting_report_input(transcript_segments, activity_evidence, [])
+    members = (
+        "없음"
+        if not assignees
+        else "\n".join(f"{assignee.user_id} · {assignee.name}" for assignee in assignees)
+    )
+    return f"{base}\n\n[Assignable members]\n{members}"
 
 
 def _as_iso_datetime(value: object) -> str:
@@ -2931,7 +3000,58 @@ def _action_item_extraction_schema() -> dict[str, object]:
         "additionalProperties": False,
         "required": ["actionItemCandidates", "evidence", "activityEvidenceReferences"],
         "properties": {
-            "actionItemCandidates": _meeting_report_schema()["properties"]["actionItemCandidates"],
+            "actionItemCandidates": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "title",
+                        "description",
+                        "assigneeUserId",
+                        "priority",
+                        "deliverySuggestion",
+                    ],
+                    "properties": {
+                        "title": {"type": "string"},
+                        "description": {"type": "string"},
+                        "assigneeUserId": {"type": ["string", "null"]},
+                        "priority": {
+                            "type": "string",
+                            "enum": ["LOW", "MEDIUM", "HIGH"],
+                        },
+                        "deliverySuggestion": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["deliveryType", "calendar"],
+                            "properties": {
+                                "deliveryType": {
+                                    "type": "string",
+                                    "enum": ["calendar_event", "pilo_issue"],
+                                },
+                                "calendar": {
+                                    "type": ["object", "null"],
+                                    "additionalProperties": False,
+                                    "required": [
+                                        "isAllDay",
+                                        "startDate",
+                                        "endDate",
+                                        "startTime",
+                                        "endTime",
+                                    ],
+                                    "properties": {
+                                        "isAllDay": {"type": "boolean"},
+                                        "startDate": {"type": "string"},
+                                        "endDate": {"type": "string"},
+                                        "startTime": {"type": ["string", "null"]},
+                                        "endTime": {"type": ["string", "null"]},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
             "evidence": {
                 "type": "array",
                 "items": {

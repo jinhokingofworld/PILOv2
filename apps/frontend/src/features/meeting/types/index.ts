@@ -196,6 +196,16 @@ export type MeetingReportActionItem = {
   description: string;
   priority: "LOW" | "MEDIUM" | "HIGH";
   assignee: MeetingReportActionItemAssignee | null;
+  deliverySuggestion: {
+    deliveryType: "calendar_event" | "pilo_issue";
+    calendar: {
+      isAllDay: boolean;
+      startDate: string;
+      endDate: string;
+      startTime: string | null;
+      endTime: string | null;
+    } | null;
+  } | null;
   status: MeetingReportActionItemStatus;
   updatedByUserId: string | null;
   approvedByUserId: string | null;

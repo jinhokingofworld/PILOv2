@@ -325,7 +325,7 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `decisions` | string \| null | 결정사항 |
 | `actionItemCandidates` | array | 후속 작업 후보 |
 | `actionItemExtraction` | object (optional) | 후속 작업 추출 상태. `status`는 `PENDING` \| `PUBLISHING` \| `QUEUED` \| `PROCESSING` \| `COMPLETED` \| `FAILED`이고, `FAILED`일 때만 안전한 `errorMessage`를 포함한다. Migration 이전 회의록처럼 추출 row가 없으면 생략될 수 있다. 회의록 본문 `status`와 독립적이다. |
-| `actionItems` | array | 상세 조회에서만 반환. 저장된 후속 작업 검토 항목. `id`, `sourceIndex`, `title`, `description`, `priority`, `assignee`, `status`, 승인·반려 audit과 `delivery`(선택 type/status·저장 draft·안전한 대상 요약)를 포함한다. `delivery`는 internal idempotency key, claim token, provider raw response를 포함하지 않는다. |
+| `actionItems` | array | 상세 조회에서만 반환. 저장된 후속 작업 검토 항목. `id`, `sourceIndex`, `title`, `description`, `priority`, `assignee`, `deliverySuggestion`, `status`, 승인·반려 audit과 `delivery`(선택 type/status·저장 draft·안전한 대상 요약)를 포함한다. `deliverySuggestion`은 AI가 근거에서 고른 기본 전달 type과, Calendar인 경우에만 안전하게 추출한 `isAllDay`, 날짜·시간 초안이다. 확정된 delivery가 아니며 사용자는 승인 전에 바꿀 수 있다. `delivery`는 internal idempotency key, claim token, provider raw response를 포함하지 않는다. |
 | `actionItemAssignees` | array | 상세 조회에서만 반환. 같은 Workspace의 지정 가능한 사용자 목록. `userId`, `name`, `avatarUrl`을 포함한다. |
 | `retryCount` | number | 재시도 횟수 |
 | `participantSummary` | object | 중복 제거한 참석자 요약. `totalCount`, 대표 참석자 최대 3명의 `participants`, 추가 참석자 여부 `hasMore`를 포함한다. 대표 참석자는 첫 참여 시각 순서다. |
@@ -923,6 +923,8 @@ Content-Type: application/json
 정규화한다. 종일 일정에는 시간을 보내지 않으며, 시간 지정 시 `HH:MM` 형식의 `startTime`을 필수로
 받고 `endTime`을 생략하면 `startTime + 1시간`으로 정규화한다. Pilo issue는 같은 Workspace의 Board와 해당 Board Column을
 명시해야 한다. title/description/body를 생략하면 저장된 Action Item 내용을 기본값으로 쓴다.
+Action Item에 담당 Workspace member가 있고 그 사용자의 GitHub login이 연결돼 있으면, Pilo issue
+body에는 해당 login의 `@mention`을 덧붙인다. 이는 GitHub Issue assignee 변경이 아니라 본문 태그다.
 
 응답 `data`는 `actionItemId`, `deliveryType`, `status`(`COMPLETED` 또는 `FAILED`)와 성공 시
 `calendarEventId` 또는 `piloIssueId`, 실패 시 안전한 `errorCode`만 반환한다.

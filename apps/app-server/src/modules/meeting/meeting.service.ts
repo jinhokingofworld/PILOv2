@@ -177,6 +177,7 @@ interface MeetingReportActionItemRow extends QueryResultRow {
   assignee_user_id: string | null;
   assignee_name: string | null;
   assignee_avatar_url: string | null;
+  action_item_candidates?: unknown;
   status: MeetingReportActionItemStatus;
   updated_by_user_id: string | null;
   approved_by_user_id: string | null;
@@ -428,6 +429,16 @@ export interface MeetingReportActionItemPayload {
   description: string;
   priority: "LOW" | "MEDIUM" | "HIGH";
   assignee: MeetingReportActionItemAssigneePayload | null;
+  deliverySuggestion: {
+    deliveryType: "calendar_event" | "pilo_issue";
+    calendar: {
+      isAllDay: boolean;
+      startDate: string;
+      endDate: string;
+      startTime: string | null;
+      endTime: string | null;
+    } | null;
+  } | null;
   status: MeetingReportActionItemStatus;
   updatedByUserId: string | null;
   approvedByUserId: string | null;
@@ -4297,7 +4308,9 @@ export class MeetingService {
       `SELECT action_items.id, action_items.meeting_report_id, action_items.source_index,
               action_items.title, action_items.description, action_items.priority,
               action_items.assignee_user_id, users.name AS assignee_name,
-              users.avatar_url AS assignee_avatar_url, action_items.status,
+              users.avatar_url AS assignee_avatar_url,
+              meeting_reports.action_item_candidates,
+              action_items.status,
               action_items.updated_by_user_id, action_items.approved_by_user_id,
               action_items.approved_at, action_items.dismissed_by_user_id,
               action_items.dismissed_at, action_items.created_at, action_items.updated_at
@@ -4441,6 +4454,7 @@ export class MeetingService {
         name: actionItem.assignee_name,
         avatarUrl: actionItem.assignee_avatar_url
       },
+      deliverySuggestion: this.getActionItemDeliverySuggestion(actionItem),
       status: actionItem.status,
       updatedByUserId: actionItem.updated_by_user_id,
       approvedByUserId: actionItem.approved_by_user_id,
@@ -4485,6 +4499,50 @@ export class MeetingService {
     };
   }
 
+  private getActionItemDeliverySuggestion(
+    actionItem: MeetingReportActionItemRow
+  ): MeetingReportActionItemPayload["deliverySuggestion"] {
+    const candidate = this.toJsonArray(actionItem.action_item_candidates)[
+      Number(actionItem.source_index)
+    ];
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+      return null;
+    }
+    const suggestion = (candidate as Record<string, unknown>).deliverySuggestion;
+    if (typeof suggestion !== "object" || suggestion === null || Array.isArray(suggestion)) {
+      return null;
+    }
+    const value = suggestion as Record<string, unknown>;
+    if (value.deliveryType === "pilo_issue") {
+      return { deliveryType: "pilo_issue", calendar: null };
+    }
+    if (value.deliveryType !== "calendar_event") return null;
+    const calendar = value.calendar;
+    if (typeof calendar !== "object" || calendar === null || Array.isArray(calendar)) {
+      return null;
+    }
+    const details = calendar as Record<string, unknown>;
+    if (
+      typeof details.isAllDay !== "boolean" ||
+      typeof details.startDate !== "string" ||
+      typeof details.endDate !== "string" ||
+      (details.startTime !== null && typeof details.startTime !== "string") ||
+      (details.endTime !== null && typeof details.endTime !== "string")
+    ) {
+      return null;
+    }
+    return {
+      deliveryType: "calendar_event",
+      calendar: {
+        isAllDay: details.isAllDay,
+        startDate: details.startDate,
+        endDate: details.endDate,
+        startTime: details.startTime,
+        endTime: details.endTime
+      }
+    };
+  }
+
   private mapMeetingReportDetail(report: MeetingReportDetailRow, evidence: {
     evidenceSegments: MeetingReportDetailPayload["evidenceSegments"];
     evidence: MeetingReportDetailPayload["evidence"];
@@ -4506,7 +4564,9 @@ export class MeetingService {
       `SELECT action_items.id, action_items.meeting_report_id, action_items.source_index,
               action_items.title, action_items.description, action_items.priority,
               action_items.assignee_user_id, users.name AS assignee_name,
-              users.avatar_url AS assignee_avatar_url, action_items.status,
+              users.avatar_url AS assignee_avatar_url,
+              meeting_reports.action_item_candidates,
+              action_items.status,
               action_items.updated_by_user_id, action_items.approved_by_user_id,
               action_items.approved_at, action_items.dismissed_by_user_id,
               action_items.dismissed_at, action_items.created_at, action_items.updated_at,
@@ -4520,6 +4580,8 @@ export class MeetingService {
               pilo_issue.column_id AS pilo_issue_column_id,
               board_column.name AS pilo_issue_column_name
        FROM meeting_report_action_items AS action_items
+       JOIN meeting_reports
+         ON meeting_reports.id = action_items.meeting_report_id
        LEFT JOIN users ON users.id = action_items.assignee_user_id
        LEFT JOIN meeting_report_action_item_deliveries AS delivery
          ON delivery.action_item_id = action_items.id

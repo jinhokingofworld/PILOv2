@@ -9,7 +9,7 @@ from app.meeting_action_item_extraction_processor import (
     MeetingActionItemExtractionProcessor,
     parse_generated_action_item_extraction_json,
 )
-from app.meeting_report_processor import ActivityEvidence, TranscriptSegment
+from app.meeting_report_processor import ActionItemAssignee, ActivityEvidence, TranscriptSegment
 
 REPORT_ID = "11111111-1111-4111-8111-111111111111"
 
@@ -55,6 +55,8 @@ class FakeAiClient:
         self,
         transcript_segments: list[TranscriptSegment],
         activity_evidence: list[ActivityEvidence],
+        _assignees: list[ActionItemAssignee],
+        _reference_date: str | None,
     ) -> GeneratedActionItemExtraction:
         return parse_generated_action_item_extraction_json(
             json.dumps(
@@ -94,6 +96,46 @@ def test_action_item_extraction_processor_completes_without_changing_report_stat
     assert result.reason == "completed"
     assert len(repository.completed) == 1
     assert repository.failed == []
+
+
+def test_action_item_extraction_keeps_only_known_assignee_and_calendar_suggestion() -> None:
+    extraction = parse_generated_action_item_extraction_json(
+        json.dumps(
+            {
+                "actionItemCandidates": [
+                    {
+                        "title": "배포 일정 공유",
+                        "description": "7월 18일 14시에 배포 일정을 공유한다.",
+                        "assigneeUserId": "known-user",
+                        "priority": "HIGH",
+                        "deliverySuggestion": {
+                            "deliveryType": "calendar_event",
+                            "calendar": {
+                                "isAllDay": False,
+                                "startDate": "2026-07-18",
+                                "endDate": "2026-07-18",
+                                "startTime": "14:00",
+                                "endTime": "15:00",
+                            },
+                        },
+                    }
+                ],
+                "evidence": [
+                    {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]}
+                ],
+                "activityEvidenceReferences": [],
+            }
+        ),
+        [TranscriptSegment(0, 0, 1_000, "진호가 7월 18일 14시에 배포 일정을 공유한다.")],
+        [],
+        {"known-user"},
+    )
+
+    item = extraction.action_item_candidates[0]
+    assert item.assignee_user_id == "known-user"
+    assert item.delivery_suggestion.delivery_type == "calendar_event"
+    assert item.delivery_suggestion.calendar is not None
+    assert item.delivery_suggestion.calendar.start_time == "14:00"
 
 
 def test_action_item_extraction_rejects_missing_action_item_evidence() -> None:

@@ -7,6 +7,7 @@ from typing import Protocol
 from uuid import UUID
 
 from app.meeting_report_processor import (
+    ActionItemAssignee,
     ActionItemCandidate,
     ActivityEvidence,
     ActivityEvidenceReference,
@@ -39,6 +40,8 @@ class MeetingActionItemExtractionContext:
     extraction_status: str
     transcript_segments: list[TranscriptSegment]
     activity_evidence: list[ActivityEvidence] = field(default_factory=list)
+    assignees: list[ActionItemAssignee] = field(default_factory=list)
+    reference_date: str | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,8 @@ class ActionItemExtractionAiClient(Protocol):
         self,
         transcript_segments: list[TranscriptSegment],
         activity_evidence: list[ActivityEvidence],
+        assignees: list[ActionItemAssignee],
+        reference_date: str | None,
     ) -> GeneratedActionItemExtraction: ...
 
 
@@ -102,6 +107,7 @@ def parse_generated_action_item_extraction_json(
     raw_text: str,
     transcript_segments: list[TranscriptSegment],
     activity_evidence: list[ActivityEvidence],
+    allowed_assignee_ids: set[str] | None = None,
 ) -> GeneratedActionItemExtraction:
     try:
         payload = json.loads(raw_text)
@@ -113,7 +119,7 @@ def parse_generated_action_item_extraction_json(
     raw_action_items = payload.get("actionItemCandidates")
     if not isinstance(raw_action_items, list):
         raise ProviderBusinessError("Invalid action item candidates")
-    action_items = [_parse_action_item(item) for item in raw_action_items]
+    action_items = [_parse_action_item(item, allowed_assignee_ids) for item in raw_action_items]
     evidence = _parse_evidence(payload.get("evidence"), transcript_segments, len(action_items), 0)
     activity_references = _parse_activity_evidence_references(
         payload.get("activityEvidenceReferences", []),
@@ -160,7 +166,10 @@ class MeetingActionItemExtractionProcessor:
             self.repository.mark_action_item_extraction_processing(job.report_id)
             try:
                 extraction = self.ai_client.generate_action_item_extraction(
-                    context.transcript_segments, context.activity_evidence
+                    context.transcript_segments,
+                    context.activity_evidence,
+                    context.assignees,
+                    context.reference_date,
                 )
             except ProviderBusinessError as error:
                 self.repository.mark_action_item_extraction_failed(
