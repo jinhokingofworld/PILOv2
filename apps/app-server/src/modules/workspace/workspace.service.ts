@@ -3,7 +3,7 @@ import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, conflict, forbidden, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
-import { WorkspaceMembershipRevocationPublisherService } from "../workspace-membership-revocation/workspace-membership-revocation-publisher.service";
+import { WorkspaceMembershipRevocationOutboxService } from "../workspace-membership-revocation/workspace-membership-revocation-outbox.service";
 
 export type WorkspaceRole = "owner" | "member";
 type WorkspaceInvitationStatus = "pending" | "accepted" | "revoked" | "expired";
@@ -196,7 +196,7 @@ const FRONTEND_DEFAULT_ORIGIN = "http://localhost:3000";
 export class WorkspaceService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly membershipRevocationPublisher: WorkspaceMembershipRevocationPublisherService
+    private readonly membershipRevocationOutbox: WorkspaceMembershipRevocationOutboxService
   ) {}
 
   async createWorkspace(
@@ -457,7 +457,7 @@ export class WorkspaceService {
     await this.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
     this.validateUserId(targetUserId);
 
-    await this.database.transaction(async (transaction) => {
+    const outboxId = await this.database.transaction(async (transaction) => {
       const membership = await transaction.queryOne<WorkspaceMemberRow>(
         `
           SELECT
@@ -525,9 +525,15 @@ export class WorkspaceService {
         `,
         [workspaceId, targetUserId]
       );
+
+      return this.membershipRevocationOutbox.enqueueMembershipRevoked(
+        transaction,
+        workspaceId,
+        targetUserId
+      );
     });
 
-    await this.publishMembershipRevocation(workspaceId, targetUserId);
+    await this.membershipRevocationOutbox.publishOutbox(outboxId);
 
     return {
       removed: true
@@ -544,7 +550,7 @@ export class WorkspaceService {
       throw badRequest("Workspace owner cannot leave own workspace");
     }
 
-    await this.database.transaction(async transaction => {
+    const outboxId = await this.database.transaction(async transaction => {
       await transaction.execute(
         `
           DELETE FROM workspace_members
@@ -553,9 +559,15 @@ export class WorkspaceService {
         `,
         [workspaceId, currentUserId]
       );
+
+      return this.membershipRevocationOutbox.enqueueMembershipRevoked(
+        transaction,
+        workspaceId,
+        currentUserId
+      );
     });
 
-    await this.publishMembershipRevocation(workspaceId, currentUserId);
+    await this.membershipRevocationOutbox.publishOutbox(outboxId);
 
     return {
       removed: true
@@ -1120,20 +1132,6 @@ export class WorkspaceService {
       `,
       [workspaceId, currentUserId]
     );
-  }
-
-  private async publishMembershipRevocation(
-    workspaceId: string,
-    userId: string
-  ): Promise<void> {
-    try {
-      await this.membershipRevocationPublisher.publishMembershipRevoked(
-        workspaceId,
-        userId
-      );
-    } catch {
-      // The publisher logs Redis failures. Membership removal remains committed.
-    }
   }
 
   private async findInvitationByToken(

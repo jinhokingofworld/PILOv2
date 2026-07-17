@@ -130,9 +130,21 @@ export interface CanvasAgentConversationContext {
   lastTask: CanvasAgentLastTaskContext | null;
 }
 
+export interface CanvasAgentShapeSummary {
+  id: string;
+  shapeType: string;
+  title: string | null;
+  text: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface CreateCanvasAgentRunRequest {
   prompt?: unknown;
   selectedShapeIds?: unknown;
+  shapeSummaries?: unknown;
   presentationMode?: unknown;
   toolHelpMode?: unknown;
   viewport?: unknown;
@@ -148,6 +160,7 @@ export interface CanvasAgentRequestContext {
   conversationContext: CanvasAgentConversationContext | null;
   presentationMode: CanvasAgentPresentationMode;
   selectedShapeIds: string[];
+  shapeSummaries: CanvasAgentShapeSummary[];
   toolHelpMode: boolean;
   viewport: CanvasAgentViewport | null;
 }

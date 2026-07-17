@@ -328,6 +328,18 @@ export function useMeetingWorkspaceData({
     [meetingClient, reloadReports, requireWorkspace]
   );
 
+  const retryMeetingReportActionItemExtraction = useCallback(
+    async (reportId: string) => {
+      const result = await meetingClient.retryMeetingReportActionItemExtraction(
+        requireWorkspace(),
+        reportId
+      );
+      await reloadReports();
+      return result;
+    },
+    [meetingClient, reloadReports, requireWorkspace]
+  );
+
   const updateMeetingReportActionItem = useCallback(
     async (
       reportId: string,
@@ -490,6 +502,7 @@ export function useMeetingWorkspaceData({
     meeting: currentState.meeting,
     nextReportCursor: reportsState.nextCursor,
     regenerateMeetingReport,
+    retryMeetingReportActionItemExtraction,
     reloadCurrentMeeting,
     reloadReports,
     reports: reportsState.reports,

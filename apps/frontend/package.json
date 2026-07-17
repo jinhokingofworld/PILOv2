@@ -14,7 +14,7 @@
     "test:chat-ui": "node --experimental-strip-types src/features/chat/utils/chat-message-text.test.mjs && node --experimental-strip-types src/features/chat/utils/chat-read-policy.test.mjs && node --experimental-strip-types src/features/chat/utils/chat-notification.test.mjs && node --experimental-strip-types src/features/chat/chat-ui.test.mjs",
     "test:chat-reducer": "node --experimental-strip-types src/features/chat/realtime/chat-reducer.test.mjs",
     "test:chat-api": "node --experimental-strip-types src/features/chat/api/client.test.mjs",
-    "test:canvas-realtime": "node --experimental-strip-types --test src/shared/canvas-realtime/canvas-remote-cursor-store.test.mjs",
+    "test:canvas-realtime": "node --experimental-strip-types --test src/shared/canvas-realtime/canvas-remote-cursor-store.test.mjs src/features/canvas/collaboration/canvas-remote-shape-preview-store.test.mjs src/features/canvas/engine/interactions/canvas-local-interaction-policy.test.mjs",
     "test:drive-document": "node --experimental-strip-types --test src/features/drive/document-realtime.test.mjs src/features/drive/components/document-slash-commands.test.mjs && node src/features/drive/drive-document-contract.test.mjs",
     "test:meeting-action-item": "node --experimental-strip-types --test src/features/meeting/utils/action-item-delivery-flow.test.mjs",
     "test:workspace-presence": "node src/shared/workspace-presence/workspace-presence-reducer.test.mjs && node src/shared/workspace-presence/workspace-location-registry.test.mjs && node src/features/workspace-presence/workspace-member-avatars.test.mjs",

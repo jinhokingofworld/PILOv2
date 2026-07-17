@@ -13,6 +13,7 @@ import { isPiloFrameCollapsed } from "@/features/canvas/engine/shapes/frame/canv
 import { normalizeCanvasFreeformShapes } from "@/features/canvas/persistence/canvas-storage";
 import type { CanvasShapeSyncQueue } from "@/features/canvas/persistence/canvas-shape-sync";
 import { CanvasEditor } from "../editor/CanvasEditor";
+import { CLASSIC_CANVAS_INITIAL_ZOOM } from "../editor/canvas-initial-camera";
 import type {
   PiloCanvasActions,
   PiloCanvasHistoryState,
@@ -39,9 +40,11 @@ import type {
 import { useCanvasApiLifecycle } from "./useCanvasApiLifecycle";
 import { useCanvasRuntimeHydration } from "./useCanvasRuntimeHydration";
 import { useCanvasShapePersistence } from "./useCanvasShapePersistence";
-import { useCanvasViewSettingPersistence } from "./useCanvasViewSettingPersistence";
 import { useCanvasViewportQueries } from "./useCanvasViewportQueries";
 import {
+  areViewSettingsEqual,
+  CANVAS_SHAPE_DETAIL_MIN_ZOOM,
+  clampZoom,
   DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
   getFreeformShapeId,
 } from "./canvas-runtime-utils";
@@ -61,7 +64,7 @@ type ClassicCanvasRuntimeProps = {
 
 const noopCanvasHistoryStateChange = () => {};
 const INITIAL_CANVAS_VIEW_SETTING: CanvasViewSetting = {
-  zoom: 0.8,
+  zoom: CLASSIC_CANVAS_INITIAL_ZOOM,
   viewportX: 0,
   viewportY: 0,
 };
@@ -78,6 +81,7 @@ const initialLocalInteractionState: PiloCanvasLocalInteractionState = {
   currentToolId: "select.idle",
   editingShapeId: null,
   focusedGroupId: null,
+  isFreehandDrawing: false,
   isFocused: false,
   protectedShapeIds: [],
   selectedShapeIds: [],
@@ -157,7 +161,10 @@ function isRemoteOperationProtectedByLocalInteraction({
   localInteractionState: PiloCanvasLocalInteractionState;
   operation: CanvasShapeOperationPayload;
 }) {
-  return localInteractionState.protectedShapeIds.includes(operation.shapeId);
+  return (
+    localInteractionState.isFreehandDrawing ||
+    localInteractionState.protectedShapeIds.includes(operation.shapeId)
+  );
 }
 
 function isRemoteFrameCollapseProtected({
@@ -339,11 +346,6 @@ function ClassicCanvasRuntimeInner({
   const [canvasSyncNotice, setCanvasSyncNotice] =
     useState<CanvasSyncNotice | null>(null);
   const shapeSyncQueueRef = useRef<CanvasShapeSyncQueue | null>(null);
-  const pendingViewSettingRef = useRef<CanvasViewSetting | null>(null);
-  const viewSettingRef = useRef<CanvasViewSetting>(viewSetting);
-  const viewSettingSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
   const viewportShapeLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -379,7 +381,7 @@ function ClassicCanvasRuntimeInner({
     pendingRemoteFrameChildrenRequestVersion,
     setPendingRemoteFrameChildrenRequestVersion,
   ] = useState(0);
-  const [cameraRestoreVersion, setCameraRestoreVersion] = useState(0);
+  const [cameraResetVersion, setCameraResetVersion] = useState(0);
   const currentRealtimeUserId = realtime?.currentUser?.userId ?? null;
   const showCanvasSyncNotice = useCallback(
     (message: string, tone: CanvasSyncNotice["tone"] = "info") => {
@@ -437,6 +439,7 @@ function ClassicCanvasRuntimeInner({
   }, []);
   const isCanvasShapePatchProtected = useCallback((shapeId: string) => {
     return (
+      localInteractionStateRef.current.isFreehandDrawing ||
       localInteractionStateRef.current.protectedShapeIds.includes(shapeId) ||
       pendingLocalShapeVersionsRef.current.has(shapeId) ||
       pendingRoomShapeAckCountsRef.current.has(shapeId)
@@ -657,7 +660,7 @@ function ClassicCanvasRuntimeInner({
     (state: PiloCanvasLocalInteractionState) => {
       localInteractionStateRef.current = state;
 
-      if (!state.protectedShapeIds.length) {
+      if (!state.isFreehandDrawing) {
         flushDeferredRemoteOperations();
         flushDeferredRoomShapeChangesRef.current();
       }
@@ -817,11 +820,14 @@ function ClassicCanvasRuntimeInner({
         ...pendingLocalShapeVersionsRef.current.keys(),
         ...pendingRoomShapeAckCountsRef.current.keys(),
       ]);
+      const shouldDeferForLocalFreehand =
+        localInteractionStateRef.current.isFreehandDrawing;
       const immediateDeletedShapeIds: string[] = [];
       const immediateUpsertShapes: PiloCanvasFreeformShape[] = [];
 
       patch.deletedShapeIds.forEach((shapeId) => {
         if (
+          shouldDeferForLocalFreehand ||
           isRemoteShapeDeletionProtected({
             currentShapes: freeformShapesRef.current,
             protectedShapeIds,
@@ -851,6 +857,7 @@ function ClassicCanvasRuntimeInner({
         }
 
         if (
+          shouldDeferForLocalFreehand ||
           protectedShapeIds.has(shapeId) ||
           isRemoteFrameCollapseProtected({
             currentShapes: freeformShapesRef.current,
@@ -886,7 +893,10 @@ function ClassicCanvasRuntimeInner({
     ],
   );
   const flushDeferredRoomShapeChanges = useCallback(() => {
-    if (!deferredRoomShapeChangesRef.current.size) {
+    if (
+      localInteractionStateRef.current.isFreehandDrawing ||
+      !deferredRoomShapeChangesRef.current.size
+    ) {
       return;
     }
 
@@ -1065,33 +1075,29 @@ function ClassicCanvasRuntimeInner({
     freeformShapesRef,
     pendingLocalShapeVersionsRef,
     pendingShapeDetailRef,
-    setCameraRestoreVersion,
+    setCameraResetVersion,
     setCanvasHydrationVersion,
     setFreeformShapes,
-    setViewSetting,
     shapeDetailCacheRef,
     shapeDetailRequestSeqRef,
     storageMode,
-    viewSettingRef,
     viewportShapeLoadRequestSeqRef,
   });
 
   useEffect(() => {
-    viewSettingRef.current = viewSetting;
-  }, [viewSetting]);
+    setViewSetting(INITIAL_CANVAS_VIEW_SETTING);
+  }, [board.id]);
 
   useCanvasApiLifecycle({
     board,
     canvasClient,
     latestViewportBoundsRef,
     pendingShapeDetailRef,
-    pendingViewSettingRef,
     queryClient,
     remoteShapeRevisionRef,
     onShapeSyncError: handleShapeSyncError,
     shapeSyncQueueRef,
     storageMode,
-    viewSettingSyncTimerRef,
     viewportShapeLoadTimerRef,
   });
 
@@ -1168,16 +1174,23 @@ function ClassicCanvasRuntimeInner({
     };
   }, [applyRoomShapePatch]);
 
-  const persistViewSetting = useCanvasViewSettingPersistence({
-    board,
-    canvasClient,
-    pendingShapeDetailRef,
-    pendingViewSettingRef,
-    setViewSetting,
-    storageMode,
-    viewSettingRef,
-    viewSettingSyncTimerRef,
-  });
+  const handleViewChange = useCallback((nextViewSetting: CanvasViewSetting) => {
+    const normalizedViewSetting = {
+      zoom: clampZoom(nextViewSetting.zoom),
+      viewportX: nextViewSetting.viewportX,
+      viewportY: nextViewSetting.viewportY,
+    };
+
+    if (normalizedViewSetting.zoom < CANVAS_SHAPE_DETAIL_MIN_ZOOM) {
+      pendingShapeDetailRef.current = null;
+    }
+
+    setViewSetting((currentViewSetting) =>
+      areViewSettingsEqual(currentViewSetting, normalizedViewSetting)
+        ? currentViewSetting
+        : normalizedViewSetting,
+    );
+  }, []);
 
   const { loadFrameChildren, loadShapeDetail, loadViewportShapes } =
     useCanvasViewportQueries({
@@ -1274,15 +1287,14 @@ function ClassicCanvasRuntimeInner({
       <section className="canvas-content" aria-label="캔버스 보드">
         <CanvasEditor
           board={board}
-          cameraRestoreVersion={cameraRestoreVersion}
+          cameraResetVersion={cameraResetVersion}
           consumeShapePatch={consumeCanvasSurfaceShapePatch}
           freeformShapes={freeformShapes}
           hydrationVersion={canvasHydrationVersion}
-          initialViewSetting={viewSetting}
           onReady={setCanvasActions}
           onFreeformShapesDraftChange={captureDraftFreeformShapes}
           onFreeformShapesChange={persistFreeformShapes}
-          onViewChange={persistViewSetting}
+          onViewChange={handleViewChange}
           onFrameChildShapesUnload={handleFrameChildShapesUnload}
           onViewportBoundsChange={loadViewportShapes}
           onFrameChildrenRequest={loadFrameChildren}

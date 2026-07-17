@@ -45,7 +45,7 @@ class CanvasAgentIntentClassifier(Protocol):
 class CanvasSemanticIntentRouter(Protocol):
     model: str
 
-    def classify(self, context: CanvasAgentRunContext): ...
+    def classify(self, context: CanvasAgentRunContext, query_override: str | None = None): ...
 
 
 def parse_canvas_agent_job_payload(payload: dict[str, object]) -> CanvasAgentJob:
@@ -110,43 +110,48 @@ class CanvasAgentProcessor:
                 )
 
             try:
-                if self.semantic_router is not None:
-                    self.repository.update_progress(
-                        context.run_id,
-                        "먼저 캔버스 위 도형 임베딩에서 관련 내용을 찾아보고 있어요.",
-                    )
-                local_classification = self._semantic_classification(context)
-                if local_classification is not None:
-                    self.repository.create_classified_intent(
-                        context,
-                        local_classification.intent,
-                        local_classification.arguments,
-                        local_classification.message,
-                        (
-                            self.semantic_router.model
-                            if self.semantic_router
-                            else "local:canvas-embedding"
-                        ),
-                    )
-                    return CanvasAgentProcessResult(
-                        True,
-                        "canvas_agent_semantic_intent_classified",
-                        job.run_id,
-                    )
-
                 self.repository.update_progress(
                     context.run_id,
-                    "임베딩으로 확실한 도형을 찾지 못해서 검색어를 정리하고 있어요.",
+                    "현재 캔버스 도형과 요청 내용을 함께 확인하고 있어요.",
                 )
                 classification = self.intent_classifier.classify(context)
                 arguments = dict(classification.arguments)
-                arguments.setdefault("routingSource", "llm_intent_classifier")
+                shape_ids = arguments.get("shapeIds")
+                has_client_match = isinstance(shape_ids, list) and any(
+                    isinstance(item, str) and item for item in shape_ids
+                )
+                model_name = self.intent_classifier.model
+                message = classification.message
+                result_reason = "canvas_agent_intent_classified"
+
+                if has_client_match:
+                    arguments["routingSource"] = "client_shape_context"
+                    arguments["focusResult"] = True
+                else:
+                    query = arguments.get("query")
+                    semantic_classification = self._semantic_classification(
+                        context,
+                        query if isinstance(query, str) else None,
+                    )
+                    if semantic_classification is not None:
+                        arguments = dict(semantic_classification.arguments)
+                        message = semantic_classification.message
+                        model_name = (
+                            self.semantic_router.model
+                            if self.semantic_router
+                            else "local:canvas-embedding"
+                        )
+                        result_reason = "canvas_agent_semantic_intent_classified"
+                    else:
+                        arguments["shapeIds"] = []
+                        arguments["routingSource"] = "llm_intent_classifier"
+
                 self.repository.create_classified_intent(
                     context,
                     classification.intent,
                     arguments,
-                    classification.message,
-                    self.intent_classifier.model,
+                    message,
+                    model_name,
                 )
             except CanvasAgentIntentClassifierError as error:
                 self.repository.mark_failed(job.run_id, str(error))
@@ -156,18 +161,22 @@ class CanvasAgentProcessor:
                     job.run_id,
                 )
 
-            return CanvasAgentProcessResult(True, "canvas_agent_intent_classified", job.run_id)
+            return CanvasAgentProcessResult(True, result_reason, job.run_id)
         finally:
             self.repository.release_run_lock(job.run_id)
 
-    def _semantic_classification(self, context: CanvasAgentRunContext):
-        if self.semantic_router is None:
+    def _semantic_classification(
+        self,
+        context: CanvasAgentRunContext,
+        query: str | None,
+    ):
+        if self.semantic_router is None or not query:
             return None
         try:
-            return self.semantic_router.classify(context)
+            return self.semantic_router.classify(context, query)
         except Exception:
             # Local retrieval must never make the Canvas AI unavailable. A
-            # failed or not-yet-ready index falls through to the GPT classifier.
+            # failed or not-yet-ready index becomes an empty search result.
             return None
 
 

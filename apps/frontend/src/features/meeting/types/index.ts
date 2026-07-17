@@ -84,6 +84,10 @@ export type MeetingReportSummary = {
   discussionPoints: string | null;
   decisions: string | null;
   actionItemCandidates: unknown[];
+  actionItemExtraction?: {
+    status: "PENDING" | "PUBLISHING" | "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
+    errorMessage: string | null;
+  };
   retryCount: number;
   participantSummary?: {
     totalCount: number;
@@ -93,6 +97,10 @@ export type MeetingReportSummary = {
   canDelete?: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type MeetingReportActionItemExtractionRetryPayload = {
+  actionItemExtraction: NonNullable<MeetingReportSummary["actionItemExtraction"]>;
 };
 
 export type MeetingReportDetail = MeetingReportSummary & {
@@ -188,6 +196,16 @@ export type MeetingReportActionItem = {
   description: string;
   priority: "LOW" | "MEDIUM" | "HIGH";
   assignee: MeetingReportActionItemAssignee | null;
+  deliverySuggestion: {
+    deliveryType: "calendar_event" | "pilo_issue";
+    calendar: {
+      isAllDay: boolean;
+      startDate: string;
+      endDate: string;
+      startTime: string | null;
+      endTime: string | null;
+    } | null;
+  } | null;
   status: MeetingReportActionItemStatus;
   updatedByUserId: string | null;
   approvedByUserId: string | null;

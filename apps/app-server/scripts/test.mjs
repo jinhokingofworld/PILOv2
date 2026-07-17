@@ -622,6 +622,7 @@ await import("./meeting/livekit-egress.test.mjs");
 await import("./auth/test.mjs");
 await import("./meeting/livekit-token.test.mjs");
 await import("./meeting/livekit-webhook.test.mjs");
+await import("./meeting/membership-revocation.test.mjs");
 await import("./meeting/meeting-report-job.test.mjs");
 await import("./calendar/test.mjs");
 await import("./common/activity-log.test.mjs");
@@ -651,6 +652,7 @@ await import("./chat/contract.test.mjs");
 await import("./chat/publisher.test.mjs");
 await import("./workspace/membership-revocation.test.mjs");
 await import("./workspace/membership-revocation-publisher.test.mjs");
+await import("./workspace/membership-revocation-outbox.test.mjs");
 await import("./user/account-deletion-revocation.test.mjs");
 if (process.env.CHAT_POSTGRES_TEST_URL) {
   await import("./chat/postgres.test.mjs");

@@ -503,6 +503,14 @@ function definition(definitions, name) {
 {
   const { boardService, definitions } = createTools();
   const tool = definition(definitions, "create_board_issue");
+  assert.deepEqual(tool.inputSchema.required, ["title"]);
+  const defaultPlan = await tool.buildConfirmation(
+    context,
+    tool.validateInput({ title: "Default placement issue", body: "Automatic selection" })
+  );
+  assert.equal(defaultPlan.target.boardId, "42");
+  assert.equal(defaultPlan.after.columnName, "Unmapped");
+  assert.equal(defaultPlan.call.columnId, "9");
   const input = tool.validateInput({
     title: "새 Agent 이슈",
     body: "확인 후 생성",
@@ -526,6 +534,91 @@ function definition(definitions, name) {
     body: "확인 후 생성",
     columnId: "7"
   });
+}
+
+{
+  const { boardService, definitions } = createTools();
+  const tool = definition(definitions, "create_board_issue");
+  boardService.activeBoardId = null;
+  boardService.boards = [boardService.boards[0]];
+  const plan = await tool.buildConfirmation(
+    context,
+    tool.validateInput({ title: "Only Board default" })
+  );
+  assert.equal(plan.target.boardId, "42");
+  assert.equal(plan.after.columnName, "Unmapped");
+}
+
+{
+  const { boardService, definitions } = createTools();
+  const tool = definition(definitions, "create_board_issue");
+  boardService.activeBoardId = null;
+  const result = await tool.buildConfirmation(
+    context,
+    tool.validateInput({ title: "Ambiguous Board" })
+  );
+  assert.equal(result.kind, "needs_clarification");
+  assert.equal(result.outputSummary.reason, "board_ambiguous");
+  assert.equal(result.outputSummary.boards.length, 2);
+}
+
+{
+  const { boardService, definitions } = createTools();
+  const tool = definition(definitions, "create_board_issue");
+  boardService.columns = boardService.columns.filter((column) => column.id !== "9");
+  const result = await tool.buildConfirmation(
+    context,
+    tool.validateInput({ title: "Missing default Column" })
+  );
+  assert.equal(result.kind, "needs_clarification");
+  assert.equal(result.outputSummary.reason, "unmapped_column_missing");
+  assert.equal(result.outputSummary.boardName, "Product Board");
+
+  const answer = buildAgentReadResultAnswer({
+    toolName: tool.name,
+    outputSummary: result.outputSummary,
+    resourceRefs: result.resourceRefs
+  });
+  assert.match(answer, /GitHub repository/);
+  assert.match(answer, /ProjectV2/);
+  assert.match(answer, /sync|동기화/i);
+}
+
+{
+  const { boardService, definitions } = createTools();
+  const tool = definition(definitions, "create_board_issue");
+  boardService.columns.push({ ...boardService.columns[2], id: "10" });
+  const result = await tool.buildConfirmation(
+    context,
+    tool.validateInput({ title: "Ambiguous default Column" })
+  );
+  assert.equal(result.kind, "needs_clarification");
+  assert.equal(result.outputSummary.reason, "unmapped_column_missing");
+}
+
+{
+  const { boardService, definitions } = createTools();
+  const tool = definition(definitions, "create_board_issue");
+  boardService.columns[2] = {
+    ...boardService.columns[2],
+    githubStatusOptionId: "provider-unmapped"
+  };
+  const providerBacked = await tool.buildConfirmation(
+    context,
+    tool.validateInput({ title: "Provider-backed Unmapped" })
+  );
+  assert.equal(providerBacked.outputSummary.reason, "unmapped_column_missing");
+
+  boardService.columns[2] = {
+    ...boardService.columns[2],
+    githubStatusOptionId: null,
+    normalizedName: "todo"
+  };
+  const wrongNormalizedName = await tool.buildConfirmation(
+    context,
+    tool.validateInput({ title: "Name-only Unmapped" })
+  );
+  assert.equal(wrongNormalizedName.outputSummary.reason, "unmapped_column_missing");
 }
 
 {

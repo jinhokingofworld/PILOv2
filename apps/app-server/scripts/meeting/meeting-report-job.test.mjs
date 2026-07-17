@@ -22,6 +22,11 @@ const payload = {
   retryCount: 0
 };
 
+const actionItemExtractionPayload = {
+  jobType: "meeting_action_item_extraction",
+  reportId: "77777777-7777-7777-7777-777777777777"
+};
+
 class FakeSqsClient {
   constructor({ shouldFail = false } = {}) {
     this.shouldFail = shouldFail;
@@ -74,6 +79,7 @@ try {
       ...payload,
       retryCount: 1
     });
+    await service.enqueueMeetingActionItemExtractionJob(actionItemExtractionPayload);
 
     assert.deepEqual(service.configs, [
       {
@@ -82,7 +88,7 @@ try {
         endpoint: "http://localhost:4566"
       }
     ]);
-    assert.equal(client.commands.length, 2);
+    assert.equal(client.commands.length, 3);
     assert.equal(client.commands[0].constructor.name, "SendMessageCommand");
     assert.equal(
       client.commands[0].input.QueueUrl,
@@ -95,6 +101,10 @@ try {
         ...payload,
         retryCount: 1
       }
+    );
+    assert.deepEqual(
+      JSON.parse(client.commands[2].input.MessageBody),
+      actionItemExtractionPayload
     );
     assert.equal(client.commands[0].input.MessageGroupId, undefined);
     assert.equal(client.commands[0].input.MessageDeduplicationId, undefined);

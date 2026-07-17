@@ -200,13 +200,14 @@ test("stale Pilo issue 선택이면 repository 연결과 ProjectV2 동기화를 
 test("DELIVERY_FAILED Pilo issue draft를 다시 열면 최신 eligibility 목록을 다시 불러온다", () => {
   assert.match(
     reportSectionSource,
-    /draft\?\.deliveryType === "pilo_issue"[\s\S]{0,800}await loadIssueDeliveryOptions\(\s*draft\.issue\.boardId,\s*draft\.issue\.columnId\s*\)/
+    /draft\?\.deliveryType === "pilo_issue"[\s\S]{0,500}setSelectedBoardId\(draft\.issue\.boardId\)/
   );
+  assert.match(reportSectionSource, /async function beginEditing\(\)[\s\S]{0,300}await loadIssueDeliveryOptions\(\)/);
 });
 
 test("현재 Board와 Column 선택이 유효하지 않으면 생성 버튼을 비활성화한다", () => {
   assert.match(
     reportSectionSource,
-    /deliveryType === "pilo_issue"\s*&&\s*!hasIssueDeliverySelection/
+    /:\s*!hasIssueDeliverySelection/
   );
 });

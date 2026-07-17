@@ -33,19 +33,13 @@ class FailingEmbedder:
 
 
 class FakeRepository:
-    def __init__(self, *, has_shapes=True, shapes=None, text_shapes=None) -> None:
+    def __init__(self, *, has_shapes=True, shapes=None) -> None:
         self.has_shapes = has_shapes
         self.shapes = shapes or []
-        self.text_shapes = text_shapes or {}
         self.search_calls = 0
-        self.text_search_calls = 0
 
     def has_semantic_shapes(self, _workspace_id, _canvas_id):
         return self.has_shapes
-
-    def search_text_shapes(self, _canvas_id, query, limit=4):
-        self.text_search_calls += 1
-        return self.text_shapes.get(query, [])[:limit]
 
     def search_semantic_shapes(self, _workspace_id, _canvas_id, _embedding, limit=4):
         self.search_calls += 1
@@ -120,25 +114,6 @@ def test_semantic_router_skips_embedding_when_canvas_has_no_indexed_shapes() -> 
     )
 
     assert classification is None
-    assert repository.search_calls == 0
-
-
-def test_semantic_router_uses_text_search_without_embedding_index() -> None:
-    repository = FakeRepository(
-        has_shapes=False,
-        text_shapes={
-            "회의 메모 찾아줘": [CanvasSemanticShapeMatch("shape:meeting", 1.0)],
-        },
-    )
-
-    classification = CanvasSemanticRouter(repository, FailingEmbedder()).classify(
-        context("회의 메모 찾아줘")
-    )
-
-    assert classification is not None
-    assert classification.intent == "find_shapes"
-    assert classification.arguments["shapeIds"] == ["shape:meeting"]
-    assert classification.arguments["routingSource"] == "deterministic_search"
     assert repository.search_calls == 0
 
 

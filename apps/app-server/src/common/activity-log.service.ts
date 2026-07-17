@@ -60,7 +60,14 @@ export const ACTIVITY_LOG_ACTIONS = [
   "document_renamed",
   "document_moved",
   "document_attachment_updated",
-  "document_deleted"
+  "document_deleted",
+  "sql_erd_session_created",
+  "sql_erd_schema_updated",
+  "sql_erd_session_renamed",
+  "sql_erd_session_deleted",
+  "sql_erd_note_created",
+  "sql_erd_note_updated",
+  "sql_erd_note_deleted"
 ] as const;
 
 export type ActivityLogAction = (typeof ACTIVITY_LOG_ACTIONS)[number];

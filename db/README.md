@@ -95,6 +95,8 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/081_add_meeting_report_activity_evidence_rag.sql` adds durable Activity evidence embedding jobs and safe `vector(1536)` chunks for MeetingReport RAG. It indexes only the MeetingReport snapshot action, summary, and timestamp; raw Activity Log metadata is never copied.
 - `migrations/082_create_workspace_chat.sql` adds Workspace Chat messages, monotonic read state, member mentions, author-delete tombstones, lookup indexes, and all-deny RLS. It was applied to the Supabase dev project under history entry `20260716171029_082_create_workspace_chat`.
 - `migrations/083_preserve_github_project_v2_reconnect_identity.sql` makes the ProjectV2 installation link nullable with `ON DELETE SET NULL`, preserving repository, ProjectV2, repository link, and Board cache identities across GitHub App installation deletion and reconnect. It was applied to the Supabase dev project under history entry `20260716173438_083_preserve_github_project_v2_reconnect_identity`.
+- `migrations/085_add_sql_erd_activity_log_actions.sql` adds SQLtoERD session, schema, rename, delete, and meaningful note-content Activity Log actions.
+- `migrations/086_create_workspace_membership_revocation_outbox.sql` adds durable, reclaimable Workspace membership revocation delivery intents so Redis publish failures are retried without rolling back the committed membership deletion.
 
 ## Operational Data Repairs
 

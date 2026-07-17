@@ -82,6 +82,16 @@ assert.doesNotMatch(
   /delivery\.requested_by_user_id !== currentUserId/,
   "Delivery retries must not be restricted to the original requester"
 );
+assert.match(
+  meetingActionItemDeliverySource,
+  /withAssigneeMention\([\s\S]*?assignee_github_login/,
+  "Pilo issue delivery must preserve the action item body and append the linked GitHub mention"
+);
+assert.match(
+  meetingServiceSource,
+  /getActionItemDeliverySuggestion/,
+  "Meeting detail must expose the AI delivery suggestion for the approval UI"
+);
 assert.match(meetingServiceSource, /ON CONFLICT DO NOTHING/);
 assert.match(meetingServiceSource, /pg_advisory_xact_lock/);
 assert.match(meetingServiceSource, /legacy_participant AS/);
@@ -120,6 +130,54 @@ const createdAt = new Date("2026-07-05T00:00:01.000Z");
 const updatedAt = new Date("2026-07-05T00:00:02.000Z");
 const leftAt = new Date("2026-07-05T00:10:00.000Z");
 const endedAt = new Date("2026-07-05T00:10:01.000Z");
+
+{
+  const service = Object.create(MeetingService.prototype);
+  const suggestion = service.mapMeetingReportActionItem({
+    id: actionItemId,
+    source_index: 0,
+    title: "7월 18일 일정 조정",
+    description: "7월 18일 14시에 일정 조정 내용을 확인한다.",
+    priority: "MEDIUM",
+    assignee_user_id: null,
+    assignee_name: null,
+    assignee_avatar_url: null,
+    action_item_candidates: [{
+      deliverySuggestion: {
+        deliveryType: "calendar_event",
+        calendar: {
+          isAllDay: false,
+          startDate: "2026-07-18",
+          endDate: "2026-07-18",
+          startTime: "14:00",
+          endTime: null
+        }
+      }
+    }],
+    status: "PENDING",
+    updated_by_user_id: null,
+    approved_by_user_id: null,
+    approved_at: null,
+    dismissed_by_user_id: null,
+    dismissed_at: null,
+    delivery_id: null,
+    delivery_type: null,
+    delivery_status: null,
+    created_at: createdAt,
+    updated_at: updatedAt
+  }).deliverySuggestion;
+
+  assert.deepEqual(suggestion, {
+    deliveryType: "calendar_event",
+    calendar: {
+      isAllDay: false,
+      startDate: "2026-07-18",
+      endDate: "2026-07-18",
+      startTime: "14:00",
+      endTime: null
+    }
+  });
+}
 
 function meetingReportEventContext(token) {
   return {

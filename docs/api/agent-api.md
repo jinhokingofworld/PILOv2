@@ -883,10 +883,16 @@ Status code: `200 OK`
 - `move_board_issue_status`는 GitHub issue 번호와 exact `columnName`을 받는다. confirmation
   직전에 현재 issue와 column을 다시 읽고 `previousColumnId`를 저장하며, 승인 실행은 Board API의
   stale column `409 CONFLICT` 규칙을 그대로 사용한다.
-- `create_board_issue`는 `title`, 선택 `body`, exact `columnName`만 지원한다. confirmation plan에
-  `agent:{runId}:create_board_issue` 형식의 안정적인 idempotency key를 저장하고 approve와 재시도에서
-  같은 key로 기존 Board issue 생성 계약을 호출한다. label, assignee, milestone 지정은 생성 범위가
-  아니다.
+- `create_board_issue`는 `title`, 선택 `body`, 선택 exact `columnName`을 지원한다. Board selector가
+  없으면 Workspace active Board를 사용하고, active Board가 없으면 유일한 Board만 자동 선택한다.
+  Board가 여러 개이면 후보를 안내하며 임의로 선택하지 않는다. `columnName`이 없으면
+  `normalizedName=unmapped`이고 `githubStatusOptionId=null`인 로컬 Unmapped Column이 정확히 하나일
+  때만 기본값으로 사용한다. 이 Column이 없거나 모호하면 write 없이 GitHub repository 연결과
+  ProjectV2 Board 선택·동기화 상태를 확인하도록 안내한다. 명시한 Board, repository, Column은 기존
+  exact match 규칙을 유지한다. confirmation plan에 자동 선택된 Board와 Column을 표시하고
+  `agent:{runId}:create_board_issue` 형식의 안정적인 idempotency key를 저장하며, approve와 재시도에서
+  같은 key로 기존 Board issue 생성 계약을 호출한다. 최종 Board API 검증은 그대로 유지한다.
+  label, assignee, milestone 지정은 생성 범위가 아니다.
 - `assign_board_issue_safely` planner input은 GitHub issue 번호와 선택 `addAssignees`,
   `removeAssignees`를 받는다. App Server는 현재 전체 assignee를 다시 읽고 repository의 live
   assignable 후보를 검증한 뒤 confirmation에 유지·추가·제거·최종 전체 목록을 표시한다. 승인 후에는

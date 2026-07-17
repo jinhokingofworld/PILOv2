@@ -4,8 +4,10 @@ import test from "node:test";
 import { workspacePresenceClientEvents, workspacePresenceServerEvents } from "../../dist/workspace-presence/workspace-presence-events.js";
 import { createWorkspacePresenceService } from "../../dist/workspace-presence/workspace-presence.service.js";
 import { registerWorkspacePresenceSocketHandlers } from "../../dist/workspace-presence/workspace-presence-socket-handlers.js";
+import { createWorkspaceMembershipRevocationFence } from "../../dist/workspace-membership-revocation/workspace-membership-revocation.js";
 
 const workspaceId = "00000000-0000-0000-0000-000000000001";
+const userId = "11111111-1111-4111-8111-111111111111";
 
 function deferred() {
   let resolve;
@@ -15,7 +17,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function createHarness({ allowed = true, canJoinWorkspace, join, leave } = {}) {
+function createHarness({ allowed = true, canJoinWorkspace, join, leave, membershipRevocationFence } = {}) {
   const handlers = new Map();
   const emitted = [];
   const joinCalls = [];
@@ -23,7 +25,7 @@ function createHarness({ allowed = true, canJoinWorkspace, join, leave } = {}) {
   const roomEvents = [];
   const socket = {
     connected: true,
-    data: { auth: { displayName: "세인", userId: "user-1" } },
+    data: { auth: { displayName: "세인", userId } },
     id: "socket-1",
     join: async (roomName) => {
       joinCalls.push(roomName);
@@ -62,6 +64,7 @@ function createHarness({ allowed = true, canJoinWorkspace, join, leave } = {}) {
       canJoinWorkspace: canJoinWorkspace ?? (async () => allowed),
     },
     io,
+    membershipRevocationFence,
     service,
     socket,
   });
@@ -99,7 +102,7 @@ test("disconnect는 다른 탭이 남으면 update, 마지막 탭이면 leave를
   await harness.handlers.get(workspacePresenceClientEvents.join)({ workspaceId });
   harness.service.joinSocket(
     "socket-2",
-    { displayName: "세인", userId: "user-1" },
+    { displayName: "세인", userId },
     workspaceId,
   );
 
@@ -136,6 +139,34 @@ test("membership 확인 중 leave되면 stale join이 room과 service를 다시 
   );
 });
 
+test("철회가 access 확인 중 발생하면 presence join은 room과 state를 만들지 않는다", async () => {
+  const access = deferred();
+  const fence = createWorkspaceMembershipRevocationFence();
+  const harness = createHarness({
+    canJoinWorkspace: () => access.promise,
+    membershipRevocationFence: fence,
+  });
+  const io = {
+    sockets: {
+      adapter: { rooms: new Map() },
+      sockets: new Map([[harness.socket.id, harness.socket]]),
+    },
+  };
+
+  const join = harness.handlers.get(workspacePresenceClientEvents.join)({ workspaceId });
+  await Promise.resolve();
+  fence.revokeUserWorkspace(io, userId, workspaceId);
+  access.resolve(true);
+  await join;
+
+  assert.equal(harness.joinCalls.length, 0);
+  assert.equal(harness.service.getWorkspacePresence(workspaceId).length, 0);
+  assert.equal(
+    harness.emitted.some(({ event }) => event === workspacePresenceServerEvents.joined),
+    false,
+  );
+});
+
 test("socket.join 대기 중 disconnect되면 stale join을 정리한다", async () => {
   const socketJoin = deferred();
   const harness = createHarness({ join: () => socketJoin.promise });
@@ -163,7 +194,7 @@ test("background 새 탭 join은 기존 foreground 대표 상태를 broadcast한
   const harness = createHarness();
   harness.service.joinSocket(
     "socket-2",
-    { displayName: "세인", userId: "user-1" },
+    { displayName: "세인", userId },
     workspaceId,
   );
   harness.service.updateSocket("socket-2", {

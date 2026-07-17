@@ -9,20 +9,26 @@ import {
   githubSourceClientEvents,
   githubSourceServerEvents
 } from "./github-source-socket-events";
+import type { WorkspaceMembershipRevocationFence } from "../workspace-membership-revocation/workspace-membership-revocation";
+import {
+  evictGithubSourceSocketFromRooms,
+  type GithubSourceMembershipSocket,
+} from "./github-source-membership-revocation";
 
-type GithubSourceSocket = {
+type GithubSourceSocket = GithubSourceMembershipSocket & {
   emit: (event: string, payload: unknown) => void;
   join: (roomName: string) => unknown | Promise<unknown>;
-  leave: (roomName: string) => unknown | Promise<unknown>;
   on: (event: string, listener: (payload: unknown) => void | Promise<void>) => void;
 };
 
 export function registerGithubSourceSocketHandlers({
   context,
+  membershipRevocationFence,
   roomService,
   socket
 }: {
   context: GithubSourceAccessContext;
+  membershipRevocationFence: WorkspaceMembershipRevocationFence;
   roomService: ReturnType<typeof createGithubSourceRoomService>;
   socket: GithubSourceSocket;
 }) {
@@ -36,7 +42,22 @@ export function registerGithubSourceSocketHandlers({
         );
         return;
       }
+      if (membershipRevocationFence.isRevoked(socket.id, result.payload.workspaceId)) {
+        socket.emit(
+          githubSourceServerEvents.error,
+          createSocketErrorPayload("forbidden", "GitHub source room access denied")
+        );
+        return;
+      }
       await socket.join(result.roomName);
+      if (membershipRevocationFence.isRevoked(socket.id, result.payload.workspaceId)) {
+        await evictGithubSourceSocketFromRooms(socket, [result.roomName]);
+        socket.emit(
+          githubSourceServerEvents.error,
+          createSocketErrorPayload("forbidden", "GitHub source room access denied")
+        );
+        return;
+      }
       socket.emit(githubSourceServerEvents.subscribed, result.payload);
     } catch {
       socket.emit(

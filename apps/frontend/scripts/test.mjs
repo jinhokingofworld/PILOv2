@@ -146,9 +146,9 @@ const canvasShapePersistence = await readFile(
   ),
   "utf8"
 );
-const canvasViewSettingPersistence = await readFile(
+const canvasInitialCamera = await readFile(
   new URL(
-    "../src/features/canvas/engine/runtime/useCanvasViewSettingPersistence.ts",
+    "../src/features/canvas/engine/editor/canvas-initial-camera.ts",
     import.meta.url
   ),
   "utf8"
@@ -251,6 +251,20 @@ const canvasRealtimeClient = await readFile(
 );
 const canvasPresenceHook = await readFile(
   new URL("../src/features/canvas/collaboration/useCanvasRoom.ts", import.meta.url),
+  "utf8"
+);
+const canvasRemoteShapePreviewStore = await readFile(
+  new URL(
+    "../src/features/canvas/collaboration/canvas-remote-shape-preview-store.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasLocalInteractionPolicy = await readFile(
+  new URL(
+    "../src/features/canvas/engine/interactions/canvas-local-interaction-policy.ts",
+    import.meta.url
+  ),
   "utf8"
 );
 const canvasRemoteCursorOverlay = await readFile(
@@ -647,7 +661,7 @@ assert.match(canvasRuntime, /pendingLocalShapeVersionsRef/);
 assert.match(canvasRuntime, /useCanvasRuntimeHydration/);
 assert.match(canvasRuntime, /useCanvasApiLifecycle/);
 assert.match(canvasRuntime, /useCanvasShapePersistence/);
-assert.match(canvasRuntime, /useCanvasViewSettingPersistence/);
+assert.doesNotMatch(canvasRuntime, /useCanvasViewSettingPersistence/);
 assert.match(canvasRuntime, /useCanvasViewportQueries/);
 assert.match(canvasRuntime, /loadFrameChildren/);
 assert.match(canvasRuntime, /<CanvasZoomControls/);
@@ -658,7 +672,7 @@ assert.match(canvasRuntimeUtils, /getChangedFreeformShapeIds/);
 assert.match(canvasRuntimeUtils, /mergeLocalFreeformShapeChanges/);
 assert.match(canvasRuntimeUtils, /changedShapeIdSet\.has\(shapeId\)/);
 assert.match(canvasRuntimeHydration, /readCanvasStorage\("freeform-shapes"/);
-assert.match(canvasRuntimeHydration, /readCanvasStorage\("view-setting"/);
+assert.doesNotMatch(canvasRuntimeHydration, /readCanvasStorage\("view-setting"/);
 assert.match(canvasApiLifecycle, /createCanvasShapeSyncQueue/);
 assert.match(canvasApiLifecycle, /queryClient\s*\.\s*invalidateQueries/);
 assert.match(canvasApiLifecycle, /enterCanvas/);
@@ -700,7 +714,10 @@ assert.match(canvasViewportQueries, /MAX_LOADED_VIEWPORT_BOUNDS = 24/);
 assert.match(canvasViewportQueries, /loadedViewportBoundsRef/);
 assert.match(canvasViewportQueries, /currentLoadedViewport\.bounds\.some/);
 assert.match(canvasRuntimeUtils, /DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN/);
-assert.match(canvasRuntimeUtils, /DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 3_000/);
+assert.match(canvasInitialCamera, /CLASSIC_CANVAS_INITIAL_ZOOM = 1/);
+assert.match(canvasInitialCamera, /editor\.centerOnPoint\(CLASSIC_CANVAS_ORIGIN/);
+assert.match(canvasInitialCamera, /force: true/);
+assert.match(canvasInitialCamera, /immediate: true/);
 assert.match(
   canvasRuntimeUtils,
   /DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 700/,
@@ -709,13 +726,11 @@ assert.match(canvasRuntimeUtils, /CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE = 1_000/
 assert.match(canvasRuntimeUtils, /Math\.floor\(value \/ CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE\)/);
 assert.match(canvasRuntimeUtils, /Math\.round\(bounds\.zoom \* 4\) \/ 4/);
 assert.doesNotMatch(canvasRuntimeUtils, /round\(bounds\.x\)/);
-assert.match(canvasViewSettingPersistence, /storageMode === "api"/);
-assert.match(canvasViewSettingPersistence, /updateViewSetting/);
 assert.match(canvasShapePersistence, /writeCanvasStorage\([\s\S]*"freeform-shapes"/);
-assert.match(canvasViewSettingPersistence, /writeCanvasStorage\("view-setting"/);
+assert.doesNotMatch(canvasRuntime, /updateViewSetting/);
 assert.match(canvasRuntime, /onSnapStateChange/);
 assert.match(canvasRuntime, /INITIAL_CANVAS_VIEW_SETTING/);
-assert.match(canvasRuntime, /zoom: 0\.8/);
+assert.match(canvasRuntime, /zoom: CLASSIC_CANVAS_INITIAL_ZOOM/);
 assert.match(canvasRuntime, /canvasSnapState\.isSmartGuideEnabled/);
 assert.match(canvasRuntime, /setSmartGuidesEnabled/);
 assert.match(canvasZoomControls, /aria-label="스마트가이드"/);
@@ -909,6 +924,9 @@ assert.match(canvasRuntime, /isRemoteShapeDeletionProtected/);
 assert.match(canvasRuntime, /flushDeferredRoomShapeChanges/);
 assert.match(canvasRuntime, /pendingRoomShapeAckCountsRef/);
 assert.match(canvasRuntime, /isCanvasShapePatchProtected/);
+assert.match(canvasRuntime, /localInteractionState\.isFreehandDrawing/);
+assert.match(canvasRuntime, /shouldDeferForLocalFreehand/);
+assert.match(canvasRuntime, /state\.isFreehandDrawing/);
 assert.match(canvasRuntime, /queueCanvasSurfaceShapePatch/);
 assert.match(canvasRuntime, /consumeCanvasSurfaceShapePatch/);
 assert.match(canvasRuntime, /canvasShapePatchVersion/);
@@ -921,6 +939,9 @@ assert.match(piloTldrawCanvas, /editingMode/);
 assert.match(piloTldrawCanvas, /RemoteCursorOverlay/);
 assert.match(piloTldrawCanvas, /CanvasRemotePresenceProvider/);
 assert.match(piloTldrawCanvas, /CanvasRealtimePreviewApplier/);
+assert.match(piloTldrawCanvas, /isEditorFreehandInteractionActive/);
+assert.match(piloTldrawCanvas, /isLocalFreehandDrawing/);
+assert.match(piloTldrawCanvas, /useSyncExternalStore/);
 assert.match(piloTldrawCanvas, /handleRealtimePreviewDraftChange/);
 assert.match(piloTldrawCanvas, /CANVAS_SHAPE_PREVIEW_THROTTLE_MS = 60/);
 assert.match(piloTldrawCanvas, /scheduleShapePreviewSend/);
@@ -930,7 +951,7 @@ assert.doesNotMatch(piloTldrawCanvas, /releaseShapeLocks/);
 assert.match(piloTldrawCanvas, /deletedShapeIds/);
 assert.match(piloTldrawCanvas, /shapesToHide/);
 assert.doesNotMatch(piloTldrawCanvas, /remoteShapeLocks/);
-assert.match(piloTldrawCanvas, /remoteShapePreviews/);
+assert.match(piloTldrawCanvas, /remoteShapePreviewStore/);
 assert.match(piloTldrawCanvas, /resolveRealtimePreviewSnapshot/);
 assert.match(piloTldrawCanvas, /syncFreeformShapesIncrementally/);
 assert.match(piloTldrawCanvas, /applyFreeformShapePatchIncrementally/);
@@ -941,6 +962,12 @@ assert.match(piloTldrawCanvas, /isShapePatchProtected/);
 assert.match(piloTldrawCanvas, /shouldPreserveMissingFrameChildShape/);
 assert.match(piloTldrawCanvas, /getPreservedFreeformShapeSnapshots/);
 assert.match(piloTldrawCanvas, /editor\.updateShapes\(shapesToUpdate/);
+assert.match(canvasPresenceHook, /remoteShapePreviewStore/);
+assert.doesNotMatch(canvasPresenceHook, /setRemoteShapePreviews/);
+assert.match(canvasRemoteShapePreviewStore, /createCanvasRemoteShapePreviewStore/);
+assert.match(canvasRemoteShapePreviewStore, /removeShapeIds/);
+assert.match(canvasRemoteShapePreviewStore, /sweepStale/);
+assert.match(canvasLocalInteractionPolicy, /isCanvasFreehandInteractionActive/);
 assert.match(canvasAgentToolStepPlayback, /playbackState/);
 assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("playing"\)/);
 assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("complete"\)/);
@@ -982,8 +1009,8 @@ assert.match(canvasRealtimeTypes, /previews: CanvasShapePreviewEventPayload\[\]/
 assert.match(canvasRealtimeTypes, /shapeLocks: CanvasShapeLockState\[\]/);
 assert.match(canvasRealtimeTypes, /deletedShapeIds/);
 assert.doesNotMatch(canvasPresenceHook, /remoteShapeLocks/);
-assert.match(canvasPresenceHook, /removeShapePreviewIds/);
-assert.match(canvasPresenceHook, /remoteShapePreviews/);
+assert.match(canvasPresenceHook, /remoteShapePreviewStore\.removeShapeIds/);
+assert.match(canvasPresenceHook, /remoteShapePreviewStore/);
 assert.match(canvasPresenceHook, /roomLoadedRegions/);
 assert.match(canvasPresenceHook, /getInitialViewportBounds/);
 assert.match(canvasPresenceHook, /initialViewportBounds/);
@@ -1041,7 +1068,7 @@ assert.match(canvasPresenceHook, /canvas:room:shapes:hydrate/);
 assert.match(canvasPresenceHook, /canvas:room:shape:patch/);
 assert.match(
   canvasPresenceHook,
-  /removeShapePreviewIds\(\{\s*actorUserId: payload\.actorUserId,\s*previews: currentPreviews,\s*shapeIds: patchedShapeIds,/,
+  /remoteShapePreviewStore\.removeShapeIds\(\s*payload\.actorUserId,\s*patchedShapeIds,/,
 );
 assert.match(canvasPresenceHook, /canvas:room:checkpoint/);
 assert.doesNotMatch(canvasPresenceHook, /ownedShapeLocks/);
@@ -1146,7 +1173,7 @@ assert.match(piloTldrawCanvas, /TldrawSurface/);
 assert.match(piloTldrawCanvas, /piloCanvasShapeUtils/);
 assert.match(piloTldrawCanvas, /hideUi/);
 assert.match(piloTldrawCanvas, /CanvasStateReporter/);
-assert.match(piloTldrawCanvas, /initialViewSetting/);
+assert.match(piloTldrawCanvas, /resetClassicCanvasCamera/);
 assert.match(piloTldrawCanvas, /editor\.setCamera/);
 assert.match(piloTldrawCanvas, /CanvasHistoryStateReporter/);
 assert.match(canvasEditorStateReporters, /editor\.getCanUndo/);
@@ -1212,7 +1239,7 @@ assert.match(piloTldrawCanvas, /SelectedGroupToolbar/);
 assert.doesNotMatch(piloTldrawCanvas, /PiloCanvasSmartGuides/);
 assert.doesNotMatch(piloTldrawCanvas, /applyPiloSmartSnap/);
 assert.doesNotMatch(piloTldrawCanvas, /SmartGuidesOverlay/);
-assert.match(piloTldrawCanvas, /cameraRestoreVersion/);
+assert.match(piloTldrawCanvas, /cameraResetVersion/);
 assert.match(piloTldrawCanvas, /resetFreeformShapes\(/);
 assert.match(piloTldrawCanvas, /preserveLocalState/);
 assert.match(piloTldrawCanvas, /editor\.getEditingShapeId\(\)/);

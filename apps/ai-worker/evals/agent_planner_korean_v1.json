@@ -675,14 +675,13 @@
     },
     {
       "name": "create_board_issue",
-      "description": "GitHub issue를 생성하고 기존 ProjectV2 Board column에 배치합니다. 실행 전 confirmation이 필요하며 Agent run 기반의 안정적인 idempotency key를 사용합니다. title, body, column만 지원합니다.",
+      "description": "GitHub issue를 생성하고 ProjectV2 Board column에 배치합니다. Board selector가 없으면 active 또는 유일한 Board를 사용하고, columnName이 없으면 로컬 Unmapped column을 사용합니다. 실행 전 confirmation이 필요하며 Agent run 기반의 안정적인 idempotency key를 사용합니다.",
       "riskLevel": "medium",
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
         "required": [
-          "title",
-          "columnName"
+          "title"
         ],
         "additionalProperties": false,
         "properties": {

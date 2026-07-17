@@ -12,6 +12,7 @@ export type PiloCanvasLocalInteractionState = {
   currentToolId: string;
   editingShapeId: string | null;
   focusedGroupId: string | null;
+  isFreehandDrawing: boolean;
   isFocused: boolean;
   protectedShapeIds: string[];
   selectedShapeIds: string[];

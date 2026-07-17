@@ -12,6 +12,7 @@ import type {
   MeetingRoomMutationPayload,
   MeetingRoomNameInput,
   MeetingReportActionItemMutationPayload,
+  MeetingReportActionItemExtractionRetryPayload,
   MeetingReportActionItemDeliveryInput,
   MeetingReportActionItemDeliveryOptions,
   MeetingReportActionItemDeliveryResult,
@@ -505,6 +506,14 @@ export function createMeetingApiClient({
     async regenerateMeetingReport(workspaceId: string, reportId: string) {
       return requestMeetingData<MeetingReportRegenerationPayload>(
         `${meetingReportPath(workspaceId, reportId)}/regeneration-jobs`,
+        { method: "POST" },
+        requestOptions
+      );
+    },
+
+    async retryMeetingReportActionItemExtraction(workspaceId: string, reportId: string) {
+      return requestMeetingData<MeetingReportActionItemExtractionRetryPayload>(
+        `${meetingReportPath(workspaceId, reportId)}/action-item-extractions/retry`,
         { method: "POST" },
         requestOptions
       );

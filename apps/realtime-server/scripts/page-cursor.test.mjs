@@ -21,10 +21,12 @@ const [
   import("../dist/page-cursor/page-cursor-room.js"),
   import("../dist/page-cursor/page-cursor-payload.js"),
 ]);
-const [socketServer, events] = await Promise.all([
+const [socketServerSource, socketHandlers, events] = await Promise.all([
   readSource("../src/socket/socket-server.ts"),
+  readSource("../src/page-cursor/page-cursor-socket-handlers.ts"),
   readSource("../src/page-cursor/page-cursor-events.ts"),
 ]);
+const socketServer = `${socketServerSource}\n${socketHandlers}`;
 
 const workspaceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 

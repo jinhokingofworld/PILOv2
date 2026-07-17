@@ -11,6 +11,10 @@ import {
   createCanvasRemoteCursorStore,
   type CanvasRemoteCursorStore,
 } from "@/shared/canvas-realtime/canvas-remote-cursor-store";
+import {
+  createCanvasRemoteShapePreviewStore,
+  type CanvasRemoteShapePreviewStore,
+} from "./canvas-remote-shape-preview-store";
 import type {
   CanvasJoinedPayload,
   CanvasLoadedViewportBounds,
@@ -25,7 +29,6 @@ import type {
   CanvasRoomShapePatchPayload,
   CanvasRoomShapePatchEventPayload,
   CanvasShapeOperationPayload,
-  CanvasShapePreviewEventPayload,
   CanvasShapePreviewPhase,
   CanvasSyncRequiredPayload,
 } from "@/shared/canvas-realtime/canvas-realtime-types";
@@ -66,7 +69,7 @@ export type CanvasPresenceController = {
   roomLoadedRegions: CanvasRoomLoadedRegion[];
   remoteCursorStore: CanvasRemoteCursorStore;
   remotePresence: CanvasRemotePresenceState[];
-  remoteShapePreviews: CanvasShapePreviewEventPayload[];
+  remoteShapePreviewStore: CanvasRemoteShapePreviewStore;
   reportLoadedViewport: (
     bounds: CanvasLoadedViewportBounds,
     shapes?: Record<string, unknown>[],
@@ -322,66 +325,16 @@ function isSameCanvasRoom(
   );
 }
 
-function upsertShapePreview(
-  previews: CanvasShapePreviewEventPayload[],
-  nextPreview: CanvasShapePreviewEventPayload,
-) {
-  return [
-    ...previews.filter(
-      (preview) => preview.actorUserId !== nextPreview.actorUserId,
-    ),
-    nextPreview,
-  ];
-}
-
-function hasShapePreviewPayload(preview: CanvasShapePreviewEventPayload) {
-  return Boolean(preview.shapes.length || preview.deletedShapeIds?.length);
-}
-
-function removeShapePreviewIds({
-  actorUserId,
-  previews,
-  shapeIds,
-}: {
-  actorUserId: string;
-  previews: CanvasShapePreviewEventPayload[];
-  shapeIds: string[];
-}) {
-  if (!shapeIds.length) return previews;
-
-  const shapeIdSet = new Set(shapeIds);
-
-  return previews.flatMap((preview) => {
-    if (preview.actorUserId !== actorUserId) {
-      return [preview];
-    }
-
-    const nextPreview = {
-      ...preview,
-      deletedShapeIds: preview.deletedShapeIds?.filter(
-        (shapeId) => !shapeIdSet.has(shapeId),
-      ),
-      shapes: preview.shapes.filter((shape) => {
-        const shapeId = isRecord(shape) ? shape.id : null;
-
-        return typeof shapeId === "string" ? !shapeIdSet.has(shapeId) : true;
-      }),
-    };
-
-    return hasShapePreviewPayload(nextPreview) ? [nextPreview] : [];
-  });
-}
-
 export function useCanvasRoom(
   config: CanvasRealtimeConfig | null | undefined,
   options: CanvasPresenceOptions = {},
 ): CanvasPresenceController {
   const [remoteCursorStore] = useState(createCanvasRemoteCursorStore);
+  const [remoteShapePreviewStore] = useState(
+    createCanvasRemoteShapePreviewStore,
+  );
   const [remotePresence, setRemotePresence] = useState<
     CanvasRemotePresenceState[]
-  >([]);
-  const [remoteShapePreviews, setRemoteShapePreviews] = useState<
-    CanvasShapePreviewEventPayload[]
   >([]);
   const [roomLoadedRegions, setRoomLoadedRegions] = useState<
     CanvasRoomLoadedRegion[]
@@ -660,10 +613,10 @@ export function useCanvasRoom(
       activeCatchUpAbortRef.current = null;
       liveOperationBufferRef.current = [];
       remoteCursorStore.clear();
+      remoteShapePreviewStore.clear();
       remoteInteractionPresenceRef.current.clear();
       remotePresenceSeenAtRef.current.clear();
       setRemotePresence([]);
-      setRemoteShapePreviews([]);
       setRoomLoadedRegions([]);
       setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
@@ -681,10 +634,10 @@ export function useCanvasRoom(
       joinedRef.current = false;
       setRoomStateActive(false);
       remoteCursorStore.clear();
+      remoteShapePreviewStore.clear();
       remoteInteractionPresenceRef.current.clear();
       remotePresenceSeenAtRef.current.clear();
       setRemotePresence([]);
-      setRemoteShapePreviews([]);
       setRoomLoadedRegions([]);
       setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
@@ -708,6 +661,7 @@ export function useCanvasRoom(
       activeCatchUpAbortRef.current = null;
       liveOperationBufferRef.current = [];
       remoteCursorStore.clear();
+      remoteShapePreviewStore.clear();
       remoteInteractionPresenceRef.current.clear();
       remotePresenceSeenAtRef.current.clear();
       setOperationSync(initialOperationSyncState);
@@ -738,10 +692,10 @@ export function useCanvasRoom(
       joinedRef.current = false;
       setRoomStateActive(false);
       remoteCursorStore.clear();
+      remoteShapePreviewStore.clear();
       remoteInteractionPresenceRef.current.clear();
       remotePresenceSeenAtRef.current.clear();
       setRemotePresence([]);
-      setRemoteShapePreviews([]);
       setRoomLoadedRegions([]);
       setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
@@ -772,7 +726,7 @@ export function useCanvasRoom(
         remotePresenceSeenAtRef.current.set(entry.userId, joinedAt);
       });
       setRemotePresence(joinedPresence);
-      setRemoteShapePreviews(
+      remoteShapePreviewStore.replace(
         payload.previews.filter(
           (preview) => preview.actorUserId !== currentUserId,
         ),
@@ -796,13 +750,9 @@ export function useCanvasRoom(
       }
 
       reconcileOperationSeq(payload);
-      setRemoteShapePreviews((currentPreviews) =>
-        removeShapePreviewIds({
-          actorUserId: payload.actorUserId,
-          previews: currentPreviews,
-          shapeIds: [payload.shapeId],
-        }),
-      );
+      remoteShapePreviewStore.removeShapeIds(payload.actorUserId, [
+        payload.shapeId,
+      ]);
     });
     realtimeSocket.on("canvas:sync:required", (payload) => {
       if (
@@ -864,20 +814,14 @@ export function useCanvasRoom(
         return;
       }
 
-      setRemoteShapePreviews((currentPreviews) =>
-        upsertShapePreview(currentPreviews, payload),
-      );
+      remoteShapePreviewStore.upsert(payload);
     });
     realtimeSocket.on("canvas:shape:preview:clear", (payload) => {
       if (!isSameCanvasRoom(payload, room)) {
         return;
       }
 
-      setRemoteShapePreviews((currentPreviews) =>
-        currentPreviews.filter(
-          (preview) => preview.actorUserId !== payload.actorUserId,
-        ),
-      );
+      remoteShapePreviewStore.clearActor(payload.actorUserId);
     });
     realtimeSocket.on("canvas:room:loaded-regions:update", (payload) => {
       if (!isSameCanvasRoom(payload, room)) {
@@ -919,12 +863,9 @@ export function useCanvasRoom(
         ),
       }));
 
-      setRemoteShapePreviews((currentPreviews) =>
-        removeShapePreviewIds({
-          actorUserId: payload.actorUserId,
-          previews: currentPreviews,
-          shapeIds: patchedShapeIds,
-        }),
+      remoteShapePreviewStore.removeShapeIds(
+        payload.actorUserId,
+        patchedShapeIds,
       );
 
       if (typeof payload.historySeq === "number") {
@@ -967,10 +908,10 @@ export function useCanvasRoom(
         socketRef.current = null;
       }
       remoteCursorStore.clear();
+      remoteShapePreviewStore.clear();
       remoteInteractionPresenceRef.current.clear();
       remotePresenceSeenAtRef.current.clear();
       setRemotePresence([]);
-      setRemoteShapePreviews([]);
       setRoomLoadedRegions([]);
       setRoomHistory(initialRoomHistoryState);
       setCheckpointStatus(null);
@@ -981,6 +922,7 @@ export function useCanvasRoom(
     reconcileOperationSeq,
     reconcileSyncRequired,
     remoteCursorStore,
+    remoteShapePreviewStore,
     usableConfig,
   ]);
 
@@ -1009,17 +951,13 @@ export function useCanvasRoom(
           ),
         );
       }
-      setRemoteShapePreviews((currentPreviews) =>
-        currentPreviews.filter(
-          (preview) =>
-            parsePresenceTimestamp(preview.sentAt) >=
-            Date.now() - STALE_SHAPE_PREVIEW_TIMEOUT_MS,
-        ),
+      remoteShapePreviewStore.sweepStale(
+        Date.now() - STALE_SHAPE_PREVIEW_TIMEOUT_MS,
       );
     }, STALE_PRESENCE_SWEEP_MS);
 
     return () => window.clearInterval(staleTimer);
-  }, [remoteCursorStore]);
+  }, [remoteCursorStore, remoteShapePreviewStore]);
 
   const sendPresenceUpdate = useCallback(
     (
@@ -1183,7 +1121,7 @@ export function useCanvasRoom(
         currentUserId === null
           ? remotePresence
           : filterOwnPresence(remotePresence, currentUserId),
-      remoteShapePreviews,
+      remoteShapePreviewStore,
       sendPresenceUpdate,
       sendShapePreview,
       undoRoomHistory,
@@ -1203,7 +1141,7 @@ export function useCanvasRoom(
       sendRoomShapePatch,
       remoteCursorStore,
       remotePresence,
-      remoteShapePreviews,
+      remoteShapePreviewStore,
       sendPresenceUpdate,
       sendShapePreview,
       undoRoomHistory,

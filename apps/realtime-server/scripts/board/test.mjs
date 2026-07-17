@@ -20,13 +20,16 @@ const [
   { parseBoardRoomRef },
   { createBoardRoomService },
   { handleBoardJoin, registerBoardSocketHandlers },
+  { createWorkspaceMembershipRevocationFence },
 ] = await Promise.all([
   import("../../dist/board/board-access.service.js"),
   import("../../dist/board/board-invalidation-fan-out.js"),
   import("../../dist/board/board-payload.parser.js"),
   import("../../dist/board/board-room.service.js"),
   import("../../dist/board/board-socket-handlers.js"),
+  import("../../dist/workspace-membership-revocation/workspace-membership-revocation.js"),
 ]);
+const membershipRevocationFence = createWorkspaceMembershipRevocationFence();
 const [boardApiContract, realtimeReadme] = await Promise.all([
   readSource("../../../../docs/api/board-api.md"),
   readSource("../../README.md"),
@@ -223,6 +226,7 @@ const malformedSocket = createFakeSocket();
 await assert.doesNotReject(() =>
   handleBoardJoin({
     context: memberContext,
+    membershipRevocationFence,
     roomService: {
       async joinBoardRoom() {
         malformedJoinCalls += 1;
@@ -251,6 +255,7 @@ const failingSocket = createFakeSocket();
 await assert.doesNotReject(() =>
   handleBoardJoin({
     context: memberContext,
+    membershipRevocationFence,
     roomService: {
       async joinBoardRoom() {
         throw new Error("database connection details must not reach clients");
@@ -273,6 +278,7 @@ assert.deepEqual(failingSocket.emittedEvents, [
 const registeredSocket = createFakeSocket();
 registerBoardSocketHandlers({
   context: memberContext,
+  membershipRevocationFence,
   roomService,
   socket: registeredSocket,
 });

@@ -50,7 +50,7 @@ interface MoveBoardIssueStatusInput extends BoardIssueTargetInput {
 interface CreateBoardIssueInput extends BoardContextSelector {
   title: string;
   body: string | null;
-  columnName: string;
+  columnName: string | null;
 }
 
 interface AssignBoardIssueInput extends BoardIssueTargetInput {
@@ -211,12 +211,12 @@ export class BoardAgentToolsService {
     return {
       name: "create_board_issue",
       description:
-        "GitHub issue를 생성하고 기존 ProjectV2 Board column에 배치합니다. 실행 전 confirmation이 필요하며 Agent run 기반의 안정적인 idempotency key를 사용합니다. title, body, column만 지원합니다.",
+        "GitHub issue를 생성하고 ProjectV2 Board column에 배치합니다. Board selector가 없으면 active 또는 유일한 Board를 사용하고, columnName이 없으면 로컬 Unmapped column을 사용합니다. 실행 전 confirmation이 필요하며 Agent run 기반의 안정적인 idempotency key를 사용합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
       inputSchema: {
         type: "object",
-        required: ["title", "columnName"],
+        required: ["title"],
         additionalProperties: false,
         properties: {
           ...this.boardSelectorSchema(),
@@ -698,9 +698,15 @@ export class BoardAgentToolsService {
       context.workspaceId,
       resolution.board.id
     );
-    const column = this.findExactColumn(columns, input.columnName);
+    const column = input.columnName
+      ? this.findExactColumn(columns, input.columnName)
+      : this.findDefaultUnmappedColumn(columns);
     if (!column) {
-      return this.columnClarification(columns, input.columnName);
+      return input.columnName
+        ? this.columnClarification(columns, input.columnName)
+        : this.clarification("unmapped_column_missing", {
+            boardName: resolution.board.name
+          });
     }
     const idempotencyKey = `agent:${context.runId}:create_board_issue`;
 
@@ -1010,6 +1016,18 @@ export class BoardAgentToolsService {
     return matches.length === 1 ? matches[0] : null;
   }
 
+  private findDefaultUnmappedColumn(
+    columns: BoardColumnPayload[]
+  ): BoardColumnPayload | null {
+    const matches = columns.filter(
+      (column) =>
+        column.normalizedName !== null &&
+        this.normalizeName(column.normalizedName) === "unmapped" &&
+        column.githubStatusOptionId === null
+    );
+    return matches.length === 1 ? matches[0] : null;
+  }
+
   private validateSearchInput(input: unknown): SearchBoardIssuesInput {
     const draft = this.validatePublicObject(
       input,
@@ -1074,7 +1092,7 @@ export class BoardAgentToolsService {
       [...BOARD_SELECTOR_FIELDS, "title", "body", "columnName"]
     );
     const body = draft.body;
-    if (body !== undefined && typeof body !== "string") {
+    if (body !== undefined && body !== null && typeof body !== "string") {
       throw badRequest("body must be a string");
     }
     if (typeof body === "string" && body.length > MAX_AGENT_BODY_LENGTH) {
@@ -1084,7 +1102,7 @@ export class BoardAgentToolsService {
       ...this.readSelector(draft),
       title: this.requireString(draft.title, "title", 255),
       body: typeof body === "string" ? body : null,
-      columnName: this.requireString(draft.columnName, "columnName", 120)
+      columnName: this.readOptionalString(draft, "columnName", 120)
     };
   }
 

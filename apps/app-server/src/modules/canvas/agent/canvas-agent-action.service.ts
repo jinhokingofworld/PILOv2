@@ -5,6 +5,7 @@ import { findCanvasAgentToolTarget } from "./canvas-agent-tool-targets";
 import type {
   CanvasAgentProgressPayload,
   CanvasAgentRunRow,
+  CanvasAgentShapeSummary,
   CanvasAgentShapeRow,
   CanvasAgentStepRow,
   CanvasAgentViewport
@@ -97,9 +98,7 @@ export class CanvasAgentActionService {
     if (!query) throw badRequest("Canvas Agent find_shapes query is required");
 
     const explicitIds = this.readStringArray(input.shapeIds);
-    const shapes = explicitIds.length
-      ? await this.repository.findShapesByIds(run.canvas_id, explicitIds)
-      : await this.repository.searchShapes(run.canvas_id, query);
+    const shapes = await this.resolveShapes(run, explicitIds, input);
     const shapeIds = shapes.map((shape) => shape.id);
     const viewport = this.viewportForShapes(shapes);
     const routingPrefix = this.routingPrefix(input);
@@ -157,10 +156,66 @@ export class CanvasAgentActionService {
     const explicitIds = this.readStringArray(input.shapeIds);
     const contextIds = this.readStringArray(run.context_json.selectedShapeIds);
     const ids = explicitIds.length ? explicitIds : contextIds;
-    if (ids.length) return this.repository.findShapesByIds(run.canvas_id, ids);
+    return ids.length ? this.resolveShapes(run, ids, input) : [];
+  }
 
-    const query = this.readText(input.query);
-    return query ? this.repository.searchShapes(run.canvas_id, query) : [];
+  private async resolveShapes(
+    run: CanvasAgentRunRow,
+    ids: string[],
+    input: Record<string, unknown>
+  ): Promise<CanvasAgentShapeRow[]> {
+    if (!ids.length) return [];
+    if (input.routingSource !== "client_shape_context") {
+      return this.repository.findShapesByIds(run.canvas_id, ids);
+    }
+
+    const summaries = this.readShapeSummaries(run.context_json.shapeSummaries);
+    const summariesById = new Map(summaries.map((summary) => [summary.id, summary]));
+    return ids.flatMap((id) => {
+      const summary = summariesById.get(id);
+      return summary ? [this.shapeRowFromSummary(summary)] : [];
+    });
+  }
+
+  private readShapeSummaries(value: unknown): CanvasAgentShapeSummary[] {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const summary = item as Record<string, unknown>;
+      const id = this.readText(summary.id);
+      const shapeType = this.readText(summary.shapeType);
+      const x = Number(summary.x);
+      const y = Number(summary.y);
+      const width = Number(summary.width);
+      const height = Number(summary.height);
+      if (!id || !shapeType || ![x, y, width, height].every(Number.isFinite)) return [];
+      if (width <= 0 || height <= 0) return [];
+      return [{
+        id,
+        shapeType,
+        title: this.readNullableText(summary.title),
+        text: this.readNullableText(summary.text),
+        x,
+        y,
+        width,
+        height
+      }];
+    });
+  }
+
+  private shapeRowFromSummary(summary: CanvasAgentShapeSummary): CanvasAgentShapeRow {
+    return {
+      id: summary.id,
+      title: summary.title,
+      text_content: summary.text,
+      shape_type: summary.shapeType,
+      x: summary.x,
+      y: summary.y,
+      width: summary.width,
+      height: summary.height,
+      revision: 0,
+      raw_shape: {}
+    };
   }
 
   private progress(
@@ -188,14 +243,19 @@ export class CanvasAgentActionService {
   }
 
   private routingPrefix(input: Record<string, unknown>): string {
+    if (input.routingSource === "client_shape_context") return "현재 캔버스에서 ";
     if (input.routingSource === "shape_embedding") return "임베딩 검색으로 ";
-    if (input.routingSource === "deterministic_search") return "Canvas 검색으로 ";
     if (input.routingSource === "llm_intent_classifier") return "Canvas AI가 검색어를 해석해서 ";
     return "";
   }
 
   private readText(value: unknown): string {
     return typeof value === "string" ? value.trim().slice(0, 12000) : "";
+  }
+
+  private readNullableText(value: unknown): string | null {
+    const text = this.readText(value);
+    return text || null;
   }
 
   private readStringArray(value: unknown): string[] {

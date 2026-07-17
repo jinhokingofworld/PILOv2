@@ -8,11 +8,21 @@ import {
   sqlErdWriteProtocolMismatch
 } from "../../common/api-error";
 import {
+  ActivityLogInput,
+  ActivityLogService
+} from "../../common/activity-log.service";
+import {
   DatabaseService,
   DatabaseTransaction
 } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { encodeSqlErdSessionCursor } from "./sql-erd.cursor";
+import {
+  buildSqlErdNoteActivities,
+  buildSqlErdSessionChangedActivities,
+  buildSqlErdSessionCreatedActivities,
+  buildSqlErdSessionDeletedActivity
+} from "./sql-erd-activity-log";
 import {
   mapDeletedSqlErdSession,
   mapSqlErdSession,
@@ -195,7 +205,8 @@ export class SqlErdService {
 
   constructor(
     private readonly database: DatabaseService,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly activityLogService: ActivityLogService
   ) {}
 
   getModuleInfo() {
@@ -380,6 +391,18 @@ export class SqlErdService {
             VALUES ($1)
           `,
           [operation.id]
+        );
+
+        await this.appendActivities(
+          transaction,
+          buildSqlErdNoteActivities({
+            workspaceId,
+            sessionId: validSessionId,
+            actor: { type: "user", userId: currentUserId },
+            beforeLayout: session.layout_json,
+            afterLayout: updatedSession.layout_json,
+            resultRevision: Number(updatedSession.revision)
+          })
         );
 
         return this.mapOperationWriteResult(updatedSession, operation);
@@ -629,6 +652,16 @@ export class SqlErdService {
           ]
         );
 
+        await this.appendActivities(
+          transaction,
+          buildSqlErdSessionChangedActivities({
+            workspaceId,
+            actor: { type: "user", userId: currentUserId },
+            before: session,
+            after: updatedSession
+          }).filter(({ action }) => action === "sql_erd_schema_updated")
+        );
+
         return {
           ...this.mapOperationWriteResult(updatedSession, operation),
           snapshot: mapSqlErdSourceSnapshot(snapshot),
@@ -780,6 +813,15 @@ export class SqlErdService {
           ]
         );
 
+        await this.appendActivities(
+          transaction,
+          buildSqlErdSessionCreatedActivities({
+            workspaceId,
+            actor: { type: "agent", userId: currentUserId },
+            session: createdSession
+          })
+        );
+
         return createdSession;
       });
 
@@ -899,6 +941,16 @@ export class SqlErdService {
           [operation.id]
         );
 
+        await this.appendActivities(
+          transaction,
+          buildSqlErdSessionChangedActivities({
+            workspaceId,
+            actor: { type: "agent", userId: currentUserId },
+            before: session,
+            after: updatedSession
+          }).filter(({ action }) => action === "sql_erd_schema_updated")
+        );
+
         return {
           ...this.mapOperationWriteResult(updatedSession, operation),
           snapshot: mapSqlErdSourceSnapshot(snapshot),
@@ -958,12 +1010,23 @@ export class SqlErdService {
           }
         }
 
-        return this.insertSession(
+        const createdSession = await this.insertSession(
           transaction,
           workspaceId,
           currentUserId,
           input
         );
+        if (createdSession) {
+          await this.appendActivities(
+            transaction,
+            buildSqlErdSessionCreatedActivities({
+              workspaceId,
+              actor: { type: "user", userId: currentUserId },
+              session: createdSession
+            })
+          );
+        }
+        return createdSession;
       });
 
       if (!session) {
@@ -1093,34 +1156,53 @@ export class SqlErdService {
 
     const validSessionId = validateSqlErdSessionId(sessionId);
     const input = validateUpdateSqlErdSessionRequest(body);
-    const currentSession = await this.findActiveSessionById(
-      workspaceId,
-      validSessionId
-    );
-    if (!currentSession) {
-      throw notFound("sqltoerd session not found");
-    }
-    if (currentSession.write_protocol !== "snapshot") {
-      throw sqlErdWriteProtocolMismatch();
-    }
-
-    this.assertRevision(currentSession, input.baseRevision);
-    if (input.modelJson || input.layoutJson) {
-      validateSqlErdLayoutJson(
-        input.layoutJson ?? currentSession.layout_json,
-        input.modelJson ?? currentSession.model_json
-      );
-    }
-
-    let session: SqlErdSessionRow | null;
     try {
-      session = await this.updateActiveSession(
-        workspaceId,
-        validSessionId,
-        currentUserId,
-        currentSession,
-        input
-      );
+      const session = await this.database.transaction(async (transaction) => {
+        const currentSession = await this.findActiveSessionById(
+          workspaceId,
+          validSessionId,
+          transaction,
+          true
+        );
+        if (!currentSession) {
+          throw notFound("sqltoerd session not found");
+        }
+        if (currentSession.write_protocol !== "snapshot") {
+          throw sqlErdWriteProtocolMismatch();
+        }
+
+        this.assertRevision(currentSession, input.baseRevision);
+        if (input.modelJson || input.layoutJson) {
+          validateSqlErdLayoutJson(
+            input.layoutJson ?? currentSession.layout_json,
+            input.modelJson ?? currentSession.model_json
+          );
+        }
+
+        const updatedSession = await this.updateActiveSession(
+          transaction,
+          workspaceId,
+          validSessionId,
+          currentUserId,
+          currentSession,
+          input
+        );
+        if (!updatedSession) {
+          throw conflict("sqltoerd session revision conflict");
+        }
+
+        await this.appendActivities(
+          transaction,
+          buildSqlErdSessionChangedActivities({
+            workspaceId,
+            actor: { type: "user", userId: currentUserId },
+            before: currentSession,
+            after: updatedSession
+          })
+        );
+        return updatedSession;
+      });
+      return mapSqlErdSession(session);
     } catch (error) {
       if (this.isJsonSizeConstraintViolation(error)) {
         throw payloadTooLarge("sqltoerd JSON payload is too large");
@@ -1128,12 +1210,6 @@ export class SqlErdService {
 
       throw error;
     }
-
-    if (!session) {
-      return await this.throwMissingOrConflict(workspaceId, validSessionId);
-    }
-
-    return mapSqlErdSession(session);
   }
 
   async updateSessionMetadata(
@@ -1196,6 +1272,16 @@ export class SqlErdService {
       if (!session) {
         throw conflict("sqltoerd session revision conflict");
       }
+
+      await this.appendActivities(
+        transaction,
+        buildSqlErdSessionChangedActivities({
+          workspaceId,
+          actor: { type: "user", userId: currentUserId },
+          before: currentSession,
+          after: session
+        })
+      );
 
       return mapSqlErdSession(session);
     });
@@ -1265,6 +1351,15 @@ export class SqlErdService {
       if (!session || !session.deleted_at) {
         throw conflict("sqltoerd session revision conflict");
       }
+
+      await this.activityLogService.append(
+        transaction,
+        buildSqlErdSessionDeletedActivity({
+          workspaceId,
+          actor: { type: "user", userId: currentUserId },
+          session
+        })
+      );
 
       return mapDeletedSqlErdSession(
         session.id,
@@ -1648,6 +1743,7 @@ export class SqlErdService {
   }
 
   private updateActiveSession(
+    transaction: DatabaseTransaction,
     workspaceId: string,
     sessionId: string,
     currentUserId: string,
@@ -1661,7 +1757,7 @@ export class SqlErdService {
     const relationCount =
       input.relationCount ?? Number(currentSession.relation_count);
 
-    return this.database.queryOne<SqlErdSessionRow>(
+    return transaction.queryOne<SqlErdSessionRow>(
       `
         UPDATE sql_erd_sessions
         SET
@@ -1729,19 +1825,13 @@ export class SqlErdService {
     }
   }
 
-  private async throwMissingOrConflict(
-    workspaceId: string,
-    sessionId: string
-  ): Promise<never> {
-    const currentSession = await this.findActiveSessionById(workspaceId, sessionId);
-    if (currentSession) {
-      if (currentSession.write_protocol !== "snapshot") {
-        throw sqlErdWriteProtocolMismatch();
-      }
-      throw conflict("sqltoerd session revision conflict");
+  private async appendActivities(
+    transaction: DatabaseTransaction,
+    activities: ActivityLogInput[]
+  ): Promise<void> {
+    for (const activity of activities) {
+      await this.activityLogService.append(transaction, activity);
     }
-
-    throw notFound("sqltoerd session not found");
   }
 
   private isUniqueViolation(error: unknown): boolean {

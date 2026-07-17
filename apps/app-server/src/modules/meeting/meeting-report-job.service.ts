@@ -11,6 +11,11 @@ export interface MeetingReportJobPayload {
   retryCount: number;
 }
 
+export interface MeetingActionItemExtractionJobPayload {
+  jobType: "meeting_action_item_extraction";
+  reportId: string;
+}
+
 interface MeetingReportJobConfig {
   awsRegion: string;
   queueUrl: string;
@@ -27,27 +32,37 @@ export class MeetingReportJobService implements OnModuleDestroy {
   private sqsClientConfigKey: string | null = null;
 
   async enqueueMeetingReportJob(payload: MeetingReportJobPayload): Promise<void> {
+    await this.enqueueJob(payload);
+  }
+
+  async enqueueMeetingActionItemExtractionJob(
+    payload: MeetingActionItemExtractionJobPayload
+  ): Promise<void> {
+    await this.enqueueJob(payload);
+  }
+
+  private async enqueueJob(
+    payload: MeetingReportJobPayload | MeetingActionItemExtractionJobPayload
+  ): Promise<void> {
     const config = this.getConfig();
     const client = this.getSqsClient(config);
 
     try {
-      this.logger.log(
-        `MeetingReport job event=enqueue_requested report_id=${payload.reportId} meeting_id=${payload.meetingId} recording_id=${payload.recordingId} retry_count=${payload.retryCount}`
-      );
+      this.logger.log(`Meeting job event=enqueue_requested job_type=${payload.jobType} report_id=${payload.reportId}`);
       const result = await client.send(
         new SendMessageCommand({
           QueueUrl: config.queueUrl,
           MessageBody: JSON.stringify(payload)
         })
       );
-      this.logger.log(
-        `MeetingReport job event=enqueued report_id=${payload.reportId} meeting_id=${payload.meetingId} recording_id=${payload.recordingId} retry_count=${payload.retryCount} sqs_message_id=${result.MessageId ?? "unknown"}`
-      );
+      this.logger.log(`Meeting job event=enqueued job_type=${payload.jobType} report_id=${payload.reportId} sqs_message_id=${result.MessageId ?? "unknown"}`);
     } catch {
-      this.logger.warn(
-        `MeetingReport job event=enqueue_failed report_id=${payload.reportId} meeting_id=${payload.meetingId} recording_id=${payload.recordingId} retry_count=${payload.retryCount}`
+      this.logger.warn(`Meeting job event=enqueue_failed job_type=${payload.jobType} report_id=${payload.reportId}`);
+      throw badRequest(
+        payload.jobType === "meeting_report"
+          ? "Meeting report job could not be enqueued"
+          : "Meeting action item extraction job could not be enqueued"
       );
-      throw badRequest("Meeting report job could not be enqueued");
     }
   }
 

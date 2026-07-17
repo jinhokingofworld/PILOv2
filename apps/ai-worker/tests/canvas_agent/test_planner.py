@@ -18,13 +18,13 @@ def test_parse_intent_classification_accepts_existing_shape_search() -> None:
             {
                 "intent": "find_shapes",
                 "message": "관련 도형을 찾습니다.",
-                "arguments": {"query": "로그인 흐름"},
+                "arguments": {"query": "로그인 흐름", "shapeIds": []},
             }
         )
     )
 
     assert result.intent == "find_shapes"
-    assert result.arguments == {"query": "로그인 흐름"}
+    assert result.arguments == {"query": "로그인 흐름", "shapeIds": []}
 
 
 @pytest.mark.parametrize("intent", ["create_shapes", "connect_shapes", "delete_shapes"])
@@ -76,6 +76,10 @@ def run_context(tool_help_mode: bool) -> CanvasAgentRunContext:
         requested_by_user_id="user-1",
         status="planning",
         prompt="로그인 메모 찾아줘",
-        request_context={"selectedShapeIds": [], "toolHelpMode": tool_help_mode},
+        request_context={
+            "selectedShapeIds": [],
+            "shapeSummaries": [],
+            "toolHelpMode": tool_help_mode,
+        },
         previous_action=None,
     )

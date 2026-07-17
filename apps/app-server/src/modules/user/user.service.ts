@@ -7,7 +7,7 @@ import {
   unauthorized
 } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
-import { WorkspaceMembershipRevocationPublisherService } from "../workspace-membership-revocation/workspace-membership-revocation-publisher.service";
+import { WorkspaceMembershipRevocationOutboxService } from "../workspace-membership-revocation/workspace-membership-revocation-outbox.service";
 
 export type AvatarMode = "provider" | "custom" | "initials";
 
@@ -113,7 +113,7 @@ const PROFILE_FIELDS = new Set([
 export class UserService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly membershipRevocationPublisher: WorkspaceMembershipRevocationPublisherService
+    private readonly membershipRevocationOutbox: WorkspaceMembershipRevocationOutboxService
   ) {}
 
   async getCurrentUser(currentUserId: string): Promise<UserProfile> {
@@ -240,7 +240,7 @@ export class UserService {
       throw conflict("소유 중인 Workspace를 먼저 삭제하거나 소유권을 이전해주세요.");
     }
 
-    const deletedWorkspaceIds = await this.database.transaction(
+    const outboxIds = await this.database.transaction(
       async transaction => {
         await transaction.execute(
           `
@@ -290,31 +290,24 @@ export class UserService {
           [currentUserId]
         );
 
-        return deletedMemberships.map(membership => membership.workspace_id);
+        return Promise.all(
+          [...new Set(deletedMemberships.map(membership => membership.workspace_id))].map(
+            workspaceId =>
+              this.membershipRevocationOutbox.enqueueMembershipRevoked(
+                transaction,
+                workspaceId,
+                currentUserId
+              )
+          )
+        );
       }
     );
 
     await Promise.all(
-      [...new Set(deletedWorkspaceIds)].map(workspaceId =>
-        this.publishMembershipRevocation(workspaceId, currentUserId)
-      )
+      outboxIds.map(outboxId => this.membershipRevocationOutbox.publishOutbox(outboxId))
     );
 
     return { deleted: true };
-  }
-
-  private async publishMembershipRevocation(
-    workspaceId: string,
-    userId: string
-  ): Promise<void> {
-    try {
-      await this.membershipRevocationPublisher.publishMembershipRevoked(
-        workspaceId,
-        userId
-      );
-    } catch {
-      // The publisher logs Redis failures. Account deletion remains committed.
-    }
   }
 
   async updateCurrentUserPresence(

@@ -327,8 +327,13 @@ mutation 대상이 아니므로 node 이동 중에는 클라이언트에서 geom
 ## Canvas 상세 조회
 
 Canvas 상세 조회는 canvas metadata와 저장된 viewport를 반환한다. 대용량 canvas에서
-초기 진입 시 전체 shape를 우선 로드하지 않도록, 클라이언트는 `viewSetting` 기준
-viewport bounds를 계산한 뒤 shape summary 조회 API를 호출한다.
+초기 진입 시 전체 shape를 우선 로드하지 않도록, 클라이언트는 초기 editor viewport
+bounds를 계산한 뒤 shape summary 조회 API를 호출한다.
+
+`classic` Canvas 클라이언트는 저장된 공용 viewport를 초기 카메라로 사용하지 않는다.
+진입과 새로고침 시 Canvas 좌표 `(0, 0)`을 실제 editor viewport 중앙에 배치하고
+zoom `1`로 시작한다. `viewSetting`과 Viewport 저장 API는 기존 API 호환을 위해
+유지하며, Classic의 사용 중 pan/zoom은 로컬 UI 상태로만 반영한다.
 
 ```json
 {

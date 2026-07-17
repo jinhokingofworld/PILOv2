@@ -4,11 +4,15 @@ import type { BoardAccessContext } from "./board-access.service";
 import { parseBoardRoomRef } from "./board-payload.parser";
 import type { BoardRoomService } from "./board-room.service";
 import { boardClientEvents, boardServerEvents } from "./board-socket-events";
+import type { WorkspaceMembershipRevocationFence } from "../workspace-membership-revocation/workspace-membership-revocation";
+import {
+  evictBoardSocketFromRooms,
+  type BoardMembershipSocket,
+} from "./board-membership-revocation";
 
-export type BoardSocket = {
+export type BoardSocket = BoardMembershipSocket & {
   emit: (event: string, payload: unknown) => unknown;
   join: (roomName: string) => unknown;
-  leave: (roomName: string) => unknown;
   on: (
     event: string,
     handler: (payload: unknown) => void | Promise<void>,
@@ -17,6 +21,7 @@ export type BoardSocket = {
 
 export type BoardSocketHandlerOptions = {
   context: BoardAccessContext;
+  membershipRevocationFence: WorkspaceMembershipRevocationFence;
   roomService: BoardRoomService;
   socket: BoardSocket;
 };
@@ -30,7 +35,12 @@ function emitBoardError(
 }
 
 export async function handleBoardJoin(
-  { context, roomService, socket }: BoardSocketHandlerOptions,
+  {
+    context,
+    membershipRevocationFence,
+    roomService,
+    socket,
+  }: BoardSocketHandlerOptions,
   payload: unknown,
 ): Promise<void> {
   const joinPayload = parseBoardRoomRef(payload);
@@ -48,7 +58,17 @@ export async function handleBoardJoin(
       return;
     }
 
+    if (membershipRevocationFence.isRevoked(socket.id, result.payload.workspaceId)) {
+      emitBoardError(socket, "forbidden", "board room access denied");
+      return;
+    }
+
     await socket.join(result.roomName);
+    if (membershipRevocationFence.isRevoked(socket.id, result.payload.workspaceId)) {
+      await evictBoardSocketFromRooms(socket, [result.roomName]);
+      emitBoardError(socket, "forbidden", "board room access denied");
+      return;
+    }
     socket.emit(boardServerEvents.joined, result.payload);
   } catch {
     emitBoardError(socket, "internal_error", "board room access failed");

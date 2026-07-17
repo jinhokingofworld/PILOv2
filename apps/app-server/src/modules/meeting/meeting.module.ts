@@ -11,6 +11,7 @@ import { LiveKitWebhookService } from "./livekit-webhook.service";
 import { MeetingController } from "./meeting.controller";
 import { CurrentUserMeetingController } from "./current-user-meeting.controller";
 import { MeetingReportOutboxPublisherService } from "./meeting-report-outbox-publisher.service";
+import { MeetingActionItemExtractionOutboxPublisherService } from "./meeting-action-item-extraction-outbox-publisher.service";
 import { MeetingReportOutboxRecoveryService } from "./meeting-report-outbox-recovery.service";
 import { MeetingRecordingRetentionService } from "./meeting-recording-retention.service";
 import { MeetingReportJobService } from "./meeting-report-job.service";
@@ -21,6 +22,7 @@ import { MeetingStateRealtimePublisherService } from "./meeting-state-realtime-p
 import { MeetingService } from "./meeting.service";
 import { MeetingTranscriptRagService } from "./meeting-transcript-rag.service";
 import { MeetingActionItemDeliveryService } from "./meeting-action-item-delivery.service";
+import { MeetingMembershipRevocationService } from "./meeting-membership-revocation.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule, CalendarModule, BoardModule],
@@ -33,6 +35,7 @@ import { MeetingActionItemDeliveryService } from "./meeting-action-item-delivery
   providers: [
     MeetingService,
     MeetingActionItemDeliveryService,
+    MeetingMembershipRevocationService,
     MeetingTranscriptRagService,
     LiveKitEgressService,
     LiveKitTokenService,
@@ -42,6 +45,7 @@ import { MeetingActionItemDeliveryService } from "./meeting-action-item-delivery
     MeetingReportRealtimePublisherService,
     MeetingStateRealtimePublisherService,
     MeetingReportOutboxPublisherService,
+    MeetingActionItemExtractionOutboxPublisherService,
     MeetingReportOutboxRecoveryService,
     MeetingRecordingRetentionService
   ],

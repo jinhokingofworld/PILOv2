@@ -430,6 +430,8 @@ function formatBoardClarification(
         ...columns.map((column) => `- ${column}`)
       ].join("\n");
     }
+    case "unmapped_column_missing":
+      return "기본 Unmapped column이 없어 이슈를 생성하지 않았습니다. GitHub repository 연결과 ProjectV2 Board 선택·동기화 상태를 확인해주세요.";
     case "assignee_not_assignable":
       return "저장소에 지정할 수 없는 GitHub 담당자가 포함되어 있어 변경하지 않았습니다.";
     case "assignee_limit_exceeded":

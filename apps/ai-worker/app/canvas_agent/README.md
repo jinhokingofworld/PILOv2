@@ -46,13 +46,13 @@ Canvas Agent run job의 실행 흐름을 담당한다.
 - run lock 획득/해제
 - run context 조회
 - terminal status 방어
-- semantic router 먼저 실행
-- semantic router가 확실한 후보를 찾지 못하면 LLM intent classifier 실행
+- LLM intent classifier로 검색어와 현재 로드된 shape 후보를 분류
+- 현재 shape 후보가 없으면 정리된 검색어로 semantic router 실행
 - 분류 결과를 `route_intent` step으로 DB에 저장
 
 중요한 원칙:
 
-- local semantic routing 실패는 Canvas AI 전체 실패로 만들지 않고 LLM intent classifier로 fall through 한다.
+- local semantic routing 실패는 Canvas AI 전체 실패로 만들지 않고 빈 검색 결과로 처리한다.
 - 실제 Canvas write는 worker가 직접 하지 않고 App Server action executor가 처리한다.
 
 ### `embedding_processor.py`
@@ -163,13 +163,13 @@ LLM에게 허용할 read-only Canvas intent 목록을 관리한다.
 
 ### `routing/semantic_router.py`
 
-LLM 호출 전 로컬 semantic routing을 담당한다.
+LLM이 정리한 검색어의 DB semantic routing을 담당한다.
 
 역할:
 
-- Canvas-local text/embedding 검색으로 기존 shape 후보 조회
+- 현재 Canvas에 한정된 embedding 검색으로 기존 shape 후보 조회
 - shape 후보가 충분히 확실하면 `find_shapes` intent classification 생성
-- 애매하면 LLM intent classifier로 넘김
+- 별도의 DB 텍스트 검색은 수행하지 않음
 
 중요한 원칙:
 

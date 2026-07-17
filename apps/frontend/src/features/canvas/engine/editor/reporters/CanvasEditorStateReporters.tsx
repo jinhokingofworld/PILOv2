@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useValue } from "@tldraw/state-react";
 import { useEditor, type TLShapeId } from "tldraw";
 import type { PiloCanvasLocalInteractionState } from "../../canvas-engine-types";
+import { isCanvasFreehandInteractionActive } from "../../interactions/canvas-local-interaction-policy";
 import type {
   PiloCanvasHistoryState,
   PiloCanvasSnapState,
@@ -13,6 +14,7 @@ const idleInteractionState: PiloCanvasLocalInteractionState = {
   currentToolId: "select.idle",
   editingShapeId: null,
   focusedGroupId: null,
+  isFreehandDrawing: false,
   isFocused: false,
   protectedShapeIds: [],
   selectedShapeIds: [],
@@ -47,13 +49,21 @@ export function CanvasLocalInteractionReporter({
       const selectedShapeIds = editor.getSelectedShapeIds();
       const editingShapeId = editor.getEditingShapeId();
       const pageState = editor.getCurrentPageState();
+      const currentToolId = editor.getCurrentToolId();
+      const isDragging = editor.inputs.getIsDragging();
+      const isPointing = editor.inputs.getIsPointing();
 
       return {
-        currentToolId: editor.getCurrentToolId(),
+        currentToolId,
         editingShapeId: editingShapeId ? String(editingShapeId) : null,
         focusedGroupId: pageState.focusedGroupId
           ? String(pageState.focusedGroupId)
           : null,
+        isFreehandDrawing: isCanvasFreehandInteractionActive({
+          currentToolId,
+          isDragging,
+          isPointing,
+        }),
         isFocused: editor.getIsFocused(),
         protectedShapeIds: getProtectedShapeIds(
           selectedShapeIds,
