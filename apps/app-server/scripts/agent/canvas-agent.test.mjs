@@ -11,9 +11,6 @@ const { CanvasAgentDraftService } = require(
 const { CanvasAgentService } = require(
   "../../dist/modules/canvas/agent/canvas-agent.service.js"
 );
-const { buildCanvasAgentShapeSearchTerms } = require(
-  "../../dist/modules/canvas/agent/canvas-agent.repository.js"
-);
 const { validateCanvasAgentRunRequest } = require(
   "../../dist/modules/canvas/agent/canvas-agent.validation.js"
 );
@@ -36,15 +33,8 @@ function shape(id, overrides = {}) {
 
 class FakeRepository {
   constructor() {
-    this.searchCalls = [];
     this.findByIdCalls = [];
-    this.searchResults = [];
     this.shapesById = [];
-  }
-
-  async searchShapes(canvasId, query) {
-    this.searchCalls.push({ canvasId, query });
-    return this.searchResults;
   }
 
   async findShapesByIds(canvasId, shapeIds) {
@@ -53,11 +43,11 @@ class FakeRepository {
   }
 }
 
-function run(prompt = "인증 메모 찾아줘") {
+function run(prompt = "인증 메모 찾아줘", context = {}) {
   return {
     canvas_id: "canvas-1",
     prompt,
-    context_json: { selectedShapeIds: [], viewport: null },
+    context_json: { selectedShapeIds: [], shapeSummaries: [], viewport: null, ...context },
   };
 }
 
@@ -279,18 +269,20 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 }
 
 {
-  const terms = buildCanvasAgentShapeSearchTerms("회의 메모 위치 안내");
-
-  assert.ok(terms.includes("회의"));
-  assert.ok(terms.includes("메모"));
-  assert.ok(terms.includes("note"));
-  assert.ok(terms.includes("sticky-note"));
-  assert.equal(terms.includes("위치"), false);
-}
-
-{
   const values = validateCanvasAgentRunRequest({
     prompt: "다시해",
+    shapeSummaries: [
+      {
+        id: "shape:meeting",
+        shapeType: "sticky-note",
+        title: null,
+        text: "회의",
+        x: 100,
+        y: 120,
+        width: 180,
+        height: 180,
+      },
+    ],
     conversationContext: {
       messages: [
         { role: "user", content: "모던한 로그인 페이지 초안 그려줘" },
@@ -309,6 +301,7 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
   assert.equal(values.context.conversationContext.messages.length, 2);
   assert.equal(values.context.conversationContext.lastTask.prompt, "모던한 로그인 페이지 초안 그려줘");
   assert.equal(values.context.conversationContext.lastTask.draftId, "draft-1");
+  assert.equal(values.context.shapeSummaries[0].text, "회의");
 }
 
 {
@@ -349,32 +342,42 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
     step({ query: "인증", continuePlanning: true, focusResult: false })
   );
 
-  assert.deepEqual(repository.searchCalls, [{ canvasId: "canvas-1", query: "인증" }]);
   assert.equal(result.shouldContinue, true);
   assert.deepEqual(result.resourceRefs, []);
 }
 
 {
   const repository = new FakeRepository();
-  repository.searchResults = [shape("shape:dashboard")];
   const service = new CanvasAgentActionService(repository);
 
   const result = await service.execute(
-    run("대시보드 와이어프레임 어디 있어?"),
+    run("대시보드 와이어프레임 어디 있어?", {
+      shapeSummaries: [
+        {
+          id: "shape:dashboard",
+          shapeType: "frame",
+          title: "대시보드 와이어프레임",
+          text: null,
+          x: 240,
+          y: 320,
+          width: 640,
+          height: 480,
+        },
+      ],
+    }),
     step({
       intent: "find_shapes",
       arguments: {
         query: "대시보드 와이어프레임",
-        routingSource: "llm_intent_classifier",
+        shapeIds: ["shape:dashboard"],
+        routingSource: "client_shape_context",
       },
     }, "route_intent")
   );
 
-  assert.deepEqual(repository.searchCalls, [
-    { canvasId: "canvas-1", query: "대시보드 와이어프레임" },
-  ]);
+  assert.deepEqual(repository.findByIdCalls, []);
   assert.deepEqual(result.resourceRefs, ["shape:dashboard"]);
-  assert.match(result.summary, /검색어를 해석해서/);
+  assert.match(result.summary, /현재 캔버스에서/);
 }
 
 {
@@ -388,7 +391,7 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
     ),
     (error) => error.response?.error?.message === "Canvas Agent intent is not supported",
   );
-  assert.deepEqual(repository.searchCalls, []);
+  assert.deepEqual(repository.findByIdCalls, []);
 }
 
 {
@@ -419,7 +422,6 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
     })
   );
 
-  assert.deepEqual(repository.searchCalls, []);
   assert.deepEqual(repository.findByIdCalls, [
     { canvasId: "canvas-1", shapeIds: ["shape:auth", "shape:login"] },
   ]);

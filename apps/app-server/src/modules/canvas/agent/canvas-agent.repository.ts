@@ -12,43 +12,6 @@ import type {
 } from "./canvas-agent.types";
 import { CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE } from "./canvas-agent.constants";
 
-const CANVAS_AGENT_SHAPE_SEARCH_STOP_WORDS = new Set([
-  "canvas",
-  "shape",
-  "관련",
-  "검색",
-  "검색해",
-  "검색해줘",
-  "도형",
-  "보여",
-  "보여줘",
-  "쉐입",
-  "안내",
-  "어디",
-  "위치",
-  "이동",
-  "이동해",
-  "이동해줘",
-  "있는",
-  "찾아",
-  "찾아봐",
-  "찾아줘",
-  "캔버스",
-  "해줘"
-]);
-
-const CANVAS_AGENT_SHAPE_TYPE_SEARCH_ALIASES = new Map<string, string[]>([
-  ["메모", ["note", "sticky-note"]],
-  ["노트", ["note", "sticky-note"]],
-  ["스티키", ["note", "sticky-note"]],
-  ["텍스트", ["text"]],
-  ["글", ["text"]],
-  ["프레임", ["frame"]],
-  ["화살표", ["arrow"]],
-  ["선", ["line", "arrow"]],
-  ["코드", ["pilo-code-block"]]
-]);
-
 @Injectable()
 export class CanvasAgentRepository {
   constructor(private readonly database: DatabaseService) {}
@@ -191,57 +154,6 @@ export class CanvasAgentRepository {
         ORDER BY array_position($2::text[], id)
       `,
       [canvasId, shapeIds]
-    );
-  }
-
-  async searchShapes(
-    canvasId: string,
-    query: string,
-    limit = 20
-  ): Promise<CanvasAgentShapeRow[]> {
-    const normalized = query.trim();
-    if (!normalized) return [];
-    const terms = buildCanvasAgentShapeSearchTerms(normalized);
-    const exactPattern = `%${escapeLikePattern(normalized)}%`;
-    const searchPatterns = terms.map((term) => `%${escapeLikePattern(term)}%`);
-
-    return this.database.query<CanvasAgentShapeRow>(
-      `
-        SELECT id, title, text_content, shape_type, x, y, width, height, revision, raw_shape
-        FROM canvas_freeform_shapes
-        WHERE canvas_id = $1
-          AND deleted_at IS NULL
-          AND (
-            COALESCE(title, '') ILIKE $2 ESCAPE '\\'
-            OR COALESCE(text_content, '') ILIKE $2 ESCAPE '\\'
-            OR shape_type ILIKE $2 ESCAPE '\\'
-            OR EXISTS (
-              SELECT 1
-              FROM unnest($3::text[]) AS search_term(pattern)
-              WHERE COALESCE(title, '') ILIKE search_term.pattern ESCAPE '\\'
-                OR COALESCE(text_content, '') ILIKE search_term.pattern ESCAPE '\\'
-                OR shape_type ILIKE search_term.pattern ESCAPE '\\'
-            )
-          )
-        ORDER BY
-          CASE
-            WHEN COALESCE(title, '') ILIKE $2 ESCAPE '\\'
-              OR COALESCE(text_content, '') ILIKE $2 ESCAPE '\\'
-              THEN 0
-            WHEN EXISTS (
-              SELECT 1
-              FROM unnest($3::text[]) AS search_term(pattern)
-              WHERE COALESCE(title, '') ILIKE search_term.pattern ESCAPE '\\'
-                OR COALESCE(text_content, '') ILIKE search_term.pattern ESCAPE '\\'
-            )
-              THEN 1
-            ELSE 2
-          END ASC,
-          updated_at DESC,
-          id ASC
-        LIMIT $4
-      `,
-      [canvasId, exactPattern, searchPatterns, limit]
     );
   }
 
@@ -569,33 +481,4 @@ export class CanvasAgentRepository {
     );
     return row?.status ?? null;
   }
-}
-
-export function buildCanvasAgentShapeSearchTerms(query: string): string[] {
-  const terms = new Set<string>();
-  const tokens =
-    query
-      .normalize("NFKC")
-      .toLowerCase()
-      .match(/[\p{L}\p{N}_-]+/gu) ?? [];
-
-  tokens.forEach((token) => {
-    if (token.length < 2) return;
-
-    const aliases = CANVAS_AGENT_SHAPE_TYPE_SEARCH_ALIASES.get(token);
-    if (!CANVAS_AGENT_SHAPE_SEARCH_STOP_WORDS.has(token)) {
-      terms.add(token);
-    }
-    aliases?.forEach((alias) => terms.add(alias));
-  });
-
-  if (!terms.size) {
-    terms.add(query.trim().toLowerCase());
-  }
-
-  return Array.from(terms).slice(0, 12);
-}
-
-function escapeLikePattern(value: string): string {
-  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }

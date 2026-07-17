@@ -13,13 +13,6 @@ from app.canvas_agent.types import (
 class SemanticCanvasAgentRepository(Protocol):
     def has_semantic_shapes(self, workspace_id: str, canvas_id: str) -> bool: ...
 
-    def search_text_shapes(
-        self,
-        canvas_id: str,
-        query: str,
-        limit: int = 4,
-    ) -> list[CanvasSemanticShapeMatch]: ...
-
     def search_semantic_shapes(
         self,
         workspace_id: str,
@@ -50,24 +43,14 @@ class CanvasSemanticRouter:
     def classify(
         self,
         context: CanvasAgentRunContext,
+        query_override: str | None = None,
     ) -> CanvasAgentIntentClassification | None:
-        request = _semantic_request(context)
+        request = query_override or _semantic_request(context)
         if request is None:
             return None
-        query = request
-
-        text_matches = self.repository.search_text_shapes(context.canvas_id, query)
-        if text_matches:
-            return CanvasAgentIntentClassification(
-                intent="find_shapes",
-                arguments={
-                    "query": query,
-                    "shapeIds": [match.shape_id for match in text_matches[:4]],
-                    "focusResult": True,
-                    "routingSource": "deterministic_search",
-                },
-                message="Canvas 검색으로 먼저 찾았어요. 여기 있는 내용이 가장 가까워요.",
-            )
+        query = request.strip()[:2000]
+        if not query:
+            return None
 
         if not self.repository.has_semantic_shapes(context.workspace_id, context.canvas_id):
             return None

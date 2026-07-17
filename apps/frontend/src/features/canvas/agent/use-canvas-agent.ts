@@ -16,6 +16,8 @@ import {
   readCanvasAgentToolHelpOverview,
   resolveCanvasAgentToolTarget,
 } from "./canvas-agent-tool-targets";
+import { focusCanvasAgentResult } from "./canvas-agent-camera";
+import { buildCanvasAgentShapeSummaries } from "./canvas-agent-shape-context";
 
 const ACTIVE_STATUSES = new Set(["queued", "planning", "executing"]);
 const COMPLETED_PROGRESS_HIDE_DELAY_MS = 8000;
@@ -55,6 +57,7 @@ export function useCanvasAgent({
   const [draft, setDraft] = useState<CanvasAgentDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const runIdRef = useRef<string | null>(null);
+  const focusRetryTimerRef = useRef<number | null>(null);
   const progressHideTimerRef = useRef<number | null>(null);
   const longRunningTimerRef = useRef<number | null>(null);
   const [visibleProgress, setVisibleProgress] = useState<CanvasAgentProgress | null>(null);
@@ -69,6 +72,12 @@ export function useCanvasAgent({
     if (longRunningTimerRef.current === null) return;
     window.clearTimeout(longRunningTimerRef.current);
     longRunningTimerRef.current = null;
+  }, []);
+
+  const clearFocusRetryTimer = useCallback(() => {
+    if (focusRetryTimerRef.current === null) return;
+    window.clearTimeout(focusRetryTimerRef.current);
+    focusRetryTimerRef.current = null;
   }, []);
 
   const presentRun = useCallback(
@@ -88,6 +97,7 @@ export function useCanvasAgent({
           progressHideTimerRef.current = null;
         }, COMPLETED_PROGRESS_HIDE_DELAY_MS);
       }
+      clearFocusRetryTimer();
       if (!editor || !progress) return;
 
       if (progress.toolTarget) {
@@ -96,19 +106,21 @@ export function useCanvasAgent({
       if (progress.highlightedShapeIds.length) {
         editor.select(...(progress.highlightedShapeIds as TLShapeId[]));
       }
-      if (progress.targetViewport) {
-        editor.zoomToBounds(
-          {
-            x: progress.targetViewport.x,
-            y: progress.targetViewport.y,
-            w: progress.targetViewport.width,
-            h: progress.targetViewport.height,
-          },
-          { animation: { duration: 500 } },
+      if (progress.targetViewport || progress.highlightedShapeIds.length) {
+        const usedLoadedBounds = focusCanvasAgentResult(
+          editor,
+          progress.highlightedShapeIds,
+          progress.targetViewport,
         );
+        if (!usedLoadedBounds && progress.highlightedShapeIds.length) {
+          focusRetryTimerRef.current = window.setTimeout(() => {
+            focusCanvasAgentResult(editor, progress.highlightedShapeIds, null);
+            focusRetryTimerRef.current = null;
+          }, 800);
+        }
       }
     },
-    [clearLongRunningTimer, clearProgressHideTimer, editor],
+    [clearFocusRetryTimer, clearLongRunningTimer, clearProgressHideTimer, editor],
   );
 
   const submit = useCallback(
@@ -231,6 +243,7 @@ export function useCanvasAgent({
           conversationContext,
           presentationMode: options?.presentationMode ?? "interactive",
           selectedShapeIds: editor.getSelectedShapeIds().map(String),
+          shapeSummaries: buildCanvasAgentShapeSummaries(editor),
           viewport,
           toolHelpMode: options?.toolHelpMode === true,
           clientRequestId: crypto.randomUUID(),
@@ -338,9 +351,10 @@ export function useCanvasAgent({
   }, [clearLongRunningTimer, runStatus]);
 
   useEffect(() => () => {
+    clearFocusRetryTimer();
     clearProgressHideTimer();
     clearLongRunningTimer();
-  }, [clearLongRunningTimer, clearProgressHideTimer]);
+  }, [clearFocusRetryTimer, clearLongRunningTimer, clearProgressHideTimer]);
 
   const message = error
     ?? (run?.status === "failed"

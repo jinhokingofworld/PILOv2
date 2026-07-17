@@ -58,7 +58,8 @@ class OpenAiCanvasAgentIntentClassifier:
         if not isinstance(output_text, str) or not output_text.strip():
             output_text = _extract_response_text(response)
 
-        return parse_canvas_agent_intent_classification(output_text, allowed_intents)
+        classification = parse_canvas_agent_intent_classification(output_text, allowed_intents)
+        return _restrict_shape_ids_to_context(classification, context)
 
 
 def parse_canvas_agent_intent_classification(
@@ -97,6 +98,12 @@ def parse_canvas_agent_intent_classification(
         if not isinstance(query, str) or not query.strip():
             raise CanvasAgentIntentClassifierError("Canvas Agent find_shapes query is required")
         sanitized_arguments["query"] = query.strip()[:120]
+        shape_ids = sanitized_arguments.get("shapeIds")
+        sanitized_arguments["shapeIds"] = (
+            [item for item in shape_ids if isinstance(item, str)][:40]
+            if isinstance(shape_ids, list)
+            else []
+        )
 
     return CanvasAgentIntentClassification(
         intent=intent,
@@ -117,11 +124,50 @@ def _schema(allowed_intents: set[str] | None = None) -> dict[str, object]:
             "arguments": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["query"],
-                "properties": {"query": {"type": "string"}},
+                "required": ["query", "shapeIds"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "shapeIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 40,
+                    },
+                },
             },
         },
     }
+
+
+def _restrict_shape_ids_to_context(
+    classification: CanvasAgentIntentClassification,
+    context: CanvasAgentRunContext,
+) -> CanvasAgentIntentClassification:
+    summaries = context.request_context.get("shapeSummaries")
+    allowed_ids = (
+        {
+            item.get("id")
+            for item in summaries
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        if isinstance(summaries, list)
+        else set()
+    )
+    arguments = dict(classification.arguments)
+    shape_ids = arguments.get("shapeIds")
+    arguments["shapeIds"] = (
+        [
+            shape_id
+            for shape_id in shape_ids
+            if isinstance(shape_id, str) and shape_id in allowed_ids
+        ]
+        if isinstance(shape_ids, list)
+        else []
+    )
+    return CanvasAgentIntentClassification(
+        intent=classification.intent,
+        arguments=arguments,
+        message=classification.message,
+    )
 
 
 def _sanitize_object(value: dict[object, object]) -> dict[str, object]:

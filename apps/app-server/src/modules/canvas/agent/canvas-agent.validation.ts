@@ -5,6 +5,7 @@ import type {
   CanvasAgentLastTaskContext,
   CanvasAgentPresentationMode,
   CanvasAgentRequestContext,
+  CanvasAgentShapeSummary,
   CanvasAgentViewport,
   CreateCanvasAgentRunRequest
 } from "./canvas-agent.types";
@@ -14,6 +15,8 @@ const MAX_CONVERSATION_MESSAGE_BYTES = 2_000;
 const MAX_LAST_TASK_PROMPT_BYTES = 4_000;
 const MAX_LAST_TASK_SUMMARY_BYTES = 2_000;
 const MAX_SELECTED_SHAPES = 40;
+const MAX_SHAPE_SUMMARIES = 120;
+const MAX_SHAPE_SUMMARY_TEXT_BYTES = 1_000;
 const MAX_CLIENT_REQUEST_ID_BYTES = 128;
 
 export function validateCanvasAgentRunRequest(
@@ -36,10 +39,63 @@ export function validateCanvasAgentRunRequest(
       conversationContext: validateConversationContext(input.conversationContext),
       presentationMode: validatePresentationMode(input.presentationMode),
       selectedShapeIds: validateSelectedShapeIds(input.selectedShapeIds),
+      shapeSummaries: validateShapeSummaries(input.shapeSummaries),
       toolHelpMode: input.toolHelpMode === true,
       viewport: validateViewport(input.viewport)
     }
   };
+}
+
+function validateShapeSummaries(value: unknown): CanvasAgentShapeSummary[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_SHAPE_SUMMARIES) {
+    throw badRequest(`Canvas Agent shapeSummaries must contain ${MAX_SHAPE_SUMMARIES} items or fewer`);
+  }
+
+  const summaries = value.map((item) => {
+    if (!isRecord(item)) throw badRequest("Canvas Agent shapeSummaries item is invalid");
+    const id = readBoundedOptionalString(item.id, "Canvas Agent shapeSummaries id", 200);
+    const shapeType = readBoundedOptionalString(
+      item.shapeType,
+      "Canvas Agent shapeSummaries shapeType",
+      100
+    );
+    if (!id || !shapeType) {
+      throw badRequest("Canvas Agent shapeSummaries id and shapeType are required");
+    }
+
+    const width = readFiniteNumber(item.width, "Canvas Agent shapeSummaries width");
+    const height = readFiniteNumber(item.height, "Canvas Agent shapeSummaries height");
+    if (width <= 0 || height <= 0) {
+      throw badRequest("Canvas Agent shapeSummaries width and height must be greater than 0");
+    }
+
+    return {
+      id,
+      shapeType,
+      title: readBoundedOptionalString(
+        item.title,
+        "Canvas Agent shapeSummaries title",
+        MAX_SHAPE_SUMMARY_TEXT_BYTES
+      ),
+      text: readBoundedOptionalString(
+        item.text,
+        "Canvas Agent shapeSummaries text",
+        MAX_SHAPE_SUMMARY_TEXT_BYTES
+      ),
+      x: readFiniteNumber(item.x, "Canvas Agent shapeSummaries x"),
+      y: readFiniteNumber(item.y, "Canvas Agent shapeSummaries y"),
+      width,
+      height
+    };
+  });
+
+  const ids = new Set<string>();
+  return summaries.filter((summary) => {
+    if (ids.has(summary.id)) return false;
+    ids.add(summary.id);
+    return true;
+  });
 }
 
 export function validateApplyClientOperationId(value: unknown): string {

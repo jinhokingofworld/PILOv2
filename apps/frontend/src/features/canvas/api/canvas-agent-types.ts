@@ -5,6 +5,17 @@ export type CanvasAgentViewport = {
   height: number;
 };
 
+export type CanvasAgentShapeSummary = {
+  id: string;
+  shapeType: string;
+  title: string | null;
+  text: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type CanvasAgentPresentationMode = "interactive" | "background";
 
 export type CanvasAgentConversationMessage = {

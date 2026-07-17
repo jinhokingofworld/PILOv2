@@ -359,6 +359,12 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       selectedShapeIds: Array.isArray(context.selectedShapeIds)
         ? context.selectedShapeIds.filter((item): item is string => typeof item === "string")
         : [],
+      shapeSummaries: Array.isArray(context.shapeSummaries)
+        ? context.shapeSummaries.filter(
+            (item): item is Record<string, unknown> =>
+              typeof item === "object" && item !== null && !Array.isArray(item)
+          )
+        : [],
       toolHelpMode: context.toolHelpMode === true,
       viewport: this.readContextViewport(context.viewport)
     };

@@ -50,36 +50,35 @@ Frontend -> App Server Canvas Agent API -> Canvas Agent run + SQS job
   -> completed explanation/search/navigation result
 ```
 
-For a shape-finding request, Canvas Agent uses this bounded cost-saving route:
+For a shape-finding request, Canvas Agent uses this bounded route:
 
 ```text
-Canvas-local text search over current shape title/text/type
-  -> Canvas-only pgvector shape search
-  -> structured GPT intent classification/query extraction when retrieval is absent or ambiguous
+Structured GPT intent classification over a bounded client shape summary
+  -> use matching currently loaded shape ids when present
+  -> current-Canvas-only pgvector search with the extracted query otherwise
   -> App Server find_shapes handler
 ```
 
 - The embedding Worker indexes only `shape_type`, `title`, and `text_content`.
   It never embeds full `raw_shape`, layout, bindings, styles, or provider data.
-- Search remains DB/checkpoint based. Disabling Canvas mutations removes the AI
-  apply synchronization problem, but it does not make the embedding index a
-  Realtime roomState index; a pre-checkpoint edit can become searchable only
+- Shapes currently loaded in the requester's tldraw store are sent as bounded,
+  advisory summaries. This lets newly created or not-yet-checkpointed shapes be
+  found without waiting for the DB checkpoint or embedding refresh flow.
+- A pre-checkpoint shape outside the requester's loaded regions is not included
+  in that snapshot. It becomes searchable after it is loaded by the client or
   after the normal checkpoint and embedding refresh flow.
-- Before embedding, explicit find requests may use bounded DB text
-  search against the current canvas' non-deleted shapes. This lets newly
-  created or not-yet-embedded shapes be found without waiting for the embedding
-  worker, and avoids an LLM/embedding call when the current canvas text is
-  already an exact enough match.
+- DB fallback uses only pgvector similarity search scoped to the authenticated
+  path Canvas. Canvas Agent does not run a separate DB `ILIKE` text search.
 - The configured local model is `intfloat/multilingual-e5-small` (384
   dimensions). Queries use `query: ` and indexed Canvas text uses `passage: `.
 - The default pgvector shape-result thresholds are shape similarity `0.78` and
-  winner margin `0.08`. A missing or ambiguous local match falls through to
-  the structured intent classifier.
+  winner margin `0.08`. A missing or ambiguous embedding match produces an
+  empty `find_shapes` result after the structured intent classification.
 - Normal mode currently exposes only the `find_shapes` intent. The classifier
   returns `{ intent, arguments }`; App Server stores it in a `route_intent`
   step and maps it to the registered `find_shapes` handler. Adding a future
   intent also requires an App Server handler and validation.
-- Direct shape-search matches are classified as `find_shapes` with
+- Client-summary and embedding matches are classified as `find_shapes` with
   `focusResult: true`, so the client can move the requester-only Canvas AI
   pointer, zoom to the matching shape area, and highlight the result. Separate
   local `select_shapes` or `focus_viewport` intent classification is not used
@@ -316,8 +315,9 @@ request proceeds through the normal `find_shapes` intent path.
 | --- | --- | --- |
 | Find a Canvas toolbar tool | `도구`, `툴`, `툴바`, `기능`, `버튼`, `아이콘`, `어디`, `위치`, `찾아줘`, `보여줘`, `알려줘`, `사용법`, `어떻게` plus a known tool name<br>`메모 도구 어디 있어?`, `색상 변경 기능 알려줘`, `프레임은 어떻게 써?` | `find_canvas_tool` with `progress.toolTarget` |
 
-External-domain words can still appear as ordinary Canvas text search terms.
-For example, `이슈 메모 찾아줘` searches Canvas shape text for an existing
+External-domain words can still appear in an ordinary Canvas shape query.
+For example, `이슈 메모 찾아줘` searches the loaded shape summaries and
+current Canvas embedding index for an existing
 Canvas item; it does not read the Issue domain. App Server does not reject
 external-domain words by keyword before classification, and the only current
 normal-mode intent remains the Canvas-only `find_shapes` intent.
@@ -406,6 +406,18 @@ Request:
 {
   "prompt": "로그인 관련 메모 찾아줘",
   "selectedShapeIds": ["shape:note-1", "shape:note-2"],
+  "shapeSummaries": [
+    {
+      "id": "shape:note-1",
+      "shapeType": "sticky-note",
+      "title": null,
+      "text": "로그인 회의",
+      "x": 120,
+      "y": 240,
+      "width": 180,
+      "height": 180
+    }
+  ],
   "viewport": {
     "x": 0,
     "y": 0,
@@ -435,6 +447,7 @@ Request:
 | --- | --- | --- |
 | `prompt` | Yes | Trimmed user request, 1 to 32768 bytes. |
 | `selectedShapeIds` | No | Current Canvas selection. Every id must belong to the path Canvas. |
+| `shapeSummaries` | No | Up to 120 bounded summaries from the requester's currently loaded tldraw shapes. Selected and visible shapes should be ordered first. These summaries are advisory and may be used only for read-only search, highlight, and viewport focus. |
 | `viewport` | No | Current visible Canvas bounds used only to create minimal planning context. |
 | `presentationMode` | No | `interactive` shows requester-only progress, pointer, highlight, and viewport focus on the Canvas surface. `background` creates the same read-only run without Canvas-local playback. Defaults to `interactive`. |
 | `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, interpret the prompt only as a search for existing Canvas content. Defaults to `false`. |
@@ -455,8 +468,9 @@ Server rules:
   existing run and does not enqueue another job.
 - Reusing a `clientRequestId` with different request content returns
   `409 CLIENT_REQUEST_ID_CONFLICT`.
-- The App Server constructs a bounded shape summary before enqueueing an AI job;
-  it must not send a complete raw Canvas snapshot by default.
+- The Frontend constructs bounded summaries from currently loaded shapes. It
+  must not send `rawShape`, bindings, assets, styles, or a complete Canvas
+  snapshot. The App Server validates the count, text size, ids, and bounds.
 
 Response: `202 Accepted`
 
