@@ -770,17 +770,45 @@ class SmokeSqlErdService {
     this.sessions = [
       {
         id: SQL_ERD_SESSION_ID,
-        title: "주문 ERD",
+        title: "Untitled ERD",
         updatedAt: "2026-07-16T00:00:00.000Z",
         tableCount: 4,
-        relationCount: 3
+        relationCount: 3,
+        revision: 1,
+        modelJson: {
+          version: 1,
+          schema: {
+            tables: [
+              {
+                id: "table-orders",
+                name: "orders",
+                columns: []
+              }
+            ],
+            relations: []
+          }
+        }
       },
       {
         id: SQL_ERD_SECOND_SESSION_ID,
-        title: "결제 ERD",
+        title: "Untitled ERD",
         updatedAt: "2026-07-17T00:00:00.000Z",
         tableCount: 3,
-        relationCount: 2
+        relationCount: 2,
+        revision: 2,
+        modelJson: {
+          version: 1,
+          schema: {
+            tables: [
+              {
+                id: "table-payments",
+                name: "payments",
+                columns: []
+              }
+            ],
+            relations: []
+          }
+        }
       }
     ];
   }
@@ -796,6 +824,16 @@ class SmokeSqlErdService {
       items: this.sessions,
       nextCursor: null
     };
+  }
+
+  async getSession(currentUserId, workspaceId, sessionId) {
+    this.calls.push({
+      method: "getSession",
+      currentUserId,
+      workspaceId,
+      sessionId
+    });
+    return this.sessions.find((session) => session.id === sessionId);
   }
 }
 
@@ -1632,6 +1670,56 @@ function formatterMeetingReport(index, overrides = {}) {
     [SQL_ERD_SESSION_ID, SQL_ERD_SECOND_SESSION_ID]
   );
   assert.equal(loggingService.calls[1].input.waitForUserInput, true);
+
+  const selectedToken = outputSummary.candidates[1].selectionToken;
+  const resumedExecution = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: inspectDefinition.name,
+      riskLevel: inspectDefinition.riskLevel,
+      executionMode: inspectDefinition.executionMode,
+      requiresConfirmation: null,
+      input: {
+        featureQuery: "결제 기능",
+        sessionSelectionToken: selectedToken
+      }
+    }),
+    registry,
+    {
+      prompt: "Untitled ERD 세션을 선택했습니다.",
+      timezone: "Asia/Seoul"
+    }
+  );
+  await resumedExecution.service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  const resumedOutput = resumedExecution.loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  ).input.outputSummary;
+  assert.equal(resumedOutput.sessionId, SQL_ERD_SECOND_SESSION_ID);
+  assert.deepEqual(
+    sqlErdService.calls
+      .filter((call) => call.method === "getSession")
+      .map(({ currentUserId, workspaceId, sessionId }) => ({
+        currentUserId,
+        workspaceId,
+        sessionId
+      })),
+    [
+      {
+        currentUserId: USER_ID,
+        workspaceId: WORKSPACE_ID,
+        sessionId: SQL_ERD_SECOND_SESSION_ID
+      },
+      {
+        currentUserId: USER_ID,
+        workspaceId: WORKSPACE_ID,
+        sessionId: SQL_ERD_SECOND_SESSION_ID
+      }
+    ]
+  );
 }
 
 {

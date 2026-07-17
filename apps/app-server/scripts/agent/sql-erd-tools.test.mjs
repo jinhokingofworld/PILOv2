@@ -621,7 +621,7 @@ const multipleSqlErdService = new FakeSqlErdService();
 multipleSqlErdService.sessions = [
   sessionPayload({
     id: SESSION_ID,
-    title: "주문 ERD",
+    title: "  주문\n\tERD\u0000 ",
     updatedAt: "2026-07-16T00:00:00.000Z",
     modelJson: focusModelJson(),
     tableCount: 4,
@@ -646,6 +646,10 @@ const ambiguousPreparation = await multipleInspect.prepareExecution(
 );
 assert.equal(ambiguousPreparation.kind, "needs_clarification");
 assert.equal(ambiguousPreparation.outputSummary.reason, "multiple_sessions");
+assert.match(ambiguousPreparation.outputSummary.question, /1\. 주문 ERD/);
+assert.match(ambiguousPreparation.outputSummary.question, /2\. 결제 ERD/);
+assert.match(ambiguousPreparation.outputSummary.question, /2026-07-16/);
+assert.match(ambiguousPreparation.outputSummary.question, /2026-07-17/);
 assert.deepEqual(
   ambiguousPreparation.outputSummary.candidates.map((candidate) => ({
     title: candidate.title,
@@ -719,6 +723,29 @@ const tokenSelectedInspection = await multipleInspect.execute(
   })
 );
 assert.equal(tokenSelectedInspection.outputSummary.sessionId, secondSessionId);
+
+const manySqlErdService = new FakeSqlErdService();
+manySqlErdService.sessions = Array.from({ length: 6 }, (_, index) =>
+  sessionPayload({
+    id: `55555555-5555-4555-8555-55555555555${index}`,
+    title: `ERD ${index + 1}`,
+    updatedAt: `2026-07-${String(index + 10).padStart(2, "0")}T00:00:00.000Z`,
+    modelJson: focusModelJson(),
+    tableCount: 4,
+    relationCount: 3
+  })
+);
+const manyInspect = new SqlErdAgentToolsService(manySqlErdService)
+  .listDefinitions()
+  .find((candidate) => candidate.name === "inspect_sql_erd_schema");
+const manyPreparation = await manyInspect.prepareExecution(
+  context,
+  manyInspect.validateInput({ featureQuery: "payment feature" })
+);
+assert.equal(manyPreparation.kind, "needs_clarification");
+assert.equal(manyPreparation.outputSummary.candidates.length, 5);
+assert.match(manyPreparation.outputSummary.question, /5\. ERD 5/);
+assert.doesNotMatch(manyPreparation.outputSummary.question, /6\. ERD 6/);
 
 const emptySqlErdService = new FakeSqlErdService();
 emptySqlErdService.sessions = [];

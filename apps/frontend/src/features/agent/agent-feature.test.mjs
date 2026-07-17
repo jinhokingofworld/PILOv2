@@ -10,6 +10,7 @@ import {
   getAgentResourceLinks,
   parseSqlErdAgentTableFocusResource
 } from "./resource-links.ts";
+import * as agentResourceUtilities from "./resource-links.ts";
 import {
   consumeStagedSqlErdAgentTableFocus,
   createSqlErdModelFingerprint,
@@ -29,14 +30,16 @@ const [
   agentApiClient,
   agentConfirmationCard,
   agentChatWidget,
-  agentResourceLinks
+  agentResourceLinks,
+  agentSqlErdSessionCandidates
 ] =
   await Promise.all([
     readFeatureFile("./types.ts"),
     readFeatureFile("./api/client.ts"),
     readFeatureFile("./components/agent-confirmation-card.tsx"),
     readFeatureFile("./components/agent-chat-widget.tsx"),
-    readFeatureFile("./components/agent-resource-links.tsx")
+    readFeatureFile("./components/agent-resource-links.tsx"),
+    readFeatureFile("./components/agent-sql-erd-session-candidates.tsx")
   ]);
 
 assert.match(agentTypes, /export type AgentRunStatus/);
@@ -47,6 +50,8 @@ assert.match(agentTypes, /"completed"/);
 assert.match(agentTypes, /export type AgentRun/);
 assert.match(agentTypes, /export type CreateAgentRunInput/);
 assert.match(agentTypes, /export type SubmitAgentRunInput/);
+assert.match(agentTypes, /kind: "sql_erd_session"/);
+assert.match(agentTypes, /selection\?: AgentRunInputSelection/);
 assert.match(agentTypes, /export type AgentRunMessage/);
 assert.match(agentTypes, /messages: AgentRunMessage\[\]/);
 assert.match(agentTypes, /export type AgentRunDetailPayload/);
@@ -123,6 +128,7 @@ assert.match(agentChatWidget, /approveConfirmation/);
 assert.match(agentChatWidget, /rejectConfirmation/);
 assert.match(agentChatWidget, /AgentConfirmationCard/);
 assert.match(agentChatWidget, /AgentResourceLinks/);
+assert.match(agentChatWidget, /AgentSqlErdSessionCandidates/);
 assert.match(agentChatWidget, /GroundedCitationList/);
 assert.match(agentChatWidget, /getGroundedCitations/);
 assert.match(agentChatWidget, /sourceType === "transcript"/);
@@ -148,6 +154,8 @@ assert.match(agentChatWidget, /waiting_confirmation/);
 assert.match(agentChatWidget, /waiting_user_input/);
 assert.match(agentChatWidget, /submitRunInput/);
 assert.match(agentChatWidget, /appendRunInput/);
+assert.match(agentChatWidget, /displayMessage/);
+assert.match(agentChatWidget, /\{ \.\.\.input, message: displayMessage \}/);
 assert.match(agentChatWidget, /latestAssistantMessage/);
 assert.match(agentChatWidget, /같은 요청을 이어서 처리합니다/);
 assert.match(agentChatWidget, /enqueueMeetingConnectionAction/);
@@ -188,6 +196,18 @@ assert.match(agentResourceLinks, /getAgentResourceLinks/);
 assert.match(agentResourceLinks, /<Link/);
 assert.match(agentResourceLinks, /stageSqlErdAgentTableFocus/);
 assert.match(agentResourceLinks, /link\.focus/);
+assert.match(agentSqlErdSessionCandidates, /getSqlErdSessionCandidates/);
+assert.match(agentSqlErdSessionCandidates, /disabled=\{disabled\}/);
+assert.match(agentSqlErdSessionCandidates, /kind: "sql_erd_session"/);
+assert.match(agentSqlErdSessionCandidates, /token: candidate\.selectionToken/);
+assert.match(agentSqlErdSessionCandidates, /수정/);
+assert.match(agentSqlErdSessionCandidates, /테이블/);
+assert.match(agentSqlErdSessionCandidates, /관계/);
+assert.equal(
+  typeof agentResourceUtilities.getSqlErdSessionCandidates,
+  "function",
+  "waiting SQLtoERD clarification candidates need a validated parser"
+);
 
 const previousMessages = [
   {
@@ -253,6 +273,204 @@ assert.equal(
 );
 
 const resourceSessionId = "88888888-8888-4888-8888-888888888888";
+const candidateSessionId = "77777777-7777-4777-8777-777777777777";
+const sqlErdCandidateRun = {
+  status: "waiting_user_input",
+  steps: [
+    {
+      id: "step-older",
+      order: 1,
+      type: "tool",
+      status: "completed",
+      toolName: "inspect_sql_erd_schema",
+      outputSummary: {
+        status: "needs_clarification",
+        candidates: [
+          {
+            selectionToken: resourceSessionId,
+            title: "이전 후보",
+            updatedAt: "2026-07-15T00:00:00.000Z",
+            tableCount: 1,
+            relationCount: 0
+          }
+        ]
+      },
+      resourceRefs: []
+    },
+    {
+      id: "step-latest",
+      order: 2,
+      type: "tool",
+      status: "completed",
+      toolName: "inspect_sql_erd_schema",
+      outputSummary: {
+        status: "needs_clarification",
+        candidates: [
+          {
+            selectionToken: candidateSessionId,
+            title: "  결제\n\tERD\u0000 ",
+            updatedAt: "2026-07-17T00:00:00.000Z",
+            tableCount: 4,
+            relationCount: 3
+          },
+          {
+            selectionToken: resourceSessionId,
+            title: "결제 ERD",
+            updatedAt: "2026-07-16T00:00:00.000Z",
+            tableCount: 2,
+            relationCount: 1
+          }
+        ]
+      },
+      resourceRefs: []
+    }
+  ]
+};
+
+assert.deepEqual(
+  agentResourceUtilities.getSqlErdSessionCandidates(sqlErdCandidateRun),
+  [
+    {
+      selectionToken: candidateSessionId,
+      title: "결제 ERD",
+      updatedAt: "2026-07-17T00:00:00.000Z",
+      tableCount: 4,
+      relationCount: 3
+    },
+    {
+      selectionToken: resourceSessionId,
+      title: "결제 ERD",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      tableCount: 2,
+      relationCount: 1
+    }
+  ]
+);
+assert.deepEqual(
+  agentResourceUtilities.getSqlErdSessionCandidates({
+    ...sqlErdCandidateRun,
+    status: "completed"
+  }),
+  []
+);
+assert.deepEqual(
+  agentResourceUtilities.getSqlErdSessionCandidates({
+    ...sqlErdCandidateRun,
+    steps: [
+      ...sqlErdCandidateRun.steps,
+      {
+        ...sqlErdCandidateRun.steps[1],
+        id: "newer-calendar-step",
+        order: 3,
+        toolName: "list_calendar_events"
+      }
+    ]
+  }),
+  []
+);
+assert.deepEqual(
+  agentResourceUtilities.getSqlErdSessionCandidates({
+    ...sqlErdCandidateRun,
+    steps: [
+      {
+        ...sqlErdCandidateRun.steps[1],
+        outputSummary: {
+          status: "needs_clarification",
+          candidates: Array.from({ length: 6 }, (_, index) => ({
+            selectionToken: `${index + 1}0000000-0000-4000-8000-000000000000`,
+            title: `후보 ${index + 1}`,
+            updatedAt: "2026-07-17T00:00:00.000Z",
+            tableCount: 1,
+            relationCount: 0
+          }))
+        }
+      }
+    ]
+  }),
+  []
+);
+assert.deepEqual(
+  agentResourceUtilities.getSqlErdSessionCandidates({
+    ...sqlErdCandidateRun,
+    steps: [
+      {
+        ...sqlErdCandidateRun.steps[1],
+        outputSummary: {
+          status: "needs_clarification",
+          candidates: [
+            ...sqlErdCandidateRun.steps[1].outputSummary.candidates,
+            {
+              ...sqlErdCandidateRun.steps[1].outputSummary.candidates[0],
+              title: "중복 token"
+            }
+          ]
+        }
+      }
+    ]
+  }),
+  [
+    {
+      selectionToken: resourceSessionId,
+      title: "결제 ERD",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      tableCount: 2,
+      relationCount: 1
+    }
+  ]
+);
+assert.deepEqual(
+  agentResourceUtilities.getSqlErdSessionCandidates({
+    ...sqlErdCandidateRun,
+    steps: [
+      {
+        ...sqlErdCandidateRun.steps[1],
+        outputSummary: {
+          status: "needs_clarification",
+          candidates: [
+            sqlErdCandidateRun.steps[1].outputSummary.candidates[1],
+            {
+              selectionToken: "not-a-uuid",
+              title: "잘못된 UUID",
+              updatedAt: "2026-07-17T00:00:00.000Z",
+              tableCount: 1,
+              relationCount: 0
+            },
+            {
+              selectionToken: candidateSessionId,
+              title: "잘못된 날짜",
+              updatedAt: "2026-02-30T00:00:00.000Z",
+              tableCount: 1,
+              relationCount: 0
+            },
+            {
+              selectionToken: "99999999-9999-4999-8999-999999999999",
+              title: "잘못된 개수",
+              updatedAt: "2026-07-17T00:00:00.000Z",
+              tableCount: -1,
+              relationCount: 0
+            },
+            {
+              selectionToken: "66666666-6666-4666-8666-666666666666",
+              title: "\u0000\n\t",
+              updatedAt: "2026-07-17T00:00:00.000Z",
+              tableCount: 1,
+              relationCount: 0
+            }
+          ]
+        }
+      }
+    ]
+  }),
+  [
+    {
+      selectionToken: resourceSessionId,
+      title: "결제 ERD",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      tableCount: 2,
+      relationCount: 1
+    }
+  ]
+);
 const validResourceRef = {
   domain: "sqltoerd",
   resourceType: "session",

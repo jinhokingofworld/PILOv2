@@ -303,6 +303,7 @@ def test_fixed_korean_suite_loads() -> None:
     assert expectations["sql_erd_generate"].tool_name == "generate_sql_erd"
     assert expectations["sql_erd_generate"].requires_confirmation is None
     assert expectations["sql_erd_focus_payment_tables"].tool_name == "inspect_sql_erd_schema"
+    assert expectations["sql_erd_focus_payment_tables"].requires_confirmation is None
     assert expectations["sql_erd_focus_payment_tables"].input_contains == {
         "featureQuery": "결제 기능"
     }

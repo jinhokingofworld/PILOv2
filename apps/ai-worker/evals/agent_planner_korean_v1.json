@@ -1786,7 +1786,7 @@
         "inputContains": {
           "featureQuery": "결제 기능"
         },
-        "requiresConfirmation": false
+        "requiresConfirmation": null
       }
     }
   ]

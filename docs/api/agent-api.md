@@ -633,8 +633,27 @@ Request:
 { "message": "금요일 오후 3시로 해줘" }
 ```
 
+SQLtoERD session 후보 버튼을 선택하면 기존 endpoint에 선택 정보를 추가한다.
+
+```json
+{
+  "message": "결제 ERD 세션을 선택했습니다.",
+  "selection": {
+    "kind": "sql_erd_session",
+    "token": "sql_erd_session_uuid"
+  }
+}
+```
+
 - `waiting_user_input` 상태인 본인 run에만 전달할 수 있다.
-- `message`는 trim 후 1~4,000 bytes여야 하며, 다른 field는 허용하지 않는다.
+- `message`는 trim 후 1~4,000 bytes여야 한다.
+- `selection`은 선택값이며 정확히 `{ kind: "sql_erd_session", token: "uuid" }`만 허용한다.
+  서버는 같은 transaction에서 최신 completed tool step이 `inspect_sql_erd_schema`
+  clarification인지 확인하고, token이 그 step의 유효한 최대 5개 후보에 정확히 한 번 포함될 때만
+  run을 재개한다. 이전 clarification, 중복 token, 잘못된 후보는 사용할 수 없다.
+- SQLtoERD 선택 message의 표시 제목은 request 값을 신뢰하지 않고 검증한 최신 후보 title로
+  다시 만든다. 내부 planning memory에는 선택 token을 canonical marker로 보존하지만
+  `submitRunInput`과 이후 run 조회의 `messages[].content`에는 marker나 UUID를 반환하지 않는다.
 - 서버는 같은 run의 append-only memory에 저장한 뒤 `planning`으로 되돌린다. 같은 transaction에서
   planner/tool budget을 새 요청 구간 기준 0으로 초기화하고, 기존 `agent_run_outbox`의
   `turn_sequence`를 증가시켜 `reason = 'user_input'`인 pending turn으로 rearm한다.
@@ -808,6 +827,10 @@ Status code: `200 OK`
   Workspace의 유일한 session 순서다. 남은 session이 여러 개거나 없으면 mutation 없이
   `needs_clarification`과 최대 5개 후보를 반환한다. 각 후보는 같은 title도 구분 가능한
   `selectionToken`을 포함하고, 후속 호출은 선택한 값을 `sessionSelectionToken`으로 그대로 보낸다.
+  clarification 질문에는 정규화한 후보 title과 수정일의 번호 목록을 포함한다. Frontend는
+  `waiting_user_input` run의 최신 completed inspect clarification만 선택 버튼으로 표시하고,
+  title·수정일·table/relation count로 같은 title 후보를 구분한다. 버튼은 구조화된 `selection`을
+  기존 `/inputs` endpoint로 보내며 UUID를 사용자 bubble에 표시하지 않는다.
 - inspect 결과의 table은 `t1`, `t2` 형태의 요청별 compact ref로 표시한다. projection은 최대
   9,000자이며 내부 table/column ID와 sourceText, DDL, 전체 modelJson을 Agent step에 복제하지 않는다.
 - `focus_sql_erd_tables`는 inspect 결과의 `sessionId`, `sessionRevision`, compact

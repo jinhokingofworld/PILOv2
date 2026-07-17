@@ -34,12 +34,13 @@ import {
 } from "@/features/agent/api/client";
 import { AgentConfirmationCard } from "@/features/agent/components/agent-confirmation-card";
 import { AgentResourceLinks } from "@/features/agent/components/agent-resource-links";
+import { AgentSqlErdSessionCandidates } from "@/features/agent/components/agent-sql-erd-session-candidates";
 import { readAgentRequestContext } from "@/features/agent/request-context";
 import {
   didAgentRunAcceptInput,
   getLatestAgentRunMessageSequence
 } from "@/features/agent/run-input-recovery";
-import type { AgentRun } from "@/features/agent/types";
+import type { AgentRun, SubmitAgentRunInput } from "@/features/agent/types";
 import { enqueueMeetingConnectionAction } from "@/features/meeting/stores/meeting-connection-action-store";
 import { cn } from "@/lib/utils";
 
@@ -433,13 +434,13 @@ export function AgentChatWidget() {
 
   async function appendRunInput(
     targetMessage: AgentChatMessage,
-    message: string
+    input: SubmitAgentRunInput
   ) {
-    const trimmedMessage = message.trim();
+    const displayMessage = input.message.trim();
     const run = targetMessage.run;
 
     if (
-      !trimmedMessage ||
+      !displayMessage ||
       run?.status !== "waiting_user_input" ||
       isBusy ||
       activeRunAbortControllerRef.current
@@ -458,7 +459,7 @@ export function AgentChatWidget() {
       {
         id: userMessageId,
         role: "user",
-        content: trimmedMessage
+        content: displayMessage
       },
       {
         id: assistantMessageId,
@@ -485,7 +486,7 @@ export function AgentChatWidget() {
       const runPayload = await agentApiClient.submitRunInput(
         run.workspaceId,
         run.id,
-        { message: trimmedMessage },
+        { ...input, message: displayMessage },
         { signal: abortController.signal }
       );
       await pollAgentRunUntilStop(
@@ -519,7 +520,7 @@ export function AgentChatWidget() {
           didAgentRunAcceptInput(
             refreshRun.messages ?? [],
             previousLatestMessageSequence,
-            trimmedMessage
+            displayMessage
           )
       );
       if (
@@ -773,7 +774,7 @@ export function AgentChatWidget() {
     }
 
     if (waitingUserInputMessage) {
-      void appendRunInput(waitingUserInputMessage, draft);
+      void appendRunInput(waitingUserInputMessage, { message: draft });
       return;
     }
 
@@ -794,7 +795,7 @@ export function AgentChatWidget() {
     event.preventDefault();
     if (canSend) {
       if (waitingUserInputMessage) {
-        void appendRunInput(waitingUserInputMessage, draft);
+        void appendRunInput(waitingUserInputMessage, { message: draft });
       } else {
         void appendPrompt(draft);
       }
@@ -910,6 +911,17 @@ export function AgentChatWidget() {
                         />
                       ) : null}
                       {message.run ? (
+                        <AgentSqlErdSessionCandidates
+                          run={message.run}
+                          disabled={
+                            !accessToken?.trim() || hasActiveAgentRequest
+                          }
+                          onSelect={(input) =>
+                            void appendRunInput(message, input)
+                          }
+                        />
+                      ) : null}
+                      {message.run ? (
                         <AgentResourceLinks run={message.run} />
                       ) : null}
                     </div>
@@ -935,7 +947,7 @@ export function AgentChatWidget() {
                         if (waitingUserInputMessage) {
                           void appendRunInput(
                             waitingUserInputMessage,
-                            suggestion.prompt
+                            { message: suggestion.prompt }
                           );
                         } else {
                           void appendPrompt(suggestion.prompt);
