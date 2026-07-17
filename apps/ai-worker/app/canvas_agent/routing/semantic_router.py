@@ -13,6 +13,14 @@ from app.canvas_agent.types import (
 class SemanticCanvasAgentRepository(Protocol):
     def has_semantic_shapes(self, workspace_id: str, canvas_id: str) -> bool: ...
 
+    def search_text_shapes(
+        self,
+        workspace_id: str,
+        canvas_id: str,
+        query: str,
+        limit: int = 4,
+    ) -> list[CanvasSemanticShapeMatch]: ...
+
     def search_semantic_shapes(
         self,
         workspace_id: str,
@@ -52,36 +60,52 @@ class CanvasSemanticRouter:
         if not query:
             return None
 
-        if not self.repository.has_semantic_shapes(context.workspace_id, context.canvas_id):
-            return None
+        if self.repository.has_semantic_shapes(context.workspace_id, context.canvas_id):
+            try:
+                query_embedding = self.embedder.embed_query(query)
+            except CanvasEmbeddingError:
+                query_embedding = None
 
-        try:
-            query_embedding = self.embedder.embed_query(query)
-        except CanvasEmbeddingError:
-            return None
+            if query_embedding is not None:
+                shape_matches = self.repository.search_semantic_shapes(
+                    context.workspace_id,
+                    context.canvas_id,
+                    query_embedding,
+                )
+                shape_match = _confident(
+                    shape_matches,
+                    self.shape_similarity_min,
+                    self.similarity_margin_min,
+                )
 
-        shape_matches = self.repository.search_semantic_shapes(
+                if isinstance(shape_match, CanvasSemanticShapeMatch):
+                    shape_ids = [match.shape_id for match in shape_matches[:4]]
+                    return CanvasAgentIntentClassification(
+                        intent="find_shapes",
+                        arguments={
+                            "query": query,
+                            "shapeIds": shape_ids,
+                            "focusResult": True,
+                            "routingSource": "shape_embedding",
+                        },
+                        message="임베딩 검색으로 찾았어요. 여기 있는 내용이 가장 가까워요.",
+                    )
+
+        text_matches = self.repository.search_text_shapes(
             context.workspace_id,
             context.canvas_id,
-            query_embedding,
+            query,
         )
-        shape_match = _confident(
-            shape_matches,
-            self.shape_similarity_min,
-            self.similarity_margin_min,
-        )
-
-        if isinstance(shape_match, CanvasSemanticShapeMatch):
-            shape_ids = [match.shape_id for match in shape_matches[:4]]
+        if text_matches:
             return CanvasAgentIntentClassification(
                 intent="find_shapes",
                 arguments={
                     "query": query,
-                    "shapeIds": shape_ids,
+                    "shapeIds": [match.shape_id for match in text_matches[:4]],
                     "focusResult": True,
-                    "routingSource": "shape_embedding",
+                    "routingSource": "database_text",
                 },
-                message="임베딩 검색으로 찾았어요. 여기 있는 내용이 가장 가까워요.",
+                message="저장된 Canvas 도형의 제목과 내용에서 찾았어요.",
             )
 
         return None

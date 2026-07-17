@@ -98,7 +98,7 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/085_add_sql_erd_activity_log_actions.sql` adds SQLtoERD session, schema, rename, delete, and meaningful note-content Activity Log actions.
 - `migrations/086_create_workspace_membership_revocation_outbox.sql` adds durable, reclaimable Workspace membership revocation delivery intents so Redis publish failures are retried without rolling back the committed membership deletion.
 - `migrations/088_add_github_sync_run_trigger_source.sql` classifies new GitHub sync runs as `manual` or `automatic`, preserves existing rows as `legacy`, and adds a recent-history lookup index by Workspace and trigger source. It was applied to the Supabase dev project under history entry `20260717065721_088_add_github_sync_run_trigger_source`.
-- `migrations/090_add_github_oauth_token_refresh.sql` adds an encrypted refresh token and access/refresh expiry timestamps to `github_oauth_connections`. It was applied to Supabase project `PILO-Project` under history entry `20260717105402_090_add_github_oauth_token_refresh`.
+- `migrations/092_add_github_oauth_token_refresh.sql` idempotently adds an encrypted refresh token and access/refresh expiry timestamps to `github_oauth_connections`. Its original `090` form was applied to Supabase project `PILO-Project` under history entry `20260717105402_090_add_github_oauth_token_refresh`; the repository file moved to `092` after the Calendar `090`/`091` sequence landed, and `IF NOT EXISTS` keeps already-applied environments safe.
 
 ## Operational Data Repairs
 

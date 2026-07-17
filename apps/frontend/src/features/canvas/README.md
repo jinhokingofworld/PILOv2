@@ -63,9 +63,14 @@ tldraw 편집 viewport의 정중앙에 Canvas 좌표 `(0, 0)`을 배치하고 10
 - `canvas-normalizers.ts`: API/mock 응답을 Canvas runtime 입력 형태로 정규화
 - `canvas-types.ts`: API client와 mock client가 공유하는 타입
 
-`agent/`는 Canvas AI run 생성·polling·개인 초안 적용/폐기 상태를 담당한다.
-Canvas AI의 가상 포인터, 도형 강조, 초안 preview는 현재 사용자 브라우저에서만
-렌더링하며 Canvas presence나 shape persistence queue에는 넣지 않는다.
+`agent/`는 Canvas AI run 생성·polling, 선택 영역 직렬화, HTML artifact 표시를
+담당한다. HTML 생성이 완료되면 선택 영역 오른쪽에 artifact 전체 내용을 가진
+`pilo-code-block`을 만들고 선택 root와 양방향 binding된 연결선을 함께 생성한다.
+이 shape와 binding은 일반 tldraw 편집과 같은 reporter/shape patch 경로를 타므로
+roomState, room history, checkpoint와 다른 참여자 화면에 반영된다. run id를 shape
+meta에 기록해 같은 완료 응답을 polling으로 여러 번 받아도 중복 생성하지 않는다.
+Canvas AI의 가상 포인터와 검색 결과 강조는 계속 현재 사용자 브라우저에서만
+렌더링하며 presence나 shape persistence queue에는 넣지 않는다.
 
 `TldrawSurface`는 Canvas API/DB 저장 흐름을 소유하지 않는다. PR Review 같은 다른
 도메인은 필요한 경우 이 surface만 가져가고, 자기 도메인 payload와 source of

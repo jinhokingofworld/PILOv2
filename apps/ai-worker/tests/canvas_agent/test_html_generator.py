@@ -6,6 +6,7 @@ import pytest
 
 from app.canvas_agent.planning.html_generator import (
     CanvasAgentHtmlGeneratorError,
+    _system_prompt,
     parse_canvas_agent_html_artifact,
 )
 
@@ -35,6 +36,19 @@ def test_parse_html_artifact_accepts_static_document() -> None:
 
     assert result["kind"] == "html"
     assert result["sourceShapeIds"] == ["shape:frame", "shape:title"]
+
+
+def test_system_prompt_preserves_structure_and_applies_requested_or_default_style() -> None:
+    prompt = _system_prompt()
+
+    assert "structural wireframe" in prompt
+    assert "relative proportions" in prompt
+    assert "If the prompt explicitly asks for a style" in prompt
+    assert "Toss-inspired Korean fintech product style" in prompt
+    assert "Add concise, plausible example labels" in prompt
+    assert "min-height: 100vh" in prompt
+    assert "CSS grid and flexbox" in prompt
+    assert "Do not preserve tiny Canvas pixel dimensions" in prompt
 
 
 @pytest.mark.parametrize(

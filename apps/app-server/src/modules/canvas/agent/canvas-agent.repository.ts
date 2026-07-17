@@ -10,7 +10,10 @@ import type {
   CanvasAgentRequestContext,
   CanvasAgentRunStatus
 } from "./canvas-agent.types";
-import { CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE } from "./canvas-agent.constants";
+import {
+  CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE,
+  CANVAS_AGENT_GENERIC_FAILURE_MESSAGE
+} from "./canvas-agent.constants";
 
 @Injectable()
 export class CanvasAgentRepository {
@@ -317,26 +320,21 @@ export class CanvasAgentRepository {
   }
 
   async failRun(runId: string, message: string): Promise<void> {
-    const userMessage = "디자인 초안을 만드는 중 오류가 났어요. 다시 시도해 주세요.";
+    const safeMessage = message.slice(0, 4096);
+    const userMessage =
+      safeMessage === CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE
+        ? CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE
+        : CANVAS_AGENT_GENERIC_FAILURE_MESSAGE;
     await this.database.execute(
       `
         UPDATE canvas_agent_runs
         SET status = 'failed', error_code = 'CANVAS_AGENT_FAILED', error_message = $2,
-          result_summary = CASE
-            WHEN $2 = $5 THEN $5
-            WHEN prompt ~* $3 THEN $4
-            ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
-          END,
+          result_summary = $3,
           result_json = jsonb_set(
             COALESCE(result_json, '{}'::jsonb),
             '{progress}',
             jsonb_build_object(
-              'message',
-              CASE
-                WHEN $2 = $5 THEN $5
-                WHEN prompt ~* $3 THEN $4
-                ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
-              END,
+              'message', $3,
               'highlightedShapeIds', '[]'::jsonb,
               'targetViewport', NULL,
               'toolTarget', NULL,
@@ -348,13 +346,7 @@ export class CanvasAgentRepository {
         WHERE id = $1
           AND status NOT IN ('completed', 'cancelled', 'expired')
       `,
-      [
-        runId,
-        message.slice(0, 4096),
-        "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
-        userMessage,
-        CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE
-      ]
+      [runId, safeMessage, userMessage]
     );
   }
 
