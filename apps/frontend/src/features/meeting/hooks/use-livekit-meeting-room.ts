@@ -181,7 +181,7 @@ export function useLiveKitMeetingRoom() {
     [attachRemoteAudio]
   );
 
-  const disconnect = useCallback(async () => {
+  const disconnect = useCallback(async (preserveRemoteParticipantAudioSettings = false) => {
     const room = roomRef.current;
     roomRef.current = null;
 
@@ -190,19 +190,25 @@ export function useLiveKitMeetingRoom() {
     }
 
     detachAllRemoteAudio();
-    remoteParticipantAudioSettingsRef.current.clear();
+    if (!preserveRemoteParticipantAudioSettings) {
+      remoteParticipantAudioSettingsRef.current.clear();
+      setRemoteParticipantAudioSettingsState({});
+    }
     setActiveSpeakerIdentities(new Set());
     setErrorMessage(null);
     setIsMicrophoneEnabled(false);
     setRoomName(null);
-    setRemoteParticipantAudioSettingsState({});
     setConnectionQuality("unknown");
     setStatus("idle");
   }, [detachAllRemoteAudio]);
 
   const connect = useCallback(
-    async (livekit: LiveKitJoin, audioDeviceId: string | null = null) => {
-      await disconnect();
+    async (
+      livekit: LiveKitJoin,
+      audioDeviceId: string | null = null,
+      preserveRemoteParticipantAudioSettings = false
+    ) => {
+      await disconnect(preserveRemoteParticipantAudioSettings);
 
       const room = new Room();
       roomRef.current = room;
