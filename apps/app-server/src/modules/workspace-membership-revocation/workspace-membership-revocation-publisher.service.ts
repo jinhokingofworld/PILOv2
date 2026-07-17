@@ -1,9 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { createClient, type RedisClientType } from "redis";
-import type { WorkspaceMembershipRevokedEventV1 } from "./workspace-membership-revocation.types";
+import {
+  WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
+  type WorkspaceMembershipRevokedEventV1
+} from "./workspace-membership-revocation.types";
 
-export const WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL =
-  "workspace:membership-revocations";
+export { WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL } from "./workspace-membership-revocation.types";
 
 type RedisConnectionAttempt = {
   client: RedisClientType;
