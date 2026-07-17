@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.8 seconds
+Output:
 CREATE TABLE public.document_embedding_jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL,
@@ -86,3 +89,5 @@ CREATE INDEX idx_document_embedding_chunks_fts
 ALTER TABLE public.document_embedding_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.document_embedding_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.document_embedding_chunks ENABLE ROW LEVEL SECURITY;
+
+
