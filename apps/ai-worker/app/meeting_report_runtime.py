@@ -22,7 +22,7 @@ from app.agent_processor import (
 )
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
 from app.canvas_agent.embeddings import LocalSentenceTransformerCanvasEmbedder
-from app.canvas_agent.planning.planner import OpenAiCanvasAgentPlanner
+from app.canvas_agent.planning.planner import OpenAiCanvasAgentIntentClassifier
 from app.canvas_agent.processor import CanvasAgentProcessor
 from app.canvas_agent.repository import PgCanvasAgentRepository
 from app.canvas_agent.routing.semantic_router import CanvasSemanticRouter
@@ -2214,7 +2214,7 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.openai_agent_planner_model,
         resolved_settings.openai_agent_planner_timeout_seconds,
     )
-    canvas_agent_planner = OpenAiCanvasAgentPlanner(
+    canvas_agent_intent_classifier = OpenAiCanvasAgentIntentClassifier(
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
     )
@@ -2246,7 +2246,7 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
     )
     canvas_agent_processor = CanvasAgentProcessor(
         canvas_agent_repository,
-        canvas_agent_planner,
+        canvas_agent_intent_classifier,
         CanvasSemanticRouter(canvas_agent_repository, canvas_embedder),
     )
     canvas_embedding_processor = CanvasEmbeddingProcessor(canvas_agent_repository, canvas_embedder)

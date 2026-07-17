@@ -91,6 +91,16 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 }
 
 {
+  const plan = deterministicPlan("지우개 어디 있어?", [], true);
+
+  assert.equal(plan.actionName, "find_canvas_tool");
+  assert.deepEqual(plan.input, {
+    toolTarget: "toolbar.draw.eraser",
+    toolTargetLabel: "지우개",
+  });
+}
+
+{
   const plan = deterministicPlan("북마크 기능 어디 있어?", [], true);
 
   assert.equal(plan.actionName, "find_canvas_tool");
@@ -173,21 +183,13 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 {
   const plan = deterministicPlan("기능 목록");
 
-  assert.equal(plan.actionName, "finish");
-  assert.match(plan.input.summary, /기능 설명 모드/);
-  assert.match(plan.input.summary, /파일\/폴더 드롭/);
-  assert.equal(plan.input.suppressProgress, true);
-  assert.equal(plan.showProgress, false);
+  assert.equal(plan, null);
 }
 
 {
   const plan = deterministicPlan("뭐 할 수 있어?");
 
-  assert.equal(plan.actionName, "finish");
-  assert.match(plan.input.summary, /기능 설명 모드/);
-  assert.match(plan.input.summary, /펜은 어디 있어/);
-  assert.equal(plan.input.suppressProgress, true);
-  assert.equal(plan.showProgress, false);
+  assert.equal(plan, null);
 }
 
 {
@@ -235,10 +237,15 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 }
 
 {
+  const plan = deterministicPlan("지우개 어디 있어?");
+
+  assert.equal(plan, null);
+}
+
+{
   const plan = deterministicPlan("선택한 메모들 정리해줘", ["shape:a", "shape:b"]);
 
-  assert.equal(plan.actionName, "finish");
-  assert.match(plan.input.summary, /새 도형을 만들거나 기존 도형을 변경하지 않습니다/);
+  assert.equal(plan, null);
 }
 
 {
@@ -250,36 +257,25 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 {
   const plan = deterministicPlan("로그인 흐름 다이어그램 초안 만들어줘");
 
-  assert.equal(plan.actionName, "finish");
-  assert.match(plan.input.summary, /새 도형을 만들거나 기존 도형을 변경하지 않습니다/);
-  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan, null);
 }
 
 {
   const plan = deterministicPlan("연결해줘", ["shape:login", "shape:auth"]);
 
-  assert.equal(plan.actionName, "finish");
-  assert.match(plan.input.summary, /새 도형을 만들거나 기존 도형을 변경하지 않습니다/);
-  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan, null);
 }
 
 {
   const plan = deterministicPlan("회의 메모 찾아줘");
 
-  assert.equal(plan.actionName, "find_shapes");
-  assert.equal(plan.input.query, "회의 메모");
-  assert.equal(plan.input.focusResult, true);
-  assert.equal(plan.input.routingSource, "deterministic_search");
+  assert.equal(plan, null);
 }
 
 {
   const plan = deterministicPlan("안녕 너는 누구야");
 
-  assert.equal(plan.actionName, "finish");
-  assert.match(plan.input.summary, /PILO Canvas AI/);
-  assert.match(plan.input.summary, /이미 있는 도형/);
-  assert.equal(plan.input.suppressProgress, true);
-  assert.equal(plan.showProgress, false);
+  assert.equal(plan, null);
 }
 
 {
@@ -356,6 +352,56 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
   assert.deepEqual(repository.searchCalls, [{ canvasId: "canvas-1", query: "인증" }]);
   assert.equal(result.shouldContinue, true);
   assert.deepEqual(result.resourceRefs, []);
+}
+
+{
+  const repository = new FakeRepository();
+  repository.searchResults = [shape("shape:dashboard")];
+  const service = new CanvasAgentActionService(repository);
+
+  const result = await service.execute(
+    run("대시보드 와이어프레임 어디 있어?"),
+    step({
+      intent: "find_shapes",
+      arguments: {
+        query: "대시보드 와이어프레임",
+        routingSource: "llm_intent_classifier",
+      },
+    }, "route_intent")
+  );
+
+  assert.deepEqual(repository.searchCalls, [
+    { canvasId: "canvas-1", query: "대시보드 와이어프레임" },
+  ]);
+  assert.deepEqual(result.resourceRefs, ["shape:dashboard"]);
+  assert.match(result.summary, /검색어를 해석해서/);
+}
+
+{
+  const repository = new FakeRepository();
+  const service = new CanvasAgentActionService(repository);
+
+  await assert.rejects(
+    service.execute(
+      run("대시보드 만들어줘"),
+      step({ intent: "create_shapes", arguments: { query: "대시보드" } }, "route_intent")
+    ),
+    (error) => error.response?.error?.message === "Canvas Agent intent is not supported",
+  );
+  assert.deepEqual(repository.searchCalls, []);
+}
+
+{
+  const repository = new FakeRepository();
+  const service = new CanvasAgentActionService(repository);
+
+  await assert.rejects(
+    service.execute(
+      run("대시보드 어디 있어?"),
+      step({ intent: "find_shapes", arguments: {} }, "route_intent")
+    ),
+    (error) => error.response?.error?.message === "Canvas Agent find_shapes intent query is required",
+  );
 }
 
 {

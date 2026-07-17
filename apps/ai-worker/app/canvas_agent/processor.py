@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
-from app.canvas_agent.planning.planner import CanvasAgentPlannerError
+from app.canvas_agent.planning.planner import CanvasAgentIntentClassifierError
 from app.canvas_agent.types import (
     CANVAS_AGENT_JOB_TYPE,
     CANVAS_AGENT_SCHEMA_VERSION,
@@ -22,11 +22,11 @@ class CanvasAgentRepository(Protocol):
 
     def get_run_context(self, job: CanvasAgentJob) -> CanvasAgentRunContext | None: ...
 
-    def create_planned_action(
+    def create_classified_intent(
         self,
         context: CanvasAgentRunContext,
-        action_name: str,
-        action_input: dict[str, object],
+        intent: str,
+        arguments: dict[str, object],
         message: str,
         model_name: str,
     ) -> None: ...
@@ -36,16 +36,16 @@ class CanvasAgentRepository(Protocol):
     def mark_failed(self, run_id: str, error_message: str) -> None: ...
 
 
-class CanvasAgentPlanner(Protocol):
+class CanvasAgentIntentClassifier(Protocol):
     model: str
 
-    def plan(self, context: CanvasAgentRunContext): ...
+    def classify(self, context: CanvasAgentRunContext): ...
 
 
-class CanvasSemanticRouter(Protocol):
+class CanvasSemanticIntentRouter(Protocol):
     model: str
 
-    def plan(self, context: CanvasAgentRunContext): ...
+    def classify(self, context: CanvasAgentRunContext): ...
 
 
 def parse_canvas_agent_job_payload(payload: dict[str, object]) -> CanvasAgentJob:
@@ -67,11 +67,11 @@ class CanvasAgentProcessor:
     def __init__(
         self,
         repository: CanvasAgentRepository,
-        planner: CanvasAgentPlanner,
-        semantic_router: CanvasSemanticRouter | None = None,
+        intent_classifier: CanvasAgentIntentClassifier,
+        semantic_router: CanvasSemanticIntentRouter | None = None,
     ) -> None:
         self.repository = repository
-        self.planner = planner
+        self.intent_classifier = intent_classifier
         self.semantic_router = semantic_router
 
     def process_payload(self, payload: dict[str, object]) -> CanvasAgentProcessResult:
@@ -115,13 +115,13 @@ class CanvasAgentProcessor:
                         context.run_id,
                         "먼저 캔버스 위 도형 임베딩에서 관련 내용을 찾아보고 있어요.",
                     )
-                local_plan = self._semantic_plan(context)
-                if local_plan is not None:
-                    self.repository.create_planned_action(
+                local_classification = self._semantic_classification(context)
+                if local_classification is not None:
+                    self.repository.create_classified_intent(
                         context,
-                        local_plan.action_name,
-                        local_plan.input,
-                        local_plan.message,
+                        local_classification.intent,
+                        local_classification.arguments,
+                        local_classification.message,
                         (
                             self.semantic_router.model
                             if self.semantic_router
@@ -130,40 +130,44 @@ class CanvasAgentProcessor:
                     )
                     return CanvasAgentProcessResult(
                         True,
-                        "canvas_agent_semantic_action_planned",
+                        "canvas_agent_semantic_intent_classified",
                         job.run_id,
                     )
 
                 self.repository.update_progress(
                     context.run_id,
-                    "임베딩으로 확실한 도형을 찾지 못해서 Canvas Planner로 이어서 판단하고 있어요.",
+                    "임베딩으로 확실한 도형을 찾지 못해서 검색어를 정리하고 있어요.",
                 )
-                plan = self.planner.plan(context)
-                action_input = dict(plan.input)
-                action_input.setdefault("routingSource", "llm_planner")
-                self.repository.create_planned_action(
+                classification = self.intent_classifier.classify(context)
+                arguments = dict(classification.arguments)
+                arguments.setdefault("routingSource", "llm_intent_classifier")
+                self.repository.create_classified_intent(
                     context,
-                    plan.action_name,
-                    action_input,
-                    plan.message,
-                    self.planner.model,
+                    classification.intent,
+                    arguments,
+                    classification.message,
+                    self.intent_classifier.model,
                 )
-            except CanvasAgentPlannerError as error:
+            except CanvasAgentIntentClassifierError as error:
                 self.repository.mark_failed(job.run_id, str(error))
-                return CanvasAgentProcessResult(True, "canvas_agent_planning_failed", job.run_id)
+                return CanvasAgentProcessResult(
+                    True,
+                    "canvas_agent_intent_classification_failed",
+                    job.run_id,
+                )
 
-            return CanvasAgentProcessResult(True, "canvas_agent_action_planned", job.run_id)
+            return CanvasAgentProcessResult(True, "canvas_agent_intent_classified", job.run_id)
         finally:
             self.repository.release_run_lock(job.run_id)
 
-    def _semantic_plan(self, context: CanvasAgentRunContext):
+    def _semantic_classification(self, context: CanvasAgentRunContext):
         if self.semantic_router is None:
             return None
         try:
-            return self.semantic_router.plan(context)
+            return self.semantic_router.classify(context)
         except Exception:
             # Local retrieval must never make the Canvas AI unavailable. A
-            # failed or not-yet-ready index falls through to the GPT planner.
+            # failed or not-yet-ready index falls through to the GPT classifier.
             return None
 
 

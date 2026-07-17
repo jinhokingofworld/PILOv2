@@ -188,9 +188,11 @@ export function CanvasStateReporter({
   );
   const lastFreeformSnapshotAtRef = useRef(0);
   const lastFreeformSnapshotSignatureRef = useRef<string | null>(null);
+  const freeformPersistSequenceRef = useRef(0);
   const pendingChangedAssetIdsRef = useRef(new Set<string>());
   const pendingDraftChangedShapeIdsRef = useRef(new Set<string>());
   const pendingDraftDeletedShapeIdsRef = useRef(new Set<string>());
+  const pendingFreehandPersistRef = useRef(false);
   const pendingPersistChangedShapeIdsRef = useRef(new Set<string>());
   const pendingExplicitDeletedShapeIdsRef = useRef(new Set<string>());
   const onFreeformShapesDraftChangeRef = useRef(onFreeformShapesDraftChange);
@@ -285,6 +287,10 @@ export function CanvasStateReporter({
       const isInteracting =
         isDrawing || editor.inputs.getIsPointing() || editor.inputs.getIsDragging();
 
+      if (isDrawing) {
+        pendingFreehandPersistRef.current = true;
+      }
+
       if (freeformSnapshotTimerRef.current) {
         if (isInteracting) {
           return;
@@ -368,14 +374,33 @@ export function CanvasStateReporter({
         if (freeformSyncTimerRef.current) {
           clearTimeout(freeformSyncTimerRef.current);
         }
+        const persistSequence = freeformPersistSequenceRef.current + 1;
+
+        freeformPersistSequenceRef.current = persistSequence;
 
         function scheduleFreeformPersist() {
-          freeformSyncTimerRef.current = setTimeout(() => {
+          const persistTimer = setTimeout(() => {
+            if (persistSequence !== freeformPersistSequenceRef.current) {
+              return;
+            }
+
             freeformSyncTimerRef.current = null;
 
             if (isFreehandDrawingInProgress(editor)) {
               scheduleFreeformPersist();
               return;
+            }
+
+            let persistFreeformShapes = nextFreeformShapes;
+
+            if (pendingFreehandPersistRef.current) {
+              try {
+                persistFreeformShapes = readFreeformShapes();
+              } catch (error) {
+                console.error("Canvas final freehand snapshot read failed", error);
+                scheduleFreeformPersist();
+                return;
+              }
             }
 
             const persistChange: PiloCanvasLocalShapeChange = {
@@ -390,8 +415,14 @@ export function CanvasStateReporter({
 
             pendingPersistChangedShapeIdsRef.current.clear();
             pendingExplicitDeletedShapeIdsRef.current.clear();
-            onFreeformShapesChangeRef.current(nextFreeformShapes, persistChange);
+            pendingFreehandPersistRef.current = false;
+            onFreeformShapesChangeRef.current(
+              persistFreeformShapes,
+              persistChange,
+            );
           }, FREEFORM_SYNC_IDLE_DELAY_MS);
+
+          freeformSyncTimerRef.current = persistTimer;
         }
 
         scheduleFreeformPersist();
@@ -413,8 +444,10 @@ export function CanvasStateReporter({
       pendingChangedAssetIdsRef.current.clear();
       pendingDraftChangedShapeIdsRef.current.clear();
       pendingDraftDeletedShapeIdsRef.current.clear();
+      pendingFreehandPersistRef.current = false;
       pendingPersistChangedShapeIdsRef.current.clear();
       pendingExplicitDeletedShapeIdsRef.current.clear();
+      freeformPersistSequenceRef.current += 1;
       removeListener();
     };
   }, [editor]);

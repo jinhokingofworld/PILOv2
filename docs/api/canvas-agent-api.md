@@ -16,8 +16,9 @@ not read, create, update, delete, or represent them as Canvas shapes.
 - Canvas domain owns this API and `canvas_agent_*` tables.
 - App Server validates Workspace and Canvas access and validates each read-only
   action. Canvas Agent does not perform persisted Canvas mutations.
-- AI Worker only chooses the next bounded Canvas action. It must not directly
-  mutate Canvas tables or call Canvas domain services.
+- AI Worker classifies the request into a bounded Canvas intent and extracts
+  typed arguments. It must not choose an arbitrary executable action, mutate
+  Canvas tables, or call Canvas domain services.
 - The schema reserves `parentAgentRunId` for a future general-Agent-to-Canvas
   delegation path. That integration is not exposed by this API yet, and it must
   remain Canvas-only when added.
@@ -35,16 +36,17 @@ not read, create, update, delete, or represent them as Canvas shapes.
 - `workspaceId`, `canvasId`, and requester identity are taken from the path and
   authenticated session, never from the request body.
 - A Canvas Agent request is asynchronous. The create endpoint returns without
-  waiting for AI Worker planning to finish.
+  waiting for AI Worker intent classification to finish.
 - A run is retained for 7 days. New runs do not create preview drafts.
 
 ## Processing model
 
 ```text
 Frontend -> App Server Canvas Agent API -> Canvas Agent run + SQS job
-  -> AI Worker: one next-action decision
-  -> App Server: validate and execute Canvas action
-  -> result saved to run/step, optionally enqueue next bounded step
+  -> AI Worker: one intent classification with typed arguments
+  -> route_intent step
+  -> App Server: validate the intent and execute its registered Canvas handler
+  -> result saved to run/step
   -> completed explanation/search/navigation result
 ```
 
@@ -52,9 +54,9 @@ For a shape-finding request, Canvas Agent uses this bounded cost-saving route:
 
 ```text
 Canvas-local text search over current shape title/text/type
-  -> local shape-search prototype embedding classifier
-  -> Canvas-only pgvector shape search when the prompt is clearly looking for an existing shape
-  -> GPT Planner when the prompt is not a shape search, retrieval is absent, or the result is ambiguous
+  -> Canvas-only pgvector shape search
+  -> structured GPT intent classification/query extraction when retrieval is absent or ambiguous
+  -> App Server find_shapes handler
 ```
 
 - The embedding Worker indexes only `shape_type`, `title`, and `text_content`.
@@ -70,21 +72,28 @@ Canvas-local text search over current shape title/text/type
   already an exact enough match.
 - The configured local model is `intfloat/multilingual-e5-small` (384
   dimensions). Queries use `query: ` and indexed Canvas text uses `passage: `.
-- The first-pass shape-search classifier uses fixed local prototype examples.
-  The default pgvector shape-result thresholds are shape similarity `0.78` and
+- The default pgvector shape-result thresholds are shape similarity `0.78` and
   winner margin `0.08`. A missing or ambiguous local match falls through to
-  GPT Planner.
-- Direct shape-search matches are returned as `find_shapes` with
+  the structured intent classifier.
+- Normal mode currently exposes only the `find_shapes` intent. The classifier
+  returns `{ intent, arguments }`; App Server stores it in a `route_intent`
+  step and maps it to the registered `find_shapes` handler. Adding a future
+  intent also requires an App Server handler and validation.
+- Direct shape-search matches are classified as `find_shapes` with
   `focusResult: true`, so the client can move the requester-only Canvas AI
   pointer, zoom to the matching shape area, and highlight the result. Separate
   local `select_shapes` or `focus_viewport` intent classification is not used
   for first-pass routing.
-- Each AI Worker decision can choose exactly one action.
+- Each AI Worker result contains exactly one allowed intent.
 - App Server limits a run to its configured maximum number of steps.
-- Deterministic toolbar-help actions can skip AI Worker planning only when the
+- Deploy App Server support for `route_intent` before deploying the AI Worker
+  classifier. App Server retains the legacy read-only action handlers so jobs
+  produced by the previous Worker remain executable during rollout.
+- Deterministic toolbar-help actions skip AI Worker classification only when the
   request explicitly uses tool-help mode.
-- Generation or mutation requests finish with a bounded explanation of the
-  currently supported read-only feature set.
+- In normal mode every prompt is interpreted as a search for existing Canvas
+  content. Generation or mutation wording cannot enable a write action; the
+  classifier extracts only the existing content to search for.
 
 ## Disabled legacy generation contract
 
@@ -294,26 +303,24 @@ arrow payload, and `CanvasService.syncShapesBatch` call.
 - If the target shapes are not found, are the same shape, or semantic matching
   is ambiguous, the action is not executed automatically.
 
-## Deterministic toolbar-help route
+## Tool-help mode route
 
-Before AI Worker planning, App Server may route built-in Canvas toolbar/help
-requests by keyword. Tool location/explanation matching only runs when
-`toolHelpMode` is `true`, but broad capability prompts such as `기능`,
-`기능 목록`, or `뭐 할 수 있어?` may return the Canvas tool overview directly
-without AI Worker planning. Normal Canvas AI chat does not use App Server
-keyword matching for shape search or selection. Mutation and generation
-requests are deterministically finished with the read-only capability notice.
+Before AI Worker classification, App Server routes built-in Canvas toolbar/help
+requests only when `toolHelpMode` is `true`. In this mode, tool
+location/explanation matching and the Canvas tool overview are handled directly
+without AI Worker classification. When `toolHelpMode` is `false`, App Server
+does not run toolbar/help, mutation, chat, or shape-search keyword routing; the
+request proceeds through the normal `find_shapes` intent path.
 
 | Intent | Keywords and examples | Action |
 | --- | --- | --- |
 | Find a Canvas toolbar tool | `도구`, `툴`, `툴바`, `기능`, `버튼`, `아이콘`, `어디`, `위치`, `찾아줘`, `보여줘`, `알려줘`, `사용법`, `어떻게` plus a known tool name<br>`메모 도구 어디 있어?`, `색상 변경 기능 알려줘`, `프레임은 어떻게 써?` | `find_canvas_tool` with `progress.toolTarget` |
 
 External-domain words can still appear as ordinary Canvas text search terms.
-For example, `이슈 메모 찾아줘` may search Canvas shape text through the
-AI Worker shape-search classifier. App Server does not reject external-domain
-phrases by keyword before planning; requests outside the Canvas action schema
-fall through the normal AI Worker route and must still resolve to bounded
-Canvas-only actions or a `finish` response.
+For example, `이슈 메모 찾아줘` searches Canvas shape text for an existing
+Canvas item; it does not read the Issue domain. App Server does not reject
+external-domain words by keyword before classification, and the only current
+normal-mode intent remains the Canvas-only `find_shapes` intent.
 
 Basic Canvas tool discovery uses `progress.toolTarget` so the client can move
 the requester-only Canvas AI pointer to the matching toolbar button and draw a
@@ -360,8 +367,8 @@ Basic Canvas tool targets:
 | Value | Meaning |
 | --- | --- |
 | `queued` | Run was created and is waiting for an App Server or AI Worker step. |
-| `planning` | AI Worker is selecting the next Canvas action. |
-| `executing` | App Server is validating or executing the selected action. |
+| `planning` | AI Worker is classifying the Canvas intent and extracting typed arguments. |
+| `executing` | App Server is validating and executing the classified intent handler. |
 | `draft_ready` | Legacy status for a requester-only preview created before generation was disabled. |
 | `completed` | The requested work finished. |
 | `failed` | The run cannot continue because of an unrecoverable error. |
@@ -430,7 +437,7 @@ Request:
 | `selectedShapeIds` | No | Current Canvas selection. Every id must belong to the path Canvas. |
 | `viewport` | No | Current visible Canvas bounds used only to create minimal planning context. |
 | `presentationMode` | No | `interactive` shows requester-only progress, pointer, highlight, and viewport focus on the Canvas surface. `background` creates the same read-only run without Canvas-local playback. Defaults to `interactive`. |
-| `toolHelpMode` | No | When `true`, route the prompt to the built-in Canvas toolbar/help dictionary instead of Canvas content search or planner routing. Defaults to `false`. |
+| `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, interpret the prompt only as a search for existing Canvas content. Defaults to `false`. |
 | `conversationContext` | No | Short-lived same-panel chat memory. `messages` contains up to 10 recent user/assistant messages, and `lastTask` can describe the previous Canvas Agent run for follow-up prompts. Legacy draft id/title fields remain nullable for compatibility. |
 | `clientRequestId` | No | Stable retry idempotency key, up to 128 bytes. |
 
@@ -439,8 +446,8 @@ Server rules:
 - The server checks Workspace membership and Canvas ownership before creating a run.
 - The server captures the Canvas `latestOpSeq` as `canvasRevision`.
 - Built-in tool/help matching is only deterministic when `toolHelpMode` is
-  `true`. Normal Canvas AI chat requests continue through Canvas content
-  search, semantic routing, or planner routing.
+  `true`. Normal Canvas AI requests continue through Canvas content search,
+  semantic retrieval, or structured intent classification.
 - `conversationContext` is advisory context only. The current `prompt` remains
   authoritative, and the server stores the context inside the run `context_json`
   without requiring a DB schema change.
@@ -505,7 +512,7 @@ resource ids, not raw shape payloads or AI provider output.
       {
         "id": "canvas_agent_step_uuid",
         "order": 1,
-        "actionName": "find_shapes",
+        "actionName": "route_intent",
         "status": "completed",
         "resourceRefs": ["shape:login", "shape:auth"],
         "completedAt": "2026-07-10T00:00:03.000Z"
@@ -617,21 +624,32 @@ shape ids, and an optional target viewport. The client renders any virtual
 pointer and selection highlight locally; it does not publish those
 values through shared Canvas presence or store pointer coordinates in the DB.
 
-## Initial action set
+## Intent and executor set
 
 ```text
-find_shapes
-select_shapes
-focus_viewport
-find_canvas_tool
-finish
+AI Worker intent:
+  find_shapes
+
+App Server executor actions:
+  route_intent
+  find_canvas_tool
+  finish
+
+Legacy read-only executor compatibility:
+  find_shapes
+  select_shapes
+  focus_viewport
 ```
 
-`connect_shapes` and `create_draft` are rejected by both AI Worker planning and
-App Server execution. Legacy `apply_draft` and `discard_draft` remain
-requester-only compatibility API operations, not AI Worker-planned actions.
+`route_intent.input_json` stores the classified `intent` and typed `arguments`.
+App Server owns the mapping from that intent to an executable Canvas handler.
 
-New Canvas actions require an input/output schema, App Server validation and
-executor, and documentation update. Canvas Agent actions must stay Canvas-only;
-adding Calendar, Issue, PR, Meeting, or any external-domain read/write/Canvas
-representation is out of scope for this API.
+`connect_shapes` and `create_draft` are rejected by both AI Worker
+classification and App Server execution. Legacy `apply_draft` and
+`discard_draft` remain
+requester-only compatibility API operations, not AI Worker-classified intents.
+
+New Canvas intents require an input/output schema, App Server validation and
+registered executor, tests, and documentation update. Canvas Agent intents must
+stay Canvas-only; adding Calendar, Issue, PR, Meeting, or any external-domain
+read/write/Canvas representation is out of scope for this API.

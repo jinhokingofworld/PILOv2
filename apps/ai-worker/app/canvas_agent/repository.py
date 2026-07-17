@@ -118,14 +118,18 @@ class PgCanvasAgentRepository:
 
         return [_shape_summary(row) for row in rows]
 
-    def create_planned_action(
+    def create_classified_intent(
         self,
         context: CanvasAgentRunContext,
-        action_name: str,
-        action_input: dict[str, object],
+        intent: str,
+        arguments: dict[str, object],
         message: str,
         model_name: str,
     ) -> None:
+        action_input = {
+            "intent": intent,
+            "arguments": arguments,
+        }
         self.connection.execute(
             """
             WITH next_step AS (
@@ -144,7 +148,7 @@ class PgCanvasAgentRepository:
             (
                 context.run_id,
                 context.run_id,
-                action_name,
+                "route_intent",
                 json.dumps(action_input, ensure_ascii=False),
                 model_name,
             ),
@@ -163,7 +167,7 @@ class PgCanvasAgentRepository:
                     {
                         "progress": {
                             "message": message,
-                            "highlightedShapeIds": _shape_ids(action_input),
+                            "highlightedShapeIds": _shape_ids(arguments),
                             "targetViewport": None,
                         }
                     },

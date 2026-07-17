@@ -7,8 +7,14 @@ export type CanvasAccessContext = {
 };
 
 export type CanvasRoomAccess = {
+  boardType: "freeform" | "review";
+  engineType: string;
   readOnly: boolean;
 };
+
+export function isClassicCanvasRoomAccess(access: CanvasRoomAccess): boolean {
+  return access.boardType === "freeform" && access.engineType === "classic";
+}
 
 export type CanvasAccessService = {
   getCanvasRoomAccess: (
@@ -23,6 +29,7 @@ export type CanvasAccessService = {
 
 type CanvasAccessRow = {
   board_type: string;
+  engine_type: string | null;
   review_room_status: string | null;
 };
 
@@ -41,13 +48,18 @@ export function createCanvasAccessService(
       }
 
       if (!database) {
-        return { readOnly: false };
+        return {
+          boardType: "freeform",
+          engineType: "classic",
+          readOnly: false,
+        };
       }
 
       const access = await database.queryOne<CanvasAccessRow>(
         `
           SELECT
             c.board_type,
+            c.engine_type,
             review_room.status AS review_room_status
           FROM canvas c
           JOIN workspace_members wm
@@ -76,16 +88,28 @@ export function createCanvasAccessService(
       }
 
       if (access.board_type === "freeform") {
-        return { readOnly: false };
+        return {
+          boardType: "freeform",
+          engineType: access.engine_type ?? "classic",
+          readOnly: false,
+        };
       }
 
       if (access.board_type === "review") {
         if (access.review_room_status === "active") {
-          return { readOnly: false };
+          return {
+            boardType: "review",
+            engineType: access.engine_type ?? "classic",
+            readOnly: false,
+          };
         }
 
         if (access.review_room_status === "completed") {
-          return { readOnly: true };
+          return {
+            boardType: "review",
+            engineType: access.engine_type ?? "classic",
+            readOnly: true,
+          };
         }
       }
 
@@ -97,7 +121,11 @@ export function createCanvasAccessService(
       }
 
       if (!database) {
-        return { readOnly: false };
+        return {
+          boardType: "freeform",
+          engineType: "tldraw_sync",
+          readOnly: false,
+        };
       }
 
       const access = await database.queryOne<CanvasTldrawSyncAccessRow>(
@@ -122,7 +150,11 @@ export function createCanvasAccessService(
         return null;
       }
 
-      return { readOnly: false };
+      return {
+        boardType: "freeform",
+        engineType: "tldraw_sync",
+        readOnly: false,
+      };
     },
   };
 }

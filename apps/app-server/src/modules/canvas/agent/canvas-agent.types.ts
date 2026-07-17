@@ -2,6 +2,7 @@ import { QueryResultRow } from "pg";
 import type { CanvasShapeBatchPayload } from "../contracts/canvas.types";
 
 export const CANVAS_AGENT_ACTION_NAMES = [
+  "route_intent",
   "find_canvas_tool",
   "find_shapes",
   "select_shapes",
@@ -10,6 +11,9 @@ export const CANVAS_AGENT_ACTION_NAMES = [
   "create_draft",
   "finish"
 ] as const;
+
+export const CANVAS_AGENT_INTENT_NAMES = ["find_shapes"] as const;
+export type CanvasAgentIntentName = (typeof CANVAS_AGENT_INTENT_NAMES)[number];
 
 export type CanvasAgentActionName = (typeof CANVAS_AGENT_ACTION_NAMES)[number];
 export type CanvasAgentRunStatus =
