@@ -27,11 +27,11 @@
 **Interfaces:**
 - Produces `WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL`, `WorkspaceMembershipRevokedEventV1`, and `isWorkspaceMembershipRevokedEvent(payload)` for Chat, PDF, and Documents.
 
-- [ ] Write a test that imports the shared contract and accepts only an exact V1 revocation payload.
-- [ ] Run the test and verify it fails because the shared module is absent.
-- [ ] Move the existing validator and channel constant from Chat into the shared module, then update Chat imports without changing Chat behavior.
-- [ ] Run the focused Chat revocation test and verify it passes.
-- [ ] Commit the shared contract extraction.
+- [x] Write a test that imports the shared contract and accepts only an exact V1 revocation payload.
+- [x] Run the test and verify it fails because the shared module is absent.
+- [x] Move the existing validator and channel constant from Chat into the shared module, then update Chat imports without changing Chat behavior.
+- [x] Run the focused Chat revocation test and verify it passes.
+- [x] Commit the shared contract extraction.
 
 ### Task 2: Evict revoked users from PDF collaboration
 
@@ -46,11 +46,11 @@
 - Produces `createPdfCollaborationMembershipRevocationHandler({ io, roomState })`.
 - Adds `roomState.clearWorkspaceSocket(socketId, workspaceId)` returning removed PDF presence records.
 
-- [ ] Write a failing test where a revoked user with two local PDF tabs is removed from only the matching Workspace, receives Socket.IO `leave` calls, and emits presence leave events.
-- [ ] Run the test and verify it fails because the PDF revocation handler is absent.
-- [ ] Implement the smallest handler: scan local sockets by authenticated user ID, clear matching PDF presence/pointers, leave each matching room, and notify remaining participants.
-- [ ] Subscribe the handler beside Chat in the existing membership revocation subscriber; keep page/pointer/stroke handlers unchanged so the removed room membership causes their existing `room_not_joined` rejection.
-- [ ] Run the PDF handler and room-state tests, then commit.
+- [x] Write a failing test where a revoked user with two local PDF tabs is removed from only the matching Workspace, receives Socket.IO `leave` calls, and emits presence leave events.
+- [x] Run the test and verify it fails because the PDF revocation handler is absent.
+- [x] Implement the smallest handler: scan local sockets by authenticated user ID, clear matching PDF presence/pointers, leave each matching room, and notify remaining participants.
+- [x] Subscribe the handler beside Chat in the existing membership revocation subscriber; keep page/pointer/stroke handlers unchanged so the removed room membership causes their existing `room_not_joined` rejection.
+- [x] Run the PDF handler and room-state tests, then commit.
 
 ### Task 3: Close revoked native document connections
 
@@ -66,18 +66,18 @@
 - The handler walks active Hocuspocus documents and closes only connections whose `context.workspaceId` and `context.userId` match the event.
 - `createRealtimeSocketServer` accepts additional membership-revocation handlers supplied by the bootstrap.
 
-- [ ] Write a failing test with matching and non-matching Hocuspocus connections; expect only matching connections to close with an access-revoked close event.
-- [ ] Run the test and verify it fails because the document revocation handler is absent.
-- [ ] Implement the handler using Hocuspocus public active-document and connection APIs, and register it during server bootstrap.
-- [ ] Ensure the Redis subscriber waits for both Chat and Document handlers before shutdown continues.
-- [ ] Run focused document and socket contract tests, then commit.
+- [x] Write a failing test with matching and non-matching Hocuspocus connections; expect only matching connections to close with an access-revoked close event.
+- [x] Run the test and verify it fails because the document revocation handler is absent.
+- [x] Implement the handler using Hocuspocus public active-document and connection APIs, and register it during server bootstrap.
+- [x] Ensure the Redis subscriber waits for both Chat and Document handlers before shutdown continues.
+- [x] Run focused document and socket contract tests, then commit.
 
 ### Task 4: Verify and prepare review
 
 **Files:**
 - Modify: `docs/superpowers/plans/2026-07-17-drive-realtime-membership-revocation.md`
 
-- [ ] Run `npm.cmd run build --prefix apps/realtime-server`.
-- [ ] Run the focused Chat, PDF, and document revocation tests.
-- [ ] Run `git diff --check` and inspect the final diff for accidental Canvas or frontend changes.
-- [ ] Mark completed plan tasks and commit the tracking update.
+- [x] Run `npm.cmd run build --prefix apps/realtime-server`.
+- [x] Run the focused Chat, PDF, and document revocation tests.
+- [x] Run `git diff --check` and inspect the final diff for accidental Canvas or frontend changes.
+- [x] Mark completed plan tasks and commit the tracking update.
