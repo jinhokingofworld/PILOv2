@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { badRequest } from "../../../common/api-error";
+import { badRequest, conflict } from "../../../common/api-error";
 import type {
   SqlErdSchemaGenerationWarning,
   SqlErdSchemaSpecV1
@@ -16,6 +16,10 @@ import type {
   AgentToolExecutionResult,
   AgentToolInputSchema
 } from "../types/agent-tool.types";
+import {
+  buildSqlErdAgentSchemaProjection,
+  resolveSqlErdAgentTableFocus
+} from "./sql-erd-table-focus";
 
 type SqlErdAgentTargetMode = "new_session" | "replace_current";
 
@@ -25,11 +29,112 @@ interface ConfirmedSqlErdAgentInput {
   targetMode: SqlErdAgentTargetMode;
 }
 
+interface InspectSqlErdSchemaInput {
+  featureQuery: string;
+  sessionId?: string;
+  sessionTitle?: string;
+}
+
+interface FocusSqlErdReason {
+  tableRef: string;
+  reason: string;
+}
+
+interface FocusSqlErdTablesInput {
+  sessionId: string;
+  sessionRevision: number;
+  featureLabel: string;
+  primaryTableRefs: string[];
+  relatedTableRefs: string[];
+  confidence: "high" | "medium" | "low";
+  reasons: FocusSqlErdReason[];
+}
+
+type SqlErdSessionCandidate = {
+  id: string;
+  title: string;
+  updatedAt: string;
+  tableCount: number;
+  relationCount: number;
+};
+
+type SqlErdSessionResolution =
+  | { kind: "selected"; session: SqlErdSessionPayload }
+  | {
+      kind: "clarification";
+      reason: "no_sessions" | "multiple_sessions" | "session_title_not_found";
+      candidates: SqlErdSessionCandidate[];
+    };
+
 const TARGET_MODES: SqlErdAgentTargetMode[] = [
   "new_session",
   "replace_current"
 ];
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TABLE_REF_PATTERN = /^t[1-9][0-9]*$/;
+const FOCUS_CONFIDENCE_VALUES = ["high", "medium", "low"] as const;
+const MAX_PRIMARY_TABLES = 20;
+const MAX_RELATED_TABLES = 30;
+const MAX_FOCUS_REASONS = MAX_PRIMARY_TABLES + MAX_RELATED_TABLES;
 
+const INSPECT_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
+  type: "object",
+  required: ["featureQuery"],
+  additionalProperties: false,
+  properties: {
+    featureQuery: { type: "string", minLength: 1, maxLength: 200 },
+    sessionId: { type: "string", format: "uuid" },
+    sessionTitle: { type: "string", minLength: 1, maxLength: 120 }
+  }
+};
+
+const FOCUS_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
+  type: "object",
+  required: [
+    "sessionId",
+    "sessionRevision",
+    "featureLabel",
+    "primaryTableRefs",
+    "relatedTableRefs",
+    "confidence",
+    "reasons"
+  ],
+  additionalProperties: false,
+  properties: {
+    sessionId: { type: "string", format: "uuid" },
+    sessionRevision: { type: "integer", minimum: 1 },
+    featureLabel: { type: "string", minLength: 1, maxLength: 100 },
+    primaryTableRefs: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_PRIMARY_TABLES,
+      uniqueItems: true,
+      items: { type: "string", pattern: "^t[1-9][0-9]*$" }
+    },
+    relatedTableRefs: {
+      type: "array",
+      maxItems: MAX_RELATED_TABLES,
+      uniqueItems: true,
+      items: { type: "string", pattern: "^t[1-9][0-9]*$" }
+    },
+    confidence: { type: "string", enum: [...FOCUS_CONFIDENCE_VALUES] },
+    reasons: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_FOCUS_REASONS,
+      items: {
+        type: "object",
+        required: ["tableRef", "reason"],
+        additionalProperties: false,
+        properties: {
+          tableRef: { type: "string", pattern: "^t[1-9][0-9]*$" },
+          reason: { type: "string", minLength: 1, maxLength: 240 }
+        }
+      }
+    }
+  }
+};
 const SQL_ERD_SCHEMA_SPEC_INPUT_SCHEMA: AgentToolInputSchema = {
   type: "object",
   required: [
@@ -226,7 +331,41 @@ export class SqlErdAgentToolsService {
   constructor(private readonly sqlErdService: SqlErdService) {}
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
-    return [this.generateSqlErdDefinition()];
+    return [
+      this.generateSqlErdDefinition(),
+      this.inspectSqlErdSchemaDefinition(),
+      this.focusSqlErdTablesDefinition()
+    ];
+  }
+
+  private inspectSqlErdSchemaDefinition(): AgentToolDefinition<unknown> {
+    return {
+      name: "inspect_sql_erd_schema",
+      description:
+        "Workspace SQLtoERD session의 테이블 이름, 주요 컬럼과 FK 관계를 제한된 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용하며 session이 여러 개면 사용자가 선택할 후보를 반환합니다.",
+      riskLevel: "low",
+      executionMode: "auto",
+      inputSchema: INSPECT_SQL_ERD_INPUT_SCHEMA,
+      validateInput: (input) => this.validateInspectInput(input),
+      prepareExecution: (context, input) =>
+        this.prepareInspect(context, this.validateInspectInput(input)),
+      execute: (context, input) =>
+        this.executeInspect(context, this.validateInspectInput(input))
+    };
+  }
+
+  private focusSqlErdTablesDefinition(): AgentToolDefinition<unknown> {
+    return {
+      name: "focus_sql_erd_tables",
+      description:
+        "inspect_sql_erd_schema 결과의 compact table ref를 현재 session revision으로 검증하고 핵심 및 직접 관련 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session은 변경하지 않습니다.",
+      riskLevel: "low",
+      executionMode: "auto",
+      inputSchema: FOCUS_SQL_ERD_INPUT_SCHEMA,
+      validateInput: (input) => this.validateFocusInput(input),
+      execute: (context, input) =>
+        this.executeFocus(context, this.validateFocusInput(input))
+    };
   }
 
   private generateSqlErdDefinition(): AgentToolDefinition<unknown> {
@@ -348,6 +487,409 @@ export class SqlErdAgentToolsService {
       schemaSpec: validateSqlErdSchemaSpec(input.schemaSpec),
       targetMode: input.targetMode as SqlErdAgentTargetMode
     };
+  }
+
+  private async prepareInspect(
+    context: AgentToolContext,
+    input: InspectSqlErdSchemaInput
+  ) {
+    const resolution = await this.resolveInspectSession(context, input);
+    if (resolution.kind === "selected") {
+      return { kind: "execute" as const };
+    }
+
+    return {
+      kind: "needs_clarification" as const,
+      outputSummary: this.toAgentJsonObject({
+        status: "needs_clarification",
+        reason: resolution.reason,
+        question: this.inspectClarificationQuestion(resolution.reason),
+        candidates: resolution.candidates.map((candidate) => ({
+          title: candidate.title,
+          updatedAt: candidate.updatedAt,
+          tableCount: candidate.tableCount,
+          relationCount: candidate.relationCount
+        }))
+      }),
+      resourceRefs: resolution.candidates.map((candidate) => ({
+        domain: "sqltoerd",
+        resourceType: "session",
+        resourceId: candidate.id,
+        label: candidate.title,
+        url: `/sql-erd/session?sessionId=${encodeURIComponent(candidate.id)}`,
+        status: "candidate"
+      }))
+    };
+  }
+
+  private async executeInspect(
+    context: AgentToolContext,
+    input: InspectSqlErdSchemaInput
+  ): Promise<AgentToolExecutionResult> {
+    const resolution = await this.resolveInspectSession(context, input);
+    if (resolution.kind !== "selected") {
+      throw badRequest("SQLtoERD session selection requires clarification");
+    }
+    const { session } = resolution;
+    const projection = buildSqlErdAgentSchemaProjection(
+      session.modelJson,
+      input.featureQuery
+    );
+    return {
+      outputSummary: this.toAgentJsonObject({
+        sessionId: session.id,
+        sessionRevision: session.revision,
+        title: session.title,
+        dialect: session.dialect,
+        tableCount: session.tableCount,
+        relationCount: session.relationCount,
+        projection
+      }),
+      resourceRefs: []
+    };
+  }
+
+  private async executeFocus(
+    context: AgentToolContext,
+    input: FocusSqlErdTablesInput
+  ): Promise<AgentToolExecutionResult> {
+    const session = await this.sqlErdService.getSession(
+      context.currentUserId,
+      context.workspaceId,
+      input.sessionId
+    );
+    if (session.revision !== input.sessionRevision) {
+      throw conflict(
+        "SQLtoERD session revision changed; inspect the schema again"
+      );
+    }
+    const resolved = resolveSqlErdAgentTableFocus(session.modelJson, input);
+    const reasonByRef = new Map(
+      input.reasons.map((item) => [item.tableRef, item.reason])
+    );
+    const primaryTables = resolved.tables
+      .filter((table) => table.role === "primary")
+      .map((table) => ({
+        name: table.name,
+        reason: reasonByRef.get(table.ref) ?? ""
+      }));
+    const relatedTables = resolved.tables
+      .filter((table) => table.role === "related")
+      .map((table) => ({
+        name: table.name,
+        reason: reasonByRef.get(table.ref) ?? ""
+      }));
+
+    return {
+      outputSummary: this.toAgentJsonObject({
+        action: "focused",
+        sessionId: session.id,
+        sessionRevision: session.revision,
+        title: session.title,
+        featureLabel: input.featureLabel,
+        confidence: input.confidence,
+        primaryTables,
+        relatedTables,
+        relationCount: resolved.relationIds.length
+      }),
+      resourceRefs: [
+        {
+          domain: "sqltoerd",
+          resourceType: "session",
+          resourceId: session.id,
+          label: session.title,
+          url: `/sql-erd/session?sessionId=${encodeURIComponent(session.id)}`,
+          status: "focused",
+          metadata: {
+            version: 1,
+            view: "table_focus",
+            sessionRevision: session.revision,
+            featureLabel: input.featureLabel,
+            primaryTableIds: resolved.primaryTableIds,
+            relatedTableIds: resolved.relatedTableIds,
+            relationIds: resolved.relationIds,
+            confidence: input.confidence
+          }
+        }
+      ],
+      status: "focused"
+    };
+  }
+
+  private async resolveInspectSession(
+    context: AgentToolContext,
+    input: InspectSqlErdSchemaInput
+  ): Promise<SqlErdSessionResolution> {
+    if (input.sessionId) {
+      return {
+        kind: "selected",
+        session: await this.sqlErdService.getSession(
+          context.currentUserId,
+          context.workspaceId,
+          input.sessionId
+        )
+      };
+    }
+
+    const sessions = await this.sqlErdService.listSessions(
+      context.currentUserId,
+      context.workspaceId,
+      { limit: 100 }
+    );
+    if (input.sessionTitle) {
+      const matches = sessions.items.filter(
+        (session) => session.title === input.sessionTitle
+      );
+      if (matches.length === 1) {
+        return {
+          kind: "selected",
+          session: await this.sqlErdService.getSession(
+            context.currentUserId,
+            context.workspaceId,
+            matches[0].id
+          )
+        };
+      }
+      return {
+        kind: "clarification",
+        reason:
+          matches.length > 1
+            ? "multiple_sessions"
+            : "session_title_not_found",
+        candidates: this.toSessionCandidates(
+          matches.length > 1 ? matches : sessions.items
+        )
+      };
+    }
+
+    if (context.requestContext?.surface === "sql_erd") {
+      return {
+        kind: "selected",
+        session: await this.sqlErdService.getSession(
+          context.currentUserId,
+          context.workspaceId,
+          context.requestContext.sessionId
+        )
+      };
+    }
+    if (sessions.items.length === 1) {
+      return {
+        kind: "selected",
+        session: await this.sqlErdService.getSession(
+          context.currentUserId,
+          context.workspaceId,
+          sessions.items[0].id
+        )
+      };
+    }
+    return {
+      kind: "clarification",
+      reason:
+        sessions.items.length === 0 ? "no_sessions" : "multiple_sessions",
+      candidates: this.toSessionCandidates(sessions.items)
+    };
+  }
+
+  private toSessionCandidates(
+    sessions: Array<{
+      id: string;
+      title: string;
+      updatedAt: string;
+      tableCount: number;
+      relationCount: number;
+    }>
+  ): SqlErdSessionCandidate[] {
+    return sessions.slice(0, 5).map((session) => ({
+      id: session.id,
+      title: session.title,
+      updatedAt: session.updatedAt,
+      tableCount: session.tableCount,
+      relationCount: session.relationCount
+    }));
+  }
+
+  private inspectClarificationQuestion(
+    reason: "no_sessions" | "multiple_sessions" | "session_title_not_found"
+  ): string {
+    if (reason === "no_sessions") {
+      return "분석할 SQLtoERD 세션이 없습니다. 먼저 세션을 만들어 주세요.";
+    }
+    if (reason === "session_title_not_found") {
+      return "요청한 제목의 SQLtoERD 세션을 찾지 못했습니다. 사용할 세션을 선택해 주세요.";
+    }
+    return "분석할 SQLtoERD 세션이 여러 개입니다. 사용할 세션을 선택해 주세요.";
+  }
+
+  private validateInspectInput(input: unknown): InspectSqlErdSchemaInput {
+    if (!this.isPlainObject(input)) {
+      throw badRequest("inspect_sql_erd_schema input must be an object");
+    }
+    this.assertAllowedFields(
+      input,
+      ["featureQuery", "sessionId", "sessionTitle"],
+      "inspect_sql_erd_schema"
+    );
+    const featureQuery = this.readBoundedText(
+      input.featureQuery,
+      200,
+      "featureQuery"
+    );
+    const sessionId =
+      input.sessionId === undefined
+        ? undefined
+        : this.readUuid(input.sessionId, "sessionId");
+    const sessionTitle =
+      input.sessionTitle === undefined
+        ? undefined
+        : this.readBoundedText(input.sessionTitle, 120, "sessionTitle");
+    return { featureQuery, sessionId, sessionTitle };
+  }
+
+  private validateFocusInput(input: unknown): FocusSqlErdTablesInput {
+    if (!this.isPlainObject(input)) {
+      throw badRequest("focus_sql_erd_tables input must be an object");
+    }
+    this.assertAllowedFields(
+      input,
+      [
+        "sessionId",
+        "sessionRevision",
+        "featureLabel",
+        "primaryTableRefs",
+        "relatedTableRefs",
+        "confidence",
+        "reasons"
+      ],
+      "focus_sql_erd_tables"
+    );
+    if (
+      !Number.isSafeInteger(input.sessionRevision) ||
+      Number(input.sessionRevision) < 1
+    ) {
+      throw badRequest("sessionRevision must be a positive integer");
+    }
+    const primaryTableRefs = this.readTableRefs(
+      input.primaryTableRefs,
+      MAX_PRIMARY_TABLES,
+      true,
+      "primaryTableRefs"
+    );
+    const relatedTableRefs = this.readTableRefs(
+      input.relatedTableRefs,
+      MAX_RELATED_TABLES,
+      false,
+      "relatedTableRefs"
+    );
+    if (
+      typeof input.confidence !== "string" ||
+      !FOCUS_CONFIDENCE_VALUES.includes(
+        input.confidence as (typeof FOCUS_CONFIDENCE_VALUES)[number]
+      )
+    ) {
+      throw badRequest("confidence is invalid");
+    }
+    if (!Array.isArray(input.reasons) || input.reasons.length === 0) {
+      throw badRequest("reasons must be a non-empty array");
+    }
+    if (input.reasons.length > MAX_FOCUS_REASONS) {
+      throw badRequest("reasons exceeds the maximum item count");
+    }
+    const reasons = input.reasons.map((value) => {
+      if (!this.isPlainObject(value)) {
+        throw badRequest("focus reason must be an object");
+      }
+      this.assertAllowedFields(value, ["tableRef", "reason"], "focus reason");
+      const tableRef = this.readTableRef(value.tableRef, "reason.tableRef");
+      return {
+        tableRef,
+        reason: this.readBoundedText(value.reason, 240, "reason")
+      };
+    });
+    const selectedRefs = new Set([...primaryTableRefs, ...relatedTableRefs]);
+    const reasonRefs = new Set(reasons.map((reason) => reason.tableRef));
+    if (
+      reasonRefs.size !== reasons.length ||
+      reasonRefs.size !== selectedRefs.size ||
+      [...reasonRefs].some((ref) => !selectedRefs.has(ref))
+    ) {
+      throw badRequest("reasons must contain each selected table reference once");
+    }
+
+    return {
+      sessionId: this.readUuid(input.sessionId, "sessionId"),
+      sessionRevision: Number(input.sessionRevision),
+      featureLabel: this.readBoundedText(
+        input.featureLabel,
+        100,
+        "featureLabel"
+      ),
+      primaryTableRefs,
+      relatedTableRefs,
+      confidence: input.confidence as FocusSqlErdTablesInput["confidence"],
+      reasons
+    };
+  }
+
+  private readTableRefs(
+    value: unknown,
+    maxItems: number,
+    requireOne: boolean,
+    label: string
+  ): string[] {
+    if (
+      !Array.isArray(value) ||
+      (requireOne && value.length === 0) ||
+      value.length > maxItems
+    ) {
+      throw badRequest(`${label} is invalid`);
+    }
+    const refs = value.map((ref) => this.readTableRef(ref, label));
+    if (new Set(refs).size !== refs.length) {
+      throw badRequest(`${label} must be unique`);
+    }
+    return refs;
+  }
+
+  private readTableRef(value: unknown, label: string): string {
+    if (typeof value !== "string" || !TABLE_REF_PATTERN.test(value)) {
+      throw badRequest(`${label} contains an invalid table reference`);
+    }
+    return value;
+  }
+
+  private readUuid(value: unknown, label: string): string {
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+      throw badRequest(`${label} must be a UUID`);
+    }
+    return value;
+  }
+
+  private readBoundedText(
+    value: unknown,
+    maxLength: number,
+    label: string
+  ): string {
+    if (typeof value !== "string") {
+      throw badRequest(`${label} must be a string`);
+    }
+    const normalized = value.trim().replace(/\s+/g, " ");
+    if (!normalized || [...normalized].length > maxLength) {
+      throw badRequest(`${label} length is invalid`);
+    }
+    return normalized;
+  }
+
+  private assertAllowedFields(
+    value: Record<string, unknown>,
+    allowedFields: string[],
+    label: string
+  ): void {
+    const unexpected = Object.keys(value).find(
+      (field) => !allowedFields.includes(field)
+    );
+    if (unexpected) {
+      throw badRequest(`${label} field is invalid: ${unexpected}`);
+    }
   }
 
   private async executeGenerate(

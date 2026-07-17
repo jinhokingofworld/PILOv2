@@ -296,11 +296,51 @@ class FakeSqlErdService {
   constructor() {
     this.calls = [];
     this.session = sessionPayload();
+    this.sessions = [this.session];
   }
 
   async getSession(currentUserId, workspaceId, sessionId) {
     this.calls.push({ method: "getSession", currentUserId, workspaceId, sessionId });
-    return this.session;
+    if (this.session.id === sessionId) {
+      return this.session;
+    }
+    return this.sessions.find((session) => session.id === sessionId) ?? this.session;
+  }
+
+  async listSessions(currentUserId, workspaceId, query) {
+    this.calls.push({ method: "listSessions", currentUserId, workspaceId, query });
+    return {
+      items: this.sessions.map(
+        ({
+          id,
+          workspaceId: itemWorkspaceId,
+          title,
+          sourceFormat,
+          dialect,
+          tableCount,
+          relationCount,
+          revision,
+          createdBy,
+          updatedBy,
+          createdAt,
+          updatedAt
+        }) => ({
+          id,
+          workspaceId: itemWorkspaceId,
+          title,
+          sourceFormat,
+          dialect,
+          tableCount,
+          relationCount,
+          revision,
+          createdBy,
+          updatedBy,
+          createdAt,
+          updatedAt
+        })
+      ),
+      nextCursor: null
+    };
   }
 
   async createAgentGeneratedSession(
@@ -517,6 +557,199 @@ assert.deepEqual(
 assert.equal(replaced.outputSummary.action, "replaced");
 assert.equal(replaced.resourceRefs[0].resourceId, SESSION_ID);
 
+const focusSqlErdService = new FakeSqlErdService();
+focusSqlErdService.session = sessionPayload({
+  modelJson: focusModelJson(),
+  tableCount: 4,
+  relationCount: 3,
+  revision: 7
+});
+focusSqlErdService.sessions = [focusSqlErdService.session];
+const focusAdapter = new SqlErdAgentToolsService(focusSqlErdService);
+const focusDefinitions = focusAdapter.listDefinitions();
+const inspectDefinition = focusDefinitions.find(
+  (candidate) => candidate.name === "inspect_sql_erd_schema"
+);
+const focusDefinition = focusDefinitions.find(
+  (candidate) => candidate.name === "focus_sql_erd_tables"
+);
+
+assert.ok(inspectDefinition);
+assert.ok(focusDefinition);
+assert.equal(inspectDefinition.riskLevel, "low");
+assert.equal(inspectDefinition.executionMode, "auto");
+assert.equal(focusDefinition.riskLevel, "low");
+assert.equal(focusDefinition.executionMode, "auto");
+assert.deepEqual(inspectDefinition.inputSchema.required, ["featureQuery"]);
+assert.equal(inspectDefinition.inputSchema.additionalProperties, false);
+assert.deepEqual(focusDefinition.inputSchema.required, [
+  "sessionId",
+  "sessionRevision",
+  "featureLabel",
+  "primaryTableRefs",
+  "relatedTableRefs",
+  "confidence",
+  "reasons"
+]);
+
+const inspectInput = inspectDefinition.validateInput({
+  featureQuery: "결제 기능"
+});
+assert.deepEqual(await inspectDefinition.prepareExecution(context, inspectInput), {
+  kind: "execute"
+});
+const inspected = await inspectDefinition.execute(context, inspectInput);
+assert.equal(inspected.outputSummary.sessionId, SESSION_ID);
+assert.equal(inspected.outputSummary.sessionRevision, 7);
+assert.equal(inspected.outputSummary.title, focusSqlErdService.session.title);
+assert.equal(inspected.outputSummary.projection.tables.length, 4);
+assert.equal(JSON.stringify(inspected.outputSummary).includes("CREATE TABLE"), false);
+assert.equal(JSON.stringify(inspected.outputSummary).includes("internal-payments-id"), false);
+assert.deepEqual(inspected.resourceRefs, []);
+
+const secondSessionId = "55555555-5555-4555-8555-555555555555";
+const multipleSqlErdService = new FakeSqlErdService();
+multipleSqlErdService.sessions = [
+  sessionPayload({
+    id: SESSION_ID,
+    title: "주문 ERD",
+    updatedAt: "2026-07-16T00:00:00.000Z",
+    modelJson: focusModelJson(),
+    tableCount: 4,
+    relationCount: 3
+  }),
+  sessionPayload({
+    id: secondSessionId,
+    title: "결제 ERD",
+    updatedAt: "2026-07-17T00:00:00.000Z",
+    modelJson: focusModelJson(),
+    tableCount: 4,
+    relationCount: 3
+  })
+];
+const multipleAdapter = new SqlErdAgentToolsService(multipleSqlErdService);
+const multipleInspect = multipleAdapter
+  .listDefinitions()
+  .find((candidate) => candidate.name === "inspect_sql_erd_schema");
+const ambiguousPreparation = await multipleInspect.prepareExecution(
+  context,
+  multipleInspect.validateInput({ featureQuery: "결제 기능" })
+);
+assert.equal(ambiguousPreparation.kind, "needs_clarification");
+assert.equal(ambiguousPreparation.outputSummary.reason, "multiple_sessions");
+assert.deepEqual(
+  ambiguousPreparation.outputSummary.candidates.map((candidate) => ({
+    title: candidate.title,
+    updatedAt: candidate.updatedAt,
+    tableCount: candidate.tableCount
+  })),
+  [
+    {
+      title: "주문 ERD",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      tableCount: 4
+    },
+    {
+      title: "결제 ERD",
+      updatedAt: "2026-07-17T00:00:00.000Z",
+      tableCount: 4
+    }
+  ]
+);
+assert.equal(ambiguousPreparation.resourceRefs.length, 2);
+
+assert.deepEqual(
+  await multipleInspect.prepareExecution(
+    context,
+    multipleInspect.validateInput({
+      featureQuery: "결제 기능",
+      sessionTitle: "결제 ERD"
+    })
+  ),
+  { kind: "execute" }
+);
+const titledInspection = await multipleInspect.execute(
+  context,
+  multipleInspect.validateInput({
+    featureQuery: "결제 기능",
+    sessionTitle: "결제 ERD"
+  })
+);
+assert.equal(titledInspection.outputSummary.sessionId, secondSessionId);
+
+const emptySqlErdService = new FakeSqlErdService();
+emptySqlErdService.sessions = [];
+const emptyInspect = new SqlErdAgentToolsService(emptySqlErdService)
+  .listDefinitions()
+  .find((candidate) => candidate.name === "inspect_sql_erd_schema");
+const emptyPreparation = await emptyInspect.prepareExecution(
+  context,
+  emptyInspect.validateInput({ featureQuery: "결제 기능" })
+);
+assert.equal(emptyPreparation.kind, "needs_clarification");
+assert.equal(emptyPreparation.outputSummary.reason, "no_sessions");
+
+const focusInput = focusDefinition.validateInput({
+  sessionId: SESSION_ID,
+  sessionRevision: 7,
+  featureLabel: "결제 기능",
+  primaryTableRefs: ["t2"],
+  relatedTableRefs: ["t1", "t3"],
+  confidence: "medium",
+  reasons: [
+    { tableRef: "t2", reason: "결제 정보를 저장합니다." },
+    { tableRef: "t1", reason: "결제 대상 주문입니다." },
+    { tableRef: "t3", reason: "결제 시도 이력입니다." }
+  ]
+});
+const focused = await focusDefinition.execute(context, focusInput);
+assert.equal(focused.outputSummary.action, "focused");
+assert.deepEqual(
+  focused.outputSummary.primaryTables.map((table) => table.name),
+  ["payments"]
+);
+assert.deepEqual(
+  focused.outputSummary.relatedTables.map((table) => table.name),
+  ["orders", "payment_attempts"]
+);
+assert.deepEqual(focused.resourceRefs, [
+  {
+    domain: "sqltoerd",
+    resourceType: "session",
+    resourceId: SESSION_ID,
+    label: focusSqlErdService.session.title,
+    url: `/sql-erd/session?sessionId=${SESSION_ID}`,
+    status: "focused",
+    metadata: {
+      version: 1,
+      view: "table_focus",
+      sessionRevision: 7,
+      featureLabel: "결제 기능",
+      primaryTableIds: ["internal-payments-id"],
+      relatedTableIds: ["internal-orders-id", "internal-attempts-id"],
+      relationIds: [
+        "internal-order-payment-relation",
+        "internal-payment-attempt-relation"
+      ],
+      confidence: "medium"
+    }
+  }
+]);
+assert.equal(JSON.stringify(focused).includes("CREATE TABLE"), false);
+assert.equal(JSON.stringify(focused).includes('"modelJson"'), false);
+
+focusSqlErdService.session = sessionPayload({
+  ...focusSqlErdService.session,
+  revision: 8
+});
+focusSqlErdService.sessions = [focusSqlErdService.session];
+await assert.rejects(
+  () => focusDefinition.execute(context, focusInput),
+  (error) =>
+    error.getStatus() === 409 &&
+    /revision|inspect/i.test(error.getResponse().error.message)
+);
+
 const registry = new AgentToolRegistryService(
   undefined,
   undefined,
@@ -526,6 +759,15 @@ const registry = new AgentToolRegistryService(
 assert.equal(
   registry.getDefinition("generate_sql_erd").name,
   "generate_sql_erd"
+);
+assert.equal(
+  new AgentToolRegistryService(
+    undefined,
+    undefined,
+    undefined,
+    focusAdapter
+  ).getDefinition("focus_sql_erd_tables").name,
+  "focus_sql_erd_tables"
 );
 
 const [agentApiContract, sqlErdApiContract] = await Promise.all([
