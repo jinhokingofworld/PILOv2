@@ -16,6 +16,42 @@ export type CanvasAgentShapeSummary = {
   height: number;
 };
 
+export type CanvasAgentSelectedSceneShape = {
+  id: string;
+  shapeType: string;
+  parentId: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  zIndex: number;
+  depth: number;
+  title: string | null;
+  text: string | null;
+  assetRef: string | null;
+  style: Record<string, string | number | boolean | null>;
+};
+
+export type CanvasAgentSelectedScene = {
+  selectionMode: "frame" | "multi-selection";
+  bounds: { width: number; height: number };
+  rootShapeIds: string[];
+  shapes: CanvasAgentSelectedSceneShape[];
+  options: {
+    styleMode: "faithful";
+    responsive: false;
+    includeJavaScript: false;
+  };
+};
+
+export type CanvasAgentHtmlArtifact = {
+  kind: "html";
+  title: string;
+  html: string;
+  sourceShapeIds: string[];
+};
+
 export type CanvasAgentPresentationMode = "interactive" | "background";
 
 export type CanvasAgentConversationMessage = {
@@ -61,6 +97,7 @@ export type CanvasAgentRun = {
   summary: string | null;
   canvasRevision: number | null;
   progress: CanvasAgentProgress | null;
+  artifact: CanvasAgentHtmlArtifact | null;
   createdAt: string;
   completedAt: string | null;
   expiresAt: string;

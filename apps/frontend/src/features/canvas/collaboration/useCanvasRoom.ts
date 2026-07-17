@@ -750,7 +750,7 @@ export function useCanvasRoom(
       }
 
       reconcileOperationSeq(payload);
-      remoteShapePreviewStore.removeShapeIds(payload.actorUserId, [
+      remoteShapePreviewStore.markCommittedShapeIds(payload.actorUserId, [
         payload.shapeId,
       ]);
     });
@@ -821,7 +821,10 @@ export function useCanvasRoom(
         return;
       }
 
-      remoteShapePreviewStore.clearActor(payload.actorUserId);
+      remoteShapePreviewStore.clearActor(
+        payload.actorUserId,
+        payload.shapeIds,
+      );
     });
     realtimeSocket.on("canvas:room:loaded-regions:update", (payload) => {
       if (!isSameCanvasRoom(payload, room)) {
@@ -863,7 +866,7 @@ export function useCanvasRoom(
         ),
       }));
 
-      remoteShapePreviewStore.removeShapeIds(
+      remoteShapePreviewStore.markCommittedShapeIds(
         payload.actorUserId,
         patchedShapeIds,
       );

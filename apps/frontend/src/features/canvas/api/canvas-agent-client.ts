@@ -6,6 +6,7 @@ import type {
   CanvasAgentPresentationMode,
   CanvasAgentRun,
   CanvasAgentRunDetail,
+  CanvasAgentSelectedScene,
   CanvasAgentShapeSummary,
   CanvasAgentViewport,
 } from "./canvas-agent-types";
@@ -67,6 +68,8 @@ export function createCanvasAgentClient() {
         conversationContext?: CanvasAgentConversationContext;
         presentationMode?: CanvasAgentPresentationMode;
         selectedShapeIds: string[];
+        selectedScene: CanvasAgentSelectedScene | null;
+        selectedSceneError: string | null;
         shapeSummaries: CanvasAgentShapeSummary[];
         toolHelpMode?: boolean;
         viewport: CanvasAgentViewport;

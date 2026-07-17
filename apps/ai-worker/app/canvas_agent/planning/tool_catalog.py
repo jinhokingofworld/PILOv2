@@ -158,6 +158,20 @@ ALLOWED_INTENTS: list[dict[str, object]] = [
         "name": "find_shapes",
         "arguments": {"query": "concise existing Canvas content to search for"},
     },
+    {
+        "name": "generate_html",
+        "arguments": {
+            "query": "empty string",
+            "shapeIds": "empty array",
+        },
+    },
+    {
+        "name": "unsupported",
+        "arguments": {
+            "query": "concise unsupported request",
+            "shapeIds": "empty array",
+        },
+    },
 ]
 
 

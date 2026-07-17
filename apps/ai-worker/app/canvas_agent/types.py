@@ -6,6 +6,8 @@ CANVAS_AGENT_JOB_TYPE = "canvas_agent_step_requested"
 CANVAS_AGENT_SCHEMA_VERSION = "canvas-agent:v1"
 CANVAS_AGENT_INTENTS = {
     "find_shapes",
+    "generate_html",
+    "unsupported",
 }
 CANVAS_AGENT_ACTIONS = {
     "route_intent",

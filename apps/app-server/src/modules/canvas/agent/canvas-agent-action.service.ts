@@ -2,7 +2,9 @@ import { Injectable } from "@nestjs/common";
 import { badRequest } from "../../../common/api-error";
 import { CanvasAgentRepository } from "./canvas-agent.repository";
 import { findCanvasAgentToolTarget } from "./canvas-agent-tool-targets";
+import { CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE } from "./canvas-agent.constants";
 import type {
+  CanvasAgentHtmlArtifact,
   CanvasAgentProgressPayload,
   CanvasAgentRunRow,
   CanvasAgentShapeSummary,
@@ -12,6 +14,7 @@ import type {
 } from "./canvas-agent.types";
 
 export type CanvasAgentActionResult = {
+  artifact?: CanvasAgentHtmlArtifact | null;
   progress: CanvasAgentProgressPayload | null;
   resourceRefs: string[];
   shouldContinue: boolean;
@@ -71,6 +74,43 @@ export class CanvasAgentActionService {
         const query = this.readText(intentArguments.query);
         if (!query) throw badRequest("Canvas Agent find_shapes intent query is required");
         return this.findShapes(run, { ...intentArguments, query });
+      }
+      case "generate_html": {
+        const selectionError = this.readText(intentArguments.selectionError);
+        if (intentArguments.missingSelection === true || selectionError) {
+          const summary = selectionError || "HTML로 만들 캔버스 영역을 먼저 선택해주세요.";
+          return {
+            artifact: null,
+            summary,
+            resourceRefs: [],
+            shouldContinue: false,
+            progress: this.progress(summary, [], null)
+          };
+        }
+        const artifact = this.readHtmlArtifact(intentArguments.artifact);
+        const selectedSceneIds = this.readSelectedSceneIds(run.context_json.selectedScene);
+        if (!selectedSceneIds.length
+          || artifact.sourceShapeIds.some((shapeId) => !selectedSceneIds.includes(shapeId))) {
+          throw badRequest(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+        }
+        const summary = "선택한 영역의 정적 HTML/CSS 초안을 만들었습니다.";
+        return {
+          artifact,
+          summary,
+          resourceRefs: artifact.sourceShapeIds,
+          shouldContinue: false,
+          progress: this.progress(summary, [], null)
+        };
+      }
+      case "unsupported": {
+        const summary = "현재 Canvas AI는 기존 도형 찾기와 선택 영역의 정적 HTML/CSS 생성만 지원합니다.";
+        return {
+          artifact: null,
+          summary,
+          resourceRefs: [],
+          shouldContinue: false,
+          progress: this.progress(summary, [], null)
+        };
       }
       default:
         throw badRequest("Canvas Agent intent is not supported");
@@ -258,9 +298,45 @@ export class CanvasAgentActionService {
     return text || null;
   }
 
-  private readStringArray(value: unknown): string[] {
+  private readStringArray(value: unknown, maxItems = 40): string[] {
     if (!Array.isArray(value)) return [];
-    return Array.from(new Set(value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()))).slice(0, 40);
+    return Array.from(new Set(value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()))).slice(0, maxItems);
+  }
+
+  private readHtmlArtifact(value: unknown): CanvasAgentHtmlArtifact {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw badRequest(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+    }
+    const artifact = value as Record<string, unknown>;
+    const title = this.readText(artifact.title).slice(0, 200);
+    const html = typeof artifact.html === "string" ? artifact.html.trim() : "";
+    const sourceShapeIds = this.readStringArray(artifact.sourceShapeIds, 160);
+    if (artifact.kind !== "html" || !title || !html || !sourceShapeIds.length) {
+      throw badRequest(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+    }
+    if (Buffer.byteLength(html, "utf8") > 250_000) {
+      throw badRequest(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+    }
+    if (/<\s*(script|iframe|object|embed|base)\b/i.test(html)
+      || /\son[a-z]+\s*=/i.test(html)
+      || /javascript\s*:/i.test(html)
+      || /<meta\b[^>]*http-equiv/i.test(html)
+      || /<\s*link\b|@import\b|url\(\s*['"]?\s*(?:https?:|\/\/)/i.test(html)
+      || /\s(?:src|href|action|formaction)\s*=\s*['"]?\s*(?:https?:|\/\/)/i.test(html)) {
+      throw badRequest(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+    }
+    return { kind: "html", title, html, sourceShapeIds };
+  }
+
+  private readSelectedSceneIds(value: unknown): string[] {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const shapes = (value as Record<string, unknown>).shapes;
+    if (!Array.isArray(shapes)) return [];
+    return shapes.flatMap((shape) => {
+      if (!shape || typeof shape !== "object" || Array.isArray(shape)) return [];
+      const id = (shape as Record<string, unknown>).id;
+      return typeof id === "string" && id.trim() ? [id.trim()] : [];
+    }).slice(0, 160);
   }
 
 }
