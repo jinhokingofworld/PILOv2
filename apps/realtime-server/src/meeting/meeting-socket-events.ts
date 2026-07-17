@@ -8,7 +8,8 @@ export const meetingServerEvents = {
   subscribed: "meeting:subscribed",
   reportUpdated: "meeting:report:updated",
   stateUpdated: "meeting:state:updated",
-  notificationCreated: "meeting:notification:created"
+  notificationCreated: "meeting:notification:created",
+  notificationUpdated: "meeting:notification:updated"
 } as const;
 
 export type MeetingReportRealtimeStatus =
@@ -48,7 +49,7 @@ export type MeetingStateRedisEvent = {
 };
 
 export type MeetingNotificationRedisEvent = {
-  event: "meeting:notification:created";
+  event: "meeting:notification:created" | "meeting:notification:updated";
   notificationId: string;
   recipientUserId: string;
   occurredAt: string;
@@ -110,7 +111,8 @@ export function isMeetingNotificationRedisEvent(
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const event = value as Record<string, unknown>;
   return (
-    event.event === "meeting:notification:created" &&
+    (event.event === "meeting:notification:created" ||
+      event.event === "meeting:notification:updated") &&
     isUuid(event.notificationId) &&
     isUuid(event.recipientUserId) &&
     typeof event.occurredAt === "string" &&

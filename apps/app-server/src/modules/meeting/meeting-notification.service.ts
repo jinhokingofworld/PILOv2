@@ -319,7 +319,10 @@ export class MeetingNotificationService implements OnModuleDestroy {
 
   async cancelPendingInvitationsForMeeting(meetingId: string): Promise<void> {
     if (!UUID_PATTERN.test(meetingId)) return;
-    await this.database.execute(
+    const notifications = await this.database.query<{
+      id: string;
+      recipient_user_id: string;
+    }>(
       `
         WITH cancelled AS (
           UPDATE meeting_invitations
@@ -331,8 +334,18 @@ export class MeetingNotificationService implements OnModuleDestroy {
         SET terminal_at = now()
         WHERE invitation_id IN (SELECT id FROM cancelled)
           AND terminal_at IS NULL
+        RETURNING id, recipient_user_id
       `,
       [meetingId]
+    );
+    await Promise.all(
+      notifications.map((notification) =>
+        this.publishNotificationSafely(
+          notification.id,
+          notification.recipient_user_id,
+          "updated"
+        )
+      )
     );
   }
 
@@ -487,7 +500,8 @@ export class MeetingNotificationService implements OnModuleDestroy {
 
   private async publishNotificationSafely(
     notificationId: string,
-    recipientUserId: string
+    recipientUserId: string,
+    change: "created" | "updated" = "created"
   ): Promise<void> {
     try {
       const client = await this.getClient();
@@ -495,7 +509,7 @@ export class MeetingNotificationService implements OnModuleDestroy {
       await client.publish(
         MEETING_NOTIFICATION_REDIS_CHANNEL,
         JSON.stringify({
-          event: "meeting:notification:created",
+          event: `meeting:notification:${change}`,
           notificationId,
           recipientUserId,
           occurredAt: new Date().toISOString()

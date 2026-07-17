@@ -620,7 +620,9 @@ export async function createRealtimeSocketServer({
         }
         const { recipientUserId, ...event } = payload;
         io.to(createMeetingNotificationUserRoomName(recipientUserId)).emit(
-          meetingServerEvents.notificationCreated,
+          event.event === "meeting:notification:updated"
+            ? meetingServerEvents.notificationUpdated
+            : meetingServerEvents.notificationCreated,
           event
         );
       })

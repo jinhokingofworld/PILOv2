@@ -231,7 +231,7 @@ Workspace member 한 명에게 초대할 수 있다. 초대는 해당 Meeting이
 시작한다. 이미 종료됐거나 Workspace membership이 사라진 초대는 수락할 수 없다.
 
 알림 row는 DB source of truth이고, Redis `meeting:notification-events` 및
-`meeting:notification:created`는 Header 재조회 힌트일 뿐이다. browser event에는
+`meeting:notification:created`·`meeting:notification:updated`는 Header 재조회 힌트일 뿐이다. browser event에는
 notification id와 생성 시각만 전달하며 본문·회의 제목·transcript는 전달하지 않는다.
 
 ### AI Worker → App Server 내부 callback

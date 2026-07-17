@@ -167,8 +167,10 @@ export function HeaderNotificationDropdown() {
     if (!socket) return;
     const reload = () => void reloadMeetingNotifications();
     socket.on("meeting:notification:created", reload);
+    socket.on("meeting:notification:updated", reload);
     return () => {
       socket.off("meeting:notification:created", reload);
+      socket.off("meeting:notification:updated", reload);
     };
   }, [reloadMeetingNotifications, socket]);
 
