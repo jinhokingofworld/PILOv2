@@ -22,6 +22,7 @@ from app.agent_processor import (
 from app.meeting_report_processor import InfrastructureError
 
 RUN_ID = "33333333-3333-3333-3333-333333333333"
+USER_VISIBLE_UUID = "12345678-1234-4123-8123-123456789abc"
 WORKSPACE_ID = "22222222-2222-2222-2222-222222222222"
 USER_ID = "11111111-1111-1111-1111-111111111111"
 SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777"
@@ -110,6 +111,45 @@ def test_completed_planner_decision_finishes_multi_tool_run() -> None:
     assert normalized.status == "completed"
     assert normalized.final_answer == "회의 참여 준비를 마쳤습니다."
     assert "unsupportedReason" not in normalized.output_summary
+
+
+def test_normalized_user_visible_text_redacts_uuid() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[tool_snapshot(executionMode="confirmation_required")],
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            message=f"대상 ID는 {USER_VISIBLE_UUID}입니다.",
+            final_answer_draft=f"{USER_VISIBLE_UUID} 항목을 확인한 뒤 승인해 주세요.",
+        ),
+        job,
+    )
+
+    assert USER_VISIBLE_UUID not in normalized.message
+    assert USER_VISIBLE_UUID not in normalized.final_answer
+    assert normalized.output_summary["message"] == normalized.message
+    assert normalized.output_summary["finalAnswerDraft"] == normalized.final_answer
+    assert "내부 식별자" in normalized.final_answer
+
+
+def test_normalized_user_visible_text_redacts_uuid_before_length_limit() -> None:
+    job = parse_agent_run_job_payload(agent_payload())
+    user_visible_text = "가" * 980 + USER_VISIBLE_UUID
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            message=user_visible_text,
+            final_answer_draft=user_visible_text,
+        ),
+        job,
+    )
+
+    assert USER_VISIBLE_UUID not in normalized.message
+    assert USER_VISIBLE_UUID not in normalized.final_answer
+    assert normalized.message.endswith("내부 식별자")
+    assert normalized.final_answer.endswith("내부 식별자")
 
 
 def test_planner_prompt_limits_prior_thread_resource_reuse() -> None:
