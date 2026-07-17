@@ -140,7 +140,13 @@ function createStepRow(overrides = {}) {
     },
     output_json: {
       intent: "calendar.list",
-      transcriptText: "must-not-leak"
+      transcriptText: "must-not-leak",
+      candidates: [
+        {
+          selectionToken: "77777777-7777-4777-8777-777777777777",
+          title: "주문 ERD"
+        }
+      ]
     },
     resource_refs: [
       {
@@ -866,6 +872,10 @@ for (const requestContext of [
   assert.equal(result.run.steps[0].inputSummary.promptLength, 12);
   assert.equal("authorizationToken" in result.run.steps[0].inputSummary, false);
   assert.equal("transcriptText" in result.run.steps[0].outputSummary, false);
+  assert.equal(
+    result.run.steps[0].outputSummary.candidates[0].selectionToken,
+    "77777777-7777-4777-8777-777777777777"
+  );
   assert.equal(result.run.steps[0].resourceRefs[0].metadata.visible, "ok");
   assert.equal("token" in result.run.steps[0].resourceRefs[0].metadata, false);
   assert.equal(result.run.confirmation.id, CONFIRMATION_ID);

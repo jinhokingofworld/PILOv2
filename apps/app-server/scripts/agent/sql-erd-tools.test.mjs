@@ -586,7 +586,7 @@ const focusDefinition = focusDefinitions.find(
 assert.ok(inspectDefinition);
 assert.ok(focusDefinition);
 assert.equal(inspectDefinition.riskLevel, "low");
-assert.equal(inspectDefinition.executionMode, "auto");
+assert.equal(inspectDefinition.executionMode, "contextual");
 assert.equal(focusDefinition.riskLevel, "low");
 assert.equal(focusDefinition.executionMode, "auto");
 assert.deepEqual(inspectDefinition.inputSchema.required, ["featureQuery"]);

@@ -1345,13 +1345,23 @@ export class AgentLoggingService {
       if (
         FORBIDDEN_JSON_KEY_PARTS.some((forbidden) =>
           normalizedKey.includes(forbidden)
-        )
+        ) && !this.isSafeSelectionToken(normalizedKey, entry)
       ) {
         throw badRequest(`${path} contains forbidden key: ${key}`);
       }
 
       this.walkJson(entry, `${path}.${key}`);
     });
+  }
+
+  private isSafeSelectionToken(key: string, value: unknown): boolean {
+    return (
+      key === "selectiontoken" &&
+      typeof value === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value
+      )
+    );
   }
 
   private assertJsonSize(value: unknown, maxBytes: number, label: string): void {

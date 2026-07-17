@@ -347,7 +347,7 @@ export class SqlErdAgentToolsService {
       description:
         "Workspace SQLtoERD session의 테이블 이름, 주요 컬럼과 FK 관계를 제한된 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용하며 session이 여러 개면 사용자가 선택할 후보를 반환합니다.",
       riskLevel: "low",
-      executionMode: "auto",
+      executionMode: "contextual",
       inputSchema: INSPECT_SQL_ERD_INPUT_SCHEMA,
       validateInput: (input) => this.validateInspectInput(input),
       prepareExecution: (context, input) =>

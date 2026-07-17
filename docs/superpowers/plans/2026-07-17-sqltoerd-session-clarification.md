@@ -4,7 +4,7 @@
 
 **Goal:** 여러 SQLtoERD session이 있는 Workspace에서 `inspect_sql_erd_schema`가 서버 예외 대신 후보와 selection token을 반환하고 사용자 입력을 기다리도록 한다.
 
-**Architecture:** SQLtoERD tool의 기존 `prepareExecution()`을 공통 `AgentExecutionService`가 호출하도록 tool execution mode를 `contextual`로 맞춘다. 실제 registry와 execution service를 함께 사용하는 회귀 테스트로 `auto` 경로의 예외 노출을 재현하고, 수정 후 `waiting_user_input` 전환과 bounded 후보 저장을 검증한다.
+**Architecture:** SQLtoERD tool의 기존 `prepareExecution()`을 공통 `AgentExecutionService`가 호출하도록 tool execution mode를 `contextual`로 맞춘다. 실제 registry와 execution service를 함께 사용하는 회귀 테스트로 `auto` 경로의 예외 노출을 재현한다. 후보의 `selectionToken`은 비밀 token이 아니라 session UUID이므로, Agent의 실행·저장·조회 안전 필터가 정확한 UUID 형식의 해당 키만 보존하도록 제한적으로 허용한다.
 
 **Tech Stack:** NestJS, TypeScript, Node.js assertion tests
 
@@ -14,7 +14,8 @@
 - 관련 Issue는 `#1330`이다.
 - `inspect_sql_erd_schema`는 read-only low-risk tool이며 confirmation을 만들지 않는다.
 - session 선택 우선순위와 후보 payload는 `docs/api/agent-api.md`의 현재 계약을 유지한다.
-- 공통 `AgentExecutionService`, API 계약, DB schema, migration, Frontend는 변경하지 않는다.
+- API 계약, DB schema, migration, Frontend는 변경하지 않는다.
+- 일반 token과 비 UUID `selectionToken`은 기존처럼 Agent payload에서 제거하거나 거부한다.
 - 여러 session 전체를 동시에 검색하는 기능은 이 수정 범위에 포함하지 않는다.
 
 ---
@@ -60,23 +61,34 @@
 
 **Files:**
 - Modify: `apps/app-server/src/modules/agent/tools/sql-erd-agent-tools.service.ts`
+- Modify: `apps/app-server/src/modules/agent/agent-execution.service.ts`
+- Modify: `apps/app-server/src/modules/agent/agent-logging.service.ts`
+- Modify: `apps/app-server/src/modules/agent/agent.service.ts`
 - Modify: `apps/app-server/scripts/agent/sql-erd-tools.test.mjs`
+- Modify: `apps/app-server/scripts/agent/logging.test.mjs`
+- Modify: `apps/app-server/scripts/agent/run-api.test.mjs`
+- Modify: `apps/ai-worker/evals/agent_planner_korean_v1.json`
 
 **Interfaces:**
 - Changes: `inspect_sql_erd_schema.executionMode` from `auto` to `contextual`.
+- Changes: exact `selectionToken` keys with UUID values survive execution sanitization, storage validation and run API sanitization.
 - Preserves: `prepareExecution()`의 `execute | needs_clarification` 결과와 기존 input/output schema.
 
-- [ ] **Step 1: SQLtoERD definition 기대값을 contextual로 변경한다**
+- [x] **Step 1: SQLtoERD definition 기대값을 contextual로 변경한다**
 
   ```js
   assert.equal(inspectDefinition.executionMode, "contextual");
   ```
 
-- [ ] **Step 2: 최소 production 수정을 적용한다**
+- [x] **Step 2: selection token 저장 경계의 RED를 확인한다**
 
-  `inspectSqlErdSchemaDefinition()`에서 `executionMode: "contextual"`만 변경한다. 공통 실행기와 `executeInspect()`의 예외 처리는 건드리지 않는다.
+  Logging service에 UUID `selectionToken` 후보를 저장하는 테스트와 run API가 이를 반환하는 테스트를 추가한다. 기존 구현에서는 logging이 forbidden key로 거부하고 run API가 값을 제거하는지 확인한다.
 
-- [ ] **Step 3: GREEN과 회귀 범위를 확인한다**
+- [x] **Step 3: 최소 production 수정을 적용한다**
+
+  `inspectSqlErdSchemaDefinition()`에서 `executionMode: "contextual"`로 변경한다. Agent 실행·logging·run API sanitizer는 정확한 `selectionToken` 키와 UUID 값의 조합만 허용하며, 나머지 token key 정책은 유지한다. `executeInspect()`의 예외 처리는 건드리지 않는다.
+
+- [x] **Step 4: GREEN과 회귀 범위를 확인한다**
 
   Run in `apps/app-server`:
 
@@ -84,11 +96,14 @@
   npm.cmd run build
   node scripts/agent/execution.test.mjs
   node scripts/agent/sql-erd-tools.test.mjs
+  node scripts/agent/logging.test.mjs
+  node scripts/agent/run-api.test.mjs
+  node scripts/agent/agent-job.test.mjs
   ```
 
   Expected: all commands exit 0; multiple sessions enter `waiting_user_input`, while direct selection and single-session inspection tests remain green.
 
-- [ ] **Step 4: 수정 commit을 만든다**
+- [x] **Step 5: 수정 commit을 만든다**
 
   ```text
   fix: SQLtoERD 다중 세션 clarification을 복구 (#1330)

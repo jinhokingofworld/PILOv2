@@ -437,7 +437,8 @@ class FakeAgentToolRegistryService {
             transcriptText: "must-not-leak",
             nested: {
               visible: "ok",
-              token: "must-not-leak"
+              token: "must-not-leak",
+              selectionToken: "must-not-leak"
             }
           },
           resourceRefs: [
@@ -1235,6 +1236,10 @@ function formatterMeetingReport(index, overrides = {}) {
   assert.equal(loggingService.calls[1].input.outputSummary.nested.visible, "ok");
   assert.equal(
     "token" in loggingService.calls[1].input.outputSummary.nested,
+    false
+  );
+  assert.equal(
+    "selectionToken" in loggingService.calls[1].input.outputSummary.nested,
     false
   );
   assert.equal(
