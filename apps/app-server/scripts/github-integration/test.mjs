@@ -190,6 +190,7 @@ execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
 
 await import("./board-invalidation.test.mjs");
 await import("./oauth.test.mjs");
+await import("./oauth-token-refresh.test.mjs");
 await import("./oauth-connection.test.mjs");
 await import("./installation.test.mjs");
 await import("./project-v2-reconnect-identity-migration.test.mjs");
