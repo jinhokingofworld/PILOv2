@@ -387,6 +387,20 @@ const piloCanvasPlacement = await readFile(
   ),
   "utf8"
 );
+const piloCanvasEmptyPlacement = await readFile(
+  new URL(
+    "../src/features/canvas/engine/interactions/pilo-canvas-empty-placement.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const piloCanvasInstantShape = await readFile(
+  new URL(
+    "../src/features/canvas/engine/interactions/pilo-canvas-instant-shape.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const piloCanvasFileImport = await readFile(
   new URL(
     "../src/features/canvas/imports/canvas-code-file-import.ts",
@@ -1315,7 +1329,9 @@ assert.match(piloTldrawCanvas, /onFreeformShapesChange\(nextFreeformShapes, fram
 assert.match(piloTldrawCanvas, /registerPendingRealtimePreviewGroup\(freehandShapes, "freehand"\)/);
 assert.match(piloTldrawCanvas, /PiloCollapsedFrameOverlay/);
 assert.match(piloTldrawCanvas, /onViewportBoundsChange/);
-assert.match(piloTldrawCanvas, /placePiloCanvasShapeAt/);
+assert.match(piloTldrawCanvas, /placePiloCanvasShapeInEmptyViewport/);
+assert.match(piloTldrawCanvas, /createPiloCanvasShapeInEmptyViewport/);
+assert.doesNotMatch(piloTldrawCanvas, /placementRequestRef/);
 assert.doesNotMatch(piloTldrawCanvas, /createCanvasShapeSyncQueue/);
 assert.doesNotMatch(piloTldrawCanvas, /writeCanvasStorage\(/);
 assert.match(piloCanvasStateReporter, /onFreeformShapesChange/);
@@ -1444,6 +1460,12 @@ assert.match(canvasCollapse, /piloChildShapeCount/);
 assert.match(canvasCollapse, /piloCodeBlockExpandedSize/);
 assert.match(piloCanvasPlacement, /PiloPlacementRequest/);
 assert.match(piloCanvasPlacement, /placePiloCanvasShapeAt/);
+assert.match(piloCanvasPlacement, /placePiloCanvasShapeInEmptyViewport/);
+assert.match(piloCanvasEmptyPlacement, /findPiloCanvasEmptyPlacementForEditor/);
+assert.match(piloCanvasEmptyPlacement, /getViewportPageBounds/);
+assert.match(piloCanvasEmptyPlacement, /getShapePageBounds/);
+assert.match(piloCanvasInstantShape, /startEditingShapeWithRichText/);
+assert.match(piloCanvasInstantShape, /getPiloCanvasInstantGeoSize/);
 assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_FILES = 30/);
 assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_SINGLE_FILE_BYTES = 200 \* 1024/);
 assert.match(piloCanvasFileImport, /PILO_CODE_IMPORT_MAX_TOTAL_BYTES = 2 \* 1024 \* 1024/);
@@ -1462,7 +1484,7 @@ assert.match(piloCanvasFileImport, /바이너리 파일은 제외했습니다/);
 assert.match(piloCanvasFileImport, /제외 폴더입니다/);
 assert.match(piloTldrawCanvas, /CanvasFileDropImporter/);
 assert.match(canvasEditorContracts, /createNote: \(\) => void/);
-assert.match(piloTldrawCanvas, /editor\.setCurrentTool\("note"\)/);
+assert.match(piloTldrawCanvas, /request: \{ type: "note" \}/);
 assert.match(canvasWorkspace, /setActiveCanvasTool\("note"\)/);
 assert.match(canvasWorkspace, /active=\{isCanvasToolActive\("note"\)\}/);
 assert.match(canvasEditorContracts, /setColor: \(color: PiloCanvasColor\) => void/);
@@ -1495,11 +1517,11 @@ assert.doesNotMatch(piloTldrawCanvas, /event\.button === 2/);
 assert.match(piloTldrawCanvas, /editor\.updateInstanceState\(\{ isToolLocked: false \}\)/);
 assert.match(piloTldrawCanvas, /preset === "pen" \|\| preset === "highlight"/);
 assert.match(piloTldrawCanvas, /isToolLocked: shouldKeepDrawing/);
-assert.match(piloTldrawCanvas, /function placePendingShapeAt/);
+assert.doesNotMatch(piloTldrawCanvas, /function placePendingShapeAt/);
 assert.match(piloTldrawCanvas, /onOneShotToolCreatedRef\.current\?\.\(\)/);
 assert.match(piloTldrawCanvas, /const connectionTools = new Set<PiloCanvasTool>\(\["arrow", "line"\]\)/);
 assert.match(piloTldrawCanvas, /!connectionTools\.has\(tool\)/);
-assert.match(piloTldrawCanvas, /tool !== "text"/);
+assert.match(piloTldrawCanvas, /tool === "frame" \|\| tool === "text"/);
 assert.match(piloTldrawCanvas, /function getArrowAtPoint/);
 assert.match(piloTldrawCanvas, /getShapesAtPoint\(pagePoint/);
 assert.match(piloTldrawCanvas, /getArrowAtPoint\(editor, pagePoint\) \?\? directShape/);

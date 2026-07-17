@@ -311,7 +311,7 @@ export function createInsertableShape(
   asset?: PiloMediaAsset;
   shape: TLCreateShapePartial<TLShape> & { id: TLShapeId };
 } {
-  const offset = index * 10;
+  const offset = 0;
 
   if (request.type === "image") {
     const width = 320;
