@@ -8,6 +8,7 @@ import { DriveStorageService } from "./drive-storage.service";
 import { DriveService } from "./drive.service";
 import { DocumentEmbeddingService } from "./document-embedding.service";
 import { DocumentEmbeddingOutboxPublisherService } from "./document-embedding-outbox-publisher.service";
+import { DocumentSearchService } from "./document-search.service";
 import { DocumentService } from "./document.service";
 
 @Module({
@@ -17,9 +18,10 @@ import { DocumentService } from "./document.service";
     DocumentService,
     DocumentEmbeddingService,
     DocumentEmbeddingOutboxPublisherService,
+    DocumentSearchService,
     DriveService,
     DriveStorageService
   ],
-  exports: [DocumentService, DriveService]
+  exports: [DocumentService, DocumentSearchService, DriveService]
 })
 export class DriveModule {}
