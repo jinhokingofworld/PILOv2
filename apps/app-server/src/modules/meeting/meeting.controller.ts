@@ -25,6 +25,7 @@ import {
   MeetingReportDetailResponsePayload,
   MeetingReportDeletionPayload,
   MeetingReportActionItemMutationPayload,
+  MeetingReportActionItemExtractionRetryPayload,
   MeetingReportListPayload,
   MeetingReportRegenerationPayload,
   MeetingService,
@@ -436,5 +437,20 @@ export class MeetingController {
       reportId
     );
     return apiResponse(result);
+  }
+
+  @Post("meeting-reports/:reportId/action-item-extractions/retry")
+  async retryReportActionItemExtraction(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string
+  ): Promise<ApiSuccessResponse<MeetingReportActionItemExtractionRetryPayload>> {
+    return apiResponse(
+      await this.meetingService.retryMeetingReportActionItemExtraction(
+        currentUserId,
+        workspaceId,
+        reportId
+      )
+    );
   }
 }

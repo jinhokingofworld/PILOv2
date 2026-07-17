@@ -84,6 +84,10 @@ export type MeetingReportSummary = {
   discussionPoints: string | null;
   decisions: string | null;
   actionItemCandidates: unknown[];
+  actionItemExtraction?: {
+    status: "PENDING" | "PUBLISHING" | "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
+    errorMessage: string | null;
+  };
   retryCount: number;
   participantSummary?: {
     totalCount: number;
@@ -93,6 +97,10 @@ export type MeetingReportSummary = {
   canDelete?: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type MeetingReportActionItemExtractionRetryPayload = {
+  actionItemExtraction: NonNullable<MeetingReportSummary["actionItemExtraction"]>;
 };
 
 export type MeetingReportDetail = MeetingReportSummary & {

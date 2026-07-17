@@ -16,6 +16,7 @@ from app.canvas_agent.processor import CanvasAgentProcessor
 from app.canvas_agent.repository import PgCanvasAgentRepository
 from app.canvas_agent.routing.semantic_router import CanvasSemanticRouter
 from app.job_dispatcher import JobDispatcher
+from app.meeting_action_item_extraction_processor import MeetingActionItemExtractionProcessor
 from app.meeting_activity_evidence_embedding_processor import (
     MeetingActivityEvidenceEmbeddingProcessor,
 )
@@ -249,10 +250,31 @@ def create_shared_ai_worker(
         ),
     )
     legacy_meeting_report_processor = None
+    meeting_action_item_extraction_processor = None
     if resolved_settings.legacy_meeting_drain_enabled:
         legacy_meeting_report_processor = _create_legacy_meeting_report_processor(
             resolved_settings,
             boto3.client("s3", **boto_kwargs),
+        )
+        extraction_repository = PgMeetingReportRepository(
+            resolved_settings.database_url,
+            resolved_settings.database_ssl,
+        )
+        extraction_client = OpenAiMeetingReportClient(
+            resolved_settings.openai_api_key,
+            resolved_settings.legacy_meeting_stt_model,
+            resolved_settings.legacy_meeting_report_model,
+        )
+        extraction_events = HttpMeetingReportEventPublisher(
+            resolved_settings.legacy_meeting_event_base_url,
+            resolved_settings.legacy_meeting_event_token,
+            resolved_settings.legacy_meeting_event_timeout_seconds,
+            resolved_settings.legacy_meeting_event_max_attempts,
+        )
+        meeting_action_item_extraction_processor = MeetingActionItemExtractionProcessor(
+            extraction_repository,
+            extraction_client,
+            extraction_events,
         )
 
     grounded_answer_processor = None
@@ -268,6 +290,7 @@ def create_shared_ai_worker(
         canvas_agent_processor,
         legacy_meeting_report_processor,
         grounded_answer_processor,
+        meeting_action_item_extraction_processor,
     )
     return SqsAiJobWorker(
         resolved_settings,
@@ -319,9 +342,11 @@ def create_shared_dispatcher(
     canvas_agent_processor: CanvasAgentProcessor,
     legacy_meeting_report_processor: MeetingReportProcessor | None,
     grounded_answer_processor: AgentGroundedAnswerProcessor | None = None,
+    meeting_action_item_extraction_processor: MeetingActionItemExtractionProcessor | None = None,
 ) -> JobDispatcher:
     return JobDispatcher(
         meeting_report_processor=legacy_meeting_report_processor,
+        meeting_action_item_extraction_processor=meeting_action_item_extraction_processor,
         agent_run_processor=agent_run_processor,
         grounded_answer_processor=grounded_answer_processor,
         canvas_agent_processor=canvas_agent_processor,
