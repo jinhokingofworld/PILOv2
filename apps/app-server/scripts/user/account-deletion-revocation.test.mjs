@@ -45,15 +45,24 @@ function createDatabase({ failCommit = false, sequence }) {
   return database;
 }
 
-function createPublisher(sequence, { rejectWorkspaceId } = {}) {
+function createOutbox(sequence, { publishFailedWorkspaceId } = {}) {
   return {
-    calls: [],
-    async publishMembershipRevoked(workspaceId, targetUserId) {
-      sequence.push(`revocation:published:${workspaceId}`);
-      this.calls.push({ workspaceId, userId: targetUserId });
-      if (workspaceId === rejectWorkspaceId) {
-        throw new Error("Redis publish failed");
-      }
+    enqueued: [],
+    published: [],
+    async enqueueMembershipRevoked(_transaction, workspaceId, targetUserId) {
+      sequence.push(`revocation:enqueued:${workspaceId}`);
+      const id = `outbox:${workspaceId}:${targetUserId}`;
+      this.enqueued.push({ id, workspaceId, userId: targetUserId });
+      return id;
+    },
+    async publishOutbox(id) {
+      const workspaceId = id.split(":")[1];
+      sequence.push(
+        workspaceId === publishFailedWorkspaceId
+          ? `revocation:publish-failed:${workspaceId}`
+          : `revocation:published:${workspaceId}`,
+      );
+      this.published.push(id);
     },
   };
 }
@@ -61,28 +70,44 @@ function createPublisher(sequence, { rejectWorkspaceId } = {}) {
 test("계정 탈퇴 transaction은 삭제한 모든 Workspace membership id를 반환한다", async () => {
   const sequence = [];
   const database = createDatabase({ sequence });
-  const service = new UserService(database, createPublisher(sequence));
+  const service = new UserService(database, createOutbox(sequence));
 
   await service.deleteCurrentUser(userId, { confirmationText: "계정 탈퇴" });
 
-  assert.deepEqual(database.transactionResult, workspaceIds);
+  assert.deepEqual(
+    database.transactionResult,
+    workspaceIds.map((workspaceId) => `outbox:${workspaceId}:${userId}`),
+  );
 });
 
 test("계정 탈퇴는 commit 후 Workspace별 회수 event를 한 번씩 발행한다", async () => {
   const sequence = [];
   const database = createDatabase({ sequence });
-  const publisher = createPublisher(sequence);
-  const service = new UserService(database, publisher);
+  const outbox = createOutbox(sequence);
+  const service = new UserService(database, outbox);
 
   assert.deepEqual(
     await service.deleteCurrentUser(userId, { confirmationText: "계정 탈퇴" }),
     { deleted: true },
   );
   assert.deepEqual(
-    publisher.calls,
-    workspaceIds.map((workspaceId) => ({ workspaceId, userId })),
+    outbox.enqueued,
+    workspaceIds.map((workspaceId) => ({
+      id: `outbox:${workspaceId}:${userId}`,
+      workspaceId,
+      userId,
+    })),
+  );
+  assert.deepEqual(
+    outbox.published,
+    workspaceIds.map((workspaceId) => `outbox:${workspaceId}:${userId}`),
   );
   const commitIndex = sequence.indexOf("transaction:commit");
+  assert.ok(
+    sequence
+      .filter((entry) => entry.startsWith("revocation:enqueued:"))
+      .every((entry) => sequence.indexOf(entry) < commitIndex),
+  );
   assert.ok(
     sequence
       .filter((entry) => entry.startsWith("revocation:published:"))
@@ -92,31 +117,31 @@ test("계정 탈퇴는 commit 후 Workspace별 회수 event를 한 번씩 발행
 
 test("계정 탈퇴 transaction 실패는 회수 event를 발행하지 않는다", async () => {
   const sequence = [];
-  const publisher = createPublisher(sequence);
+  const outbox = createOutbox(sequence);
   const service = new UserService(
     createDatabase({ failCommit: true, sequence }),
-    publisher,
+    outbox,
   );
 
   await assert.rejects(() =>
     service.deleteCurrentUser(userId, { confirmationText: "계정 탈퇴" }),
   );
-  assert.deepEqual(publisher.calls, []);
+  assert.deepEqual(outbox.published, []);
 });
 
 test("계정 탈퇴 회수 event 발행 실패는 성공 응답과 다른 Workspace 발행을 막지 않는다", async () => {
   const sequence = [];
-  const publisher = createPublisher(sequence, {
-    rejectWorkspaceId: workspaceIds[0],
+  const outbox = createOutbox(sequence, {
+    publishFailedWorkspaceId: workspaceIds[0],
   });
-  const service = new UserService(createDatabase({ sequence }), publisher);
+  const service = new UserService(createDatabase({ sequence }), outbox);
 
   assert.deepEqual(
     await service.deleteCurrentUser(userId, { confirmationText: "계정 탈퇴" }),
     { deleted: true },
   );
   assert.deepEqual(
-    publisher.calls,
-    workspaceIds.map((workspaceId) => ({ workspaceId, userId })),
+    outbox.published,
+    workspaceIds.map((workspaceId) => `outbox:${workspaceId}:${userId}`),
   );
 });

@@ -37,6 +37,16 @@ type LocalSocketRegistry = {
   sockets: ReadonlyMap<string, WorkspaceMembershipRevocationSocket>;
 };
 
+export type WorkspaceMembershipRevocationFence = {
+  clearSocket: (socketId: string) => void;
+  isRevoked: (socketId: string, workspaceId: string) => boolean;
+  revokeUserWorkspace: (
+    io: WorkspaceMembershipRevocationIo,
+    userId: string,
+    workspaceId: string,
+  ) => void;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -125,4 +135,26 @@ export function readLocalMembershipRoomSockets(
     sockets.push(socket);
   }
   return sockets;
+}
+
+export function createWorkspaceMembershipRevocationFence(): WorkspaceMembershipRevocationFence {
+  const revokedWorkspaceIdsBySocket = new Map<string, Set<string>>();
+
+  return {
+    clearSocket(socketId) {
+      revokedWorkspaceIdsBySocket.delete(socketId);
+    },
+    isRevoked(socketId, workspaceId) {
+      return revokedWorkspaceIdsBySocket.get(socketId)?.has(workspaceId) ?? false;
+    },
+    revokeUserWorkspace(io, userId, workspaceId) {
+      for (const socket of io.sockets.sockets.values()) {
+        if (readAuthenticatedMembershipUserId(socket) !== userId) continue;
+        const revokedWorkspaceIds =
+          revokedWorkspaceIdsBySocket.get(socket.id) ?? new Set<string>();
+        revokedWorkspaceIds.add(workspaceId);
+        revokedWorkspaceIdsBySocket.set(socket.id, revokedWorkspaceIds);
+      }
+    }
+  };
 }

@@ -32,29 +32,20 @@ export class WorkspaceMembershipRevocationPublisherService
   private shuttingDown = false;
 
   async publishMembershipRevoked(
-    workspaceId: string,
-    userId: string
-  ): Promise<void> {
-    const event: WorkspaceMembershipRevokedEventV1 = {
-      version: 1,
-      type: "membership.revoked",
-      workspaceId,
-      userId,
-      occurredAt: new Date().toISOString()
-    };
-
+    event: WorkspaceMembershipRevokedEventV1
+  ): Promise<boolean> {
     try {
       const client = await this.getClient();
-      if (!client || this.shuttingDown) return;
+      if (!client || this.shuttingDown) return false;
 
       await client.publish(
         WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
         JSON.stringify(event)
       );
+      return true;
     } catch {
-      this.logger.warn(
-        `Workspace membership revocation publish failed workspace_id=${workspaceId} user_id=${userId}`
-      );
+      this.logger.warn("Workspace membership revocation Redis publish failed");
+      return false;
     }
   }
 

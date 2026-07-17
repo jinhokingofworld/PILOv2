@@ -49,51 +49,66 @@ function createDatabase({ role, failCommit = false, sequence }) {
   };
 }
 
-function createPublisher(sequence, { reject = false } = {}) {
+function createOutbox(sequence, { publishFailed = false } = {}) {
   return {
-    calls: [],
-    async publishMembershipRevoked(targetWorkspaceId, targetUserId) {
-      sequence.push("revocation:published");
-      this.calls.push({
-        userId: targetUserId,
-        workspaceId: targetWorkspaceId,
-      });
-      if (reject) throw new Error("Redis publish failed");
+    enqueued: [],
+    published: [],
+    async enqueueMembershipRevoked(_transaction, targetWorkspaceId, targetUserId) {
+      sequence.push("revocation:enqueued");
+      const id = `outbox:${targetWorkspaceId}:${targetUserId}`;
+      this.enqueued.push({ id, userId: targetUserId, workspaceId: targetWorkspaceId });
+      return id;
+    },
+    async publishOutbox(id) {
+      sequence.push(publishFailed ? "revocation:publish-failed" : "revocation:published");
+      this.published.push(id);
     },
   };
 }
 
-test("removeMember는 membership transaction commit 후 회수 event를 발행한다", async () => {
+test("removeMember는 membership transaction 안에서 회수 outbox를 만들고 commit 후 발행한다", async () => {
   const sequence = [];
-  const publisher = createPublisher(sequence);
+  const outbox = createOutbox(sequence);
   const service = new WorkspaceService(
     createDatabase({ role: "owner", sequence }),
-    publisher,
+    outbox,
   );
 
   assert.deepEqual(
     await service.removeMember(ownerUserId, workspaceId, memberUserId),
     { removed: true },
   );
-  assert.deepEqual(publisher.calls, [{ workspaceId, userId: memberUserId }]);
+  assert.deepEqual(outbox.enqueued, [
+    { id: `outbox:${workspaceId}:${memberUserId}`, workspaceId, userId: memberUserId },
+  ]);
+  assert.deepEqual(outbox.published, [`outbox:${workspaceId}:${memberUserId}`]);
+  assert.ok(
+    sequence.indexOf("revocation:enqueued") < sequence.indexOf("transaction:commit"),
+  );
   assert.ok(
     sequence.indexOf("transaction:commit") <
       sequence.indexOf("revocation:published"),
   );
 });
 
-test("leaveWorkspace는 membership transaction commit 후 회수 event를 발행한다", async () => {
+test("leaveWorkspace는 membership transaction 안에서 회수 outbox를 만들고 commit 후 발행한다", async () => {
   const sequence = [];
-  const publisher = createPublisher(sequence);
+  const outbox = createOutbox(sequence);
   const service = new WorkspaceService(
     createDatabase({ role: "member", sequence }),
-    publisher,
+    outbox,
   );
 
   assert.deepEqual(await service.leaveWorkspace(memberUserId, workspaceId), {
     removed: true,
   });
-  assert.deepEqual(publisher.calls, [{ workspaceId, userId: memberUserId }]);
+  assert.deepEqual(outbox.enqueued, [
+    { id: `outbox:${workspaceId}:${memberUserId}`, workspaceId, userId: memberUserId },
+  ]);
+  assert.deepEqual(outbox.published, [`outbox:${workspaceId}:${memberUserId}`]);
+  assert.ok(
+    sequence.indexOf("revocation:enqueued") < sequence.indexOf("transaction:commit"),
+  );
   assert.ok(
     sequence.indexOf("transaction:commit") <
       sequence.indexOf("revocation:published"),
@@ -103,14 +118,14 @@ test("leaveWorkspace는 membership transaction commit 후 회수 event를 발행
 for (const operation of ["removeMember", "leaveWorkspace"]) {
   test(`${operation} transaction 실패는 회수 event를 발행하지 않는다`, async () => {
     const sequence = [];
-    const publisher = createPublisher(sequence);
+    const outbox = createOutbox(sequence);
     const service = new WorkspaceService(
       createDatabase({
         failCommit: true,
         role: operation === "removeMember" ? "owner" : "member",
         sequence,
       }),
-      publisher,
+      outbox,
     );
 
     await assert.rejects(() =>
@@ -118,20 +133,20 @@ for (const operation of ["removeMember", "leaveWorkspace"]) {
         ? service.removeMember(ownerUserId, workspaceId, memberUserId)
         : service.leaveWorkspace(memberUserId, workspaceId),
     );
-    assert.deepEqual(publisher.calls, []);
+    assert.deepEqual(outbox.published, []);
   });
 }
 
 for (const operation of ["removeMember", "leaveWorkspace"]) {
   test(`${operation} 회수 event 발행 실패는 성공 응답을 바꾸지 않는다`, async () => {
     const sequence = [];
-    const publisher = createPublisher(sequence, { reject: true });
+    const outbox = createOutbox(sequence, { publishFailed: true });
     const service = new WorkspaceService(
       createDatabase({
         role: operation === "removeMember" ? "owner" : "member",
         sequence,
       }),
-      publisher,
+      outbox,
     );
 
     const result =
@@ -140,6 +155,6 @@ for (const operation of ["removeMember", "leaveWorkspace"]) {
         : await service.leaveWorkspace(memberUserId, workspaceId);
 
     assert.deepEqual(result, { removed: true });
-    assert.equal(publisher.calls.length, 1);
+    assert.equal(outbox.published.length, 1);
   });
 }

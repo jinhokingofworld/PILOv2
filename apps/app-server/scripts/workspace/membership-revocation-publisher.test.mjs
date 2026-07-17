@@ -7,6 +7,13 @@ const originalCreateClient = redis.createClient;
 const originalRedisUrl = process.env.REDIS_URL;
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const userId = "22222222-2222-4222-8222-222222222222";
+const event = {
+  version: 1,
+  type: "membership.revoked",
+  workspaceId,
+  userId,
+  occurredAt: "2026-07-17T00:00:00.000Z",
+};
 
 function deferred() {
   let resolve;
@@ -40,7 +47,7 @@ try {
     throw new Error("Redis client should not be created");
   };
   const disabledPublisher = new WorkspaceMembershipRevocationPublisherService();
-  await disabledPublisher.publishMembershipRevoked(workspaceId, userId);
+  assert.equal(await disabledPublisher.publishMembershipRevoked(event), false);
   assert.equal(createClientCalls, 0);
   await disabledPublisher.onModuleDestroy();
 
@@ -74,8 +81,8 @@ try {
   const publisher = new WorkspaceMembershipRevocationPublisherService();
   publisher.logger = { error() {}, warn() {} };
   await Promise.all([
-    publisher.publishMembershipRevoked(workspaceId, userId),
-    publisher.publishMembershipRevoked(workspaceId, userId),
+    publisher.publishMembershipRevoked(event),
+    publisher.publishMembershipRevoked(event),
   ]);
 
   assert.equal(
@@ -103,9 +110,9 @@ try {
       },
       { type: "membership.revoked", userId, version: 1, workspaceId },
     );
-    assert.equal(
-      new Date(call.payload.occurredAt).toISOString(),
-      call.payload.occurredAt,
+    assert.deepEqual(
+      call.payload,
+      event,
     );
   }
   await publisher.onModuleDestroy();
@@ -137,9 +144,7 @@ try {
       logs.push(message);
     },
   };
-  await assert.doesNotReject(() =>
-    failingPublisher.publishMembershipRevoked(workspaceId, userId),
-  );
+  assert.equal(await failingPublisher.publishMembershipRevoked(event), false);
   assert.equal(logs.length > 0, true);
   assert.doesNotMatch(logs.join("\n"), /redis:\/\//i);
   assert.doesNotMatch(logs.join("\n"), /bearer-secret|user-content/i);
@@ -169,9 +174,7 @@ try {
       publishFailureLogs.push(message);
     },
   };
-  await assert.doesNotReject(() =>
-    publishFailingPublisher.publishMembershipRevoked(workspaceId, userId),
-  );
+  assert.equal(await publishFailingPublisher.publishMembershipRevoked(event), false);
   assert.equal(publishFailureLogs.length > 0, true);
   assert.doesNotMatch(publishFailureLogs.join("\n"), /bearer-secret|user-content/i);
   await publishFailingPublisher.onModuleDestroy();
@@ -205,10 +208,7 @@ try {
   const shutdownPublisher =
     new WorkspaceMembershipRevocationPublisherService();
   shutdownPublisher.logger = { error() {}, warn() {} };
-  const pendingPublish = shutdownPublisher.publishMembershipRevoked(
-    workspaceId,
-    userId,
-  );
+  const pendingPublish = shutdownPublisher.publishMembershipRevoked(event);
   await Promise.resolve();
   const shutdown = shutdownPublisher.onModuleDestroy();
   assert.equal(shutdownClients[0].destroyCalls, 1);
@@ -216,7 +216,7 @@ try {
   await Promise.all([pendingPublish, shutdown]);
   assert.equal(shutdownClients[0].publishCalls, 0);
   assert.equal(shutdownClients[0].quitCalls, 1);
-  await shutdownPublisher.publishMembershipRevoked(workspaceId, userId);
+  assert.equal(await shutdownPublisher.publishMembershipRevoked(event), false);
   assert.equal(shutdownClients.length, 1);
 } finally {
   redis.createClient = originalCreateClient;

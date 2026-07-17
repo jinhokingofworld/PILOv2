@@ -6,6 +6,7 @@ import {
   isWorkspaceMembershipRevokedEvent,
   WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL
 } from "../workspace-membership-revocation/workspace-membership-revocation.types";
+import { MeetingService } from "./meeting.service";
 
 export { WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL } from "../workspace-membership-revocation/workspace-membership-revocation.types";
 
@@ -29,7 +30,10 @@ export class MeetingMembershipRevocationService
   private readonly logger = new Logger(MeetingMembershipRevocationService.name);
   private redisClient: RedisClientType | null = null;
 
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly meetingService: MeetingService
+  ) {}
 
   async onModuleInit(): Promise<void> {
     if (process.env.APP_SERVER_RUNTIME === "github-sync-worker") return;
@@ -102,7 +106,10 @@ export class MeetingMembershipRevocationService
             { revokeTokenTs }
           );
         } catch (error) {
-          if (this.isLiveKitParticipantAbsent(error)) continue;
+          if (this.isLiveKitParticipantAbsent(error)) {
+            await this.reconcileAbsentParticipant(participant, event.occurredAt);
+            continue;
+          }
           throw error;
         }
       }
@@ -130,6 +137,24 @@ export class MeetingMembershipRevocationService
 
   protected createRedisClient(redisUrl: string): RedisClientType {
     return createClient({ url: redisUrl }) as RedisClientType;
+  }
+
+  private async reconcileAbsentParticipant(
+    participant: ActiveLiveKitParticipant,
+    occurredAt: string
+  ): Promise<void> {
+    const eventCreatedAt = new Date(occurredAt);
+    const result = await this.database.transaction(transaction =>
+      this.meetingService.reconcileLiveKitParticipantDeparture(transaction, {
+        roomName: participant.livekit_room_name,
+        participantIdentity: participant.livekit_identity,
+        eventCreatedAt
+      })
+    );
+    await this.meetingService.enqueueReconciledMeetingReportJob(result.job);
+    await this.meetingService.publishReconciledMeetingStateEvents(
+      result.stateEvents
+    );
   }
 
   private async handleRedisMessage(message: string): Promise<void> {

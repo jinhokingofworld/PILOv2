@@ -41,6 +41,31 @@ class FakeDatabase {
     this.calls.push({ text, values });
     return this.rows;
   }
+
+  async transaction(callback) {
+    return callback(this);
+  }
+}
+
+class FakeMeetingService {
+  constructor() {
+    this.reconciliationCalls = [];
+    this.reportJobs = [];
+    this.stateEvents = [];
+  }
+
+  async reconcileLiveKitParticipantDeparture(transaction, input) {
+    this.reconciliationCalls.push({ input, transaction });
+    return { job: null, stateEvents: [] };
+  }
+
+  async enqueueReconciledMeetingReportJob(job) {
+    this.reportJobs.push(job);
+  }
+
+  async publishReconciledMeetingStateEvents(events) {
+    this.stateEvents.push(events);
+  }
 }
 
 class FakeLiveKitRoomServiceClient {
@@ -56,10 +81,11 @@ class FakeLiveKitRoomServiceClient {
 }
 
 class TestMeetingMembershipRevocationService extends MeetingMembershipRevocationService {
-  constructor(database, client) {
-    super(database);
+  constructor(database, client, meetingService = new FakeMeetingService()) {
+    super(database, meetingService);
     this.client = client;
     this.configs = [];
+    this.meetingService = meetingService;
   }
 
   createRoomServiceClient(config) {
@@ -139,10 +165,27 @@ try {
     const client = new FakeLiveKitRoomServiceClient({
       error: { code: "not_found" },
     });
-    const service = new TestMeetingMembershipRevocationService(database, client);
+    const meetingService = new FakeMeetingService();
+    const service = new TestMeetingMembershipRevocationService(
+      database,
+      client,
+      meetingService,
+    );
     service.logger = { error() {}, warn() {} };
 
     assert.equal(await service.handleMembershipRevocation(validEvent), true);
+    assert.deepEqual(meetingService.reconciliationCalls, [
+      {
+        transaction: database,
+        input: {
+          roomName: livekitRoomName,
+          participantIdentity: livekitIdentity,
+          eventCreatedAt: new Date(validEvent.occurredAt),
+        },
+      },
+    ]);
+    assert.deepEqual(meetingService.reportJobs, [null]);
+    assert.deepEqual(meetingService.stateEvents, [[]]);
   }
 
   {
