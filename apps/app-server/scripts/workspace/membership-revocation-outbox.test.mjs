@@ -131,7 +131,7 @@ function createPublisher(result) {
 }
 
 const migration = await readFile(
-  new URL("../../../../db/migrations/085_create_workspace_membership_revocation_outbox.sql", import.meta.url),
+  new URL("../../../../db/migrations/086_create_workspace_membership_revocation_outbox.sql", import.meta.url),
   "utf8",
 );
 const outboxServiceSource = await readFile(
