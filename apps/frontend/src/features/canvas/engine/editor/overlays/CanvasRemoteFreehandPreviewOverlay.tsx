@@ -3,24 +3,24 @@
 import {
   useLayoutEffect,
   useRef,
-  useState,
   useSyncExternalStore,
-  type RefObject,
 } from "react";
 import { useValue } from "@tldraw/state-react";
-import { Mat, b64Vecs, useEditor, type TLShapeId } from "tldraw";
+import { b64Vecs, useEditor } from "tldraw";
 
 import type { CanvasRemoteShapePreviewStore } from "@/features/canvas/collaboration/canvas-remote-shape-preview-store";
+import {
+  CANVAS_PREVIEW_SHAPE_COLORS,
+  CANVAS_PREVIEW_STROKE_WIDTHS,
+  getCanvasPreviewStrokeDash,
+  getCanvasRemotePreviewShapePageTransform,
+  prepareCanvasPreviewContext,
+  useCanvasOverlayRect,
+  type CanvasOverlayRect,
+} from "./canvas-remote-preview-canvas";
 
 type CanvasRemoteFreehandPreviewOverlayProps = {
   previewStore: CanvasRemoteShapePreviewStore;
-};
-
-type CanvasOverlayRect = {
-  height: number;
-  left: number;
-  top: number;
-  width: number;
 };
 
 type CanvasRemoteFreehandShape = {
@@ -45,34 +45,11 @@ type CanvasRemoteFreehandShape = {
   };
 };
 
-const CANVAS_DRAW_STROKE_WIDTHS: Record<string, number> = {
-  l: 3.5,
-  m: 2.75,
-  s: 2,
-  xl: 6,
-};
-
 const CANVAS_HIGHLIGHT_STROKE_WIDTHS: Record<string, number> = {
   l: 32,
   m: 24,
   s: 18,
   xl: 42,
-};
-
-const CANVAS_SHAPE_COLORS: Record<string, string> = {
-  black: "#1d1d1d",
-  blue: "#4263eb",
-  green: "#2f9e44",
-  grey: "#868e96",
-  "light-blue": "#74c0fc",
-  "light-green": "#8ce99a",
-  "light-red": "#ffa8a8",
-  "light-violet": "#b197fc",
-  orange: "#f76707",
-  red: "#e03131",
-  violet: "#7048e8",
-  white: "#ffffff",
-  yellow: "#f59f00",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -130,89 +107,6 @@ function readRemoteFreehandShape(
   };
 }
 
-function hasSameOverlayRect(
-  previousRect: CanvasOverlayRect | null,
-  nextRect: CanvasOverlayRect,
-) {
-  return (
-    previousRect?.height === nextRect.height &&
-    previousRect.left === nextRect.left &&
-    previousRect.top === nextRect.top &&
-    previousRect.width === nextRect.width
-  );
-}
-
-function useCanvasOverlayRect(
-  overlayRef: RefObject<HTMLCanvasElement | null>,
-) {
-  const [overlayRect, setOverlayRect] = useState<CanvasOverlayRect | null>(null);
-
-  useLayoutEffect(() => {
-    const overlayElement = overlayRef.current;
-    if (!overlayElement) return undefined;
-    const measuredOverlay = overlayElement;
-
-    function updateOverlayRect() {
-      const rect = measuredOverlay.getBoundingClientRect();
-      const nextRect = {
-        height: rect.height,
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-      };
-
-      setOverlayRect((currentRect) =>
-        hasSameOverlayRect(currentRect, nextRect) ? currentRect : nextRect,
-      );
-    }
-
-    updateOverlayRect();
-
-    const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(updateOverlayRect);
-
-    resizeObserver?.observe(measuredOverlay);
-    window.addEventListener("resize", updateOverlayRect);
-    window.addEventListener("scroll", updateOverlayRect, true);
-
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateOverlayRect);
-      window.removeEventListener("scroll", updateOverlayRect, true);
-    };
-  }, [overlayRef]);
-
-  return overlayRect;
-}
-
-function getFreehandShapePageTransform(
-  editor: ReturnType<typeof useEditor>,
-  shape: CanvasRemoteFreehandShape,
-) {
-  const localTransform = Mat.Identity()
-    .translate(shape.x, shape.y)
-    .rotate(shape.rotation);
-  const parentShape = shape.parentId
-    ? editor.getShape(shape.parentId as TLShapeId)
-    : null;
-
-  return parentShape
-    ? Mat.Compose(editor.getShapePageTransform(parentShape), localTransform)
-    : localTransform;
-}
-
-function getCanvasStrokeDash(
-  dash: string,
-  strokeWidth: number,
-): number[] {
-  if (dash === "dashed") return [strokeWidth * 2, strokeWidth * 2];
-  if (dash === "dotted") return [0.1, strokeWidth * 2];
-
-  return [];
-}
-
 function drawRemoteFreehandShape({
   context,
   editor,
@@ -224,12 +118,12 @@ function drawRemoteFreehandShape({
   overlayRect: CanvasOverlayRect;
   shape: CanvasRemoteFreehandShape;
 }) {
-  const pageTransform = getFreehandShapePageTransform(editor, shape);
+  const pageTransform = getCanvasRemotePreviewShapePageTransform(editor, shape);
   const cameraZoom = editor.getCamera().z;
   const baseStrokeWidth =
     shape.type === "highlight"
       ? (CANVAS_HIGHLIGHT_STROKE_WIDTHS[shape.props.size] ?? 24)
-      : (CANVAS_DRAW_STROKE_WIDTHS[shape.props.size] ?? 2.75);
+      : (CANVAS_PREVIEW_STROKE_WIDTHS[shape.props.size] ?? 2.75);
   const strokeWidth = baseStrokeWidth * shape.props.scale * cameraZoom;
   const points = shape.props.segments.flatMap((segment) => {
     try {
@@ -253,8 +147,11 @@ function drawRemoteFreehandShape({
   context.lineJoin = "round";
   context.lineWidth = Math.max(1, strokeWidth);
   context.strokeStyle =
-    CANVAS_SHAPE_COLORS[shape.props.color] ?? CANVAS_SHAPE_COLORS.black;
-  context.setLineDash(getCanvasStrokeDash(shape.props.dash, strokeWidth));
+    CANVAS_PREVIEW_SHAPE_COLORS[shape.props.color] ??
+    CANVAS_PREVIEW_SHAPE_COLORS.black;
+  context.setLineDash(
+    getCanvasPreviewStrokeDash(shape.props.dash, strokeWidth),
+  );
   context.beginPath();
 
   points.forEach((point, index) => {
@@ -312,30 +209,7 @@ export function CanvasRemoteFreehandPreviewOverlay({
       const context = overlay.getContext("2d");
       if (!context) return;
 
-      const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
-      const pixelWidth = Math.max(
-        1,
-        Math.round(overlayRect.width * devicePixelRatio),
-      );
-      const pixelHeight = Math.max(
-        1,
-        Math.round(overlayRect.height * devicePixelRatio),
-      );
-
-      if (overlay.width !== pixelWidth || overlay.height !== pixelHeight) {
-        overlay.width = pixelWidth;
-        overlay.height = pixelHeight;
-      }
-
-      context.setTransform(
-        devicePixelRatio,
-        0,
-        0,
-        devicePixelRatio,
-        0,
-        0,
-      );
-      context.clearRect(0, 0, overlayRect.width, overlayRect.height);
+      prepareCanvasPreviewContext({ context, overlay, overlayRect });
 
       previews.forEach((preview) => {
         preview.shapes.forEach((value) => {

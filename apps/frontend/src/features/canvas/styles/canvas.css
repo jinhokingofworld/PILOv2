@@ -1409,6 +1409,7 @@
   height: 100%;
 }
 
+.canvas-remote-connection-preview-layer,
 .canvas-remote-freehand-preview-layer {
   position: absolute;
   inset: 0;

@@ -274,6 +274,20 @@ const canvasRemoteFreehandPreviewOverlay = await readFile(
   ),
   "utf8"
 );
+const canvasRemoteConnectionPreviewOverlay = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/overlays/CanvasRemoteConnectionPreviewOverlay.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasRemoteConnectionPreview = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/overlays/canvas-remote-connection-preview.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const canvasRemoteCursorOverlay = await readFile(
   new URL("../src/shared/canvas-realtime/RemoteCursorOverlay.tsx", import.meta.url),
   "utf8"
@@ -981,15 +995,22 @@ assert.match(canvasRemoteShapePreviewStore, /markCommittedShapeIds/);
 assert.match(canvasRemoteShapePreviewStore, /acknowledgeAppliedShapeIds/);
 assert.match(canvasRemoteShapePreviewStore, /sweepStale/);
 assert.match(piloTldrawCanvas, /CanvasRemoteFreehandPreviewOverlay/);
+assert.match(piloTldrawCanvas, /CanvasRemoteConnectionPreviewOverlay/);
 assert.match(
   piloTldrawCanvas,
-  /previewShape\.type === "draw"[\s\S]*previewShape\.type === "highlight"/,
+  /previewShape\.type === "draw"[\s\S]*previewShape\.type === "highlight"[\s\S]*previewShape\.type === "line"[\s\S]*previewShape\.type === "arrow"/,
 );
 assert.match(canvasRemoteFreehandPreviewOverlay, /useSyncExternalStore/);
 assert.match(canvasRemoteFreehandPreviewOverlay, /requestAnimationFrame/);
 assert.match(canvasRemoteFreehandPreviewOverlay, /b64Vecs\.decodePoints/);
 assert.doesNotMatch(canvasRemoteFreehandPreviewOverlay, /editor\.createShapes/);
 assert.doesNotMatch(canvasRemoteFreehandPreviewOverlay, /editor\.updateShapes/);
+assert.match(canvasRemoteConnectionPreviewOverlay, /useSyncExternalStore/);
+assert.match(canvasRemoteConnectionPreviewOverlay, /requestAnimationFrame/);
+assert.doesNotMatch(canvasRemoteConnectionPreviewOverlay, /editor\.createShapes/);
+assert.doesNotMatch(canvasRemoteConnectionPreviewOverlay, /editor\.updateShapes/);
+assert.match(canvasRemoteConnectionPreview, /getRemoteConnectionPreviewPath/);
+assert.match(canvasRemoteConnectionPreview, /readRemoteConnectionPreviewShape/);
 assert.match(canvasLocalInteractionPolicy, /isCanvasFreehandInteractionActive/);
 assert.match(canvasLocalInteractionPolicy, /getCanvasActiveMutationShapeIds/);
 assert.match(

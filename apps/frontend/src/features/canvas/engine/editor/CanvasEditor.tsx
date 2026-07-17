@@ -43,6 +43,7 @@ import {
   CanvasAiChatOverlay,
 } from "./overlays/CanvasAiChatOverlay";
 import { CanvasAgentVisualOverlay } from "./overlays/CanvasAgentVisualOverlay";
+import { CanvasRemoteConnectionPreviewOverlay } from "./overlays/CanvasRemoteConnectionPreviewOverlay";
 import { CanvasRemoteFreehandPreviewOverlay } from "./overlays/CanvasRemoteFreehandPreviewOverlay";
 import { PiloCollapsedFrameOverlay } from "./overlays/PiloCollapsedFrameOverlay";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
@@ -2532,9 +2533,14 @@ export function CanvasEditor({
             previewStore={presence?.remoteShapePreviewStore}
           />
           {presence ? (
-            <CanvasRemoteFreehandPreviewOverlay
-              previewStore={presence.remoteShapePreviewStore}
-            />
+            <>
+              <CanvasRemoteConnectionPreviewOverlay
+                previewStore={presence.remoteShapePreviewStore}
+              />
+              <CanvasRemoteFreehandPreviewOverlay
+                previewStore={presence.remoteShapePreviewStore}
+              />
+            </>
           ) : null}
           <CanvasHistoryStateReporter
             onHistoryStateChange={onHistoryStateChange}
@@ -2635,7 +2641,9 @@ function CanvasRealtimePreviewApplier({
         if (!shapeId) return;
         if (
           previewShape.type === "draw" ||
-          previewShape.type === "highlight"
+          previewShape.type === "highlight" ||
+          previewShape.type === "line" ||
+          previewShape.type === "arrow"
         ) {
           return;
         }
