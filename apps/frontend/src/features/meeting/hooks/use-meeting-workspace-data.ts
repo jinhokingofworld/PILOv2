@@ -10,6 +10,7 @@ import type {
   MeetingRecording,
   MeetingReportActionItemDeliveryInput,
   UpdateMeetingReportActionItemInput,
+  UpdateMeetingReportContentInput,
   MeetingReportListQuery,
   MeetingReportSummary,
   StartMeetingInput
@@ -306,6 +307,19 @@ export function useMeetingWorkspaceData({
     [meetingClient, reloadReports, requireWorkspace]
   );
 
+  const updateMeetingReportContent = useCallback(
+    async (reportId: string, body: UpdateMeetingReportContentInput) => {
+      const result = await meetingClient.updateMeetingReportContent(
+        requireWorkspace(),
+        reportId,
+        body
+      );
+      await reloadReports();
+      return result;
+    },
+    [meetingClient, reloadReports, requireWorkspace]
+  );
+
   const listMeetingReportsByMeeting = useCallback(
     async (meetingId: string) => {
       return meetingClient.listMeetingReportsByMeeting(
@@ -512,6 +526,7 @@ export function useMeetingWorkspaceData({
     startMeeting,
     startRecording,
     updateMeetingReportActionItem,
+    updateMeetingReportContent,
     workspaceId: normalizedWorkspaceId
   };
 }

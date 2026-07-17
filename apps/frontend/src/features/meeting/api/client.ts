@@ -17,6 +17,7 @@ import type {
   MeetingReportActionItemDeliveryOptions,
   MeetingReportActionItemDeliveryResult,
   MeetingReportDetailPayload,
+  MeetingReportContentMutationPayload,
   MeetingReportDeletionPayload,
   MeetingReportListPayload,
   MeetingReportListQuery,
@@ -26,7 +27,8 @@ import type {
   StartMeetingInput,
   StartMeetingPayload,
   StartRecordingPayload,
-  UpdateMeetingReportActionItemInput
+  UpdateMeetingReportActionItemInput,
+  UpdateMeetingReportContentInput
 } from "@/features/meeting/types";
 
 const API_BASE_PATH = "/api/v1";
@@ -551,6 +553,18 @@ export function createMeetingApiClient({
       return requestMeetingData<MeetingReportDetailPayload>(
         meetingReportPath(workspaceId, reportId),
         undefined,
+        requestOptions
+      );
+    },
+
+    async updateMeetingReportContent(
+      workspaceId: string,
+      reportId: string,
+      body: UpdateMeetingReportContentInput
+    ) {
+      return requestMeetingData<MeetingReportContentMutationPayload>(
+        meetingReportPath(workspaceId, reportId),
+        withJsonBody(body, { method: "PATCH" }),
         requestOptions
       );
     },

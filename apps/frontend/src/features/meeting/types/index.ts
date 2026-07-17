@@ -80,9 +80,13 @@ export type MeetingReportSummary = {
   status: MeetingReportStatus;
   failedStep: MeetingReportFailedStep | null;
   errorMessage: string | null;
+  title: string | null;
   summary: string | null;
   discussionPoints: string | null;
   decisions: string | null;
+  contentVersion: number;
+  contentEditedByUserId: string | null;
+  contentEditedAt: string | null;
   actionItemCandidates: unknown[];
   actionItemExtraction?: {
     status: "PENDING" | "PUBLISHING" | "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
@@ -95,6 +99,7 @@ export type MeetingReportSummary = {
     hasMore: boolean;
   };
   canDelete?: boolean;
+  canEdit?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -117,6 +122,23 @@ export type MeetingReportDetail = MeetingReportSummary & {
   }>;
   actionItems?: MeetingReportActionItem[];
   actionItemAssignees?: MeetingReportActionItemAssignee[];
+  decisionItems?: MeetingReportDecisionItem[];
+};
+
+export type MeetingReportDecisionItem = {
+  id: string;
+  sourceIndex: number;
+  text: string;
+  isUserEdited: boolean;
+  editedByUserId: string | null;
+  editedAt: string | null;
+};
+
+export type UpdateMeetingReportContentInput = {
+  expectedVersion: number;
+  title?: string;
+  discussionPoints?: string;
+  decisionItems?: Array<{ id: string; text: string }>;
 };
 
 export type MeetingReportActionItemStatus =
@@ -334,6 +356,10 @@ export type MeetingReportListPayload = {
 };
 
 export type MeetingReportDetailPayload = {
+  report: MeetingReportDetail;
+};
+
+export type MeetingReportContentMutationPayload = {
   report: MeetingReportDetail;
 };
 
