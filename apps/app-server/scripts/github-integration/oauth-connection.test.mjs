@@ -12,9 +12,9 @@ const { GithubOAuthRefreshRejectedError } = require(
 
 const migrationsDirectory = new URL("../../../../db/migrations/", import.meta.url);
 const migrationNames = await readdir(migrationsDirectory);
-assert.equal(migrationNames.includes("089_add_github_oauth_token_refresh.sql"), true);
+assert.equal(migrationNames.includes("090_add_github_oauth_token_refresh.sql"), true);
 const refreshMigration = await readFile(
-  new URL("089_add_github_oauth_token_refresh.sql", migrationsDirectory),
+  new URL("090_add_github_oauth_token_refresh.sql", migrationsDirectory),
   "utf8"
 );
 const connectionMigration = await readFile(
