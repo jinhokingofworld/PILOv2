@@ -14,7 +14,6 @@ import { createChatAccessService } from "../chat/chat-access.service";
 import { createChatFanOut } from "../chat/chat-fan-out";
 import {
   createChatMembershipRevocationHandler,
-  WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
 } from "../chat/chat-membership-revocation";
 import { registerChatSocketHandlers } from "../chat/chat-socket-handlers";
 import { createChatSubscriptionWorkQueue } from "../chat/chat-subscription-work";
@@ -83,6 +82,7 @@ import type {
   PageCursorRoomRef,
 } from "../page-cursor/page-cursor-types";
 import { createPdfCollaborationAccessService } from "../pdf-collaboration/pdf-collaboration-access.service";
+import { createPdfCollaborationMembershipRevocationHandler } from "../pdf-collaboration/pdf-collaboration-membership-revocation";
 import {
   pdfCollaborationClientEvents,
   pdfCollaborationServerEvents,
@@ -96,6 +96,7 @@ import {
 } from "../pdf-collaboration/pdf-collaboration-payload";
 import { createPdfCollaborationRoomName } from "../pdf-collaboration/pdf-collaboration-room";
 import { createPdfCollaborationRoomState } from "../pdf-collaboration/pdf-collaboration-room-state";
+import { WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL } from "../workspace-membership-revocation/workspace-membership-revocation";
 import type {
   CanvasRoomRef,
 } from "../canvas/contracts/canvas-types";
@@ -149,6 +150,9 @@ export type RealtimeSocketServerOptions = {
   config: RealtimeServerConfig;
   database?: RealtimeDatabase;
   httpServer: HttpServer;
+  membershipRevocationHandlers?: Array<{
+    handle: (payload: unknown) => Promise<boolean>;
+  }>;
 };
 
 type AuthedSocket = Socket & {
@@ -470,6 +474,7 @@ export async function createRealtimeSocketServer({
   config,
   database: providedDatabase,
   httpServer,
+  membershipRevocationHandlers = [],
 }: RealtimeSocketServerOptions): Promise<RealtimeSocketServerHandle> {
   const io = new Server(httpServer, {
     cors: {
@@ -543,6 +548,11 @@ export async function createRealtimeSocketServer({
   const chatFanOut = createChatFanOut({ database, io });
   const chatMembershipRevocationHandler =
     createChatMembershipRevocationHandler({ io });
+  const pdfCollaborationMembershipRevocationHandler =
+    createPdfCollaborationMembershipRevocationHandler({
+      io,
+      roomState: pdfCollaborationRoomState,
+    });
   const chatSubscriptionWork = createChatSubscriptionWorkQueue({
     onRejected() {
       console.error("Chat Redis subscription work failed");
@@ -658,7 +668,16 @@ export async function createRealtimeSocketServer({
         WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
         (payload) => {
           chatSubscriptionWork.trackRevocation(async () => {
-            if (!(await chatMembershipRevocationHandler.handle(payload))) {
+            const handled = await Promise.all(
+              [
+                chatMembershipRevocationHandler.handle(payload),
+                pdfCollaborationMembershipRevocationHandler.handle(payload),
+                ...membershipRevocationHandlers.map((handler) =>
+                  handler.handle(payload),
+                ),
+              ],
+            );
+            if (handled.some((result) => !result)) {
               console.error("Workspace membership revocation handling failed");
             }
           });

@@ -10,6 +10,7 @@ import { createDocumentAppServerClient } from "./documents/document-app-server-c
 import { createDocumentCheckpointService } from "./documents/document-checkpoint.service";
 import { createDocumentHocuspocusService } from "./documents/document-hocuspocus.service";
 import { createDocumentHocuspocusTransport } from "./documents/document-hocuspocus-transport";
+import { createDocumentMembershipRevocationHandler } from "./documents/document-membership-revocation";
 import { createRealtimeSocketServer } from "./socket/socket-server";
 
 async function bootstrap() {
@@ -67,11 +68,6 @@ async function bootstrap() {
     response.end(JSON.stringify({ error: "not_found" }));
   });
 
-  const socketServer = await createRealtimeSocketServer({
-    config,
-    database,
-    httpServer: server,
-  });
   const tldrawSyncRoomService = createCanvasTldrawSyncRoomService({
     database,
   });
@@ -83,6 +79,16 @@ async function bootstrap() {
     sessionService: createRealtimeSessionService(database),
   });
   const documentHocuspocus = documentHocuspocusService.hocuspocus;
+  const documentMembershipRevocationHandler =
+    createDocumentMembershipRevocationHandler({
+      hocuspocus: documentHocuspocus,
+    });
+  const socketServer = await createRealtimeSocketServer({
+    config,
+    database,
+    httpServer: server,
+    membershipRevocationHandlers: [documentMembershipRevocationHandler],
+  });
   const documentHocuspocusTransport = await createDocumentHocuspocusTransport(
     documentHocuspocus,
   );

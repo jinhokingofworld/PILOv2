@@ -92,6 +92,16 @@ export function createPdfCollaborationRoomState() {
       }
       return removed;
     },
+    clearWorkspaceSocket(socketId: string, workspaceId: string) {
+      const removed: PdfCollaborationPresence[] = [];
+      for (const state of rooms.values()) {
+        const room = state.presenceBySocketId.get(socketId);
+        if (!room || room.workspaceId !== workspaceId) continue;
+        const removedPresence = removeSocket(room, socketId);
+        if (removedPresence) removed.push(removedPresence);
+      }
+      return removed;
+    },
     updatePage(room: PdfCollaborationRoomRef, socketId: string, pageNumber: number) {
       const state = getRoom(room);
       const current = state?.presenceBySocketId.get(socketId);
