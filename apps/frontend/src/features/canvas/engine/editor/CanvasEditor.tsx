@@ -92,6 +92,7 @@ import {
 import { piloCanvasShapeUtils } from "../shapes/pilo-canvas-shape-utils";
 import { createPiloCanvasShapeInEmptyViewport } from "../interactions/pilo-canvas-instant-shape";
 import { placePiloCanvasShapeInEmptyViewport } from "../interactions/pilo-canvas-placement";
+import { getCanvasInteractionToolPath } from "../interactions/canvas-local-interaction-policy";
 import {
   hasCodeFileDrag,
   importCodeFilesFromDataTransfer,
@@ -3333,7 +3334,7 @@ function CanvasPresenceReporter({
   );
   const currentToolId = useValue(
     "pilo-presence-current-tool-id",
-    () => editor.getCurrentToolId(),
+    () => getCanvasInteractionToolPath(editor),
     [editor],
   );
   const editingMode = getCanvasPresenceEditingMode({

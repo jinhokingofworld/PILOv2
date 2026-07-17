@@ -1027,6 +1027,7 @@ assert.match(canvasRemoteConnectionPreview, /getRemoteConnectionPreviewPath/);
 assert.match(canvasRemoteConnectionPreview, /readRemoteConnectionPreviewShape/);
 assert.match(canvasLocalInteractionPolicy, /isCanvasFreehandInteractionActive/);
 assert.match(canvasLocalInteractionPolicy, /getCanvasActiveMutationShapeIds/);
+assert.match(canvasLocalInteractionPolicy, /getCanvasInteractionToolPath/);
 assert.match(
   canvasLocalInteractionPolicy,
   /isCanvasShapeMutationInteractionActive/,
@@ -1310,6 +1311,9 @@ assert.match(piloTldrawCanvas, /editor\.setEditingShape\(editingShapeId\)/);
 assert.match(piloTldrawCanvas, /editor\.setSelectedShapes\(nextSelectedShapeIds\)/);
 assert.match(piloTldrawCanvas, /CanvasLocalInteractionReporter/);
 assert.match(canvasEditorStateReporters, /getCanvasActiveMutationShapeIds/);
+assert.match(canvasEditorStateReporters, /getCanvasInteractionToolPath\(editor\)/);
+assert.doesNotMatch(canvasEditorStateReporters, /editor\.getCurrentToolId\(\)/);
+assert.match(piloTldrawCanvas, /getCanvasInteractionToolPath\(editor\)/);
 assert.doesNotMatch(canvasEditorStateReporters, /getProtectedShapeIds/);
 assert.match(piloTldrawCanvas, /onLocalInteractionStateChange/);
 assert.match(piloTldrawCanvas, /freeformShapesRef\.current/);

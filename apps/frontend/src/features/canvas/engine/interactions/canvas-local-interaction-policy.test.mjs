@@ -3,11 +3,22 @@ import test from "node:test";
 
 import {
   getCanvasActiveMutationShapeIds,
+  getCanvasInteractionToolPath,
   isCanvasFreehandInteractionActive,
   isCanvasFreehandToolId,
   isCanvasShapeMutationInteractionActive,
 } from "./canvas-local-interaction-policy.ts";
 import { findPiloCanvasEmptyPlacement } from "./pilo-canvas-empty-placement.ts";
+
+test("tldraw root tool ID 대신 현재 interaction path를 읽는다", () => {
+  const source = {
+    getCurrentTool: () => ({
+      getPath: () => "select.translating",
+    }),
+  };
+
+  assert.equal(getCanvasInteractionToolPath(source), "select.translating");
+});
 
 test("draw와 highlight 도구만 freehand 도구로 분류한다", () => {
   assert.equal(isCanvasFreehandToolId("draw.drawing"), true);
