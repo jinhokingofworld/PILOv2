@@ -1,7 +1,8 @@
-import { isUuid } from "../chat/chat-identifiers";
-
 export const WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL =
   "workspace:membership-revocations";
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type WorkspaceMembershipRevokedEventV1 = {
   version: 1;
@@ -32,6 +33,10 @@ function isCanonicalIsoTimestamp(value: unknown): value is string {
   return (
     Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value
   );
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
 export function isWorkspaceMembershipRevokedEvent(
