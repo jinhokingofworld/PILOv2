@@ -672,7 +672,7 @@ function ActionItemReviewCard({
         </div>
       )}
 
-      {evidenceSegments.length ? (
+      {!editing && evidenceSegments.length ? (
         <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
       ) : null}
 
@@ -762,12 +762,15 @@ function ActionItemReviewCard({
               {deliveryOptionsError ? <p className="text-xs text-destructive sm:col-span-2">{deliveryOptionsError}</p> : null}
             </div>
           )}
-          <div className="flex justify-end gap-2">
-            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(false)}>취소</Button>
-            <Button type="button" size="sm" disabled={busy || !title.trim() || !description.trim() || (deliveryType === "calendar_event" ? !startDate || (!isAllDay && !startTime) : !hasIssueDeliverySelection)} onClick={() => void submitApproval()}>
-              {busy ? <Loader2 className="animate-spin" /> : null}
-              승인
-            </Button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(false)}>취소</Button>
+              <Button type="button" size="sm" disabled={busy || !title.trim() || !description.trim() || (deliveryType === "calendar_event" ? !startDate || (!isAllDay && !startTime) : !hasIssueDeliverySelection)} onClick={() => void submitApproval()}>
+                {busy ? <Loader2 className="animate-spin" /> : null}
+                승인
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}

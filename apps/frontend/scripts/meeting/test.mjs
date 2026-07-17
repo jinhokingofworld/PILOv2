@@ -433,6 +433,10 @@ assert.match(meetingReportSection, /후속 작업 제목/);
 assert.match(meetingReportSection, /후속 작업 설명/);
 assert.match(meetingReportSection, /승인/);
 assert.match(meetingReportSection, /editing/);
+assert.match(
+  meetingReportSection,
+  /!editing && evidenceSegments\.length[\s\S]*?flex flex-wrap items-center justify-between gap-2[\s\S]*?<EvidenceTimeButtons[\s\S]*?취소[\s\S]*?승인/
+);
 assert.match(meetingReportSection, /endDate: endDate \|\| startDate/);
 assert.match(meetingReportSection, /종료 날짜 \(비우면 시작 날짜\)/);
 assert.match(meetingReportSection, /deliverMeetingReportActionItem/);
