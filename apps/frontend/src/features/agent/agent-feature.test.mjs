@@ -366,6 +366,8 @@ assert.equal(
 
 const stagedFocusStorage = new Map();
 const stagedFocusEvents = [];
+const previousCustomEvent = globalThis.CustomEvent;
+const previousWindow = globalThis.window;
 globalThis.CustomEvent = class {
   constructor(type, init) {
     this.type = type;
@@ -397,8 +399,16 @@ assert.deepEqual(
 );
 assert.equal(stagedFocusStorage.size, 0);
 assert.equal(consumeStagedSqlErdAgentTableFocus(resourceSessionId), null);
-delete globalThis.window;
-delete globalThis.CustomEvent;
+if (previousWindow === undefined) {
+  delete globalThis.window;
+} else {
+  globalThis.window = previousWindow;
+}
+if (previousCustomEvent === undefined) {
+  delete globalThis.CustomEvent;
+} else {
+  globalThis.CustomEvent = previousCustomEvent;
+}
 assert.deepEqual(
   getAgentResourceLinks({ ...completedRun, status: "running" }),
   []

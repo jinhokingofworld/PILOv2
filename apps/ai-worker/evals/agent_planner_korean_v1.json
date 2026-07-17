@@ -1182,7 +1182,7 @@
     },
     {
       "name": "inspect_sql_erd_schema",
-      "description": "Workspace SQLtoERD 세션의 테이블 이름, 주요 컬럼과 FK 관계를 제한된 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용합니다.",
+      "description": "Workspace SQLtoERD session의 테이블 이름, 주요 컬럼과 FK 관계를 제한된 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용하며 session이 여러 개면 사용자가 선택할 후보를 반환합니다.",
       "riskLevel": "low",
       "executionMode": "auto",
       "inputSchema": {
@@ -1198,7 +1198,7 @@
     },
     {
       "name": "focus_sql_erd_tables",
-      "description": "inspect_sql_erd_schema의 compact table ref를 검증하고 핵심 및 직접 관련 테이블의 일회성 집중 보기 링크를 만듭니다.",
+      "description": "inspect_sql_erd_schema 결과의 compact table ref를 현재 session revision으로 검증하고 핵심 및 직접 관련 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session은 변경하지 않습니다.",
       "riskLevel": "low",
       "executionMode": "auto",
       "inputSchema": {
