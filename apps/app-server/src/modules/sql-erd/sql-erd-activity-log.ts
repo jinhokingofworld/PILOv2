@@ -236,7 +236,7 @@ export function buildSqlErdNoteActivities({
       continue;
     }
 
-    if (beforeNote.text !== afterNote.text) {
+    if (normalizeText(beforeNote.text) !== normalizeText(afterNote.text)) {
       activities.push(
         createNoteContentActivity({
           workspaceId,

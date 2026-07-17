@@ -227,6 +227,10 @@ const workspaceService = {
   }
 };
 
+const activityLogService = {
+  async append() {}
+};
+
 function sessionRow(overrides = {}) {
   return {
     id: sessionId,
@@ -252,7 +256,11 @@ function sessionRow(overrides = {}) {
   };
 }
 
-const service = new SqlErdService(new FakeDatabase(sessionRow()), workspaceService);
+const service = new SqlErdService(
+  new FakeDatabase(sessionRow()),
+  workspaceService,
+  activityLogService
+);
 
 const operationRequestFixture = {
   baseRevision: 1,
@@ -294,7 +302,11 @@ assert.equal(
 
 {
   const database = new FakeDatabase(sessionRow());
-  const operationService = new SqlErdService(database, workspaceService);
+  const operationService = new SqlErdService(
+    database,
+    workspaceService,
+    activityLogService
+  );
   const result = await operationService.createOperation(
     currentUserId,
     workspaceId,
@@ -337,7 +349,11 @@ assert.equal(
     created_at: new Date("2026-07-14T12:00:00.000Z")
   };
   const database = new FakeDatabase(sessionRow(), existingOperation);
-  const operationService = new SqlErdService(database, workspaceService);
+  const operationService = new SqlErdService(
+    database,
+    workspaceService,
+    activityLogService
+  );
   const result = await operationService.createOperation(
     currentUserId,
     workspaceId,
@@ -360,7 +376,11 @@ assert.equal(
 
 {
   const database = new FakeDatabase(sessionRow({ write_protocol: "snapshot" }));
-  const operationService = new SqlErdService(database, workspaceService);
+  const operationService = new SqlErdService(
+    database,
+    workspaceService,
+    activityLogService
+  );
   await assert.rejects(
     () =>
       operationService.createOperation(currentUserId, workspaceId, sessionId, {
@@ -392,7 +412,11 @@ assert.equal(
       created_at: new Date("2026-07-14T12:00:00.000Z")
     }
   ]);
-  const operationService = new SqlErdService(database, workspaceService);
+  const operationService = new SqlErdService(
+    database,
+    workspaceService,
+    activityLogService
+  );
   const result = await operationService.listOperations(
     currentUserId,
     workspaceId,
@@ -413,7 +437,11 @@ assert.equal(
 
 {
   const database = new FakeDatabase(sessionRow());
-  const operationService = new SqlErdService(database, workspaceService);
+  const operationService = new SqlErdService(
+    database,
+    workspaceService,
+    activityLogService
+  );
   await assert.rejects(
     () =>
       operationService.createOperation(currentUserId, workspaceId, sessionId, {
