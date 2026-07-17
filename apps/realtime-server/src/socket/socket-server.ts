@@ -62,13 +62,15 @@ import {
   evictSqlErdSocketFromRooms,
 } from "../sql-erd/sql-erd-membership-revocation";
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
+import { createMeetingMembershipRevocationHandler } from "../meeting/meeting-membership-revocation";
+import { registerMeetingSocketHandlers } from "../meeting/meeting-socket-handlers";
 import { createWorkspacePresenceAccessService } from "../workspace-presence/workspace-presence-access.service";
+import { createWorkspacePresenceMembershipRevocationHandler } from "../workspace-presence/workspace-presence-membership-revocation";
 import { createWorkspacePresenceService } from "../workspace-presence/workspace-presence.service";
 import { registerWorkspacePresenceSocketHandlers } from "../workspace-presence/workspace-presence-socket-handlers";
 import {
   isMeetingReportRedisEvent,
   isMeetingStateRedisEvent,
-  meetingClientEvents,
   meetingServerEvents
 } from "../meeting/meeting-socket-events";
 import {
@@ -102,7 +104,11 @@ import {
 } from "../pdf-collaboration/pdf-collaboration-payload";
 import { createPdfCollaborationRoomName } from "../pdf-collaboration/pdf-collaboration-room";
 import { createPdfCollaborationRoomState } from "../pdf-collaboration/pdf-collaboration-room-state";
-import { WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL } from "../workspace-membership-revocation/workspace-membership-revocation";
+import {
+  createWorkspaceMembershipRevocationFence,
+  isWorkspaceMembershipRevokedEvent,
+  WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL
+} from "../workspace-membership-revocation/workspace-membership-revocation";
 import type {
   CanvasRoomRef,
 } from "../canvas/contracts/canvas-types";
@@ -408,15 +414,6 @@ async function getSqlErdRoomSocketPresence(
   return [...presenceByUserId.values()];
 }
 
-function readMeetingWorkspaceId(payload: unknown): string | null {
-  if (!isRecord(payload)) return null;
-  return readRequiredString(payload, "workspaceId");
-}
-
-function emitMeetingError(socket: Socket, message: string) {
-  socket.emit(meetingServerEvents.error, createSocketErrorPayload("invalid_payload", message));
-}
-
 function emitPageCursorError(socket: Socket, message: string) {
   socket.emit(
     pageCursorServerEvents.error,
@@ -553,6 +550,7 @@ export async function createRealtimeSocketServer({
   const workspacePresenceAccessService =
     createWorkspacePresenceAccessService(database);
   const workspacePresenceService = createWorkspacePresenceService();
+  const membershipRevocationFence = createWorkspaceMembershipRevocationFence();
   const chatAccessService = createChatAccessService(database);
   const chatFanOut = createChatFanOut({ database, io });
   const chatMembershipRevocationHandler =
@@ -578,6 +576,13 @@ export async function createRealtimeSocketServer({
       database,
       io,
       presenceService: sqlErdPresenceService,
+    });
+  const meetingMembershipRevocationHandler =
+    createMeetingMembershipRevocationHandler({ io });
+  const workspacePresenceMembershipRevocationHandler =
+    createWorkspacePresenceMembershipRevocationHandler({
+      io,
+      service: workspacePresenceService,
     });
   const chatSubscriptionWork = createChatSubscriptionWorkQueue({
     onRejected() {
@@ -694,12 +699,21 @@ export async function createRealtimeSocketServer({
         WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
         (payload) => {
           chatSubscriptionWork.trackRevocation(async () => {
+            if (isWorkspaceMembershipRevokedEvent(payload)) {
+              membershipRevocationFence.revokeUserWorkspace(
+                io,
+                payload.userId,
+                payload.workspaceId,
+              );
+            }
             const handled = await Promise.all(
               [
                 chatMembershipRevocationHandler.handle(payload),
                 classicCanvasMembershipRevocationHandler.handle(payload),
                 pdfCollaborationMembershipRevocationHandler.handle(payload),
                 sqlErdMembershipRevocationHandler.handle(payload),
+                meetingMembershipRevocationHandler.handle(payload),
+                workspacePresenceMembershipRevocationHandler.handle(payload),
                 ...membershipRevocationHandlers.map((handler) =>
                   handler.handle(payload),
                 ),
@@ -796,8 +810,18 @@ export async function createRealtimeSocketServer({
     registerWorkspacePresenceSocketHandlers({
       accessService: workspacePresenceAccessService,
       io,
+      membershipRevocationFence,
       service: workspacePresenceService,
       socket,
+    });
+    registerMeetingSocketHandlers({
+      accessService: meetingAccessService,
+      membershipRevocationFence,
+      socket,
+    });
+
+    socket.on("disconnect", () => {
+      membershipRevocationFence.clearSocket(socket.id);
     });
 
     registerCanvasSocketHandlers({
@@ -919,38 +943,6 @@ export async function createRealtimeSocketServer({
         ...result.payload,
         presence: sqlErdPresence,
       });
-    });
-
-    socket.on(meetingClientEvents.subscribe, async payload => {
-      const workspaceId = readMeetingWorkspaceId(payload);
-      if (!workspaceId) {
-        emitMeetingError(socket, "meeting:subscribe payload is invalid");
-        return;
-      }
-
-      const allowed = await meetingAccessService.canJoinWorkspace(
-        { userId: authedSocket.data.auth.userId },
-        workspaceId
-      );
-      if (!allowed) {
-        socket.emit(
-          meetingServerEvents.error,
-          createSocketErrorPayload("forbidden", "meeting room access denied")
-        );
-        return;
-      }
-
-      await socket.join(createMeetingRoomName(workspaceId));
-      socket.emit(meetingServerEvents.subscribed, { workspaceId });
-    });
-
-    socket.on(meetingClientEvents.unsubscribe, async payload => {
-      const workspaceId = readMeetingWorkspaceId(payload);
-      if (!workspaceId) {
-        emitMeetingError(socket, "meeting:unsubscribe payload is invalid");
-        return;
-      }
-      await socket.leave(createMeetingRoomName(workspaceId));
     });
 
     socket.on(pageCursorClientEvents.join, async (payload) => {

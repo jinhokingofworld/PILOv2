@@ -21,6 +21,7 @@ import { MeetingStateRealtimePublisherService } from "./meeting-state-realtime-p
 import { MeetingService } from "./meeting.service";
 import { MeetingTranscriptRagService } from "./meeting-transcript-rag.service";
 import { MeetingActionItemDeliveryService } from "./meeting-action-item-delivery.service";
+import { MeetingMembershipRevocationService } from "./meeting-membership-revocation.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule, CalendarModule, BoardModule],
@@ -33,6 +34,7 @@ import { MeetingActionItemDeliveryService } from "./meeting-action-item-delivery
   providers: [
     MeetingService,
     MeetingActionItemDeliveryService,
+    MeetingMembershipRevocationService,
     MeetingTranscriptRagService,
     LiveKitEgressService,
     LiveKitTokenService,

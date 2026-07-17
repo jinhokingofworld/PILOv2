@@ -12,6 +12,10 @@ import {
 } from "./workspace-presence-payload";
 import type { WorkspacePresenceService } from "./workspace-presence.service";
 import type { WorkspacePresenceClearResult } from "./workspace-presence-types";
+import {
+  createWorkspaceMembershipRevocationFence,
+  type WorkspaceMembershipRevocationFence
+} from "../workspace-membership-revocation/workspace-membership-revocation";
 
 type WorkspacePresenceAccessService = {
   canJoinWorkspace: (
@@ -30,7 +34,10 @@ export function createWorkspacePresenceRoomName(workspaceId: string) {
   return `workspace:${workspaceId}:presence`;
 }
 
-function emitClearResult(io: Server, result: WorkspacePresenceClearResult) {
+export function emitWorkspacePresenceClearResult(
+  io: Server,
+  result: WorkspacePresenceClearResult,
+) {
   if (result.kind === "update") {
     io.to(createWorkspacePresenceRoomName(result.presence.workspaceId)).emit(
       workspacePresenceServerEvents.update,
@@ -55,11 +62,13 @@ function emitInvalidPayload(socket: Socket, event: string) {
 export function registerWorkspacePresenceSocketHandlers({
   accessService,
   io,
+  membershipRevocationFence = createWorkspaceMembershipRevocationFence(),
   service,
   socket,
 }: {
   accessService: WorkspacePresenceAccessService;
   io: Server;
+  membershipRevocationFence?: WorkspaceMembershipRevocationFence;
   service: WorkspacePresenceService;
   socket: Socket;
 }) {
@@ -79,6 +88,7 @@ export function registerWorkspacePresenceSocketHandlers({
     return (
       !disconnected &&
       socket.connected &&
+      !membershipRevocationFence.isRevoked(socket.id, workspaceId) &&
       generationByWorkspace.get(workspaceId) === generation
     );
   }
@@ -169,14 +179,25 @@ export function registerWorkspacePresenceSocketHandlers({
       if (generationByWorkspace.get(room.workspaceId) !== generation) return;
       const result = service.leaveSocket(socket.id, room.workspaceId);
       await socket.leave(createWorkspacePresenceRoomName(room.workspaceId));
-      if (result) emitClearResult(io, result);
+      if (result) emitWorkspacePresenceClearResult(io, result);
     });
   });
 
-  socket.on(workspacePresenceClientEvents.update, (payload) => {
+  socket.on(workspacePresenceClientEvents.update, async (payload) => {
     const update = readWorkspacePresenceUpdatePayload(payload);
     if (!update) {
       emitInvalidPayload(socket, workspacePresenceClientEvents.update);
+      return;
+    }
+
+    if (membershipRevocationFence.isRevoked(socket.id, update.workspaceId)) {
+      const result = service.leaveSocket(socket.id, update.workspaceId);
+      await socket.leave(createWorkspacePresenceRoomName(update.workspaceId));
+      if (result) emitWorkspacePresenceClearResult(io, result);
+      socket.emit(
+        workspacePresenceServerEvents.error,
+        createSocketErrorPayload("forbidden", "workspace presence access denied"),
+      );
       return;
     }
 
@@ -202,7 +223,7 @@ export function registerWorkspacePresenceSocketHandlers({
     disconnected = true;
     joinedGenerationByWorkspace.clear();
     for (const result of service.clearSocket(socket.id)) {
-      emitClearResult(io, result);
+      emitWorkspacePresenceClearResult(io, result);
     }
   });
 }

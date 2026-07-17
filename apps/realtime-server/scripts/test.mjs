@@ -81,6 +81,10 @@ const meetingEvents = await readFile(
   new URL("../src/meeting/meeting-socket-events.ts", import.meta.url),
   "utf8"
 );
+const meetingSocketHandlers = await readFile(
+  new URL("../src/meeting/meeting-socket-handlers.ts", import.meta.url),
+  "utf8"
+);
 const redisPubSub = await readFile(
   new URL("../src/redis/redis-pubsub.ts", import.meta.url),
   "utf8"
@@ -199,7 +203,7 @@ assert.match(socketServer, /pr-review:conflict-draft:lock:claim/);
 assert.match(socketServer, /PR_REVIEW_CONFLICT_DRAFT_LOCK_RELEASED_EVENT/);
 assert.match(socketServer, /MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events"/);
 assert.match(socketServer, /MEETING_STATE_REDIS_CHANNEL = "meeting:state-events"/);
-assert.match(socketServer, /meetingClientEvents\.subscribe/);
+assert.match(socketServer, /registerMeetingSocketHandlers\(/);
 assert.match(socketServer, /meetingServerEvents\.reportUpdated/);
 assert.match(socketServer, /meetingServerEvents\.stateUpdated/);
 assert.match(socketServer, /createMeetingRoomName/);
@@ -210,6 +214,8 @@ assert.match(meetingEvents, /meeting:report:updated/);
 assert.match(meetingEvents, /meeting:state:updated/);
 assert.match(meetingEvents, /isMeetingStateRedisEvent/);
 assert.match(meetingEvents, /recording_failed/);
+assert.match(meetingSocketHandlers, /meetingClientEvents\.subscribe/);
+assert.match(meetingSocketHandlers, /membershipRevocationFence\.isRevoked/);
 
 assert.match(canvasPresence, /clearRoomPresence/);
 assert.match(canvasPresence, /clearSocket/);
@@ -317,9 +323,12 @@ await import("./page-cursor.test.mjs");
 await import("./github-source/test.mjs");
 await import("../src/chat/chat-events.test.mjs");
 await import("../src/chat/chat-membership-revocation.test.mjs");
+await import("../src/meeting/meeting-membership-revocation.test.mjs");
+await import("../src/meeting/meeting-socket-handlers.test.mjs");
 await import("../src/chat/chat-subscription-work.test.mjs");
 await import("../src/chat/chat-socket-lifecycle.test.mjs");
 await import("../src/canvas/socket/canvas-membership-revocation.test.mjs");
+await import("../src/workspace-presence/workspace-presence-membership-revocation.test.mjs");
 await import("../src/documents/document-access.service.test.mjs");
 await import("../src/documents/document-app-server-client.test.mjs");
 await import("../src/documents/document-checkpoint.service.test.mjs");

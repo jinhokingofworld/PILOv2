@@ -28,6 +28,12 @@ Workspace에는 하나 이상의 MeetingRoom이 있다. 활성 방을 `created_a
 - API 응답에는 OAuth token, LiveKit secret, provider raw error를 노출하지 않는다.
 - LiveKit token은 입장용 임시 token이며 서버 저장 대상이 아니다.
 - LiveKit token 만료 시간은 발급 시점 기준 1시간이다.
+- Workspace membership이 철회되면 이미 가입한 Meeting Socket.IO room과 LiveKit
+  participant를 즉시 정리한다. 해당 사용자가 이미 발급받은 LiveKit token도
+  재입장에 사용할 수 없으며, participant·녹음·Meeting 종료 상태는 기존 LiveKit
+  departure webhook으로 보정한다. `removeParticipant`가 이미 없는 participant를
+  반환하면 webhook을 기다리지 않고 같은 idempotent Meeting reconciliation 경로로
+  `meeting_participants.left_at`과 파생 상태를 보정한다.
 
 성공 응답:
 
@@ -152,6 +158,10 @@ socket.emit("meeting:unsubscribe", { workspaceId });
 - socket 인증은 기존 Realtime bearer access token을 사용한다.
 - 가입 권한이 없거나 payload가 잘못되면 `meeting:error`를 받는다.
 - 가입 성공 시 `meeting:subscribed`를 받는다.
+- membership이 철회되면 서버는 해당 Workspace의 기존 `meeting:subscribe` room
+  가입을 즉시 해제한다. 별도의 browser event는 보내지 않으며, 재구독은
+  `forbidden`으로 거부된다. membership 검사와 `socket.join()` 사이에 철회가
+  도착한 in-flight subscribe도 room leave로 rollback하고 `forbidden`으로 거부한다.
 
 ### Socket.IO server → client
 
