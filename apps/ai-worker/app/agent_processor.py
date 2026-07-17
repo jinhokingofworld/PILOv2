@@ -28,6 +28,10 @@ PLANNER_STATUSES = {
 TOOL_RISK_LEVELS = {"low", "medium", "high"}
 TOOL_EXECUTION_MODES = {"auto", "confirmation_required", "contextual"}
 MEETING_REPORT_ID_TOOLS = {"get_meeting_report", "summarize_meeting_report"}
+USER_VISIBLE_UUID_PATTERN = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
 FORBIDDEN_JSON_KEY_PARTS = (
     "authorization",
     "cookie",
@@ -1211,7 +1215,7 @@ def _agent_planner_schema() -> dict[str, object]:
 
 def _safe_text(value: str | None, fallback: str) -> str:
     if isinstance(value, str) and value.strip():
-        return value.strip()[:1000]
+        return USER_VISIBLE_UUID_PATTERN.sub("내부 식별자", value.strip()[:1000])
     return fallback
 
 

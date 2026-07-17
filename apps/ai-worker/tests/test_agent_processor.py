@@ -112,6 +112,27 @@ def test_completed_planner_decision_finishes_multi_tool_run() -> None:
     assert "unsupportedReason" not in normalized.output_summary
 
 
+def test_normalized_user_visible_text_redacts_uuid() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[tool_snapshot(executionMode="confirmation_required")],
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            message=f"대상 ID는 {RUN_ID}입니다.",
+            final_answer_draft=f"{RUN_ID} 항목을 확인한 뒤 승인해 주세요.",
+        ),
+        job,
+    )
+
+    assert RUN_ID not in normalized.message
+    assert RUN_ID not in normalized.final_answer
+    assert normalized.output_summary["message"] == normalized.message
+    assert normalized.output_summary["finalAnswerDraft"] == normalized.final_answer
+    assert "내부 식별자" in normalized.final_answer
+
+
 def test_planner_prompt_limits_prior_thread_resource_reuse() -> None:
     prompt = _agent_planner_system_prompt()
 

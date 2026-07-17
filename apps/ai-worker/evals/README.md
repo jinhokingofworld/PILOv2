@@ -21,3 +21,34 @@ OPENAI_API_KEY=... PYTHONPATH=. .venv/bin/python scripts/evaluate_agent_planner.
 기준선은 30개 case를 각각 5회 실행한다. 결과 JSON의 `metadata`, case별 `exactRate`,
 `flakyCaseIds`, `failureCategoryCandidates`와 모든 비정확 결과를 함께 검토한다. 이 평가는
 Planner 판단만 측정하며, 배포된 dev의 SQS·handoff·tool execution E2E는 별도 #723에서 검증한다.
+
+## Meeting Agent Phase 1 회귀 catalog
+
+`meeting_agent_capability_catalog_v1.json`은 현재 지원하는 18개 Meeting tool별로 canonical 발화,
+문맥 후속 발화, 인접 intent 반례, held-out paraphrase와 현재 planner 기대 상태를 보관한다. canonical은
+각 capability의 4개 seed와 3개 prefix를 조합해 12개 발화로 확장하고, held-out은 같은 seed를 재사용하지
+않는다. 현재 selector가 구현되지 않은 요청은 catalog의 `currentExpectation`에서
+`needs_clarification` 또는 `unsupported`로 고정하고, `target`에는 후속 Phase의 intent·selector·tool
+흐름을 기록한다.
+
+canonical과 held-out은 같은 tool snapshot, 기준일, timezone, model, repetition으로 각각 실행한다.
+
+```bash
+cd apps/ai-worker
+OPENAI_API_KEY=... PYTHONPATH=. .venv/bin/python scripts/evaluate_agent_planner.py \
+  --suite evals/agent_planner_korean_v1.json \
+  --meeting-catalog evals/meeting_agent_capability_catalog_v1.json \
+  --meeting-variant canonical \
+  --current-date 2026-07-18 --timezone Asia/Seoul --repetitions 5 \
+  > meeting-agent-canonical-baseline.json
+
+OPENAI_API_KEY=... PYTHONPATH=. .venv/bin/python scripts/evaluate_agent_planner.py \
+  --suite evals/agent_planner_korean_v1.json \
+  --meeting-catalog evals/meeting_agent_capability_catalog_v1.json \
+  --meeting-variant held_out \
+  --current-date 2026-07-18 --timezone Asia/Seoul --repetitions 5 \
+  > meeting-agent-held-out-baseline.json
+```
+
+두 결과에는 model, current date, timezone, suite SHA, source revision과 case별 정확도가 포함된다.
+실제 API key가 필요한 실행 결과는 repository에 commit하지 않고 #1371에 첨부한다.

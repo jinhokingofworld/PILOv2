@@ -94,6 +94,92 @@ def load_evaluation_suite(path: Path) -> EvaluationSuite:
     return EvaluationSuite(version=version, job=job, cases=parsed_cases)
 
 
+def load_meeting_regression_suite(
+    catalog_path: Path,
+    tool_snapshot_path: Path,
+    variant: str,
+) -> EvaluationSuite:
+    if variant not in {"canonical", "held_out"}:
+        raise ValueError("Meeting regression variant must be canonical or held_out")
+
+    try:
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Invalid meeting regression catalog JSON: {catalog_path}") from error
+    if not isinstance(catalog, dict):
+        raise ValueError("Meeting regression catalog must be an object")
+
+    prefixes = catalog.get("canonicalPrefixes")
+    capabilities = catalog.get("capabilities")
+    if (
+        not isinstance(prefixes, list)
+        or not all(isinstance(prefix, str) for prefix in prefixes)
+        or not isinstance(capabilities, list)
+    ):
+        raise ValueError("Meeting regression catalog has invalid capability variants")
+
+    base_suite = load_evaluation_suite(tool_snapshot_path)
+    cases: list[EvaluationCase] = []
+    for capability in capabilities:
+        if not isinstance(capability, dict):
+            raise ValueError("Meeting regression capability must be an object")
+        capability_id = _require_string(capability, "id")
+        expectation = _meeting_regression_expectation(capability)
+        if variant == "canonical":
+            seeds = capability.get("canonicalSeeds")
+            if not isinstance(seeds, list) or not all(
+                isinstance(seed, str) and seed for seed in seeds
+            ):
+                raise ValueError("Meeting regression canonicalSeeds must be a string array")
+            prompts = [
+                f"{prefix}{seed}".strip()
+                for prefix in prefixes
+                for seed in seeds
+            ]
+        else:
+            prompts = capability.get("heldOutParaphrases")
+            if not isinstance(prompts, list) or not all(
+                isinstance(prompt, str) and prompt for prompt in prompts
+            ):
+                raise ValueError("Meeting regression heldOutParaphrases must be a string array")
+
+        for index, prompt in enumerate(prompts, start=1):
+            cases.append(
+                EvaluationCase(
+                    case_id=f"{capability_id}:{variant}:{index}",
+                    prompt=prompt,
+                    expectation=expectation,
+                )
+            )
+
+    if not cases:
+        raise ValueError("Meeting regression catalog must produce at least one case")
+    if len({case.case_id for case in cases}) != len(cases):
+        raise ValueError("Meeting regression catalog produced duplicate case IDs")
+
+    return EvaluationSuite(
+        version=f"{_require_string(catalog, 'version')}:{variant}",
+        job=base_suite.job,
+        cases=tuple(cases),
+    )
+
+
+def _meeting_regression_expectation(capability: dict[str, object]) -> EvaluationExpectation:
+    raw = capability.get("currentExpectation")
+    if not isinstance(raw, dict):
+        raise ValueError("Meeting regression capability must include currentExpectation")
+    tool_name = raw.get("toolName")
+    if tool_name is not None and (not isinstance(tool_name, str) or not tool_name):
+        raise ValueError("Meeting regression currentExpectation toolName must be a string")
+    return EvaluationExpectation(
+        status=_require_string(raw, "status"),
+        tool_name=tool_name,
+        input_contains={},
+        requires_confirmation=None,
+        missing_fields=(),
+    )
+
+
 def evaluate_suite(
     planner: AgentPlannerClient,
     suite: EvaluationSuite,
