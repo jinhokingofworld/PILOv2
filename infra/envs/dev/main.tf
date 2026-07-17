@@ -119,27 +119,28 @@ module "secrets" {
 module "iam" {
   source = "../../modules/iam"
 
-  name_prefix                        = local.name_prefix
-  aws_region                         = var.aws_region
-  github_owner                       = var.github_owner
-  github_repo                        = var.github_repo
-  ecr_repository_arns                = module.ecr.repository_arns
-  s3_bucket_arns                     = [module.s3.frontend_bucket_arn, module.s3.uploads_bucket_arn]
-  sqs_queue_arns                     = module.sqs.queue_arns
-  ai_worker_queue_arns               = [module.sqs.ai_jobs_queue_arn]
-  agent_worker_queue_arns            = [module.sqs.agent_jobs_queue_arn]
-  meeting_worker_queue_arns          = [module.sqs.meeting_jobs_queue_arn]
-  pr_review_ai_worker_queue_arns     = [module.sqs.pr_review_analysis_queue_arn]
-  github_sync_worker_queue_arns      = module.sqs.github_sync_worker_queue_arns
-  github_webhooks_queue_arn          = module.sqs.github_webhooks_queue_arn
-  github_sync_operator_user_name     = "pilo-juhyung-github-ops"
-  team_administrator_user_names      = ["pilo-donghyun", "pilo-sein", "pilo-jinho"]
-  github_sync_operator_dlq_arns      = module.sqs.github_sync_worker_dlq_arns
-  github_sync_operator_log_group_arn = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/github-sync-worker"
-  secrets_manager_arns               = concat(module.secrets.secret_arns, [module.rds.master_user_secret_arn])
-  cloudfront_distribution            = module.cloudfront.distribution_arn
-  terraform_plan_state_bucket_arn    = "arn:aws:s3:::${module.terraform_state.state_bucket_name}"
-  terraform_plan_state_key           = "infra/dev/terraform.tfstate"
+  name_prefix                         = local.name_prefix
+  aws_region                          = var.aws_region
+  github_owner                        = var.github_owner
+  github_repo                         = var.github_repo
+  ecr_repository_arns                 = module.ecr.repository_arns
+  s3_bucket_arns                      = [module.s3.frontend_bucket_arn, module.s3.uploads_bucket_arn]
+  sqs_queue_arns                      = module.sqs.queue_arns
+  ai_worker_queue_arns                = [module.sqs.ai_jobs_queue_arn]
+  agent_worker_queue_arns             = [module.sqs.agent_jobs_queue_arn]
+  meeting_worker_queue_arns           = [module.sqs.meeting_jobs_queue_arn]
+  pr_review_ai_worker_queue_arns      = [module.sqs.pr_review_analysis_queue_arn]
+  workspace_indexer_worker_queue_arns = [module.sqs.workspace_indexing_queue_arn]
+  github_sync_worker_queue_arns       = module.sqs.github_sync_worker_queue_arns
+  github_webhooks_queue_arn           = module.sqs.github_webhooks_queue_arn
+  github_sync_operator_user_name      = "pilo-juhyung-github-ops"
+  team_administrator_user_names       = ["pilo-donghyun", "pilo-sein", "pilo-jinho"]
+  github_sync_operator_dlq_arns       = module.sqs.github_sync_worker_dlq_arns
+  github_sync_operator_log_group_arn  = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/github-sync-worker"
+  secrets_manager_arns                = concat(module.secrets.secret_arns, [module.rds.master_user_secret_arn])
+  cloudfront_distribution             = module.cloudfront.distribution_arn
+  terraform_plan_state_bucket_arn     = "arn:aws:s3:::${module.terraform_state.state_bucket_name}"
+  terraform_plan_state_key            = "infra/dev/terraform.tfstate"
 }
 
 module "rds" {
@@ -357,6 +358,27 @@ module "ecs" {
         AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS   = "900"
       }
       secrets = module.secrets.pr_review_ai_worker_ecs_secrets
+    }
+
+    workspace-indexer-worker = {
+      image              = "${module.ecr.repository_urls["pilo-ai-worker"]}:latest"
+      cpu                = var.ai_worker_cpu
+      memory             = var.ai_worker_memory
+      desired_count      = 1
+      container_port     = null
+      command            = ["python", "-m", "app.workspace_indexing_worker_runtime"]
+      security_group_ids = [module.security_groups.ai_worker_security_group_id]
+      task_role_arn      = module.iam.workspace_indexer_worker_task_role_arn
+      target_group_arn   = null
+      environment = {
+        APP_ENV                                   = var.environment
+        AWS_REGION                                = var.aws_region
+        DATABASE_SSL                              = "true"
+        SQS_WORKSPACE_INDEXING_QUEUE_URL          = module.sqs.workspace_indexing_queue_url
+        OPENAI_WORKSPACE_INDEXING_EMBEDDING_MODEL = "text-embedding-3-small"
+        AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS  = "900"
+      }
+      secrets = module.secrets.workspace_indexer_worker_ecs_secrets
     }
 
     github-sync-worker = {

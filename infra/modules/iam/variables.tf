@@ -47,6 +47,11 @@ variable "pr_review_ai_worker_queue_arns" {
   type        = list(string)
 }
 
+variable "workspace_indexer_worker_queue_arns" {
+  description = "Queues consumed by the Workspace indexing worker."
+  type        = list(string)
+}
+
 variable "github_sync_worker_queue_arns" {
   type = list(string)
 }

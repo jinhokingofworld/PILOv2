@@ -203,6 +203,31 @@ resource "aws_iam_role_policy" "pr_review_ai_worker_task" {
   })
 }
 
+resource "aws_iam_role" "workspace_indexer_worker_task" {
+  name               = "${var.name_prefix}-workspace-indexer-worker-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy" "workspace_indexer_worker_task" {
+  name = "${var.name_prefix}-workspace-indexer-worker-task-policy"
+  role = aws_iam_role.workspace_indexer_worker_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:ChangeMessageVisibility"
+      ]
+      Resource = var.workspace_indexer_worker_queue_arns
+    }]
+  })
+}
+
 resource "aws_iam_role" "github_sync_worker_task" {
   name               = "${var.name_prefix}-github-sync-worker-task-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
@@ -473,6 +498,7 @@ resource "aws_iam_role_policy" "github_actions_pass_roles" {
           aws_iam_role.app_server_task.arn,
           aws_iam_role.realtime_server_task.arn,
           aws_iam_role.ai_worker_task.arn,
+          aws_iam_role.workspace_indexer_worker_task.arn,
           aws_iam_role.github_sync_worker_task.arn,
         ]
       }
