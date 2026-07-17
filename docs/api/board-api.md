@@ -598,7 +598,12 @@ GET /api/v1/workspaces/{workspaceId}/boards/{boardId}/filter-options
 - 로컬 cache 갱신 중 실패하면 GitHub source of truth 기준으로 다음 hydrate 또는 refresh에서 복구되어야 한다.
 - 클라이언트가 optimistic update를 적용한 경우 실패 시 클라이언트는 GitHub 기준으로 rollback 또는 refresh한다.
 - Board write API는 ProjectV2 field/option 생성·수정은 수행하지 않는다. 기존 Status field와 Status option만 사용한다.
+- GitHub OAuth refresh가 불가능하면 `400 BAD_REQUEST`와 `GitHub OAuth reconnection is required`를 반환한다.
+- GitHub user token으로 수행한 issue create/update, assignee 변경·조회가 `401`을 받으면
+  `400 BAD_REQUEST`와 `GitHub OAuth connection is invalid; reconnect is required`를 반환한다.
 - GitHub OAuth 연결 오류는 기존 auth/provider error를 그대로 반환한다.
+- 위 두 reconnect 오류는 generic GitHub provider 오류의 `502 BAD_GATEWAY` mapping보다 먼저
+  보존하므로 Board service boundary에서 다른 메시지나 status로 변환하지 않는다.
 - 그 외 GitHub provider write 실패는 `502 BAD_GATEWAY`로 매핑한다.
 
 ## Issue Status 변경
@@ -896,7 +901,7 @@ Board API 오류 응답은 공통 API 오류 포맷을 따른다.
 
 | Status | Code | 상황 |
 | --- | --- | --- |
-| `400 BAD_REQUEST` | `BAD_REQUEST` | request body, path id, query, `Idempotency-Key`가 잘못됨. GitHub metadata가 부족함 |
+| `400 BAD_REQUEST` | `BAD_REQUEST` | request body, path id, query, `Idempotency-Key`가 잘못됨. GitHub metadata가 부족하거나 GitHub OAuth 재연결이 필요함 |
 | `401 UNAUTHORIZED` | `UNAUTHORIZED` | PILO bearer token 없음 또는 만료 |
 | `403 FORBIDDEN` | `FORBIDDEN` | Workspace 접근 권한 또는 GitHub write 권한 없음 |
 | `404 NOT_FOUND` | `NOT_FOUND` | Board, issue, column, repository, ProjectV2를 찾을 수 없음 |
@@ -917,6 +922,8 @@ Board API 오류 응답은 공통 API 오류 포맷을 따른다.
 | `400` | `assignees must be an array of GitHub logins` |
 | `400` | `assignees must contain 10 or fewer GitHub logins` |
 | `400` | `One or more assignees cannot be assigned to this repository` |
+| `400` | `GitHub OAuth reconnection is required` |
+| `400` | `GitHub OAuth connection is invalid; reconnect is required` |
 | `404` | `Board not found` |
 | `404` | `Board issue not found` |
 | `404` | `Board issue or target column not found` |
