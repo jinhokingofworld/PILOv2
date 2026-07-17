@@ -240,6 +240,16 @@ class MutationDatabase {
   }
 }
 
+class FakeActivityLogService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ transaction, input });
+  }
+}
+
 const workspaceService = {
   calls: [],
   async assertWorkspaceAccess(userId, requestedWorkspaceId) {
@@ -250,7 +260,12 @@ const workspaceService = {
 process.env.SQL_ERD_OPERATIONS_V1_ENABLED = "true";
 
 const createDatabase = new MutationDatabase("create");
-const createService = new SqlErdService(createDatabase, workspaceService);
+const createActivityLogService = new FakeActivityLogService();
+const createService = new SqlErdService(
+  createDatabase,
+  workspaceService,
+  createActivityLogService
+);
 const created = await createService.createAgentGeneratedSession(
   actorUserId,
   workspaceId,
@@ -262,6 +277,16 @@ assert.equal(created.session.writeProtocol, "operations_v1");
 assert.equal(created.session.revision, 1);
 assert.equal(created.warnings.length, 0);
 assert.ok(createDatabase.ledger);
+assert.equal(createActivityLogService.calls.length, 1);
+assert.equal(createActivityLogService.calls[0].transaction, createDatabase);
+assert.deepEqual(createActivityLogService.calls[0].input.actor, {
+  type: "agent",
+  userId: actorUserId
+});
+assert.equal(
+  createActivityLogService.calls[0].input.action,
+  "sql_erd_session_created"
+);
 
 const retried = await createService.createAgentGeneratedSession(
   actorUserId,
@@ -276,6 +301,7 @@ assert.equal(
   ).length,
   1
 );
+assert.equal(createActivityLogService.calls.length, 1);
 await assert.rejects(
   () =>
     createService.createAgentGeneratedSession(
@@ -292,7 +318,12 @@ await assert.rejects(
 );
 
 const replaceDatabase = new MutationDatabase("replace");
-const replaceService = new SqlErdService(replaceDatabase, workspaceService);
+const replaceActivityLogService = new FakeActivityLogService();
+const replaceService = new SqlErdService(
+  replaceDatabase,
+  workspaceService,
+  replaceActivityLogService
+);
 const replacement = await replaceService.replaceAgentGeneratedSchema(
   actorUserId,
   workspaceId,
@@ -345,6 +376,16 @@ assert.ok(
     sql.startsWith("INSERT INTO sql_erd_session_operation_outbox")
   )
 );
+assert.equal(replaceActivityLogService.calls.length, 1);
+assert.equal(replaceActivityLogService.calls[0].transaction, replaceDatabase);
+assert.deepEqual(replaceActivityLogService.calls[0].input.actor, {
+  type: "agent",
+  userId: actorUserId
+});
+assert.equal(
+  replaceActivityLogService.calls[0].input.action,
+  "sql_erd_schema_updated"
+);
 
 const replacementRetry = await replaceService.replaceAgentGeneratedSchema(
   actorUserId,
@@ -389,6 +430,7 @@ assert.equal(
   ).length,
   1
 );
+assert.equal(replaceActivityLogService.calls.length, 1);
 await assert.rejects(
   () =>
     replaceService.replaceAgentGeneratedSchema(
@@ -418,7 +460,11 @@ lockedDatabase.activeLock = {
 };
 await assert.rejects(
   () =>
-    new SqlErdService(lockedDatabase, workspaceService).replaceAgentGeneratedSchema(
+    new SqlErdService(
+      lockedDatabase,
+      workspaceService,
+      new FakeActivityLogService()
+    ).replaceAgentGeneratedSchema(
       actorUserId,
       workspaceId,
       sessionId,
@@ -436,7 +482,11 @@ const snapshotDatabase = new MutationDatabase("replace");
 snapshotDatabase.session = sessionRow({ write_protocol: "snapshot" });
 await assert.rejects(
   () =>
-    new SqlErdService(snapshotDatabase, workspaceService).replaceAgentGeneratedSchema(
+    new SqlErdService(
+      snapshotDatabase,
+      workspaceService,
+      new FakeActivityLogService()
+    ).replaceAgentGeneratedSchema(
       actorUserId,
       workspaceId,
       sessionId,
@@ -456,7 +506,11 @@ await assert.rejects(
 const dialectDatabase = new MutationDatabase("replace");
 await assert.rejects(
   () =>
-    new SqlErdService(dialectDatabase, workspaceService).replaceAgentGeneratedSchema(
+    new SqlErdService(
+      dialectDatabase,
+      workspaceService,
+      new FakeActivityLogService()
+    ).replaceAgentGeneratedSchema(
       actorUserId,
       workspaceId,
       sessionId,
@@ -474,7 +528,8 @@ const autoDialectDatabase = new MutationDatabase("replace");
 autoDialectDatabase.session = sessionRow({ dialect: "auto" });
 const autoDialectReplacement = await new SqlErdService(
   autoDialectDatabase,
-  workspaceService
+  workspaceService,
+  new FakeActivityLogService()
 ).replaceAgentGeneratedSchema(
   actorUserId,
   workspaceId,

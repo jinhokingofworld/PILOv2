@@ -1356,3 +1356,33 @@ On catch-up, a client pauses at a `source_snapshot` operation, batch-loads its
 snapshot, applies that exact source/model/layout, then applies buffered later
 operations by `opSeq`. Duplicate IDs/sequences are ignored and a sequence gap
 uses the existing operations GET endpoint.
+
+## Activity Log side effects
+
+Committed SQLtoERD mutations append the following common Activity Log actions in
+the same DB transaction. This does not add fields to any SQLtoERD request or
+response.
+
+| Commit result | Activity Log action |
+| --- | --- |
+| Session created by a user or Agent | `sql_erd_session_created` |
+| SQL source, model, or dialect actually changed | `sql_erd_schema_updated` |
+| Session title actually changed | `sql_erd_session_renamed` |
+| Session soft-deleted | `sql_erd_session_deleted` |
+| Non-empty note created | `sql_erd_note_created` |
+| Existing note text changed after whitespace normalization | `sql_erd_note_updated` |
+| Non-empty note deleted | `sql_erd_note_deleted` |
+
+Normal API mutations use a `user` actor. Agent session creation and Agent schema
+replacement use an `agent` actor while retaining the requesting user's ID. The
+domain does not accept or store Meeting or recording IDs; MeetingReport performs
+Workspace, recording-window, and participant membership filtering later.
+
+Note position, size, color and other layout-only changes do not create an
+Activity Log. A saved note content projection collapses whitespace and is limited
+to 500 Unicode code points without splitting a surrogate pair. A note target is
+scoped as `<sessionId>:<noteId>` because note IDs are session-local. If token,
+password, secret, OAuth, or private-key content is detected, the projection is
+omitted. Deleted note text, SQL source, model JSON, layout JSON, writer leases,
+reads, polling, retry returns, and realtime presence are never copied into
+Activity Log metadata. Whitespace-only note edits do not append an Activity Log.

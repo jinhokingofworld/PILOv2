@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 
 await import("./operations-v1-cutover-manifest.test.mjs");
+await import("./activity-log.test.mjs");
 
 const require = createRequire(import.meta.url);
 require("reflect-metadata");
@@ -226,10 +227,30 @@ class FakeWorkspaceService {
   }
 }
 
-function createSubject(database = new FakeDatabase()) {
+class FakeActivityLogService {
+  constructor(error = null) {
+    this.error = error;
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ transaction, input });
+    if (this.error) throw this.error;
+  }
+}
+
+function createSubject(
+  database = new FakeDatabase(),
+  activityLogService = new FakeActivityLogService()
+) {
   const workspaceService = new FakeWorkspaceService();
-  const service = new SqlErdService(database, workspaceService);
+  const service = new SqlErdService(
+    database,
+    workspaceService,
+    activityLogService
+  );
   return {
+    activityLogService,
     database,
     service,
     workspaceService
@@ -793,7 +814,7 @@ await assertRouteBodyLimit(
 
 {
   const database = new FakeDatabase({ queryOneRows: [sessionRow()] });
-  const { service } = createSubject(database);
+  const { activityLogService, service } = createSubject(database);
 
   assert.equal(typeof service.getSession, "function");
   const session = await service.getSession(currentUserId, workspaceId, sessionId);
@@ -862,7 +883,7 @@ await assertRouteBodyLimit(
       }
     ]
   });
-  const { service } = createSubject(database);
+  const { activityLogService, service } = createSubject(database);
 
   const session = await service.createSession(currentUserId, workspaceId, {
     title: " Commerce ERD ",
@@ -884,6 +905,16 @@ await assertRouteBodyLimit(
   assert.equal(session.updatedBy, currentUserId);
   assert.equal(database.transactions.length, 1);
   assert.equal(database.queries.every((query) => query.transaction), true);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(activityLogService.calls[0].transaction, database.transactions[0]);
+  assert.equal(
+    activityLogService.calls[0].input.action,
+    "sql_erd_session_created"
+  );
+  assert.deepEqual(activityLogService.calls[0].input.actor, {
+    type: "user",
+    userId: currentUserId
+  });
 }
 
 {
@@ -2198,7 +2229,7 @@ await assertRouteBodyLimit(
       }
     ]
   });
-  const { service } = createSubject(database);
+  const { activityLogService, service } = createSubject(database);
 
   const session = await service.updateSessionMetadata(currentUserId, workspaceId, sessionId, {
     baseRevision: 3,
@@ -2214,6 +2245,12 @@ await assertRouteBodyLimit(
     database.queries.some((query) => /sql_erd_session_operations|operation_outbox/.test(query.text)),
     false
   );
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(
+    activityLogService.calls[0].input.action,
+    "sql_erd_session_renamed"
+  );
+  assert.equal(activityLogService.calls[0].transaction, database.transactions[0]);
 }
 
 {
@@ -2236,7 +2273,7 @@ await assertRouteBodyLimit(
       }
     ]
   });
-  const { service } = createSubject(database);
+  const { activityLogService, service } = createSubject(database);
 
   const result = await service.deleteSession(currentUserId, workspaceId, sessionId, {
     baseRevision: "4"
@@ -2256,6 +2293,12 @@ await assertRouteBodyLimit(
     database.queries.some((query) => /sql_erd_session_operations|operation_outbox/.test(query.text)),
     false
   );
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(
+    activityLogService.calls[0].input.action,
+    "sql_erd_session_deleted"
+  );
+  assert.equal(activityLogService.calls[0].transaction, database.transactions[0]);
 }
 
 {
@@ -2344,7 +2387,7 @@ await assertRouteBodyLimit(
       }
     ]
   });
-  const { service } = createSubject(database);
+  const { activityLogService, service } = createSubject(database);
 
   const session = await service.updateSession(currentUserId, workspaceId, sessionId, {
     baseRevision: 3,
@@ -2364,6 +2407,16 @@ await assertRouteBodyLimit(
   assert.deepEqual(session.layoutJson, updatedLayoutJson);
   assert.equal(session.revision, 4);
   assert.equal(session.updatedBy, currentUserId);
+  assert.deepEqual(
+    activityLogService.calls.map(({ input }) => input.action),
+    ["sql_erd_schema_updated", "sql_erd_session_renamed"]
+  );
+  assert.equal(
+    activityLogService.calls.every(
+      ({ transaction }) => transaction === database.transactions[0]
+    ),
+    true
+  );
 }
 
 {
@@ -2403,7 +2456,7 @@ await assertRouteBodyLimit(
       }
     ]
   });
-  const { service } = createSubject(database);
+  const { activityLogService, service } = createSubject(database);
 
   const session = await service.updateSession(currentUserId, workspaceId, sessionId, {
     baseRevision: 2,
@@ -2415,6 +2468,10 @@ await assertRouteBodyLimit(
   assert.equal(session.tableCount, 2);
   assert.equal(session.relationCount, 1);
   assert.equal(session.revision, 3);
+  assert.deepEqual(
+    activityLogService.calls.map(({ input }) => input.action),
+    ["sql_erd_session_renamed"]
+  );
 }
 
 {

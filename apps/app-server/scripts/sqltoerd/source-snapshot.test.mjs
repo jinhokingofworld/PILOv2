@@ -364,11 +364,17 @@ const sourceLeaseId = "99999999-9999-4999-8999-999999999999";
 const competingSourceUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const competingSourceLeaseId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const sourceDatabase = new SourceSnapshotDatabase();
+const sourceActivityLogService = {
+  calls: [],
+  async append(transaction, input) {
+    this.calls.push({ transaction, input });
+  }
+};
 const sourceService = new SqlErdService(sourceDatabase, {
   async assertWorkspaceAccess() {
     return { id: sourceWorkspaceId };
   }
-});
+}, sourceActivityLogService);
 
 const acquiredLock = await sourceService.acquireSourceLock(
   sourceUserId,
@@ -417,6 +423,16 @@ assert.equal(sourcePublish.snapshot.id, "77777777-7777-4777-8777-777777777777");
 assert.equal(sourcePublish.revision, 3);
 assert.equal(sourceDatabase.outboxOperationId, sourcePublish.operation.id);
 assert.equal(sourceDatabase.lock.source_base_revision, 3);
+assert.equal(sourceActivityLogService.calls.length, 1);
+assert.equal(sourceActivityLogService.calls[0].transaction, sourceDatabase);
+assert.equal(
+  sourceActivityLogService.calls[0].input.action,
+  "sql_erd_schema_updated"
+);
+assert.deepEqual(sourceActivityLogService.calls[0].input.actor, {
+  type: "user",
+  userId: sourceUserId
+});
 
 const retry = await sourceService.publishSourceSnapshot(
   sourceUserId,
@@ -434,6 +450,7 @@ const retry = await sourceService.publishSourceSnapshot(
 );
 assert.equal(retry.operation.id, sourcePublish.operation.id);
 assert.equal(sourceDatabase.session.revision, 3);
+assert.equal(sourceActivityLogService.calls.length, 1);
 
 await assert.rejects(
   () =>

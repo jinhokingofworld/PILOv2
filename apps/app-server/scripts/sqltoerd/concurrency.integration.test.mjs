@@ -69,8 +69,17 @@ const setupPool = new Pool({ connectionString: databaseUrl });
 const databaseA = new DatabaseService();
 const databaseB = new DatabaseService();
 const workspaceService = new IntegrationWorkspaceService();
-const serviceA = new SqlErdService(databaseA, workspaceService);
-const serviceB = new SqlErdService(databaseB, workspaceService);
+const activityLogService = { async append() {} };
+const serviceA = new SqlErdService(
+  databaseA,
+  workspaceService,
+  activityLogService
+);
+const serviceB = new SqlErdService(
+  databaseB,
+  workspaceService,
+  activityLogService
+);
 
 try {
   const [{ pid: pidA }, { pid: pidB }] = await Promise.all([
