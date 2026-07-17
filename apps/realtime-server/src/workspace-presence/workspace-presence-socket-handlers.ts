@@ -30,7 +30,10 @@ export function createWorkspacePresenceRoomName(workspaceId: string) {
   return `workspace:${workspaceId}:presence`;
 }
 
-function emitClearResult(io: Server, result: WorkspacePresenceClearResult) {
+export function emitWorkspacePresenceClearResult(
+  io: Server,
+  result: WorkspacePresenceClearResult,
+) {
   if (result.kind === "update") {
     io.to(createWorkspacePresenceRoomName(result.presence.workspaceId)).emit(
       workspacePresenceServerEvents.update,
@@ -169,7 +172,7 @@ export function registerWorkspacePresenceSocketHandlers({
       if (generationByWorkspace.get(room.workspaceId) !== generation) return;
       const result = service.leaveSocket(socket.id, room.workspaceId);
       await socket.leave(createWorkspacePresenceRoomName(room.workspaceId));
-      if (result) emitClearResult(io, result);
+      if (result) emitWorkspacePresenceClearResult(io, result);
     });
   });
 
@@ -202,7 +205,7 @@ export function registerWorkspacePresenceSocketHandlers({
     disconnected = true;
     joinedGenerationByWorkspace.clear();
     for (const result of service.clearSocket(socket.id)) {
-      emitClearResult(io, result);
+      emitWorkspacePresenceClearResult(io, result);
     }
   });
 }

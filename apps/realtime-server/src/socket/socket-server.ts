@@ -62,7 +62,9 @@ import {
   evictSqlErdSocketFromRooms,
 } from "../sql-erd/sql-erd-membership-revocation";
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
+import { createMeetingMembershipRevocationHandler } from "../meeting/meeting-membership-revocation";
 import { createWorkspacePresenceAccessService } from "../workspace-presence/workspace-presence-access.service";
+import { createWorkspacePresenceMembershipRevocationHandler } from "../workspace-presence/workspace-presence-membership-revocation";
 import { createWorkspacePresenceService } from "../workspace-presence/workspace-presence.service";
 import { registerWorkspacePresenceSocketHandlers } from "../workspace-presence/workspace-presence-socket-handlers";
 import {
@@ -579,6 +581,13 @@ export async function createRealtimeSocketServer({
       io,
       presenceService: sqlErdPresenceService,
     });
+  const meetingMembershipRevocationHandler =
+    createMeetingMembershipRevocationHandler({ io });
+  const workspacePresenceMembershipRevocationHandler =
+    createWorkspacePresenceMembershipRevocationHandler({
+      io,
+      service: workspacePresenceService,
+    });
   const chatSubscriptionWork = createChatSubscriptionWorkQueue({
     onRejected() {
       console.error("Chat Redis subscription work failed");
@@ -700,6 +709,8 @@ export async function createRealtimeSocketServer({
                 classicCanvasMembershipRevocationHandler.handle(payload),
                 pdfCollaborationMembershipRevocationHandler.handle(payload),
                 sqlErdMembershipRevocationHandler.handle(payload),
+                meetingMembershipRevocationHandler.handle(payload),
+                workspacePresenceMembershipRevocationHandler.handle(payload),
                 ...membershipRevocationHandlers.map((handler) =>
                   handler.handle(payload),
                 ),
