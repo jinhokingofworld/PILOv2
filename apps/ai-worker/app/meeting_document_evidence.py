@@ -131,7 +131,7 @@ def limit_document_change_evidence(
             text = _truncate_utf8(change.text, MAX_DOCUMENT_CHANGE_TEXT_BYTES)
             if not text:
                 continue
-            serialized_size = len(f"{change.kind}:{text}".encode("utf-8"))
+            serialized_size = len(f"{change.kind}:{text}".encode())
             if total_bytes + serialized_size > MAX_DOCUMENT_EVIDENCE_BYTES:
                 break
             bounded_changes.append(DocumentTextChange(change.kind, text))

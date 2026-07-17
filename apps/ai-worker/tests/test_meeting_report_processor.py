@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.meeting_document_evidence import DocumentChangeEvidence, DocumentTextChange
 from app.meeting_report_processor import (
     ActivityEvidence,
     AudioObjectMetadata,
@@ -18,7 +19,6 @@ from app.meeting_report_processor import (
     parse_meeting_report_job,
     serialize_action_items,
 )
-from app.meeting_document_evidence import DocumentChangeEvidence, DocumentTextChange
 from app.meeting_report_runtime import (
     HttpMeetingReportEventPublisher,
     OpenAiMeetingReportClient,
