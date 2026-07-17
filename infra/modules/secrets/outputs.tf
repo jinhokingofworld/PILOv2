@@ -26,10 +26,15 @@ output "github_sync_worker_ecs_secrets" {
 }
 
 output "realtime_server_ecs_secrets" {
-  value = {
-    for name in local.realtime_server_ecs_secret_names :
-    name => aws_secretsmanager_secret.this["realtime-server/${name}"].arn
-  }
+  value = merge(
+    {
+      for name in local.realtime_server_ecs_secret_names :
+      name => aws_secretsmanager_secret.this["realtime-server/${name}"].arn
+    },
+    {
+      REALTIME_CANVAS_ACTIVITY_TOKEN = aws_secretsmanager_secret.this["shared/REALTIME_CANVAS_ACTIVITY_TOKEN"].arn
+    },
+  )
 }
 
 output "ai_worker_ecs_secrets" {

@@ -1,5 +1,10 @@
 # PILO 인프라 환경 변수와 시크릿 목록
 
+`REALTIME_CANVAS_ACTIVITY_TOKEN` is a shared server-to-server secret injected
+into App Server and Realtime Server. It authenticates the internal Canvas
+recording activity batch endpoint. It must never be sent by a browser or
+stored in Canvas Activity metadata.
+
 ## 1. 원칙
 
 - secret value는 Terraform 파일, GitHub Actions workflow, Dockerfile에 하드코딩하지 않는다.
@@ -108,6 +113,7 @@ fallback으로만 사용한다.
 | Secret key | 공급 대상 | 설명 |
 | --- | --- | --- |
 | `MEETING_REPORT_EVENT_TOKEN` | App Server, Meeting Worker | Meeting Worker가 `POST /api/v1/internal/meeting-reports/events`를 호출할 때 쓰는 shared token. Secrets Manager의 `pilo-dev/shared/MEETING_REPORT_EVENT_TOKEN` 하나를 두 task에 같은 환경변수 이름으로 주입한다. |
+| `REALTIME_CANVAS_ACTIVITY_TOKEN` | App Server, Realtime Server | Realtime Server가 `POST /internal/canvas/recording-activities/batch`를 호출할 때 쓰는 shared token. 브라우저에는 노출하지 않는다. |
 
 ## 4. ECS 환경 변수
 
@@ -171,6 +177,7 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | `DATABASE_SSL` | Set to `true` when `DATABASE_URL` requires SSL. |
 | `SOCKET_IO_CORS_ORIGIN` | Socket.IO 허용 frontend origin. 여러 개면 comma-separated로 설정한다. |
 | `APP_SERVER_URL` | classic Canvas roomState checkpoint를 App Server `/shapes/batch`로 저장할 때 사용할 App Server origin. |
+| `REALTIME_CANVAS_ACTIVITY_TOKEN` | Internal Canvas recording activity handoff token. App Server와 Realtime Server에 같은 shared secret을 주입한다. |
 | `REALTIME_SCOPE` | MVP 기본값: `notifications_status_only` |
 
 ### AI Worker

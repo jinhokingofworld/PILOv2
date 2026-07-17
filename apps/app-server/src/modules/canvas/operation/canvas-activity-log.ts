@@ -19,6 +19,20 @@ interface BuildCanvasShapeActivityLogInput {
   operation: CanvasShapeOperationPayload;
 }
 
+export interface CanvasRecordingActivityDelta {
+  actorUserId: string;
+  captureId: string;
+  canvasId: string;
+  changedFields?: string[];
+  language?: string;
+  operationType: "create" | "update" | "delete";
+  shapeId: string;
+  shapeType: string;
+  textPreview?: string;
+  title?: string;
+  workspaceId: string;
+}
+
 const TRACKED_CANVAS_SHAPE_TYPES = new Set([
   "sticky-note",
   "note",
@@ -99,6 +113,48 @@ export function buildCanvasShapeActivityLog(
       changedFields
     }
   });
+}
+
+export function buildCanvasRecordingActivityLog(
+  input: CanvasRecordingActivityDelta
+): ActivityLogInput | null {
+  if (!isTrackedShapeType(input.shapeType)) return null;
+
+  const changedFields = normalizeChangedFields(input.changedFields);
+  if (input.operationType === "update" && changedFields.length === 0) {
+    return null;
+  }
+
+  const action = `canvas_shape_${input.operationType}d` as const;
+  const label = shapeLabel(input.shapeType);
+  const summary =
+    input.operationType === "create"
+      ? `${label}을(를) 생성했습니다.`
+      : input.operationType === "delete"
+        ? `${label}을(를) 삭제했습니다.`
+        : `${label}의 내용을 수정했습니다.`;
+  const title = input.title ? safeText(input.title) : null;
+  const textPreview = input.textPreview ? safeText(input.textPreview) : null;
+
+  return {
+    workspaceId: input.workspaceId,
+    actor: { type: "user", userId: input.actorUserId },
+    action,
+    target: { type: "canvas_shape", id: input.shapeId },
+    dedupeKey: `canvas:recording:${action}:${input.shapeId}:${input.captureId}`,
+    metadata: {
+      version: 1,
+      summary,
+      data: {
+        canvasId: input.canvasId,
+        shapeType: input.shapeType,
+        ...(title ? { title } : {}),
+        ...(textPreview ? { textPreview } : {}),
+        ...(input.language ? { language: input.language } : {}),
+        ...(input.operationType === "update" ? { changedFields } : {})
+      }
+    }
+  };
 }
 
 function buildActivityLog(
@@ -194,6 +250,18 @@ function safeText(value: string | null): string | null {
   }
 
   return normalized.slice(0, TEXT_PREVIEW_MAX_LENGTH);
+}
+
+function normalizeChangedFields(fields: string[] | undefined): string[] {
+  if (!fields) return [];
+
+  return [...new Set(fields.filter(field =>
+    field === "name" ||
+    field === "title" ||
+    field === "text" ||
+    field === "code" ||
+    field === "language"
+  ))];
 }
 
 function isTrackedShapeType(shapeType: string): boolean {

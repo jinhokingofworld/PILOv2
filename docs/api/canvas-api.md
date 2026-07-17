@@ -1,5 +1,30 @@
 # Freeform Canvas API
 
+## Meeting recording activity capture
+
+Canvas shape changes are not general Canvas Activity Log history. The only
+recorded Canvas shape actions are safe semantic deltas received by the
+Realtime server while the authenticated actor has exactly one active Meeting
+Recording in the workspace. Changes outside a recording, changes received
+after recording end, and changes with ambiguous active recordings are omitted.
+
+Realtime sends the internal-only endpoint
+`POST /api/v1/internal/canvas/recording-activities/batch` with the shared
+`X-Realtime-Canvas-Activity-Token`. Each item contains `captureId`,
+`recordingId`, `capturedAt` (Realtime receive time), `receiveSeq`, actor,
+workspace/canvas/shape IDs, operation type, and bounded semantic fields only.
+The endpoint is not a client API and rejects malformed or cross-workspace
+data. App Server locks and validates the recording and participant session,
+then calls `ActivityLogService.append(transaction, input)` and inserts
+`meeting_recording_activity_links` in the same transaction. `captureId` is the
+idempotency key for retries. Activity metadata never contains `recordingId`,
+`captureId`, raw shape data, complete code, access tokens, or cursor data.
+
+Text and code updates for the same recording, actor, canvas, and shape are
+coalesced as one editing burst. The burst flushes after 3 seconds without a
+new change and is force-flushed every 30 seconds during continuous editing.
+The first `capturedAt` and `receiveSeq` are retained for each flushed burst.
+
 ## 범위
 
 Canvas API는 사용자가 직접 편집하는 자유형 캔버스와 PR Review room에 연결된

@@ -1,15 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
-import { ActivityLogService } from "../../../common/activity-log.service";
 import type { DatabaseTransaction } from "../../../database/database.service";
 import { badRequest, notFound } from "../../../common/api-error";
 import { DatabaseService } from "../../../database/database.service";
 import { WorkspaceService } from "../../workspace/workspace.service";
 import { CanvasOperationPublisherService } from "../operation/canvas-operation-publisher.service";
-import {
-  buildCanvasShapeActivityLog,
-  type CanvasActivityActorType
-} from "../operation/canvas-activity-log";
 import {
   assertUserCanCreateCanvasShape,
   assertUserCanDeleteCanvasShape,
@@ -89,7 +84,6 @@ type CanvasShapeStaleRevisionConflictDetails = {
 @Injectable()
 export class CanvasShapeCommandService {
   constructor(
-    private readonly activityLogService: ActivityLogService,
     private readonly canvasAccess: CanvasAccessService,
     private readonly database: DatabaseService,
     private readonly operationPublisher: CanvasOperationPublisherService,
@@ -240,10 +234,6 @@ export class CanvasShapeCommandService {
         }
       );
 
-      await this.appendShapeActivityLog(transaction, writeResult, "user", {
-        after: writeResult.payload
-      });
-
       return writeResult;
     });
 
@@ -259,7 +249,7 @@ export class CanvasShapeCommandService {
     workspaceId: string,
     canvasId: string,
     input: SyncCanvasShapesBatchRequest,
-    actorType: CanvasActivityActorType = "user"
+    _actorType = "user"
   ): Promise<CanvasShapeBatchPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
@@ -407,10 +397,6 @@ export class CanvasShapeCommandService {
             }
           );
 
-          await this.appendShapeActivityLog(transaction, writeResult, actorType, {
-            after: writeResult.payload
-          });
-
           result.created += 1;
           result.shapes.push(writeResult.payload);
           if (writeResult.isNewOperation) {
@@ -421,7 +407,6 @@ export class CanvasShapeCommandService {
 
         if (operation.type === "update") {
           const values = validateShapeUpdate(operation.payload);
-          let activityBefore: CanvasShapePayload | undefined;
           const writeResult = await this.writeShapeOperation<CanvasShapePayload>(
             transaction,
             {
@@ -443,8 +428,6 @@ export class CanvasShapeCommandService {
               if (!currentShape) {
                 throw notFound("Canvas shape not found");
               }
-
-              activityBefore = mapShape(currentShape);
 
               const permittedValues = prepareUserCanvasShapeUpdate(
                 currentShape,
@@ -535,11 +518,6 @@ export class CanvasShapeCommandService {
             }
           );
 
-          await this.appendShapeActivityLog(transaction, writeResult, actorType, {
-            after: writeResult.payload,
-            before: activityBefore
-          });
-
           result.updated += 1;
           result.shapes.push(writeResult.payload);
           if (writeResult.isNewOperation) {
@@ -548,7 +526,6 @@ export class CanvasShapeCommandService {
           continue;
         }
 
-        let activityBefore: CanvasShapePayload | undefined;
         const writeResult =
           await this.writeShapeOperation<CanvasShapeDeletePayload>(
             transaction,
@@ -571,8 +548,6 @@ export class CanvasShapeCommandService {
               if (!currentShape) {
                 throw notFound("Canvas shape not found");
               }
-
-              activityBefore = mapShape(currentShape);
 
               assertUserCanDeleteCanvasShape(currentShape);
 
@@ -609,10 +584,6 @@ export class CanvasShapeCommandService {
               };
             }
           );
-
-        await this.appendShapeActivityLog(transaction, writeResult, actorType, {
-          before: activityBefore
-        });
 
         result.deleted += 1;
         result.deletedShapes.push(writeResult.payload);
@@ -679,7 +650,6 @@ export class CanvasShapeCommandService {
     }
 
     const result = await this.database.transaction(async (transaction) => {
-      let activityBefore: CanvasShapePayload | undefined;
       const writeResult = await this.writeShapeOperation<CanvasShapePayload>(
         transaction,
         {
@@ -701,8 +671,6 @@ export class CanvasShapeCommandService {
           if (!currentShape) {
             throw notFound("Canvas shape not found");
           }
-
-          activityBefore = mapShape(currentShape);
 
           const permittedValues = prepareUserCanvasShapeUpdate(
             currentShape,
@@ -794,11 +762,6 @@ export class CanvasShapeCommandService {
         }
       );
 
-      await this.appendShapeActivityLog(transaction, writeResult, "user", {
-        after: writeResult.payload,
-        before: activityBefore
-      });
-
       return writeResult;
     });
 
@@ -858,7 +821,6 @@ export class CanvasShapeCommandService {
     }
 
     const result = await this.database.transaction(async (transaction) => {
-      let activityBefore: CanvasShapePayload | undefined;
       const writeResult =
         await this.writeShapeOperation<CanvasShapeDeletePayload>(
           transaction,
@@ -881,8 +843,6 @@ export class CanvasShapeCommandService {
             if (!currentShape) {
               throw notFound("Canvas shape not found");
             }
-
-            activityBefore = mapShape(currentShape);
 
             assertUserCanDeleteCanvasShape(currentShape);
 
@@ -919,10 +879,6 @@ export class CanvasShapeCommandService {
             };
           }
         );
-
-      await this.appendShapeActivityLog(transaction, writeResult, "user", {
-        before: activityBefore
-      });
 
       return writeResult;
     });
@@ -1068,33 +1024,6 @@ export class CanvasShapeCommandService {
         operation
       ) as TPayload
     };
-  }
-
-  private async appendShapeActivityLog(
-    transaction: DatabaseTransaction,
-    writeResult: CanvasShapeOperationWriteResult<
-      CanvasShapeDeletePayload | CanvasShapePayload
-    >,
-    actorType: CanvasActivityActorType,
-    shapes: {
-      after?: CanvasShapePayload;
-      before?: CanvasShapePayload;
-    }
-  ): Promise<void> {
-    if (!writeResult.isNewOperation) {
-      return;
-    }
-
-    const activityLog = buildCanvasShapeActivityLog({
-      actorType,
-      after: shapes.after,
-      before: shapes.before,
-      operation: writeResult.operation
-    });
-
-    if (activityLog) {
-      await this.activityLogService.append(transaction, activityLog);
-    }
   }
 
   private async findActiveShapeForUpdate(

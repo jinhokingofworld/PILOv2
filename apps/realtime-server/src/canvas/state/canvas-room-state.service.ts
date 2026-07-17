@@ -45,7 +45,20 @@ export type CanvasRoomHistoryState = {
   historySeq: number;
 };
 
+export type CanvasRoomShapeActivityCandidate = {
+  after: Record<string, unknown> | null;
+  before: Record<string, unknown> | null;
+  operationType: "create" | "update" | "delete";
+  receiveSeq: number;
+  shapeId: string;
+};
+
+export type CanvasRoomShapePatchResult = CanvasRoomHistoryState & {
+  activityCandidates: CanvasRoomShapeActivityCandidate[];
+};
+
 export type CanvasRoomHistoryPatch = {
+  activityCandidates: CanvasRoomShapeActivityCandidate[];
   canRedo: boolean;
   canUndo: boolean;
   deletedShapeIds: string[];
@@ -68,7 +81,7 @@ export type CanvasRoomStateService = {
     room: CanvasRoomRef,
     patch: { deletedShapeIds: string[]; upsertShapes: Record<string, unknown>[] },
     options?: { actorUserId?: string | null },
-  ) => CanvasRoomHistoryState;
+  ) => CanvasRoomShapePatchResult;
   getCachedShapes: (room: CanvasRoomRef) => Record<string, unknown>[];
   getCheckpointSnapshot: (room: CanvasRoomRef) => CanvasRoomCheckpointSnapshot;
   getCheckpointState: (room: CanvasRoomRef) => CanvasRoomCheckpointState;
@@ -100,6 +113,7 @@ export type CanvasRoomStateService = {
 
 export function createCanvasRoomStateService(): CanvasRoomStateService {
   let checkpointOperationSequence = 0;
+  const receiveSequenceByRoom = new Map<string, number>();
   const loadedRegionsByRoom = new Map<string, CanvasRoomLoadedRegion[]>();
   const deletedTombstonesByRoom = new Map<string, Map<string, number | null>>();
   const dirtyShapeIdsByRoom = new Map<string, Set<string>>();
@@ -148,6 +162,12 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     const nextSeq = (historySeqByRoom.get(roomName) ?? 0) + 1;
 
     historySeqByRoom.set(roomName, nextSeq);
+    return nextSeq;
+  }
+
+  function getNextReceiveSeq(roomName: string) {
+    const nextSeq = (receiveSequenceByRoom.get(roomName) ?? 0) + 1;
+    receiveSequenceByRoom.set(roomName, nextSeq);
     return nextSeq;
   }
 
@@ -203,6 +223,22 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       canRedo: Boolean(redoHistoryByRoom.get(roomName)?.length),
       canUndo: Boolean(historyByRoom.get(roomName)?.length),
       historySeq: historySeqByRoom.get(roomName) ?? 0,
+    };
+  }
+
+  function createHistoryActivityCandidate(
+    roomName: string,
+    historyItem: CanvasRoomHistoryItem,
+    operationType: CanvasRoomShapeActivityCandidate["operationType"],
+    before: Record<string, unknown> | null,
+    after: Record<string, unknown> | null,
+  ): CanvasRoomShapeActivityCandidate {
+    return {
+      after: cloneShapeRecord(after),
+      before: cloneShapeRecord(before),
+      operationType,
+      receiveSeq: getNextReceiveSeq(roomName),
+      shapeId: historyItem.shapeId,
     };
   }
 
@@ -494,6 +530,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       const roomName = createCanvasRoomName(room);
       const actorUserId = options.actorUserId?.trim() || "unknown";
       const shapeCache = getRoomShapeCache(roomName);
+      const activityCandidates: CanvasRoomShapeActivityCandidate[] = [];
 
       patch.upsertShapes.forEach((shape) => {
         const shapeId = typeof shape.id === "string" ? shape.id.trim() : "";
@@ -502,6 +539,20 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
         const before = cloneShapeRecord(shapeCache.get(shapeId)?.shape);
         const after = cloneShapeRecord(shape);
+        const incomingOperationType =
+          shape.operationType === "create" || shape.operationType === "update"
+            ? shape.operationType
+            : null;
+
+        if (before || incomingOperationType === "create") {
+          activityCandidates.push({
+            after,
+            before,
+            operationType: before ? "update" : "create",
+            receiveSeq: getNextReceiveSeq(roomName),
+            shapeId
+          });
+        }
 
         recordRoomHistoryChange({
           action: before ? "update" : "create",
@@ -516,7 +567,10 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       upsertRoomShapes(roomName, patch.upsertShapes, { markDirty: true });
 
       if (!patch.deletedShapeIds.length) {
-        return buildHistoryPatchFromState(roomName);
+        return {
+          ...buildHistoryPatchFromState(roomName),
+          activityCandidates
+        };
       }
 
       const deletedTombstones = getRoomTombstones(roomName);
@@ -527,6 +581,16 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
         if (!normalizedShapeId) return;
         const deletedShape = shapeCache.get(normalizedShapeId)?.shape;
+
+        if (deletedShape) {
+          activityCandidates.push({
+            after: null,
+            before: cloneShapeRecord(deletedShape),
+            operationType: "delete",
+            receiveSeq: getNextReceiveSeq(roomName),
+            shapeId: normalizedShapeId
+          });
+        }
 
         recordRoomHistoryChange({
           action: "delete",
@@ -543,7 +607,10 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         dirtyShapeIds.add(normalizedShapeId);
       });
 
-      return buildHistoryPatchFromState(roomName);
+      return {
+        ...buildHistoryPatchFromState(roomName),
+        activityCandidates
+      };
     },
 
     getCachedShapes(room) {
@@ -759,6 +826,15 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       return {
         ...patch,
         ...buildHistoryPatchFromState(roomName),
+        activityCandidates: [
+          createHistoryActivityCandidate(
+            roomName,
+            historyItem,
+            historyItem.action,
+            historyItem.before,
+            historyItem.after,
+          ),
+        ],
       };
     },
 
@@ -788,6 +864,27 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       return {
         ...patch,
         ...buildHistoryPatchFromState(roomName),
+        activityCandidates: [
+          createHistoryActivityCandidate(
+            roomName,
+            historyItem,
+            historyItem.action === "create"
+              ? "delete"
+              : historyItem.action === "delete"
+                ? "create"
+                : "update",
+            historyItem.action === "create"
+              ? historyItem.after
+              : historyItem.action === "delete"
+                ? null
+                : historyItem.after,
+            historyItem.action === "create"
+              ? null
+              : historyItem.action === "delete"
+                ? historyItem.before
+                : historyItem.before,
+          ),
+        ],
       };
     },
   };

@@ -102,6 +102,7 @@ const socketServer = [
 assert.match(config, /notifications_status_only/);
 assert.match(config, /DATABASE_URL/);
 assert.match(config, /APP_SERVER_URL/);
+assert.match(config, /REALTIME_CANVAS_ACTIVITY_TOKEN/);
 assert.match(config, /SOCKET_IO_CORS_ORIGIN/);
 assert.match(server, /\/health/);
 assert.match(server, /classic_room_state/);
@@ -182,6 +183,9 @@ assert.match(socketServer, /canvasServerEvents\.shapePreviewClear/);
 assert.match(socketServer, /createCanvasShapePreviewService/);
 assert.match(socketServer, /createCanvasRoomStateService/);
 assert.match(socketServer, /getCanvasRoomStateStats/);
+assert.match(socketServer, /createCanvasRecordingActivityService/);
+assert.match(canvasSocketHandlers, /recordingActivityService\.capture/);
+assert.match(canvasSocketHandlers, /authenticatedActorUserId/);
 assert.match(socketServer, /createCanvasRoomCheckpointService/);
 assert.match(socketServer, /roomCheckpointService\.scheduleCheckpoint/);
 assert.match(socketServer, /roomCheckpointService\.flushCheckpointNow/);

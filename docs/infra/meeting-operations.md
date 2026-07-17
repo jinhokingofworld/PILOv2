@@ -1,5 +1,11 @@
 # Meeting 운영 추적
 
+Canvas recording activity links are part of the MeetingReport evidence path.
+When investigating a report, verify `meeting_recording_activity_links` by
+`recording_id`, `captured_at`, and `receive_seq`; do not infer Canvas event time
+from `activity_logs.occurred_at`. Links are server-only, and a retry with the
+same `capture_id` must leave exactly one Activity Log and one link.
+
 ## 목적
 
 Meeting 녹음 종료부터 AI 회의록 처리까지의 전달 경로와 실패 단계를 운영 로그에서

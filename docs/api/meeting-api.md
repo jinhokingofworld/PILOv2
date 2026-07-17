@@ -1,5 +1,20 @@
 # Meeting API
 
+## Recording-linked Canvas activity
+
+`meeting_recording_activity_links` is the only association between a Meeting
+Recording and Canvas shape Activity Logs. The link preserves the Realtime
+server `captured_at` and `receive_seq`; these values are used by MeetingReport
+activity evidence ordering instead of the App Server insert time.
+
+The App Server accepts a link only when the recording belongs to the supplied
+workspace, the captured time is inside `[started_at, ended_at)`, and the actor
+has a non-legacy `meeting_participants` session covering that instant. A
+RUNNING recording is row-locked during validation and append. If the actor has
+more than one active recording in the workspace, the batch item is ignored.
+The link table is server-only RLS and its recording/activity foreign keys use
+`ON DELETE CASCADE`.
+
 ## 범위
 
 Meeting API는 Workspace 안의 고정 회의 페이지를 담당한다.

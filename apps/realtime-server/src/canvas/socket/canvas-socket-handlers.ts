@@ -9,6 +9,7 @@ import type { CanvasShapeLockService } from "../review-lock/canvas-shape-lock.se
 import { isClassicCanvasRoomAccess } from "../room/canvas-access.service";
 import type { CanvasRoomService } from "../room/canvas-room.service";
 import type { CanvasRoomStateService } from "../state/canvas-room-state.service";
+import type { CanvasRecordingActivityService } from "../recording-activity/canvas-recording-activity.service";
 import { canvasClientEvents, canvasServerEvents } from "./canvas-socket-events";
 import {
   readCanvasJoinPayload,
@@ -33,6 +34,7 @@ export type RegisterCanvasSocketHandlersOptions = {
   io: Server;
   presenceService: CanvasPresenceService;
   roomCheckpointService: CanvasRoomCheckpointService;
+  recordingActivityService: CanvasRecordingActivityService;
   roomService: CanvasRoomService;
   roomStateService: CanvasRoomStateService;
   shapeLockService: CanvasShapeLockService;
@@ -89,6 +91,7 @@ export function registerCanvasSocketHandlers({
   io,
   presenceService,
   roomCheckpointService,
+  recordingActivityService,
   roomService,
   roomStateService,
   shapeLockService,
@@ -322,6 +325,7 @@ export function registerCanvasSocketHandlers({
     }
 
     const actorUserId = socket.data.auth.userId ?? socket.id;
+    const authenticatedActorUserId = socket.data.auth.userId;
     const historyState = roomStateService.applyShapePatch(
       patchPayload,
       patchPayload,
@@ -329,6 +333,15 @@ export function registerCanvasSocketHandlers({
         actorUserId,
       },
     );
+    if (authenticatedActorUserId) {
+      for (const candidate of historyState.activityCandidates) {
+        recordingActivityService.capture(
+          patchPayload,
+          authenticatedActorUserId,
+          candidate,
+        );
+      }
+    }
     const patchedShapeIds = [
       ...patchPayload.deletedShapeIds,
       ...patchPayload.upsertShapes.flatMap((shape) =>
@@ -374,6 +387,7 @@ export function registerCanvasSocketHandlers({
       action: "undo",
       io,
       payload,
+      recordingActivityService,
       roomCheckpointService,
       roomStateService,
       socket,
@@ -385,6 +399,7 @@ export function registerCanvasSocketHandlers({
       action: "redo",
       io,
       payload,
+      recordingActivityService,
       roomCheckpointService,
       roomStateService,
       socket,
@@ -480,6 +495,7 @@ export function registerCanvasSocketHandlers({
   socket.on("disconnect", () => {
     void cleanupCanvasSocket({
       emitLockReleases,
+      recordingActivityService,
       roomCheckpointService,
       presenceService,
       shapeLockService,
@@ -495,6 +511,7 @@ function applyCanvasHistoryChange({
   action,
   io,
   payload,
+  recordingActivityService,
   roomCheckpointService,
   roomStateService,
   socket,
@@ -502,6 +519,7 @@ function applyCanvasHistoryChange({
   action: "redo" | "undo";
   io: Server;
   payload: unknown;
+  recordingActivityService: CanvasRecordingActivityService;
   roomCheckpointService: CanvasRoomCheckpointService;
   roomStateService: CanvasRoomStateService;
   socket: CanvasAuthedSocket;
@@ -544,6 +562,13 @@ function applyCanvasHistoryChange({
 
   if (!historyPatch) return;
 
+  const actorUserId = socket.data.auth.userId ?? socket.id;
+  if (socket.data.auth.userId) {
+    for (const candidate of historyPatch.activityCandidates) {
+      recordingActivityService.capture(room, socket.data.auth.userId, candidate);
+    }
+  }
+
   roomCheckpointService.scheduleCheckpoint(
     room,
     socket.data.auth.token,
@@ -551,7 +576,7 @@ function applyCanvasHistoryChange({
   );
   io.to(roomName).emit(canvasServerEvents.shapePatch, {
     ...room,
-    actorUserId: socket.data.auth.userId ?? socket.id,
+    actorUserId,
     canRedo: historyPatch.canRedo,
     canUndo: historyPatch.canUndo,
     deletedShapeIds: historyPatch.deletedShapeIds,
@@ -563,6 +588,7 @@ function applyCanvasHistoryChange({
 
 async function cleanupCanvasSocket({
   emitLockReleases,
+  recordingActivityService,
   presenceService,
   roomCheckpointService,
   shapeLockService,
@@ -570,6 +596,7 @@ async function cleanupCanvasSocket({
   socket,
 }: {
   emitLockReleases: (payload: CanvasLockReleasePayload) => void;
+  recordingActivityService: CanvasRecordingActivityService;
   presenceService: CanvasPresenceService;
   roomCheckpointService: CanvasRoomCheckpointService;
   shapeLockService: CanvasShapeLockService;
@@ -586,17 +613,17 @@ async function cleanupCanvasSocket({
 
   const [lockReleaseEvents, previewClearEvents] = await Promise.all([
     shapeLockService.clearSocket(socket.id),
-    shapePreviewService.clearSocket(socket.id),
-    Promise.all(
-      canvasRooms.map((room) =>
-        roomCheckpointService.flushCheckpointNow(
-          room,
-          socket.data.auth.token,
-          socket.data.auth.userId,
-        ),
-      ),
-    ),
+    shapePreviewService.clearSocket(socket.id)
   ]);
+
+  await Promise.all(canvasRooms.map(room =>
+    roomCheckpointService.flushCheckpointNow(
+      room,
+      socket.data.auth.token,
+      socket.data.auth.userId,
+    )
+  ));
+  await Promise.all(canvasRooms.map(room => recordingActivityService.flushRoom(room)));
 
   for (const leavePayload of leaveEvents) {
     socket

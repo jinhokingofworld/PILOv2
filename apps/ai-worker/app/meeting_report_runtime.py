@@ -364,7 +364,10 @@ class PgMeetingReportRepository:
             rows = self.connection.execute(
                 """
                 SELECT activity_logs.id AS activity_log_id,
-                       activity_logs.occurred_at,
+                       COALESCE(
+                           recording_links.captured_at,
+                           activity_logs.occurred_at
+                       ) AS occurred_at,
                        activity_logs.action::text AS action,
                        activity_logs.metadata ->> 'summary' AS summary
                 FROM meeting_reports
@@ -376,25 +379,38 @@ class PgMeetingReportRepository:
                 JOIN activity_logs
                   ON activity_logs.workspace_id = meetings.workspace_id
                  AND activity_logs.actor_user_id IS NOT NULL
-                 AND activity_logs.occurred_at >= meeting_recordings.started_at
-                 AND activity_logs.occurred_at < meeting_recordings.ended_at
+                LEFT JOIN meeting_recording_activity_links AS recording_links
+                  ON recording_links.recording_id = meeting_recordings.id
+                 AND recording_links.activity_log_id = activity_logs.id
                 WHERE meeting_reports.id = %s
                   AND meeting_reports.meeting_id = %s
                   AND meeting_reports.recording_id = %s
                   AND meeting_recordings.ended_at IS NOT NULL
+                  AND COALESCE(recording_links.captured_at, activity_logs.occurred_at) >= meeting_recordings.started_at
+                  AND COALESCE(recording_links.captured_at, activity_logs.occurred_at) < meeting_recordings.ended_at
                   AND EXISTS (
                     SELECT 1
                     FROM meeting_participants
                     WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
                       AND meeting_participants.user_id = activity_logs.actor_user_id
                       AND meeting_participants.is_legacy_session = false
-                      AND meeting_participants.joined_at <= activity_logs.occurred_at
+                      AND meeting_participants.joined_at <= COALESCE(recording_links.captured_at, activity_logs.occurred_at)
                       AND (
                         meeting_participants.left_at IS NULL
-                        OR activity_logs.occurred_at < meeting_participants.left_at
+                        OR COALESCE(recording_links.captured_at, activity_logs.occurred_at) < meeting_participants.left_at
                       )
                   )
-                ORDER BY activity_logs.occurred_at ASC, activity_logs.id ASC
+                  AND (
+                    activity_logs.action NOT IN (
+                      'canvas_shape_created',
+                      'canvas_shape_updated',
+                      'canvas_shape_deleted'
+                    )
+                    OR recording_links.id IS NOT NULL
+                  )
+                ORDER BY COALESCE(recording_links.captured_at, activity_logs.occurred_at) ASC,
+                         recording_links.receive_seq ASC NULLS LAST,
+                         activity_logs.id ASC
                 LIMIT %s
                 """,
                 (

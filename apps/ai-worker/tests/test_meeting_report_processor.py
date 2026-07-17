@@ -1214,8 +1214,11 @@ def test_activity_evidence_requires_a_non_legacy_participant_session() -> None:
     query, values = connection.calls[1]
     assert "AND EXISTS (" in query
     assert "meeting_participants.is_legacy_session = false" in query
-    assert "meeting_participants.joined_at <= activity_logs.occurred_at" in query
-    assert "activity_logs.occurred_at < meeting_participants.left_at" in query
+    assert "meeting_recording_activity_links" in query
+    assert "COALESCE(recording_links.captured_at, activity_logs.occurred_at)" in query
+    assert "meeting_participants.joined_at <= COALESCE(recording_links.captured_at, activity_logs.occurred_at)" in query
+    assert "COALESCE(recording_links.captured_at, activity_logs.occurred_at) < meeting_participants.left_at" in query
+    assert "activity_logs.action NOT IN" in query
     assert values == (REPORT_ID, MEETING_ID, RECORDING_ID, 50)
 
 

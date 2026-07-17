@@ -1,5 +1,13 @@
 # Activity Log Registry
 
+Canvas shape actions (`canvas_shape_created`, `canvas_shape_updated`, and
+`canvas_shape_deleted`) are emitted only by the internal Meeting Recording
+capture path. They are not appended by the ordinary Canvas shape command or
+checkpoint path. The path uses the authenticated Realtime actor and
+`captureId`-derived dedupe key; recording identity, receive ordering, and
+Realtime capture time live in `meeting_recording_activity_links`, not in
+`activity_logs.metadata`.
+
 `activity_logs`는 Meeting 전용 테이블이 아니다. 각 도메인은 실제로 commit된 의미 있는 사용자 행동만 공통 `ActivityLogService`로 같은 DB transaction 안에 append한다.
 
 ## 공통 계약

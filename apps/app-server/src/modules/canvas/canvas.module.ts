@@ -14,10 +14,13 @@ import { CanvasShapeCommandService } from "./shape/canvas-shape-command.service"
 import { CanvasShapeQueryService } from "./shape/canvas-shape-query.service";
 import { CanvasSyncDocumentService } from "./sync-document/canvas-sync-document.service";
 import { CanvasUserStateService } from "./user-state/canvas-user-state.service";
+import { CanvasRecordingActivityController } from "./recording-activity/canvas-recording-activity.controller";
+import { CanvasRecordingActivityGuard } from "./recording-activity/canvas-recording-activity.guard";
+import { CanvasRecordingActivityService } from "./recording-activity/canvas-recording-activity.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule, forwardRef(() => CanvasAgentModule)],
-  controllers: [CanvasController],
+  controllers: [CanvasController, CanvasRecordingActivityController],
   providers: [
     CanvasAccessService,
     CanvasBoardService,
@@ -28,7 +31,9 @@ import { CanvasUserStateService } from "./user-state/canvas-user-state.service";
     CanvasShapeCommandService,
     CanvasShapeQueryService,
     CanvasSyncDocumentService,
-    CanvasUserStateService
+    CanvasUserStateService,
+    CanvasRecordingActivityGuard,
+    CanvasRecordingActivityService
   ],
   exports: [CanvasService]
 })
