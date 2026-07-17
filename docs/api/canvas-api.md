@@ -19,6 +19,19 @@ then calls `ActivityLogService.append(transaction, input)` and inserts
 `meeting_recording_activity_links` in the same transaction. `captureId` is the
 idempotency key for retries. Activity metadata never contains `recordingId`,
 `captureId`, raw shape data, complete code, access tokens, or cursor data.
+`captureId` includes a UUID namespace created once per Realtime service
+instance. It is assigned once to a buffered entry and reused for every HTTP
+retry, so a process restart can safely restart `receiveSeq` from 1 without
+colliding with captures from an earlier instance.
+
+The link table exists because capture and persistence are intentionally
+asynchronous, not because a user must already be in Canvas when recording
+starts. Realtime can merge a text burst for 3 seconds and force-flush it up to
+30 seconds later, while `activity_logs.occurred_at` is the App Server
+transaction time. The link therefore preserves the original `recordingId`,
+`capturedAt`, and `receiveSeq` even when persistence happens after recording
+ends. A participant who enters Canvas after recording starts is captured as
+soon as their semantic edit is received during that recording.
 
 Text and code updates for the same recording, actor, canvas, and shape are
 coalesced as one editing burst. The burst flushes after 3 seconds without a
@@ -65,12 +78,14 @@ PR Review의 분석 결과, file decision, 위험도, Flow와 relation 원본, G
   변경 여부를 판단한다.
 - 모든 create/update/delete/batch mutation은 shape row 변경, `canvas.latest_op_seq`
   증가, `canvas_shape_operations` insert를 같은 transaction 안에서 처리한다.
-- Canvas shape 중 `note`, `sticky-note`, `text`, `frame`, `pilo-code-block`,
-  `arrow`, `line`의 생성·삭제와 text/title/code/language/frame name 같은 의미 변경은
-  공통 `activity_logs`에 같은 transaction으로 append한다. geometry-only 변경,
-  draw/highlight, viewport, presence, preview, retry/recovery는 기록하지 않는다.
-- Canvas Activity Log는 Canvas operation에서 dedupe key와 App Server 발생 시각을
-  만들며 client에게 Meeting/recording 식별자나 별도 Activity Log 값을 요구하지 않는다.
+- 일반 Canvas command/checkpoint 경로는 shape Activity Log를 append하지 않는다.
+  `note`, `sticky-note`, `text`, `frame`, `pilo-code-block`, `arrow`, `line`의
+  생성·삭제와 text/title/code/language/frame name 같은 의미 변경은 위의 Meeting
+  Recording capture 경로에서만 기록한다. geometry-only 변경, draw/highlight,
+  viewport, presence, preview, retry/recovery는 기록하지 않는다.
+- Meeting Recording Canvas Activity Log는 Realtime이 만든 stable `captureId`를
+  dedupe 기준으로 사용하고, `occurred_at`은 App Server transaction 시각을 사용한다.
+  client에게 Meeting/recording 식별자나 별도 Activity Log 값을 요구하지 않는다.
   metadata에는 raw tldraw shape, 원문 code/file, token, secret을 저장하지 않는다.
 - `clientOperationId`는 frontend retry/idempotency 기준이다. Realtime canvas client는
   요청마다 stable `clientOperationId`를 보내야 한다. 기존 client, 다른 canvas engine,

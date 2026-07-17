@@ -1212,19 +1212,21 @@ def test_activity_evidence_requires_a_non_legacy_participant_session() -> None:
     assert len(evidence) == 1
     assert evidence[0].activity_log_id == "88888888-8888-8888-8888-888888888888"
     query, values = connection.calls[1]
-    assert "AND EXISTS (" in query
-    assert "meeting_participants.is_legacy_session = false" in query
-    assert "meeting_recording_activity_links" in query
-    assert "COALESCE(recording_links.captured_at, activity_logs.occurred_at)" in query
+    normalized_query = " ".join(query.split())
+    compact_query = "".join(query.split())
+    assert "AND EXISTS (" in normalized_query
+    assert "meeting_participants.is_legacy_session = false" in normalized_query
+    assert "meeting_recording_activity_links" in normalized_query
+    assert "COALESCE(recording_links.captured_at, activity_logs.occurred_at)" in normalized_query
     assert (
-        "meeting_participants.joined_at <= COALESCE(recording_links.captured_at, activity_logs.occurred_at)"
-        in query
+        "meeting_participants.joined_at<=COALESCE("
+        "recording_links.captured_at,activity_logs.occurred_at)" in compact_query
     )
     assert (
-        "COALESCE(recording_links.captured_at, activity_logs.occurred_at) < meeting_participants.left_at"
-        in query
+        "COALESCE(recording_links.captured_at,activity_logs.occurred_at)"
+        "<meeting_participants.left_at" in compact_query
     )
-    assert "activity_logs.action NOT IN" in query
+    assert "activity_logs.action NOT IN" in normalized_query
     assert values == (REPORT_ID, MEETING_ID, RECORDING_ID, 50)
 
 

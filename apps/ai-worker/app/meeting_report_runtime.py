@@ -386,18 +386,30 @@ class PgMeetingReportRepository:
                   AND meeting_reports.meeting_id = %s
                   AND meeting_reports.recording_id = %s
                   AND meeting_recordings.ended_at IS NOT NULL
-                  AND COALESCE(recording_links.captured_at, activity_logs.occurred_at) >= meeting_recordings.started_at
-                  AND COALESCE(recording_links.captured_at, activity_logs.occurred_at) < meeting_recordings.ended_at
+                  AND COALESCE(
+                    recording_links.captured_at,
+                    activity_logs.occurred_at
+                  ) >= meeting_recordings.started_at
+                  AND COALESCE(
+                    recording_links.captured_at,
+                    activity_logs.occurred_at
+                  ) < meeting_recordings.ended_at
                   AND EXISTS (
                     SELECT 1
                     FROM meeting_participants
                     WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
                       AND meeting_participants.user_id = activity_logs.actor_user_id
                       AND meeting_participants.is_legacy_session = false
-                      AND meeting_participants.joined_at <= COALESCE(recording_links.captured_at, activity_logs.occurred_at)
+                      AND meeting_participants.joined_at <= COALESCE(
+                        recording_links.captured_at,
+                        activity_logs.occurred_at
+                      )
                       AND (
                         meeting_participants.left_at IS NULL
-                        OR COALESCE(recording_links.captured_at, activity_logs.occurred_at) < meeting_participants.left_at
+                        OR COALESCE(
+                          recording_links.captured_at,
+                          activity_logs.occurred_at
+                        ) < meeting_participants.left_at
                       )
                   )
                   AND (

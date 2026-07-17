@@ -13,6 +13,7 @@ assert.match(serviceSource, /TEXT_BURST_IDLE_MS = 3_000/);
 assert.match(serviceSource, /TEXT_BURST_MAX_MS = 30_000/);
 assert.match(serviceSource, /existing\.lastCapturedAt/);
 assert.match(serviceSource, /entry\.maxTimer = setTimeout/);
+assert.match(serviceSource, /captureSessionId = randomUUID\(\)/);
 
 const room = { canvasId: "canvas-1", workspaceId: "workspace-1" };
 const shape = (text) => ({
@@ -31,9 +32,10 @@ function databaseWith(recordings) {
 
 const originalFetch = globalThis.fetch;
 const requests = [];
+const fetchOutcomes = [];
 globalThis.fetch = async (_url, init) => {
   requests.push(JSON.parse(init.body));
-  return { ok: true };
+  return { ok: fetchOutcomes.length ? fetchOutcomes.shift() : true };
 };
 
 try {
@@ -53,6 +55,117 @@ try {
   assert.equal(requests.length, 0, "ambiguous active recordings must be ignored");
   await ambiguous.close();
 
+  const noCanvasAtRecordingStart = createCanvasRecordingActivityService({
+    appServerUrl: "http://app-server",
+    database: databaseWith([{ recordingId: "recording-late-join" }]),
+    token: "test-token",
+  });
+  const lateJoinStart = requests.length;
+  noCanvasAtRecordingStart.capture(room, "actor-late", {
+    after: shape("joined after recording start"),
+    before: null,
+    operationType: "create",
+    receiveSeq: 1,
+    shapeId: "shape-late-join",
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await noCanvasAtRecordingStart.flushRoom(room);
+  assert.equal(requests.length - lateJoinStart, 1, "a participant joining Canvas after recording start must be captured");
+  assert.equal(requests[lateJoinStart].activities[0].recordingId, "recording-late-join");
+  await noCanvasAtRecordingStart.close();
+
+  let recordingsAfterStart = [];
+  const cachedMiss = createCanvasRecordingActivityService({
+    appServerUrl: "http://app-server",
+    database: {
+      async query() {
+        return recordingsAfterStart;
+      },
+    },
+    token: "test-token",
+  });
+  const invalidationStart = requests.length;
+  cachedMiss.capture(room, "actor-cache", {
+    after: shape("before recording"),
+    before: null,
+    operationType: "create",
+    receiveSeq: 1,
+    shapeId: "shape-cache",
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  recordingsAfterStart = [{ recordingId: "recording-after-cache-miss" }];
+  cachedMiss.invalidateWorkspace(room.workspaceId);
+  cachedMiss.capture(room, "actor-cache", {
+    after: shape("after recording start"),
+    before: null,
+    operationType: "create",
+    receiveSeq: 2,
+    shapeId: "shape-cache",
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await cachedMiss.flushRoom(room);
+  assert.equal(requests.length - invalidationStart, 1, "recording_started invalidation must clear a cached miss");
+  assert.equal(requests[invalidationStart].activities[0].recordingId, "recording-after-cache-miss");
+  await cachedMiss.close();
+
+  const restartStart = requests.length;
+  const firstInstance = createCanvasRecordingActivityService({
+    appServerUrl: "http://app-server",
+    database: databaseWith([{ recordingId: "recording-restart" }]),
+    token: "test-token",
+  });
+  const secondInstance = createCanvasRecordingActivityService({
+    appServerUrl: "http://app-server",
+    database: databaseWith([{ recordingId: "recording-restart" }]),
+    token: "test-token",
+  });
+  for (const instance of [firstInstance, secondInstance]) {
+    instance.capture(room, "actor-restart", {
+      after: shape("receive sequence restarted"),
+      before: null,
+      operationType: "create",
+      receiveSeq: 1,
+      shapeId: "shape-restart",
+    });
+  }
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await Promise.all([firstInstance.flushRoom(room), secondInstance.flushRoom(room)]);
+  const restartCaptureIds = requests
+    .slice(restartStart)
+    .map(request => request.activities[0].captureId);
+  assert.equal(restartCaptureIds.length, 2);
+  assert.notEqual(restartCaptureIds[0], restartCaptureIds[1], "service restart must create a new capture namespace");
+  await Promise.all([firstInstance.close(), secondInstance.close()]);
+
+  const retryStart = requests.length;
+  fetchOutcomes.push(false, true);
+  const retryService = createCanvasRecordingActivityService({
+    appServerUrl: "http://app-server",
+    database: databaseWith([{ recordingId: "recording-retry" }]),
+    token: "test-token",
+  });
+  retryService.capture(room, "actor-retry", {
+    after: shape("retry me"),
+    before: null,
+    operationType: "create",
+    receiveSeq: 1,
+    shapeId: "shape-retry",
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await retryService.flushRoom(room);
+  for (let attempt = 0; attempt < 15 && requests.length < retryStart + 2; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  const retryRequests = requests.slice(retryStart);
+  assert.equal(retryRequests.length, 2, "a failed handoff must retry");
+  assert.equal(
+    retryRequests[0].activities[0].captureId,
+    retryRequests[1].activities[0].captureId,
+    "the same buffered entry must keep its captureId across HTTP retries",
+  );
+  await retryService.close();
+
+  const textBurstStart = requests.length;
   const service = createCanvasRecordingActivityService({
     appServerUrl: "http://app-server",
     database: databaseWith([{ recordingId: "recording-1" }]),
@@ -75,11 +188,11 @@ try {
   await new Promise(resolve => setTimeout(resolve, 0));
   await service.flushRoom(room);
 
-  assert.equal(requests.length, 1, "text burst inside the idle window must be one handoff");
-  assert.equal(requests[0].activities.length, 1);
-  assert.deepEqual(requests[0].activities[0].changedFields, ["text"]);
-  assert.equal(requests[0].activities[0].textPreview, "final");
-  assert.equal(requests[0].activities[0].receiveSeq, 2);
+  assert.equal(requests.length - textBurstStart, 1, "text burst inside the idle window must be one handoff");
+  assert.equal(requests[textBurstStart].activities.length, 1);
+  assert.deepEqual(requests[textBurstStart].activities[0].changedFields, ["text"]);
+  assert.equal(requests[textBurstStart].activities[0].textPreview, "final");
+  assert.equal(requests[textBurstStart].activities[0].receiveSeq, 2);
   await service.close();
 
   const RealDate = globalThis.Date;

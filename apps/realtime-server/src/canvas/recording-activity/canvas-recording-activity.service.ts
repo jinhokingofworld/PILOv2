@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { RealtimeDatabase } from "../../database/database";
 import type { CanvasRoomRef } from "../contracts/canvas-types";
 import type { CanvasRoomShapeActivityCandidate } from "../state/canvas-room-state.service";
@@ -71,6 +73,7 @@ export function createCanvasRecordingActivityService({
   database: RealtimeDatabase;
   token: string | null;
 }): CanvasRecordingActivityService {
+  const captureSessionId = randomUUID();
   const recordingCache = new Map<string, CachedRecording>();
   const buffered = new Map<string, BufferedActivity>();
   const pendingSends = new Map<string, BufferedActivity[]>();
@@ -293,7 +296,7 @@ export function createCanvasRecordingActivityService({
       const initial: BufferedActivity = {
         actorUserId,
         canvasId: room.canvasId,
-        captureId: `canvas:${room.workspaceId}:${room.canvasId}:${actorUserId}:${recording.recordingId}:${candidate.receiveSeq}`,
+        captureId: `canvas:${captureSessionId}:${room.workspaceId}:${room.canvasId}:${actorUserId}:${recording.recordingId}:${candidate.receiveSeq}`,
         capturedAt,
         ...(changedFields.length ? { changedFields } : {}),
         ...(projection.language ? { language: projection.language } : {}),

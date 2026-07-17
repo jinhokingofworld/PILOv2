@@ -7,6 +7,13 @@ Recording and Canvas shape Activity Logs. The link preserves the Realtime
 server `captured_at` and `receive_seq`; these values are used by MeetingReport
 activity evidence ordering instead of the App Server insert time.
 
+This table is not required by Canvas occupancy at recording start. A user may
+enter Canvas later and still be captured. It is required because Realtime may
+merge edits for 3 seconds and force-flush after up to 30 seconds, so the
+Realtime receive time can differ from `activity_logs.occurred_at`. The link
+keeps the selected recording and original ordering stable across asynchronous
+persistence and retries.
+
 The App Server accepts a link only when the recording belongs to the supplied
 workspace, the captured time is inside `[started_at, ended_at)`, and the actor
 has a non-legacy `meeting_participants` session covering that instant. A

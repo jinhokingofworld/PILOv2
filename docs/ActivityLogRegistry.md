@@ -21,10 +21,11 @@ Realtime capture time live in `meeting_recording_activity_links`, not in
 
 ## MeetingReport 소비 경계
 
-`activity_logs`에는 `meetingId`나 `recordingId`를 저장하지 않는다. MeetingReport가 전역
-활동을 근거로 사용할 후속 구현은 Workspace 일치, recording 시간 범위, 해당 시점의
-participant membership을 모두 만족하는 row만 snapshot한다. raw Activity Log row와 raw
-metadata는 MeetingReport 응답이나 LLM 결과 저장소에 노출하지 않는다.
+`activity_logs`에는 `meetingId`나 `recordingId`를 저장하지 않는다. MeetingReport는
+Workspace 일치, recording 시간 범위, 해당 시점의 participant membership을 모두
+만족하는 row만 snapshot한다. Canvas action은 연결 row의 `captured_at`을 시간 기준으로
+사용하고 `meeting_recording_activity_links`가 없는 row는 제외한다. raw Activity Log
+row와 raw metadata는 MeetingReport 응답이나 LLM 결과 저장소에 노출하지 않는다.
 
 ## 등록된 action과 `metadata.data` 계약
 

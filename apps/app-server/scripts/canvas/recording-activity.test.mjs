@@ -27,8 +27,9 @@ const base = {
 };
 
 async function runScenario({
+  activity = base,
   activeRecordings = [{ id: recordingId }],
-  capturedAt = base.capturedAt,
+  capturedAt = activity.capturedAt,
   endedAt = "2026-07-17T11:00:00.000Z",
   existingLink = null,
   recordingStatus = "COMPLETED",
@@ -78,7 +79,7 @@ async function runScenario({
     new ActivityLogService(),
     database,
   );
-  const result = await service.appendBatch({ activities: [{ ...base, capturedAt }] });
+  const result = await service.appendBatch({ activities: [{ ...activity, capturedAt }] });
   return { executed, result, transaction };
 }
 
@@ -102,11 +103,36 @@ const ambiguous = await runScenario({
 assert.deepEqual(ambiguous.result, { accepted: 0 });
 assert.equal(ambiguous.executed.length, 0, "ambiguous recording must not append Activity Log");
 
-const first = await runScenario();
-assert.deepEqual(first.result, { accepted: 1 });
-assert.equal(first.executed.length, 1);
-assert.match(first.executed[0].text, /INSERT INTO activity_logs/);
-assert.equal(first.executed[0].values[6].includes(base.captureId), true);
+const lateCanvasJoin = await runScenario({
+  endedAt: null,
+  recordingStatus: "RUNNING",
+});
+assert.deepEqual(lateCanvasJoin.result, { accepted: 1 });
+assert.equal(lateCanvasJoin.executed.length, 1);
+assert.match(lateCanvasJoin.executed[0].text, /INSERT INTO activity_logs/);
+assert.equal(lateCanvasJoin.executed[0].values[6].includes(base.captureId), true);
+
+const restartedFirst = await runScenario({
+  activity: {
+    ...base,
+    captureId: "canvas:session-a:same-receive-seq",
+    receiveSeq: 1,
+  },
+});
+const restartedSecond = await runScenario({
+  activity: {
+    ...base,
+    captureId: "canvas:session-b:same-receive-seq",
+    receiveSeq: 1,
+  },
+});
+assert.deepEqual(restartedFirst.result, { accepted: 1 });
+assert.deepEqual(restartedSecond.result, { accepted: 1 });
+assert.notEqual(
+  restartedFirst.executed[0].values[6],
+  restartedSecond.executed[0].values[6],
+  "different Realtime capture sessions must produce different Activity Log dedupe keys",
+);
 
 const retry = await runScenario({ existingLink: { activity_log_id: "activity-1" } });
 assert.deepEqual(retry.result, { accepted: 0 });
