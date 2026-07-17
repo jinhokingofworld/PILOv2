@@ -140,6 +140,8 @@ interface MeetingReportRow extends QueryResultRow {
   status: MeetingReportStatus;
   failed_step: MeetingReportFailedStep | null;
   error_message: string | null;
+  failure_code?: string | null;
+  failure_detail?: unknown;
   summary: string | null;
   discussion_points: string | null;
   decisions: string | null;
@@ -1890,6 +1892,8 @@ export class MeetingService {
           meeting_reports.status,
           meeting_reports.failed_step,
           meeting_reports.error_message,
+          meeting_reports.failure_code,
+          meeting_reports.failure_detail,
           meeting_reports.transcript_text,
           meeting_reports.summary,
           meeting_reports.discussion_points,
@@ -1925,6 +1929,8 @@ export class MeetingService {
           status = 'QUEUED',
           failed_step = NULL,
           error_message = NULL,
+          failure_code = NULL,
+          failure_detail = NULL,
           transcript_text = NULL,
           summary = NULL,
           discussion_points = NULL,
@@ -1941,6 +1947,8 @@ export class MeetingService {
           status,
           failed_step,
           error_message,
+          failure_code,
+          failure_detail,
           summary,
           discussion_points,
           decisions,
@@ -1970,12 +1978,14 @@ export class MeetingService {
             status = $2::meeting_report_status,
             failed_step = $3::meeting_report_failed_step,
             error_message = $4,
-            transcript_text = $5,
-            summary = $6,
-            discussion_points = $7,
-            decisions = $8,
-            action_item_candidates = $9::jsonb,
-            retry_count = $10,
+            failure_code = $5,
+            failure_detail = $6::jsonb,
+            transcript_text = $7,
+            summary = $8,
+            discussion_points = $9,
+            decisions = $10,
+            action_item_candidates = $11::jsonb,
+            retry_count = $12,
             updated_at = now()
           WHERE id = $1
             AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
@@ -1986,6 +1996,8 @@ export class MeetingService {
             status,
             failed_step,
             error_message,
+            failure_code,
+            failure_detail,
             summary,
             discussion_points,
             decisions,
@@ -1999,6 +2011,8 @@ export class MeetingService {
           report.status,
           report.failed_step,
           report.error_message,
+          report.failure_code,
+          report.failure_detail == null ? null : JSON.stringify(report.failure_detail),
           report.transcript_text,
           report.summary,
           report.discussion_points,
