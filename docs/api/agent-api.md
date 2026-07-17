@@ -880,6 +880,20 @@ Status code: `200 OK`
 - 지원 범위를 벗어난 schema 기능은 `unsupportedFeatures`에 명시한다. DB 실행·배포만 요구하는
   요청은 `unsupported`이며, 요구 entity/table 정보가 없으면 먼저 clarification을 요청한다.
 
+#### Dev Agent CORS preflight 진단
+
+브라우저에서 Agent 답변 뒤 `No 'Access-Control-Allow-Origin' header`가 발생하면 토큰이나 request
+body를 보내기 전에 실제 배포 endpoint의 OPTIONS 응답을 확인한다.
+
+```powershell
+node apps/app-server/scripts/agent/cors-preflight-smoke.mjs --url "https://api.dev.pilo.my/api/v1/workspaces/<workspaceId>/agent/runs" --origin "https://dev.pilo.my"
+```
+
+스크립트는 status와 `Access-Control-Allow-*` header만 출력하며 인증 정보나 response body를
+출력하지 않는다. `ok=true`면 preflight 계약은 정상이므로 브라우저 Network 탭에서 실제 실패
+request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=false`면 App Server 코드를 임의로
+완화하지 않고 dev gateway와 배포 환경의 origin 전달 및 OPTIONS routing부터 점검한다.
+
 ### PR Review
 
 - `requestContext`는 `null`, `{ "surface": "sql_erd", "sessionId": "uuid" }`, 또는
