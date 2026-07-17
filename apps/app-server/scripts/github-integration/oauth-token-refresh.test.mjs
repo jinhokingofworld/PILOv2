@@ -257,3 +257,70 @@ for (const fetchImplementation of [
     globalThis.clearTimeout = originalClearTimeout;
   }
 }
+
+{
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timerHandle = { name: "github-oauth-response-timeout" };
+  let scheduledCallback;
+  let scheduledDelay;
+  let clearedHandle;
+  let timerClearedBeforeJson;
+  let receivedSignal;
+
+  globalThis.setTimeout = (callback, delay) => {
+    scheduledCallback = callback;
+    scheduledDelay = delay;
+    return timerHandle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    clearedHandle = handle;
+  };
+
+  try {
+    const client = new GithubOAuthClient();
+    const error = await withFetch(
+      async (_url, init) => {
+        receivedSignal = init?.signal;
+        const response = new Response(null, {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+        response.json = () =>
+          new Promise((_resolve, reject) => {
+            timerClearedBeforeJson = clearedHandle === timerHandle;
+            receivedSignal.addEventListener("abort", () => {
+              reject(new DOMException("stalled response body", "AbortError"));
+            });
+            scheduledCallback();
+          });
+        return response;
+      },
+      () =>
+        captureRejection(() =>
+          client.refreshAccessToken({
+            clientId: "client-id",
+            clientSecret: "client-secret",
+            refreshToken
+          })
+        )
+    );
+
+    assert.equal(scheduledDelay, 10_000);
+    assert.equal(timerClearedBeforeJson, false);
+    assert.equal(receivedSignal?.aborted, true);
+    assert.equal(clearedHandle, timerHandle);
+    assert.notEqual(
+      error?.constructor?.name,
+      "GithubOAuthRefreshRejectedError"
+    );
+    assert.equal(
+      error?.response?.error?.message,
+      "GitHub OAuth token refresh failed"
+    );
+    assertTokenFree(error);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+}
