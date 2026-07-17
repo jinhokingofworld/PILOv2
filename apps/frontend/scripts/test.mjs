@@ -1252,8 +1252,18 @@ assert.match(piloCanvasStateReporter, /source:\s*"user"/);
 assert.match(piloCanvasStateReporter, /getRemovedCanvasShapeIds/);
 assert.match(piloCanvasStateReporter, /pendingExplicitDeletedShapeIdsRef/);
 assert.match(piloCanvasStateReporter, /pendingPersistChangedShapeIdsRef/);
+assert.match(piloCanvasStateReporter, /pendingFreehandPersistRef/);
+assert.match(piloCanvasStateReporter, /freeformPersistSequenceRef/);
 assert.match(piloCanvasStateReporter, /getChangedCanvasShapeRecordIds/);
 assert.match(piloCanvasStateReporter, /isFreehandDrawing: isDrawing/);
+assert.match(
+  piloCanvasStateReporter,
+  /if \(pendingFreehandPersistRef\.current\) \{[\s\S]*persistFreeformShapes = readFreeformShapes\(\)/,
+);
+assert.doesNotMatch(
+  piloCanvasStateReporter,
+  /onFreeformShapesChangeRef\.current\(nextFreeformShapes, persistChange\)/,
+);
 assert.match(
   piloCanvasStateReporter,
   /lastFreeformSnapshotSignatureRef\.current === nextSnapshotSignature &&\s*!pendingExplicitDeletedShapeIdsRef\.current\.size/,

@@ -44,6 +44,13 @@ const participantSessionMigration = await readFile(
   ),
   "utf8"
 );
+const meetingReportFailureDiagnosticsMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/084_add_meeting_report_failure_diagnostics.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 assert.match(meetingStateRealtimePublisher, /MEETING_STATE_REDIS_CHANNEL = "meeting:state-events"/);
 assert.match(meetingStateRealtimePublisher, /event: "meeting:state:updated"/);
@@ -88,6 +95,11 @@ assert.match(
 assert.match(meetingServiceSource, /COUNT\(DISTINCT user_id\)::int/);
 assert.match(meetingServiceSource, /SELECT DISTINCT ON \(meeting_participants\.user_id\)/);
 assert.match(participantSessionMigration, /is_legacy_session boolean NOT NULL DEFAULT false/);
+assert.match(meetingReportFailureDiagnosticsMigration, /ADD COLUMN failure_code TEXT/);
+assert.match(meetingReportFailureDiagnosticsMigration, /ADD COLUMN failure_detail JSONB/);
+assert.match(meetingReportFailureDiagnosticsMigration, /failure_detail - ARRAY\['category', 'retryable', 'providerStatusCode'\]/);
+assert.match(meetingServiceSource, /failure_code = NULL/);
+assert.match(meetingServiceSource, /failure_detail = NULL/);
 assert.match(participantSessionMigration, /UPDATE meeting_participants\s+SET is_legacy_session = true/s);
 assert.match(participantSessionMigration, /DROP CONSTRAINT IF EXISTS unique_meeting_participant/);
 assert.match(participantSessionMigration, /unique_active_meeting_participant/);
@@ -487,6 +499,8 @@ function meetingReportRow(overrides = {}) {
     status: "COMPLETED",
     failed_step: null,
     error_message: null,
+    failure_code: null,
+    failure_detail: null,
     summary: "요약",
     discussion_points: "논의사항",
     decisions: "결정사항",
@@ -527,6 +541,12 @@ function meetingReportRegenerationRow(overrides = {}) {
       status: "FAILED",
       failed_step: "STT",
       error_message: "STT failed safely",
+      failure_code: "INVALID_OUTPUT",
+      failure_detail: {
+        category: "invalid_output",
+        retryable: false,
+        providerStatusCode: null
+      },
       summary: "이전 요약",
       discussion_points: "이전 논의사항",
       decisions: "이전 결정사항",
@@ -2670,6 +2690,8 @@ assert.doesNotMatch(meetingServiceSource, /AS references\b/);
           assert.match(text, /status = 'QUEUED'/);
           assert.match(text, /failed_step = NULL/);
           assert.match(text, /error_message = NULL/);
+          assert.match(text, /failure_code = NULL/);
+          assert.match(text, /failure_detail = NULL/);
           assert.match(text, /transcript_text = NULL/);
           assert.match(text, /action_item_candidates = '\[\]'::jsonb/);
           assert.match(text, /retry_count = retry_count \+ 1/);
@@ -2835,14 +2857,22 @@ assert.doesNotMatch(meetingServiceSource, /AS references\b/);
           assert.match(text, /UPDATE meeting_reports/);
           assert.match(text, /status = \$2::meeting_report_status/);
           assert.match(text, /failed_step = \$3::meeting_report_failed_step/);
-          assert.match(text, /action_item_candidates = \$9::jsonb/);
-          assert.match(text, /retry_count = \$10/);
+          assert.match(text, /failure_code = \$5/);
+          assert.match(text, /failure_detail = \$6::jsonb/);
+          assert.match(text, /action_item_candidates = \$11::jsonb/);
+          assert.match(text, /retry_count = \$12/);
           assert.match(text, /AND status IN/);
           assert.deepEqual(values, [
             reportId,
             "FAILED",
             "STT",
             "STT failed safely",
+            "INVALID_OUTPUT",
+            JSON.stringify({
+              category: "invalid_output",
+              retryable: false,
+              providerStatusCode: null
+            }),
             "이전 전문",
             "이전 요약",
             "이전 논의사항",

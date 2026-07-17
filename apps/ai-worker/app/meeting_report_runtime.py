@@ -22,7 +22,7 @@ from app.agent_processor import (
 )
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
 from app.canvas_agent.embeddings import LocalSentenceTransformerCanvasEmbedder
-from app.canvas_agent.planning.planner import OpenAiCanvasAgentPlanner
+from app.canvas_agent.planning.planner import OpenAiCanvasAgentIntentClassifier
 from app.canvas_agent.processor import CanvasAgentProcessor
 from app.canvas_agent.repository import PgCanvasAgentRepository
 from app.canvas_agent.routing.semantic_router import CanvasSemanticRouter
@@ -40,6 +40,7 @@ from app.meeting_document_evidence import (
 from app.meeting_report_processor import (
     ActivityEvidence,
     AudioObjectMetadata,
+    EvidenceValidationError,
     GeneratedMeetingReport,
     InfrastructureError,
     MeetingReportContext,
@@ -446,7 +447,14 @@ class PgMeetingReportRepository:
             (status, report_id),
         )
 
-    def mark_failed(self, report_id: str, failed_step: str, error_message: str) -> None:
+    def mark_failed(
+        self,
+        report_id: str,
+        failed_step: str,
+        error_message: str,
+        failure_code: str | None = None,
+        failure_detail: dict[str, str | bool | int | None] | None = None,
+    ) -> None:
         self.connection.execute(
             """
             UPDATE meeting_reports
@@ -454,6 +462,8 @@ class PgMeetingReportRepository:
               status = 'FAILED',
               failed_step = %s,
               error_message = %s,
+              failure_code = %s,
+              failure_detail = %s::jsonb,
               transcript_text = NULL,
               summary = NULL,
               discussion_points = NULL,
@@ -463,7 +473,13 @@ class PgMeetingReportRepository:
             WHERE id = %s
               AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
             """,
-            (failed_step, error_message, report_id),
+            (
+                failed_step,
+                error_message,
+                failure_code,
+                json.dumps(failure_detail) if failure_detail is not None else None,
+                report_id,
+            ),
         )
 
     def mark_completed(self, report_id: str, report: GeneratedMeetingReport) -> None:
@@ -475,6 +491,8 @@ class PgMeetingReportRepository:
               status = 'COMPLETED',
               failed_step = NULL,
               error_message = NULL,
+              failure_code = NULL,
+              failure_detail = NULL,
               transcript_text = %s,
               summary = %s,
               discussion_points = %s,
@@ -1631,12 +1649,36 @@ class OpenAiMeetingReportClient:
         document_change_evidence: list[DocumentChangeEvidence],
     ) -> GeneratedMeetingReport:
         try:
+            return self._generate_report_once(
+                transcript_text,
+                transcript_segments,
+                activity_evidence,
+                document_change_evidence,
+            )
+        except EvidenceValidationError as error:
+            return self._generate_report_once(
+                transcript_text,
+                transcript_segments,
+                activity_evidence,
+                document_change_evidence,
+                evidence_repair_code=error.code,
+            )
+
+    def _generate_report_once(
+        self,
+        transcript_text: str,
+        transcript_segments: list[TranscriptSegment],
+        activity_evidence: list[ActivityEvidence],
+        document_change_evidence: list[DocumentChangeEvidence],
+        evidence_repair_code: str | None = None,
+    ) -> GeneratedMeetingReport:
+        try:
             response = self.client.responses.create(
                 model=self.meeting_report_model,
                 input=[
                     {
                         "role": "system",
-                        "content": _meeting_report_system_prompt(),
+                        "content": _meeting_report_system_prompt(evidence_repair_code),
                     },
                     {
                         "role": "user",
@@ -2172,7 +2214,7 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.openai_agent_planner_model,
         resolved_settings.openai_agent_planner_timeout_seconds,
     )
-    canvas_agent_planner = OpenAiCanvasAgentPlanner(
+    canvas_agent_intent_classifier = OpenAiCanvasAgentIntentClassifier(
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
     )
@@ -2204,7 +2246,7 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
     )
     canvas_agent_processor = CanvasAgentProcessor(
         canvas_agent_repository,
-        canvas_agent_planner,
+        canvas_agent_intent_classifier,
         CanvasSemanticRouter(canvas_agent_repository, canvas_embedder),
     )
     canvas_embedding_processor = CanvasEmbeddingProcessor(canvas_agent_repository, canvas_embedder)
@@ -2378,8 +2420,8 @@ def _is_missing_s3_object_error(error: Exception) -> bool:
     return error_code in {"404", "NoSuchKey", "NotFound", "NoSuchBucket"} or status_code == 404
 
 
-def _meeting_report_system_prompt() -> str:
-    return (
+def _meeting_report_system_prompt(evidence_repair_code: str | None = None) -> str:
+    prompt = (
         "You generate concise meeting reports from transcripts and optional Activity evidence. "
         "Return only JSON matching the provided schema. "
         "Use the transcript language. "
@@ -2405,6 +2447,14 @@ def _meeting_report_system_prompt() -> str:
         "Do not create action items when there is no concrete follow-up. "
         "Set every actionItemCandidates[].assigneeUserId to null because "
         "this worker does not match users in #174."
+    )
+    if evidence_repair_code is None:
+        return prompt
+    return (
+        f"{prompt} Previous output failed evidence validation with code "
+        f"{evidence_repair_code}. Regenerate the complete report. Do not reuse an "
+        "action item unless it has a valid evidence link using only indexes shown in "
+        "the current input."
     )
 
 

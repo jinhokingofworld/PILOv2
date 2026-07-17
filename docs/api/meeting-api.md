@@ -324,6 +324,8 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 
 목록 응답에는 긴 `transcriptText`를 포함하지 않는다. Workspace member는 해당 Workspace의 모든 MeetingReport를 목록·상세에서 조회할 수 있다. 회의 참여 이력은 조회 조건이 아니다.
 
+LLM 처리 실패의 내부 진단 코드와 상세 정보는 운영 DB·제한된 운영 로그에서만 사용한다. API·Realtime event·Agent tool·브라우저에는 `failedStep`과 사용자용 `errorMessage`만 반환하며, provider payload, LLM output, transcript, prompt, token, stack trace는 저장하거나 노출하지 않는다.
+
 ## API 목록
 
 | Method | Endpoint | 설명 |
@@ -922,6 +924,8 @@ Request body 없음.
 허용한다. 요청이 성공하면 MeetingReport는 다시 `QUEUED` 상태가 되고
 `retryCount`가 증가한다. 기존 실패 정보와 이전 산출물은 초기화한다. MVP 응답에는
 별도 `jobId`와 Transcript 전문은 포함하지 않는다.
+
+LLM output의 evidence 연결 정보가 내부 검증에 실패한 경우 Worker는 동일 transcript와 안전한 Activity evidence로 한 번만 보정 생성을 시도한다. 보정도 실패하면 최종 `FAILED`로 기록하며, 일반 OpenAI·SQS·network 인프라 오류의 기존 재시도 정책은 바꾸지 않는다.
 
 Meeting 종료 뒤 30일 retention purge가 완료되어 `audioFileKey`가 `null`인 경우에는
 기존 transcript·요약 등 MeetingReport 산출물은 계속 조회할 수 있지만, 원본 audio가 없어

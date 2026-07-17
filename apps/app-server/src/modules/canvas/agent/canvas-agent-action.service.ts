@@ -26,6 +26,8 @@ export class CanvasAgentActionService {
     step: CanvasAgentStepRow
   ): Promise<CanvasAgentActionResult> {
     switch (step.action_name) {
+      case "route_intent":
+        return this.routeIntent(run, step.input_json);
       case "find_canvas_tool":
         return this.findCanvasTool(step.input_json);
       case "find_shapes":
@@ -49,6 +51,28 @@ export class CanvasAgentActionService {
         };
       default:
         throw badRequest("Canvas Agent action is invalid");
+    }
+  }
+
+  private async routeIntent(
+    run: CanvasAgentRunRow,
+    input: Record<string, unknown>
+  ): Promise<CanvasAgentActionResult> {
+    const intent = this.readText(input.intent);
+    const argumentsValue = input.arguments;
+    const intentArguments = argumentsValue && typeof argumentsValue === "object" && !Array.isArray(argumentsValue)
+      ? argumentsValue as Record<string, unknown>
+      : null;
+    if (!intentArguments) throw badRequest("Canvas Agent intent arguments are required");
+
+    switch (intent) {
+      case "find_shapes": {
+        const query = this.readText(intentArguments.query);
+        if (!query) throw badRequest("Canvas Agent find_shapes intent query is required");
+        return this.findShapes(run, { ...intentArguments, query });
+      }
+      default:
+        throw badRequest("Canvas Agent intent is not supported");
     }
   }
 
@@ -166,7 +190,7 @@ export class CanvasAgentActionService {
   private routingPrefix(input: Record<string, unknown>): string {
     if (input.routingSource === "shape_embedding") return "임베딩 검색으로 ";
     if (input.routingSource === "deterministic_search") return "Canvas 검색으로 ";
-    if (input.routingSource === "llm_planner") return "Canvas Planner가 판단해서 ";
+    if (input.routingSource === "llm_intent_classifier") return "Canvas AI가 검색어를 해석해서 ";
     return "";
   }
 

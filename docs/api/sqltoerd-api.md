@@ -353,6 +353,21 @@ SQL source panel이 열린 상태를 뜻한다.
 노출한다. 탭 하나가 leave·disconnect되면 남은 탭의 최신 presence를 `presence:update`
 로 전환 전송하며, 마지막 탭이 사라질 때만 `presence:leave`를 전송한다.
 
+Workspace member 제거 또는 자진 탈퇴가 commit되면 App Server가 발행하는 공통
+`workspace:membership-revocations` event를 SQLtoERD Realtime handler도 소비한다.
+각 Realtime instance는 대상 사용자의 local SQLtoERD tab을 찾아 해당 Workspace의
+모든 SQLtoERD room에서 제거하고, in-memory presence를 정리해 남은 참여자에게 최종
+`presence:leave`를 전송한다. 같은 사용자의 여러 탭은 중간 replacement presence를
+노출하지 않고 한 번에 정리한다. 해당 사용자가 보유한 Workspace의 source writer
+lease도 즉시 삭제한다.
+
+철회 event를 받은 socket은 같은 연결에서 해당 Workspace의 join과 presence update가
+거부된다. 진행 중이던 join과 철회가 교차해도 join 완료 뒤 다시 검사하고 room을
+정리한다. 다른 사용자와 다른 Workspace의 room·presence·lease는 유지하며, 중복 event와
+local socket이 없는 event는 멱등 처리한다. room leave가 실패하면 `disconnect(true)`로
+강제 종료한다. REST operation·source lock·source publish는 이 빠른 퇴출 경로와
+독립적으로 요청마다 Workspace 접근 권한을 검증한다.
+
 ## 데이터 규칙
 
 - 테이블: `sql_erd_sessions`

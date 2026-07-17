@@ -36,6 +36,7 @@ import {
 } from "../canvas/state/canvas-room-state.service";
 import { createCanvasShapeLockService } from "../canvas/review-lock/canvas-shape-lock.service";
 import { createCanvasShapePreviewService } from "../canvas/preview/canvas-shape-preview.service";
+import { createClassicCanvasMembershipRevocationHandler } from "../canvas/socket/canvas-membership-revocation";
 import {
   assertCanvasRoomWritable,
   emitCanvasError,
@@ -45,6 +46,7 @@ import {
   isCanvasShapeOperationPayload,
 } from "../canvas/socket/canvas-socket-payloads";
 import { createSqlErdAccessService } from "../sql-erd/sql-erd-access.service";
+import { canEmitSqlErdJoined } from "../sql-erd/sql-erd-join-state";
 import {
   createSqlErdPresenceService,
   type SqlErdPresenceClearResult,
@@ -55,6 +57,10 @@ import {
   sqlErdServerEvents,
 } from "../sql-erd/sql-erd-socket-events";
 import { relaySqlErdOperation } from "../sql-erd/sql-erd-operation-relay";
+import {
+  createSqlErdMembershipRevocationHandler,
+  evictSqlErdSocketFromRooms,
+} from "../sql-erd/sql-erd-membership-revocation";
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
 import { createWorkspacePresenceAccessService } from "../workspace-presence/workspace-presence-access.service";
 import { createWorkspacePresenceService } from "../workspace-presence/workspace-presence.service";
@@ -163,7 +169,10 @@ type AuthedSocket = Socket & {
     canvasRoomAccess: Map<string, CanvasRoomAccess>;
     canvasRoomsByName: Map<string, CanvasRoomRef>;
     pageCursorPresenceByRoom: Record<string, PageCursorPresenceState>;
+    revokedClassicCanvasWorkspaceIds: Set<string>;
     sqlErdPresenceByRoom: Record<string, SqlErdPresenceState>;
+    sqlErdRevokedWorkspaceIds: Set<string>;
+    sqlErdRoomsByName: Map<string, SqlErdRoomRef>;
   };
 };
 
@@ -548,10 +557,27 @@ export async function createRealtimeSocketServer({
   const chatFanOut = createChatFanOut({ database, io });
   const chatMembershipRevocationHandler =
     createChatMembershipRevocationHandler({ io });
+  const classicCanvasMembershipRevocationHandler =
+    createClassicCanvasMembershipRevocationHandler({
+      emitLockReleases(payload) {
+        emitConflictDraftLockReleases(io, payload);
+      },
+      io,
+      presenceService,
+      roomCheckpointService,
+      shapeLockService,
+      shapePreviewService,
+    });
   const pdfCollaborationMembershipRevocationHandler =
     createPdfCollaborationMembershipRevocationHandler({
       io,
       roomState: pdfCollaborationRoomState,
+    });
+  const sqlErdMembershipRevocationHandler =
+    createSqlErdMembershipRevocationHandler({
+      database,
+      io,
+      presenceService: sqlErdPresenceService,
     });
   const chatSubscriptionWork = createChatSubscriptionWorkQueue({
     onRejected() {
@@ -671,7 +697,9 @@ export async function createRealtimeSocketServer({
             const handled = await Promise.all(
               [
                 chatMembershipRevocationHandler.handle(payload),
+                classicCanvasMembershipRevocationHandler.handle(payload),
                 pdfCollaborationMembershipRevocationHandler.handle(payload),
+                sqlErdMembershipRevocationHandler.handle(payload),
                 ...membershipRevocationHandlers.map((handler) =>
                   handler.handle(payload),
                 ),
@@ -748,7 +776,11 @@ export async function createRealtimeSocketServer({
         (socket as AuthedSocket).data.canvasRoomAccess = new Map();
         (socket as AuthedSocket).data.canvasRoomsByName = new Map();
         (socket as AuthedSocket).data.pageCursorPresenceByRoom = {};
+        (socket as AuthedSocket).data.revokedClassicCanvasWorkspaceIds =
+          new Set();
         (socket as AuthedSocket).data.sqlErdPresenceByRoom = {};
+        (socket as AuthedSocket).data.sqlErdRevokedWorkspaceIds = new Set();
+        (socket as AuthedSocket).data.sqlErdRoomsByName = new Map();
         next();
       })
       .catch(next);
@@ -803,14 +835,89 @@ export async function createRealtimeSocketServer({
         return;
       }
 
+      if (
+        authedSocket.data.sqlErdRevokedWorkspaceIds.has(
+          joinPayload.workspaceId,
+        )
+      ) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload("forbidden", "SQLtoERD room access denied"),
+        );
+        return;
+      }
+
       await socket.join(result.roomName);
+
+      if (
+        authedSocket.data.sqlErdRevokedWorkspaceIds.has(
+          joinPayload.workspaceId,
+        )
+      ) {
+        const safelyEvicted = await evictSqlErdSocketFromRooms(socket, [
+          result.roomName,
+        ]);
+        if (!safelyEvicted) {
+          console.error("SQLtoERD revoked join cleanup failed");
+          return;
+        }
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload("forbidden", "SQLtoERD room access denied"),
+        );
+        return;
+      }
+
+      authedSocket.data.sqlErdRoomsByName.set(result.roomName, joinPayload);
+      const sqlErdPresence = await getSqlErdRoomSocketPresence(
+        io,
+        joinPayload,
+        result.roomName,
+      );
+
+      if (
+        !canEmitSqlErdJoined({
+          isRoomJoined: socket.rooms.has(result.roomName),
+          room: joinPayload,
+          roomName: result.roomName,
+          roomsByName: authedSocket.data.sqlErdRoomsByName,
+          revokedWorkspaceIds:
+            authedSocket.data.sqlErdRevokedWorkspaceIds,
+        })
+      ) {
+        if (
+          authedSocket.data.sqlErdRoomsByName.get(result.roomName) ===
+          joinPayload
+        ) {
+          authedSocket.data.sqlErdRoomsByName.delete(result.roomName);
+        }
+
+        if (
+          authedSocket.data.sqlErdRevokedWorkspaceIds.has(
+            joinPayload.workspaceId,
+          )
+        ) {
+          const safelyEvicted = socket.rooms.has(result.roomName)
+            ? await evictSqlErdSocketFromRooms(socket, [result.roomName])
+            : true;
+          if (!safelyEvicted) {
+            console.error("SQLtoERD revoked joined snapshot cleanup failed");
+            return;
+          }
+          socket.emit(
+            sqlErdServerEvents.error,
+            createSocketErrorPayload(
+              "forbidden",
+              "SQLtoERD room access denied",
+            ),
+          );
+        }
+        return;
+      }
+
       socket.emit(sqlErdServerEvents.joined, {
         ...result.payload,
-        presence: await getSqlErdRoomSocketPresence(
-          io,
-          joinPayload,
-          result.roomName,
-        ),
+        presence: sqlErdPresence,
       });
     });
 
@@ -948,6 +1055,7 @@ export async function createRealtimeSocketServer({
 
       await socket.leave(roomName);
       delete authedSocket.data.sqlErdPresenceByRoom[roomName];
+      authedSocket.data.sqlErdRoomsByName.delete(roomName);
 
       if (clearResult) emitSqlErdPresenceClearResult(socket, clearResult);
     });
@@ -977,6 +1085,18 @@ export async function createRealtimeSocketServer({
       }
 
       const roomName = createSqlErdRoomName(presencePayload);
+
+      if (
+        authedSocket.data.sqlErdRevokedWorkspaceIds.has(
+          presencePayload.workspaceId,
+        )
+      ) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload("forbidden", "SQLtoERD room access denied"),
+        );
+        return;
+      }
 
       if (!socket.rooms.has(roomName)) {
         socket.emit(
@@ -1213,6 +1333,7 @@ export async function createRealtimeSocketServer({
         );
         const pdfCollaborationLeaveEvents = pdfCollaborationRoomState.clearSocket(socket.id);
         authedSocket.data.pageCursorPresenceByRoom = {};
+        authedSocket.data.sqlErdRoomsByName.clear();
 
         for (const clearResult of sqlErdClearResults) {
           emitSqlErdPresenceClearResult(socket, clearResult);

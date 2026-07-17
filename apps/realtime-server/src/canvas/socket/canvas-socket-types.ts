@@ -12,5 +12,6 @@ export type CanvasAuthedSocket = Socket & {
     };
     canvasRoomAccess: Map<string, CanvasRoomAccess>;
     canvasRoomsByName: Map<string, CanvasRoomRef>;
+    revokedClassicCanvasWorkspaceIds: Set<string>;
   };
 };

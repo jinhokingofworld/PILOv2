@@ -28,25 +28,41 @@ const room = { workspaceId: "workspace-1", canvasId: "canvas-1" };
 
 assert.deepEqual(
   await createCanvasAccessService(
-    createDatabase({ board_type: "freeform", review_room_status: null })
+    createDatabase({
+      board_type: "freeform",
+      engine_type: "classic",
+      review_room_status: null
+    })
   ).getCanvasRoomAccess(context, room),
-  { readOnly: false }
+  { boardType: "freeform", engineType: "classic", readOnly: false }
 );
 assert.deepEqual(
   await createCanvasAccessService(
-    createDatabase({ board_type: "review", review_room_status: "active" })
+    createDatabase({
+      board_type: "review",
+      engine_type: "classic",
+      review_room_status: "active"
+    })
   ).getCanvasRoomAccess(context, room),
-  { readOnly: false }
+  { boardType: "review", engineType: "classic", readOnly: false }
 );
 assert.deepEqual(
   await createCanvasAccessService(
-    createDatabase({ board_type: "review", review_room_status: "completed" })
+    createDatabase({
+      board_type: "review",
+      engine_type: "classic",
+      review_room_status: "completed"
+    })
   ).getCanvasRoomAccess(context, room),
-  { readOnly: true }
+  { boardType: "review", engineType: "classic", readOnly: true }
 );
 assert.equal(
   await createCanvasAccessService(
-    createDatabase({ board_type: "review", review_room_status: "unexpected" })
+    createDatabase({
+      board_type: "review",
+      engine_type: "classic",
+      review_room_status: "unexpected"
+    })
   ).getCanvasRoomAccess(context, room),
   null
 );

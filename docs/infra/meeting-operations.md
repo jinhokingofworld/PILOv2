@@ -52,6 +52,17 @@ PR Review job은 이 Worker가 아닌 각각의 전용 queue/Worker에서 처리
 - `failure_step=none`: 정상 완료, 중복 처리, 재시도 가능한 infrastructure failure처럼
   terminal failure 단계가 확정되지 않은 결과다.
 
+LLM `FAILED` report에만 내부 `failure_code`와 `failure_detail`이 있을 수 있다.
+`failure_detail`은 `category`, `retryable`, `providerStatusCode`만 포함하는 allow-list
+object다. CloudWatch에서 `report_id`와 `failure_code`를 상관하되, provider raw payload,
+LLM output, transcript, prompt, token, stack trace를 조사 메모나 로그에 복사하지 않는다.
+
+`MISSING_ACTION_ITEM_EVIDENCE`, `INVALID_TRANSCRIPT_SEGMENT_INDEX`,
+`INVALID_ACTIVITY_EVIDENCE_INDEX`, `INVALID_EVIDENCE_SOURCE_INDEX`처럼 evidence 계약이
+실패하면 Worker는 같은 입력으로 한 번만 보정 생성을 수행한다. 두 번째 실패는 terminal
+`FAILED`이며 SQS 재시도를 추가로 만들지 않는다. OpenAI/SQS/network infrastructure
+failure는 기존 메시지 미삭제·SQS retry 경로를 유지한다.
+
 outbox가 `pending` 또는 lease가 만료된 `publishing`이면 App Server dispatcher가
 재발행한다. `failed`면 재시도 한도가 소진된 상태다. `delivered`인데 Report가
 `PROCESSING`이면 AI Worker 로그와 advisory lock 보유 여부를 먼저 확인한다. stale

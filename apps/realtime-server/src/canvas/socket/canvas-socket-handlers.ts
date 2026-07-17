@@ -6,6 +6,7 @@ import type { CanvasRoomRef } from "../contracts/canvas-types";
 import type { CanvasPresenceService } from "../presence/canvas-presence.service";
 import type { CanvasShapePreviewService } from "../preview/canvas-shape-preview.service";
 import type { CanvasShapeLockService } from "../review-lock/canvas-shape-lock.service";
+import { isClassicCanvasRoomAccess } from "../room/canvas-access.service";
 import type { CanvasRoomService } from "../room/canvas-room.service";
 import type { CanvasRoomStateService } from "../state/canvas-room-state.service";
 import { canvasClientEvents, canvasServerEvents } from "./canvas-socket-events";
@@ -51,8 +52,17 @@ export function assertCanvasRoomWritable(
   roomName: string,
 ): boolean {
   const access = socket.data.canvasRoomAccess.get(roomName);
+  const room = socket.data.canvasRoomsByName.get(roomName);
 
-  if (access && !access.readOnly) {
+  if (
+    access &&
+    room &&
+    !access.readOnly &&
+    !(
+      isClassicCanvasRoomAccess(access) &&
+      socket.data.revokedClassicCanvasWorkspaceIds.has(room.workspaceId)
+    )
+  ) {
     return true;
   }
 
@@ -61,6 +71,17 @@ export function assertCanvasRoomWritable(
     createSocketErrorPayload("forbidden", "canvas room is read-only"),
   );
   return false;
+}
+
+function hasCanvasRoomAccess(socket: CanvasAuthedSocket, roomName: string) {
+  const access = socket.data.canvasRoomAccess.get(roomName);
+  const room = socket.data.canvasRoomsByName.get(roomName);
+
+  if (!access || !room) return false;
+  return !(
+    isClassicCanvasRoomAccess(access) &&
+    socket.data.revokedClassicCanvasWorkspaceIds.has(room.workspaceId)
+  );
 }
 
 export function registerCanvasSocketHandlers({
@@ -95,10 +116,36 @@ export function registerCanvasSocketHandlers({
       return;
     }
 
+    const hasRevokedClassicAccess = () =>
+      isClassicCanvasRoomAccess(result.access) &&
+      socket.data.revokedClassicCanvasWorkspaceIds.has(
+        joinPayload.workspaceId,
+      );
+    const rejectRevokedClassicJoin = () => {
+      roomCheckpointService.revokeRoomAuthorization(
+        joinPayload,
+        socket.data.auth.userId,
+      );
+      socket.emit(
+        canvasServerEvents.error,
+        createSocketErrorPayload("forbidden", "canvas room access revoked"),
+      );
+    };
+
+    if (hasRevokedClassicAccess()) {
+      rejectRevokedClassicJoin();
+      return;
+    }
+
     await roomCheckpointService.flushCheckpointNow(
       joinPayload,
       socket.data.auth.token,
+      socket.data.auth.userId,
     );
+    if (hasRevokedClassicAccess()) {
+      rejectRevokedClassicJoin();
+      return;
+    }
     const checkpointState = roomStateService.getCheckpointState(joinPayload);
     const joinedPayload = {
       ...result.payload,
@@ -109,6 +156,11 @@ export function registerCanvasSocketHandlers({
     };
 
     await socket.join(result.roomName);
+    if (hasRevokedClassicAccess()) {
+      await socket.leave(result.roomName);
+      rejectRevokedClassicJoin();
+      return;
+    }
     socket.data.canvasRoomAccess.set(result.roomName, result.access);
     socket.data.canvasRoomsByName.set(result.roomName, {
       canvasId: joinPayload.canvasId,
@@ -126,6 +178,16 @@ export function registerCanvasSocketHandlers({
     }
 
     const roomName = createCanvasRoomName(room);
+    if (!socket.rooms.has(roomName) || !hasCanvasRoomAccess(socket, roomName)) {
+      socket.emit(
+        canvasServerEvents.error,
+        createSocketErrorPayload(
+          "room_not_joined",
+          "join canvas room before leaving it",
+        ),
+      );
+      return;
+    }
     const leavePayload = presenceService.clearRoomPresence(socket.id, room);
     const lockReleasePayload = await shapeLockService.clearRoomLocks(
       socket.id,
@@ -138,9 +200,14 @@ export function registerCanvasSocketHandlers({
       room,
     );
 
+    if (!socket.rooms.has(roomName) || !hasCanvasRoomAccess(socket, roomName)) {
+      await socket.leave(roomName);
+      return;
+    }
     await roomCheckpointService.flushCheckpointNow(
       room,
       socket.data.auth.token,
+      socket.data.auth.userId,
     );
     await socket.leave(roomName);
     socket.data.canvasRoomAccess.delete(roomName);
@@ -171,7 +238,7 @@ export function registerCanvasSocketHandlers({
 
     const roomName = createCanvasRoomName(presencePayload);
 
-    if (!socket.rooms.has(roomName)) {
+    if (!socket.rooms.has(roomName) || !hasCanvasRoomAccess(socket, roomName)) {
       socket.emit(
         canvasServerEvents.error,
         createSocketErrorPayload(
@@ -204,7 +271,7 @@ export function registerCanvasSocketHandlers({
 
     const roomName = createCanvasRoomName(loadedPayload);
 
-    if (!socket.rooms.has(roomName)) {
+    if (!socket.rooms.has(roomName) || !hasCanvasRoomAccess(socket, roomName)) {
       socket.emit(
         canvasServerEvents.error,
         createSocketErrorPayload(
@@ -272,6 +339,7 @@ export function registerCanvasSocketHandlers({
     roomCheckpointService.scheduleCheckpoint(
       patchPayload,
       socket.data.auth.token,
+      socket.data.auth.userId,
     );
     io.to(roomName).emit(canvasServerEvents.shapePatch, {
       ...patchPayload,
@@ -359,6 +427,15 @@ export function registerCanvasSocketHandlers({
       previewEvent.actorUserId,
       previewEvent,
     );
+
+    if (!hasCanvasRoomAccess(socket, roomName)) {
+      await shapePreviewService.clearRoomPreview(
+        socket.id,
+        previewEvent.actorUserId,
+        previewPayload,
+      );
+      return;
+    }
 
     socket.to(roomName).emit(canvasServerEvents.shapePreview, previewEvent);
   });
@@ -467,7 +544,11 @@ function applyCanvasHistoryChange({
 
   if (!historyPatch) return;
 
-  roomCheckpointService.scheduleCheckpoint(room, socket.data.auth.token);
+  roomCheckpointService.scheduleCheckpoint(
+    room,
+    socket.data.auth.token,
+    socket.data.auth.userId,
+  );
   io.to(roomName).emit(canvasServerEvents.shapePatch, {
     ...room,
     actorUserId: socket.data.auth.userId ?? socket.id,
@@ -508,7 +589,11 @@ async function cleanupCanvasSocket({
     shapePreviewService.clearSocket(socket.id),
     Promise.all(
       canvasRooms.map((room) =>
-        roomCheckpointService.flushCheckpointNow(room, socket.data.auth.token),
+        roomCheckpointService.flushCheckpointNow(
+          room,
+          socket.data.auth.token,
+          socket.data.auth.userId,
+        ),
       ),
     ),
   ]);
