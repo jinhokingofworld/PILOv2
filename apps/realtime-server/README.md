@@ -93,6 +93,8 @@ Optional:
 - `APP_SERVER_URL` for classic Canvas roomState checkpoint persistence through
   the existing App Server `/shapes/batch` transaction boundary and native
   document snapshot checkpoints.
+- `REALTIME_CANVAS_ACTIVITY_TOKEN` for the internal `/api/v1/internal/canvas/recording-activities/batch`
+  handoff. The same server-only secret must be configured on App Server.
 
 ## tldraw_sync deployment notes
 

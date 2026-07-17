@@ -1,5 +1,6 @@
 export type RealtimeServerConfig = {
   appServerUrl: string;
+  canvasActivityToken: string | null;
   corsOrigin: string | string[];
   databaseApplicationName: string;
   databasePoolConnectionTimeoutMs: number;
@@ -43,6 +44,7 @@ export function loadRealtimeServerConfig(
         env.API_PUBLIC_ORIGIN?.trim() ||
         DEFAULT_APP_SERVER_URL,
     ),
+    canvasActivityToken: env.REALTIME_CANVAS_ACTIVITY_TOKEN?.trim() || null,
     corsOrigin: parseCorsOrigin(env.SOCKET_IO_CORS_ORIGIN),
     databaseApplicationName:
       env.DATABASE_APPLICATION_NAME?.trim() || DEFAULT_DATABASE_APPLICATION_NAME,

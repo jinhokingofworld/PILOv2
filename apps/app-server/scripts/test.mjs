@@ -39,7 +39,7 @@ const calendarService = await readSource("../src/modules/calendar/calendar.servi
 const googleCalendarController = await readSource("../src/modules/calendar/google-calendar.controller.ts");
 const googleCalendarSyncService = await readSource("../src/modules/calendar/google-calendar-sync.service.ts");
 const googleCalendarClient = await readSource("../src/modules/calendar/google-calendar.client.ts");
-const googleCalendarMigration = await readSource("../../../db/migrations/091_fix_google_calendar_sync_delivery.sql");
+const googleCalendarMigration = await readSource("../../../db/migrations/092_fix_google_calendar_sync_delivery.sql");
 const appServerSecretsTerraform = await readSource("../../../infra/modules/secrets/main.tf");
 const userController = await readSource("../src/modules/user/user.controller.ts");
 const userService = await readSource("../src/modules/user/user.service.ts");
@@ -435,7 +435,8 @@ assert.match(workspaceMembershipMigration, /UNIQUE \(workspace_id, user_id\)/);
 assert.match(workspaceMembershipMigration, /unique_pending_workspace_invitation_email/);
 assert.match(workspaceMembershipMigration, /ENABLE ROW LEVEL SECURITY/);
 assert.match(workspaceMembershipMigration, /ON CONFLICT \(workspace_id, user_id\) DO NOTHING/);
-assert.match(canvasModule, /controllers: \[CanvasController\]/);
+assert.match(canvasModule, /controllers: \[CanvasController, CanvasRecordingActivityController\]/);
+assert.match(canvasModule, /CanvasRecordingActivityService/);
 assert.match(canvasModule, /CanvasOperationPublisherService/);
 assert.match(canvasModule, /CanvasShapeCommandService/);
 assert.match(canvasModule, /CanvasShapeQueryService/);

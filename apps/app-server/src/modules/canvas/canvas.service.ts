@@ -23,7 +23,6 @@ import type {
   UpdateCanvasSyncDocumentRequest,
   UpdateCanvasViewSettingRequest
 } from "./contracts/canvas.types";
-import type { CanvasActivityActorType } from "./operation/canvas-activity-log";
 import { CanvasOperationQueryService } from "./operation/canvas-operation-query.service";
 import { CanvasShapeCommandService } from "./shape/canvas-shape-command.service";
 import { CanvasShapeQueryService } from "./shape/canvas-shape-query.service";
@@ -125,14 +124,14 @@ export class CanvasService {
     workspaceId: string,
     canvasId: string,
     input: SyncCanvasShapesBatchRequest,
-    actorType: CanvasActivityActorType = "user"
+    _actorType = "user"
   ): Promise<CanvasShapeBatchPayload> {
     return this.shapeCommandService.syncShapesBatch(
       currentUserId,
       workspaceId,
       canvasId,
       input,
-      actorType
+      _actorType
     );
   }
 

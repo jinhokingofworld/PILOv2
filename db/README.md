@@ -98,7 +98,10 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/085_add_sql_erd_activity_log_actions.sql` adds SQLtoERD session, schema, rename, delete, and meaningful note-content Activity Log actions.
 - `migrations/086_create_workspace_membership_revocation_outbox.sql` adds durable, reclaimable Workspace membership revocation delivery intents so Redis publish failures are retried without rolling back the committed membership deletion.
 - `migrations/088_add_github_sync_run_trigger_source.sql` classifies new GitHub sync runs as `manual` or `automatic`, preserves existing rows as `legacy`, and adds a recent-history lookup index by Workspace and trigger source. It was applied to the Supabase dev project under history entry `20260717065721_088_add_github_sync_run_trigger_source`.
-- `migrations/092_add_github_oauth_token_refresh.sql` idempotently adds an encrypted refresh token and access/refresh expiry timestamps to `github_oauth_connections`. Its original `090` form was applied to Supabase project `PILO-Project` under history entry `20260717105402_090_add_github_oauth_token_refresh`; the repository file moved to `092` after the Calendar `090`/`091` sequence landed, and `IF NOT EXISTS` keeps already-applied environments safe.
+- `migrations/090_add_github_oauth_token_refresh.sql` idempotently adds an encrypted refresh token and access/refresh expiry timestamps to `github_oauth_connections`. It was applied to Supabase project `PILO-Project` under history entry `20260717105402_090_add_github_oauth_token_refresh`, and `IF NOT EXISTS` keeps already-applied environments safe.
+- `migrations/091_create_google_calendar_sync.sql` creates Google Calendar OAuth connection, event mapping, and synchronization outbox storage.
+- `migrations/092_fix_google_calendar_sync_delivery.sql` stores the destination Google Calendar per synchronized event after migration 091 creates the synchronization tables.
+- `migrations/094_create_meeting_recording_activity_links.sql` links safe Canvas Activity Logs to the recording selected at Realtime receive time, preserves `captured_at`/`receive_seq`, enforces capture idempotency, and keeps the server-only RLS boundary.
 
 ## Operational Data Repairs
 

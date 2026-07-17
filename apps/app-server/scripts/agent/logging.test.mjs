@@ -678,7 +678,15 @@ function errorMessage(error) {
     {
       runId: RUN_ID,
       stepId: STEP_ID,
-      outputSummary: { selection: "multiple" },
+      outputSummary: {
+        selection: "multiple",
+        candidates: [
+          {
+            selectionToken: "77777777-7777-4777-8777-777777777777",
+            title: "주문 ERD"
+          }
+        ]
+      },
       resourceRefs: [],
       waitingMessage: "어느 일정을 선택할까요?",
       waitForUserInput: true
@@ -686,6 +694,10 @@ function errorMessage(error) {
   );
 
   assert.equal(result.step.status, "completed");
+  assert.equal(
+    result.step.outputSummary.candidates[0].selectionToken,
+    "77777777-7777-4777-8777-777777777777"
+  );
   assert.equal(result.run.status, "waiting_user_input");
   assert.equal(result.queuedNextPlannerTurn, false);
   assert.equal(state.runs[0].tool_call_count, 2);
@@ -1088,6 +1100,23 @@ function errorMessage(error) {
       assert.equal(error.getStatus(), 400);
       assert.equal(errorCode(error), "BAD_REQUEST");
       assert.match(errorMessage(error), /forbidden key: providerRaw/);
+      return true;
+    }
+  );
+  await assert.rejects(
+    () =>
+      service.startStep(USER_ID, WORKSPACE_ID, {
+        runId: RUN_ID,
+        order: 1,
+        type: "tool",
+        inputSummary: {
+          selectionToken: "must-not-store"
+        }
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(errorMessage(error), /forbidden key: selectionToken/);
       return true;
     }
   );

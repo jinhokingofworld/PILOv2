@@ -31,6 +31,7 @@ import {
   type MeetingStateChange,
   type MeetingStateRealtimeEventInput
 } from "./meeting-state-realtime-publisher.service";
+import { MeetingNotificationService } from "./meeting-notification.service";
 import type { MeetingActionItemDeliveryInput } from "./meeting-action-item-delivery.service";
 
 type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
@@ -610,6 +611,7 @@ export class MeetingService {
     private readonly liveKitTokenService: LiveKitTokenService,
     private readonly liveKitEgressService: LiveKitEgressService,
     private readonly meetingReportJobService: MeetingReportJobService,
+    private readonly meetingNotificationService: MeetingNotificationService,
     private readonly meetingReportRealtimePublisher?: MeetingReportRealtimePublisherService,
     private readonly meetingStateRealtimePublisher?: MeetingStateRealtimePublisherService
   ) {}
@@ -3087,6 +3089,17 @@ export class MeetingService {
   private async publishMeetingStateEvent(
     input: MeetingStateRealtimeEventInput
   ): Promise<void> {
+    if (input.change === "ended") {
+      try {
+        await this.meetingNotificationService.cancelPendingInvitationsForMeeting(
+          input.meetingId
+        );
+      } catch {
+        this.logger.warn(
+          `Meeting invitation cancellation failed meeting_id=${input.meetingId}`
+        );
+      }
+    }
     await this.meetingStateRealtimePublisher?.publishStateUpdatedSafely(input);
   }
 

@@ -70,6 +70,14 @@ const payload = {
       "utf8"
     )
   );
+  const sqlErdFocusEvaluation = suite.cases.find(
+    (candidate) => candidate.id === "sql_erd_focus_payment_tables"
+  );
+  assert.equal(
+    sqlErdFocusEvaluation?.expected?.requiresConfirmation,
+    null,
+    "contextual SQLtoERD inspection must not require confirmation"
+  );
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService({}),
     new MeetingAgentToolsService({}),

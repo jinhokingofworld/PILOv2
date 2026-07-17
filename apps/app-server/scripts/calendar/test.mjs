@@ -318,7 +318,8 @@ async function assertBadRequest(action, messagePattern) {
   const database = new FakeDatabase({
     queryOneRows: [
       (text) => {
-        assert.match(text, /FOR UPDATE/);
+        assert.match(text, /LEFT JOIN calendar_event_google_syncs/);
+        assert.match(text, /FOR UPDATE OF calendar_events/);
         return calendarRow({
           title: "Existing event",
           description: "Before",
@@ -495,10 +496,14 @@ async function assertBadRequest(action, messagePattern) {
 {
   const database = new FakeDatabase({
     queryOneRows: [
-      calendarRow({
-        id: 3,
-        title: "Deleted event"
-      }),
+      (text) => {
+        assert.match(text, /LEFT JOIN calendar_event_google_syncs/);
+        assert.match(text, /FOR UPDATE OF calendar_events/);
+        return calendarRow({
+          id: 3,
+          title: "Deleted event"
+        });
+      },
       (text, values) => {
         assert.match(text, /DELETE FROM calendar_events/);
         assert.deepEqual(values, [workspaceId, 3]);

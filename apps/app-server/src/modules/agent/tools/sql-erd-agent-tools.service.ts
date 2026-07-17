@@ -16,6 +16,7 @@ import type {
   AgentToolExecutionResult,
   AgentToolInputSchema
 } from "../types/agent-tool.types";
+import { parseSqlErdSessionCandidates } from "../sql-erd-session-selection";
 import {
   buildSqlErdAgentSchemaProjection,
   createSqlErdModelFingerprint,
@@ -347,7 +348,7 @@ export class SqlErdAgentToolsService {
       description:
         "Workspace SQLtoERD session의 테이블 이름, 주요 컬럼과 FK 관계를 제한된 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용하며 session이 여러 개면 사용자가 선택할 후보를 반환합니다.",
       riskLevel: "low",
-      executionMode: "auto",
+      executionMode: "contextual",
       inputSchema: INSPECT_SQL_ERD_INPUT_SCHEMA,
       validateInput: (input) => this.validateInspectInput(input),
       prepareExecution: (context, input) =>
@@ -506,7 +507,10 @@ export class SqlErdAgentToolsService {
       outputSummary: this.toAgentJsonObject({
         status: "needs_clarification",
         reason: resolution.reason,
-        question: this.inspectClarificationQuestion(resolution.reason),
+        question: this.inspectClarificationQuestion(
+          resolution.reason,
+          resolution.candidates
+        ),
         candidates: resolution.candidates.map((candidate) => ({
           selectionToken: candidate.id,
           title: candidate.title,
@@ -715,25 +719,41 @@ export class SqlErdAgentToolsService {
       relationCount: number;
     }>
   ): SqlErdSessionCandidate[] {
-    return sessions.slice(0, 5).map((session) => ({
-      id: session.id,
-      title: session.title,
-      updatedAt: session.updatedAt,
-      tableCount: session.tableCount,
-      relationCount: session.relationCount
+    return parseSqlErdSessionCandidates(
+      sessions.slice(0, 5).map((session) => ({
+        selectionToken: session.id,
+        title: session.title,
+        updatedAt: session.updatedAt,
+        tableCount: session.tableCount,
+        relationCount: session.relationCount
+      }))
+    ).map((candidate) => ({
+      id: candidate.selectionToken,
+      title: candidate.title,
+      updatedAt: candidate.updatedAt,
+      tableCount: candidate.tableCount,
+      relationCount: candidate.relationCount
     }));
   }
 
   private inspectClarificationQuestion(
-    reason: "no_sessions" | "multiple_sessions" | "session_title_not_found"
+    reason: "no_sessions" | "multiple_sessions" | "session_title_not_found",
+    candidates: SqlErdSessionCandidate[]
   ): string {
     if (reason === "no_sessions") {
       return "분석할 SQLtoERD 세션이 없습니다. 먼저 세션을 만들어 주세요.";
     }
-    if (reason === "session_title_not_found") {
-      return "요청한 제목의 SQLtoERD 세션을 찾지 못했습니다. 사용할 세션을 선택해 주세요.";
-    }
-    return "분석할 SQLtoERD 세션이 여러 개입니다. 사용할 세션을 선택해 주세요.";
+    const question =
+      reason === "session_title_not_found"
+        ? "요청한 제목의 SQLtoERD 세션을 찾지 못했습니다. 사용할 세션을 선택해 주세요."
+        : "분석할 SQLtoERD 세션이 여러 개입니다. 사용할 세션을 선택해 주세요.";
+    return [
+      question,
+      ...candidates.map(
+        (candidate, index) =>
+          `${index + 1}. ${candidate.title} · 수정 ${candidate.updatedAt} · 테이블 ${candidate.tableCount}개 · 관계 ${candidate.relationCount}개`
+      )
+    ].join("\n");
   }
 
   private validateInspectInput(input: unknown): InspectSqlErdSchemaInput {

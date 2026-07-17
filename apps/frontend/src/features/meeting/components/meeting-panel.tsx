@@ -55,6 +55,7 @@ import { MeetingWorkspaceLocationAdapter } from "@/features/meeting/meeting-work
 import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import { meetingNavigation } from "@/features/meeting/navigation";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
+import { useWorkspacePresence } from "@/shared/workspace-presence/workspace-presence-provider";
 import { setHeaderMeetingRecordingStatus } from "@/features/meeting/stores/header-meeting-status-store";
 import {
   consumeMeetingConnectionAction,
@@ -282,6 +283,7 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
     () => createMeetingApiClient({ accessToken }),
     [accessToken]
   );
+  const { onlineUsers } = useWorkspacePresence();
   const activeSection = section;
   const [reportStatusFilter, setReportStatusFilter] =
     useState<MeetingReportStatusFilter>("ALL");
@@ -363,6 +365,8 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<ActionStatus>("idle");
   const [participants, setParticipants] = useState<MeetingParticipant[]>([]);
+  const [inviteeUserId, setInviteeUserId] = useState("");
+  const [isInvitationPending, setIsInvitationPending] = useState(false);
   const [participantError, setParticipantError] = useState<string | null>(null);
   const [participantStatus, setParticipantStatus] =
     useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -424,6 +428,15 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
     (participant) => participant.userId === currentUserId
   );
   const isCurrentUserActive = Boolean(currentUserActiveParticipant);
+  const inviteableOnlineUsers = useMemo(
+    () =>
+      onlineUsers.filter(
+        (user) =>
+          user.userId !== currentUserId &&
+          !activeParticipants.some((participant) => participant.userId === user.userId)
+      ),
+    [activeParticipants, currentUserId, onlineUsers]
+  );
   const shouldLeaveMeeting = isCurrentUserActive;
   const canReconnect =
     isCurrentUserActive &&
@@ -444,6 +457,21 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
     () => meetingRooms.map((room) => room.id),
     [meetingRooms]
   );
+
+  const handleInviteOnlineUser = useCallback(async () => {
+    if (!meeting || !inviteeUserId || isInvitationPending) return;
+    setIsInvitationPending(true);
+    setActionError(null);
+    try {
+      await meetingClient.createMeetingInvitation(workspaceId, meeting.id, inviteeUserId);
+      setInviteeUserId("");
+      setToastMessage("회의 초대를 보냈습니다.");
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      setIsInvitationPending(false);
+    }
+  }, [inviteeUserId, isInvitationPending, meeting, meetingClient, workspaceId]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -1324,6 +1352,34 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
                         <Clock3 className="size-4" />
                         {formatRecordingElapsed(recordingElapsedSeconds)}
                       </span>
+                    </div>
+                  ) : null}
+                  {isCurrentUserActive && meeting ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3">
+                      <label className="text-sm font-medium" htmlFor="meeting-invitee">
+                        온라인 사용자 초대
+                      </label>
+                      <select
+                        className="h-9 min-w-40 flex-1 rounded-md border bg-background px-2 text-sm"
+                        id="meeting-invitee"
+                        value={inviteeUserId}
+                        onChange={(event) => setInviteeUserId(event.target.value)}
+                      >
+                        <option value="">초대할 사용자 선택</option>
+                        {inviteableOnlineUsers.map((user) => (
+                          <option key={user.userId} value={user.userId}>
+                            {user.displayName}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        disabled={!inviteeUserId || isInvitationPending}
+                        onClick={() => void handleInviteOnlineUser()}
+                        size="sm"
+                        type="button"
+                      >
+                        {isInvitationPending ? "전송 중" : "초대"}
+                      </Button>
                     </div>
                   ) : null}
                   {participantStatus === "loading" &&

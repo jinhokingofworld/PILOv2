@@ -64,6 +64,7 @@ $githubPrivateKeyPath = Read-Host "GITHUB_APP_PRIVATE_KEY file path"
 $githubWebhookSecret = Read-OptionalSecureText "GITHUB_WEBHOOK_SECRET"
 $githubTokenEncryptionKey = Read-OptionalSecureText "GITHUB_TOKEN_ENCRYPTION_KEY"
 $meetingReportEventToken = Read-OptionalSecureText "MEETING_REPORT_EVENT_TOKEN"
+$realtimeCanvasActivityToken = Read-OptionalSecureText "REALTIME_CANVAS_ACTIVITY_TOKEN"
 $livekitApiKey = Read-OptionalSecureText "LIVEKIT_API_KEY"
 $livekitApiSecret = Read-OptionalSecureText "LIVEKIT_API_SECRET"
 $livekitUrl = Read-Host "LIVEKIT_URL"
@@ -106,6 +107,7 @@ Put-SecretIfPresent "pilo-dev/ai-worker/GITHUB_APP_PRIVATE_KEY" $githubPrivateKe
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_WEBHOOK_SECRET" $githubWebhookSecret
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_TOKEN_ENCRYPTION_KEY" $githubTokenEncryptionKey
 Put-SecretIfPresent "pilo-dev/shared/MEETING_REPORT_EVENT_TOKEN" $meetingReportEventToken
+Put-SecretIfPresent "pilo-dev/shared/REALTIME_CANVAS_ACTIVITY_TOKEN" $realtimeCanvasActivityToken
 
 Put-SecretIfPresent "pilo-dev/app-server/LIVEKIT_API_KEY" $livekitApiKey
 Put-SecretIfPresent "pilo-dev/app-server/LIVEKIT_API_SECRET" $livekitApiSecret

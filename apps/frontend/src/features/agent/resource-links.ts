@@ -8,9 +8,81 @@ export type AgentResourceLink = {
   label: "ERD 및 DDL 열기" | "집중 보기 열기";
 };
 
+export type SqlErdSessionCandidate = {
+  selectionToken: string;
+  title: string;
+  updatedAt: string;
+  tableCount: number;
+  relationCount: number;
+};
+
 const SQL_ERD_SESSION_PATH = "/sql-erd/session";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_SQL_ERD_SESSION_CANDIDATES = 5;
+
+export function getSqlErdSessionCandidates(
+  run: Pick<AgentRun, "status" | "steps"> | null | undefined
+): SqlErdSessionCandidate[] {
+  if (run?.status !== "waiting_user_input") return [];
+  const latestCompletedToolStep = [...run.steps]
+    .filter((step) => step.type === "tool" && step.status === "completed")
+    .sort((left, right) => right.order - left.order)[0];
+  if (
+    latestCompletedToolStep?.toolName !== "inspect_sql_erd_schema" ||
+    latestCompletedToolStep.outputSummary?.status !== "needs_clarification"
+  ) {
+    return [];
+  }
+  const rawCandidates = latestCompletedToolStep.outputSummary.candidates;
+  if (
+    !Array.isArray(rawCandidates) ||
+    rawCandidates.length === 0 ||
+    rawCandidates.length > MAX_SQL_ERD_SESSION_CANDIDATES
+  ) {
+    return [];
+  }
+  const tokenCounts = new Map<string, number>();
+  for (const candidate of rawCandidates) {
+    if (
+      isPlainObject(candidate) &&
+      typeof candidate.selectionToken === "string" &&
+      UUID_PATTERN.test(candidate.selectionToken)
+    ) {
+      tokenCounts.set(
+        candidate.selectionToken,
+        (tokenCounts.get(candidate.selectionToken) ?? 0) + 1
+      );
+    }
+  }
+  const candidates = rawCandidates.flatMap((candidate) => {
+    if (!isPlainObject(candidate)) return [];
+    const title = normalizeCandidateTitle(candidate.title);
+    const updatedAt = normalizeCandidateDate(candidate.updatedAt);
+    if (
+      typeof candidate.selectionToken !== "string" ||
+      !UUID_PATTERN.test(candidate.selectionToken) ||
+      !title ||
+      !updatedAt ||
+      !isNonNegativeSafeInteger(candidate.tableCount) ||
+      !isNonNegativeSafeInteger(candidate.relationCount)
+    ) {
+      return [];
+    }
+    return [
+      {
+        selectionToken: candidate.selectionToken,
+        title,
+        updatedAt,
+        tableCount: candidate.tableCount,
+        relationCount: candidate.relationCount
+      }
+    ];
+  });
+  return candidates.filter(
+    (candidate) => tokenCounts.get(candidate.selectionToken) === 1
+  );
+}
 
 export function getAgentResourceLinks(
   run: Pick<AgentRun, "status" | "steps"> | null | undefined
@@ -156,6 +228,27 @@ function readUniqueIds(
 function isBoundedText(value: string, maxLength: number): boolean {
   const normalized = value.trim().replace(/\s+/g, " ");
   return normalized.length > 0 && [...normalized].length <= maxLength;
+}
+
+function normalizeCandidateTitle(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+  return normalized && [...normalized].length <= 120 ? normalized : null;
+}
+
+function normalizeCandidateDate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return null;
+  const normalized = new Date(timestamp).toISOString();
+  return value === normalized ? normalized : null;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

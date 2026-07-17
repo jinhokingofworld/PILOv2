@@ -38,6 +38,25 @@ type MeetingClientOptions = {
   fetcher?: typeof fetch;
 };
 
+export type MeetingNotification = {
+  id: string;
+  type: "meeting_report_completed" | "meeting_invitation";
+  message: string;
+  title: string | null;
+  readAt: string | null;
+  createdAt: string;
+  workspaceId: string;
+  meetingId: string;
+  reportId: string | null;
+  canOpenReport: boolean;
+  invitation: {
+    id: string;
+    status: "PENDING" | "ACCEPTED" | "DECLINED" | "CANCELLED";
+    inviterName: string;
+    canRespond: boolean;
+  } | null;
+};
+
 type MeetingApiSuccessResponse<T> = {
   success: true;
   data: T;
@@ -358,6 +377,43 @@ export function createMeetingApiClient({
       );
     },
 
+    async listCurrentUserMeetingNotifications() {
+      return requestMeetingData<{ items: MeetingNotification[]; unreadCount: number }>(
+        "/me/meeting-notifications",
+        undefined,
+        requestOptions
+      );
+    },
+
+    async markCurrentUserMeetingNotificationRead(notificationId: string) {
+      return requestMeetingData<MeetingNotification>(
+        `/me/meeting-notifications/${encodeURIComponent(notificationId)}/read`,
+        { method: "PATCH" },
+        requestOptions
+      );
+    },
+
+    async acceptCurrentUserMeetingInvitation(invitationId: string) {
+      return requestMeetingData<{
+        invitationId: string;
+        meetingId: string;
+        workspaceId: string;
+        meetingRoomId: string;
+      }>(
+        `/me/meeting-invitations/${encodeURIComponent(invitationId)}/accept`,
+        { method: "POST" },
+        requestOptions
+      );
+    },
+
+    async declineCurrentUserMeetingInvitation(invitationId: string) {
+      return requestMeetingData<{ invitationId: string; status: "DECLINED" }>(
+        `/me/meeting-invitations/${encodeURIComponent(invitationId)}/decline`,
+        { method: "POST" },
+        requestOptions
+      );
+    },
+
     async getCurrentMeetingInRoom(workspaceId: string, meetingRoomId: string) {
       return requestMeetingData<CurrentMeetingPayload>(
         `${meetingRoomPath(workspaceId, meetingRoomId)}/current`,
@@ -402,6 +458,18 @@ export function createMeetingApiClient({
       return requestMeetingData<JoinMeetingPayload>(
         `${meetingPath(workspaceId, meetingId)}/participants/me`,
         withJsonBody(body, { method: "POST" }),
+        requestOptions
+      );
+    },
+
+    async createMeetingInvitation(
+      workspaceId: string,
+      meetingId: string,
+      inviteeUserId: string
+    ) {
+      return requestMeetingData<{ invitationId: string; status: "PENDING" }>(
+        `${meetingPath(workspaceId, meetingId)}/invitations`,
+        withJsonBody({ inviteeUserId }, { method: "POST" }),
         requestOptions
       );
     },

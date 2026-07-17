@@ -1,5 +1,13 @@
 # Activity Log Registry
 
+Canvas shape actions (`canvas_shape_created`, `canvas_shape_updated`, and
+`canvas_shape_deleted`) are emitted only by the internal Meeting Recording
+capture path. They are not appended by the ordinary Canvas shape command or
+checkpoint path. The path uses the authenticated Realtime actor and
+`captureId`-derived dedupe key; recording identity, receive ordering, and
+Realtime capture time live in `meeting_recording_activity_links`, not in
+`activity_logs.metadata`.
+
 `activity_logs`는 Meeting 전용 테이블이 아니다. 각 도메인은 실제로 commit된 의미 있는 사용자 행동만 공통 `ActivityLogService`로 같은 DB transaction 안에 append한다.
 
 ## 공통 계약
@@ -13,10 +21,11 @@
 
 ## MeetingReport 소비 경계
 
-`activity_logs`에는 `meetingId`나 `recordingId`를 저장하지 않는다. MeetingReport가 전역
-활동을 근거로 사용할 후속 구현은 Workspace 일치, recording 시간 범위, 해당 시점의
-participant membership을 모두 만족하는 row만 snapshot한다. raw Activity Log row와 raw
-metadata는 MeetingReport 응답이나 LLM 결과 저장소에 노출하지 않는다.
+`activity_logs`에는 `meetingId`나 `recordingId`를 저장하지 않는다. MeetingReport는
+Workspace 일치, recording 시간 범위, 해당 시점의 participant membership을 모두
+만족하는 row만 snapshot한다. Canvas action은 연결 row의 `captured_at`을 시간 기준으로
+사용하고 `meeting_recording_activity_links`가 없는 row는 제외한다. raw Activity Log
+row와 raw metadata는 MeetingReport 응답이나 LLM 결과 저장소에 노출하지 않는다.
 
 ## 등록된 action과 `metadata.data` 계약
 

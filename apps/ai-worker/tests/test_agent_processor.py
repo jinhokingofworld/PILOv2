@@ -1158,7 +1158,8 @@ def test_sql_erd_table_focus_planner_contract_inspects_before_focusing() -> None
     assert "compact table refs" in prompt
     assert "direct FK neighbors" in prompt
     assert "Never invent SQLtoERD session IDs" in prompt
-    assert "sessionSelectionToken" in prompt
+    assert "candidates include selectionToken" in prompt
+    assert "copy the exact selected selectionToken into sessionSelectionToken" in prompt
     assert "completed inspect_sql_erd_schema result" in prompt
     assert "sessionRevision" in prompt
     assert "primaryTableRefs" in prompt

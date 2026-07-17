@@ -143,8 +143,14 @@ export type AgentConfirmationApproveInput = {
   choiceId: string;
 };
 
+export type AgentRunInputSelection = {
+  kind: "sql_erd_session";
+  token: string;
+};
+
 export type SubmitAgentRunInput = {
   message: string;
+  selection?: AgentRunInputSelection;
 };
 
 export type AgentRunDetailPayload = {

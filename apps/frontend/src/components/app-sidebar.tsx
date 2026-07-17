@@ -98,7 +98,7 @@ export function AppSidebar({
   selectedItemId,
   onSelectItem
 }: AppSidebarProps) {
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile, state: sidebarState } = useSidebar();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -458,7 +458,10 @@ export function AppSidebar({
                       <CollapsibleTrigger
                         onClick={() =>
                           handleSelectItem(item.id, item.href, {
-                            navigate: item.navigateOnTrigger
+                            navigate:
+                              item.id === "voice-chat" && sidebarState === "collapsed"
+                                ? true
+                                : item.navigateOnTrigger
                           })
                         }
                         render={

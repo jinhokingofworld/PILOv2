@@ -39,13 +39,15 @@ import {
   MeetingActionItemDeliveryPayload,
   MeetingActionItemDeliveryService
 } from "./meeting-action-item-delivery.service";
+import { MeetingNotificationService } from "./meeting-notification.service";
 
 @Controller("workspaces/:workspaceId")
 @UseGuards(AuthGuard)
 export class MeetingController {
   constructor(
     private readonly meetingService: MeetingService,
-    private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService
+    private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService,
+    private readonly meetingNotificationService: MeetingNotificationService
   ) {}
 
   @Get("meeting-rooms")
@@ -273,6 +275,40 @@ export class MeetingController {
       meetingId
     );
     return apiResponse(result);
+  }
+
+  @Post("meetings/:meetingId/invitations")
+  async createInvitation(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("meetingId") meetingId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<{ invitationId: string; status: "PENDING" }>> {
+    return apiResponse(
+      await this.meetingNotificationService.createInvitation(
+        currentUserId,
+        workspaceId,
+        meetingId,
+        body
+      )
+    );
+  }
+
+  @Delete("meetings/:meetingId/invitations/:invitationId")
+  async cancelInvitation(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("meetingId") meetingId: string,
+    @Param("invitationId") invitationId: string
+  ): Promise<ApiSuccessResponse<{ invitationId: string; status: "CANCELLED" }>> {
+    return apiResponse(
+      await this.meetingNotificationService.cancelInvitation(
+        currentUserId,
+        workspaceId,
+        meetingId,
+        invitationId
+      )
+    );
   }
 
   @Get("meeting-reports")

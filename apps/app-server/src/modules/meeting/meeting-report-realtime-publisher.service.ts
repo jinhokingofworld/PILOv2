@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { createClient, type RedisClientType } from "redis";
 import { DatabaseService } from "../../database/database.service";
+import { MeetingNotificationService } from "./meeting-notification.service";
 
 export const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
 export type MeetingReportRealtimeStatus =
@@ -16,7 +17,10 @@ export class MeetingReportRealtimePublisherService implements OnModuleDestroy {
   private readonly logger = new Logger(MeetingReportRealtimePublisherService.name);
   private client: RedisClientType | null = null;
 
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly meetingNotificationService: MeetingNotificationService
+  ) {}
 
   async publishReportUpdated(reportId: string): Promise<void> {
     const report = await this.database.queryOne<{
@@ -32,6 +36,17 @@ export class MeetingReportRealtimePublisherService implements OnModuleDestroy {
       [reportId]
     );
     if (!report) return;
+    if (report.status === "COMPLETED") {
+      try {
+        await this.meetingNotificationService.createReportCompletedNotifications(
+          report.id
+        );
+      } catch {
+        this.logger.warn(
+          `MeetingReport completion notification creation failed report_id=${report.id}`
+        );
+      }
+    }
     const client = await this.getClient();
     if (!client) return;
     await client.publish(

@@ -7,6 +7,9 @@ const { ActivityLogService } = await import(
 const { buildCanvasShapeActivityLog } = await import(
   "../../dist/modules/canvas/canvas-activity-log.js"
 );
+const { buildCanvasRecordingActivityLog } = await import(
+  "../../dist/modules/canvas/canvas-activity-log.js"
+);
 
 const activityLogServiceSource = await readFile(
   new URL("../../src/common/activity-log.service.ts", import.meta.url),
@@ -25,6 +28,20 @@ const canvasAgentServiceSource = await readFile(
     import.meta.url
   ),
   "utf8"
+);
+const recordingActivityServiceSource = await readFile(
+  new URL(
+    "../../src/modules/canvas/recording-activity/canvas-recording-activity.service.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const recordingActivityMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/094_create_meeting_recording_activity_links.sql",
+    import.meta.url,
+  ),
+  "utf8",
 );
 const activityLogMigration = await readFile(
   new URL(
@@ -115,6 +132,35 @@ const sensitiveNoteCreate = buildCanvasShapeActivityLog({
 });
 assert.equal(sensitiveNoteCreate?.metadata.data.textPreview, undefined);
 
+const recordingCreate = buildCanvasRecordingActivityLog({
+  actorUserId: "11111111-1111-4111-8111-111111111111",
+  captureId: "canvas:capture-1",
+  canvasId: "canvas-1",
+  operationType: "create",
+  shapeId: "shape:recording-note",
+  shapeType: "note",
+  textPreview: "회의 결정",
+  workspaceId: "22222222-2222-4222-8222-222222222222"
+});
+assert.equal(recordingCreate?.action, "canvas_shape_created");
+assert.match(recordingCreate?.dedupeKey ?? "", /canvas:recording:/);
+assert.equal(recordingCreate?.metadata.data.recordingId, undefined);
+assert.equal(recordingCreate?.metadata.data.rawShape, undefined);
+assert.equal(recordingCreate?.metadata.data.captureId, undefined);
+
+assert.equal(
+  buildCanvasRecordingActivityLog({
+    actorUserId: "11111111-1111-4111-8111-111111111111",
+    captureId: "canvas:capture-geometry",
+    canvasId: "canvas-1",
+    operationType: "update",
+    shapeId: "shape:recording-note",
+    shapeType: "note",
+    workspaceId: "22222222-2222-4222-8222-222222222222"
+  }),
+  null,
+);
+
 const arrowDelete = buildCanvasShapeActivityLog({
   actorType: "user",
   before: createShape({ id: "shape:arrow-1", shapeType: "arrow" }),
@@ -143,8 +189,17 @@ assert.doesNotMatch(executed[0].text, /occurred_at/);
 assert.equal(executed[0].values[6], noteCreate.dedupeKey);
 
 assert.match(activityLogServiceSource, /append\(\s*transaction: DatabaseTransaction/);
-assert.match(canvasServiceSource, /activityLogService\.append\(transaction/);
-assert.match(canvasServiceSource, /if \(!writeResult\.isNewOperation\)/);
+assert.doesNotMatch(canvasServiceSource, /ActivityLogService/);
+assert.match(recordingActivityServiceSource, /activityLogService\.append\(transaction/);
+assert.match(recordingActivityServiceSource, /FOR UPDATE OF r/);
+assert.match(recordingActivityServiceSource, /status = 'RUNNING'/);
+assert.match(recordingActivityServiceSource, /ORDER BY r\.id/);
+assert.match(recordingActivityServiceSource, /meeting_recording_activity_links/);
+assert.match(recordingActivityServiceSource, /ON CONFLICT \(capture_id\) DO NOTHING/);
+assert.match(recordingActivityMigration, /REFERENCES public\.meeting_recordings\(id\) ON DELETE CASCADE/);
+assert.match(recordingActivityMigration, /REFERENCES public\.activity_logs\(id\) ON DELETE CASCADE/);
+assert.match(recordingActivityMigration, /ENABLE ROW LEVEL SECURITY/);
+assert.match(recordingActivityMigration, /UNIQUE \(capture_id\)/);
 assert.match(
   canvasAgentServiceSource,
   /this\.drafts\.toShapeBatch\(draft\.draft_spec_json, clientOperationId\),\s*"agent"/,

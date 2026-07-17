@@ -1,6 +1,7 @@
 type NotificationUnreadCounts = {
   invitationUnread: number;
   mentionUnread: number;
+  meetingUnread?: number;
 };
 
 export const CHAT_TARGET_UNAVAILABLE_MESSAGE =
@@ -9,9 +10,14 @@ export const CHAT_TARGET_VISIBILITY_THRESHOLD = 0;
 
 export function getNotificationUnreadCount({
   invitationUnread,
-  mentionUnread
+  mentionUnread,
+  meetingUnread = 0
 }: NotificationUnreadCounts) {
-  return normalizeUnreadCount(invitationUnread) + normalizeUnreadCount(mentionUnread);
+  return (
+    normalizeUnreadCount(invitationUnread) +
+    normalizeUnreadCount(mentionUnread) +
+    normalizeUnreadCount(meetingUnread)
+  );
 }
 
 export function formatChatNotificationBadgeCount(unreadCount: number) {

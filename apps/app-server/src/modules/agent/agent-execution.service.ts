@@ -941,7 +941,10 @@ export class AgentExecutionService {
     if (this.isPlainObject(input)) {
       const sanitized: AgentJsonObject = {};
       for (const [key, value] of Object.entries(input)) {
-        if (this.isForbiddenJsonKey(key)) {
+        if (
+          this.isForbiddenJsonKey(key) &&
+          !this.isSafeSelectionToken(key, value)
+        ) {
           continue;
         }
 
@@ -1036,6 +1039,17 @@ export class AgentExecutionService {
   private isForbiddenJsonKey(key: string): boolean {
     const normalized = key.replace(/[_-]/g, "").toLowerCase();
     return FORBIDDEN_JSON_KEY_PARTS.some((part) => normalized.includes(part));
+  }
+
+  private isSafeSelectionToken(key: string, value: unknown): boolean {
+    const normalized = key.replace(/[_-]/g, "").toLowerCase();
+    return (
+      normalized === "selectiontoken" &&
+      typeof value === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value
+      )
+    );
   }
 
   private isPlainObject(value: unknown): value is AgentJsonObject {

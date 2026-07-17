@@ -1183,7 +1183,7 @@
       "name": "inspect_sql_erd_schema",
       "description": "Workspace SQLtoERD session의 테이블 이름, 주요 컬럼과 FK 관계를 제한된 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용하며 session이 여러 개면 사용자가 선택할 후보를 반환합니다.",
       "riskLevel": "low",
-      "executionMode": "auto",
+      "executionMode": "contextual",
       "inputSchema": {
         "type": "object",
         "required": ["featureQuery"],
@@ -1786,7 +1786,20 @@
         "inputContains": {
           "featureQuery": "결제 기능"
         },
-        "requiresConfirmation": false
+        "requiresConfirmation": null
+      }
+    },
+    {
+      "id": "sql_erd_select_session_token",
+      "prompt": "[PILO_INTERNAL_SELECTION kind=sql_erd_session sessionSelectionToken=88888888-8888-4888-8888-888888888888]\n결제 기능 집중 보기를 위해 Untitled ERD 세션을 선택했습니다.",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "inspect_sql_erd_schema",
+        "inputContains": {
+          "featureQuery": "결제 기능",
+          "sessionSelectionToken": "88888888-8888-4888-8888-888888888888"
+        },
+        "requiresConfirmation": null
       }
     }
   ]

@@ -53,6 +53,7 @@ locals {
   shared_ecs_secret_names = [
     "AGENT_EXECUTION_HANDOFF_TOKEN",
     "MEETING_REPORT_EVENT_TOKEN",
+    "REALTIME_CANVAS_ACTIVITY_TOKEN",
   ]
 
   all_secret_names = toset(concat(

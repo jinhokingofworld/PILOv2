@@ -12,6 +12,15 @@ import {
   AgentStepPayload as StoredAgentStepPayload
 } from "./agent-logging.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
+import {
+  buildStoredSqlErdSelectionMessage,
+  containsReservedAgentSelectionMarker,
+  isSqlErdClarificationOutput,
+  isSqlErdSelectionToken,
+  parseSqlErdSessionCandidates,
+  SQL_ERD_SESSION_SELECTION_KIND,
+  toPublicAgentMessageContent
+} from "./sql-erd-session-selection";
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
@@ -35,6 +44,10 @@ export interface AgentRunCreateInput {
 
 export interface AgentRunInput {
   message: string;
+  selection?: {
+    kind: typeof SQL_ERD_SESSION_SELECTION_KIND;
+    token: string;
+  };
 }
 
 export interface AgentRunApiPayload {
@@ -193,6 +206,11 @@ interface AgentRunMessageRow extends QueryResultRow {
   created_at: Date | string;
 }
 
+interface AgentLatestToolStepRow extends QueryResultRow {
+  tool_name: string | null;
+  output_json: AgentJsonObject;
+}
+
 interface AgentRunWithConfirmationRow extends AgentRunRow {
   confirmation_id: string | null;
   confirmation_status: AgentConfirmationStatus | null;
@@ -322,13 +340,45 @@ export class AgentService {
         );
         return "expired" as const;
       }
+      let storedMessage = input.message;
+      if (input.selection) {
+        const latestToolStep = await transaction.queryOne<AgentLatestToolStepRow>(
+          `
+            SELECT tool_name, output_json
+            FROM agent_steps
+            WHERE run_id = $1
+              AND step_type = 'tool'
+              AND status = 'completed'
+            ORDER BY step_order DESC
+            LIMIT 1
+          `,
+          [runId]
+        );
+        const candidates =
+          latestToolStep?.tool_name === "inspect_sql_erd_schema" &&
+          isSqlErdClarificationOutput(latestToolStep.output_json)
+            ? parseSqlErdSessionCandidates(latestToolStep.output_json.candidates)
+            : [];
+        const selected = candidates.find(
+          (candidate) => candidate.selectionToken === input.selection?.token
+        );
+        if (!selected) {
+          throw badRequest(
+            "selection token must belong to the latest SQLtoERD session candidates"
+          );
+        }
+        storedMessage = buildStoredSqlErdSelectionMessage(
+          selected.selectionToken,
+          selected.title
+        );
+      }
       const next = await transaction.queryOne<{ sequence: number | string }>(
         `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
         [runId]
       );
       await transaction.execute(
         `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'user', $3)`,
-        [runId, Number(next?.sequence ?? 1), input.message]
+        [runId, Number(next?.sequence ?? 1), storedMessage]
       );
       const resumed = await transaction.queryOne<{ id: string }>(
         `
@@ -736,10 +786,33 @@ export class AgentService {
 
   private normalizeRunInput(body: unknown): AgentRunInput {
     if (!this.isPlainObject(body)) throw badRequest("Request body must be an object");
-    if (Object.keys(body).some((key) => key !== "message")) {
-      throw badRequest("Only message may be provided");
+    if (Object.keys(body).some((key) => !["message", "selection"].includes(key))) {
+      throw badRequest("Only message and selection may be provided");
     }
-    return { message: this.readRequiredText(body.message, "message", MAX_RUN_INPUT_BYTES) };
+    const message = this.readRequiredText(
+      body.message,
+      "message",
+      MAX_RUN_INPUT_BYTES
+    );
+    if (containsReservedAgentSelectionMarker(message)) {
+      throw badRequest("message contains a reserved Agent selection marker");
+    }
+    if (body.selection === undefined) return { message };
+    if (
+      !this.isPlainObject(body.selection) ||
+      Object.keys(body.selection).some((key) => !["kind", "token"].includes(key)) ||
+      body.selection.kind !== SQL_ERD_SESSION_SELECTION_KIND ||
+      !isSqlErdSelectionToken(body.selection.token)
+    ) {
+      throw badRequest("selection must be a valid SQLtoERD session selection");
+    }
+    return {
+      message,
+      selection: {
+        kind: SQL_ERD_SESSION_SELECTION_KIND,
+        token: body.selection.token
+      }
+    };
   }
 
   private normalizePagination(query: AgentRunListQuery): NormalizedPagination {
@@ -953,7 +1026,7 @@ export class AgentService {
       id: row.id,
       sequence: row.sequence,
       role: row.role,
-      content: row.content,
+      content: toPublicAgentMessageContent(row.content),
       createdAt: this.toIso(row.created_at)
     };
   }
@@ -993,7 +1066,10 @@ export class AgentService {
       const sanitized: AgentJsonObject = {};
 
       for (const [key, child] of Object.entries(value)) {
-        if (this.isForbiddenJsonKey(key)) {
+        if (
+          this.isForbiddenJsonKey(key) &&
+          !this.isSafeSelectionToken(key, child)
+        ) {
           continue;
         }
 
@@ -1009,6 +1085,17 @@ export class AgentService {
   private isForbiddenJsonKey(key: string): boolean {
     const normalized = key.replace(/[_-]/g, "").toLowerCase();
     return FORBIDDEN_JSON_KEY_PARTS.some((part) => normalized.includes(part));
+  }
+
+  private isSafeSelectionToken(key: string, value: unknown): boolean {
+    const normalized = key.replace(/[_-]/g, "").toLowerCase();
+    return (
+      normalized === "selectiontoken" &&
+      typeof value === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value
+      )
+    );
   }
 
   private isPlainObject(value: unknown): value is AgentJsonObject {

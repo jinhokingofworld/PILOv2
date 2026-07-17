@@ -23,18 +23,26 @@ import { MeetingService } from "./meeting.service";
 import { MeetingTranscriptRagService } from "./meeting-transcript-rag.service";
 import { MeetingActionItemDeliveryService } from "./meeting-action-item-delivery.service";
 import { MeetingMembershipRevocationService } from "./meeting-membership-revocation.service";
+import {
+  CurrentUserMeetingInvitationController,
+  MeetingNotificationController
+} from "./meeting-notification.controller";
+import { MeetingNotificationService } from "./meeting-notification.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule, CalendarModule, BoardModule],
   controllers: [
     MeetingController,
     CurrentUserMeetingController,
+    MeetingNotificationController,
+    CurrentUserMeetingInvitationController,
     LiveKitWebhookController,
     MeetingReportInternalController
   ],
   providers: [
     MeetingService,
     MeetingActionItemDeliveryService,
+    MeetingNotificationService,
     MeetingMembershipRevocationService,
     MeetingTranscriptRagService,
     LiveKitEgressService,
@@ -52,7 +60,8 @@ import { MeetingMembershipRevocationService } from "./meeting-membership-revocat
   exports: [
     MeetingService,
     MeetingTranscriptRagService,
-    MeetingActionItemDeliveryService
+    MeetingActionItemDeliveryService,
+    MeetingNotificationService
   ]
 })
 export class MeetingModule {}

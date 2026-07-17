@@ -281,7 +281,8 @@ assert.match(meetingNavigation, /navigateOnTrigger: false/);
 assert.doesNotMatch(meetingNavigation, /#room|#report/);
 assert.match(navigationTypes, /navigateOnTrigger\?: boolean/);
 assert.match(appSidebar, /options\.navigate === false/);
-assert.match(appSidebar, /navigate: item\.navigateOnTrigger/);
+assert.match(appSidebar, /item\.id === "voice-chat" && sidebarState === "collapsed"/);
+assert.match(appSidebar, /navigate:\s*item\.id === "voice-chat"/);
 assert.match(homeRouting, /buildMeetingReportHref\(reportId: string\)/);
 assert.match(homeRouting, /\/report\?reportId=\$\{encodeURIComponent\(reportId\)\}/);
 

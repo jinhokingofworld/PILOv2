@@ -44,3 +44,7 @@ export function createDocumentYjsRoomName({
 export function createMeetingRoomName(workspaceId: string) {
   return `workspace:${workspaceId}:meeting`;
 }
+
+export function createMeetingNotificationUserRoomName(userId: string) {
+  return `user:${userId}:meeting-notifications`;
+}

@@ -7,7 +7,9 @@ export const meetingServerEvents = {
   error: "meeting:error",
   subscribed: "meeting:subscribed",
   reportUpdated: "meeting:report:updated",
-  stateUpdated: "meeting:state:updated"
+  stateUpdated: "meeting:state:updated",
+  notificationCreated: "meeting:notification:created",
+  notificationUpdated: "meeting:notification:updated"
 } as const;
 
 export type MeetingReportRealtimeStatus =
@@ -44,6 +46,13 @@ export type MeetingStateRedisEvent = {
   meetingId: string;
   change: MeetingStateChange;
   updatedAt: string;
+};
+
+export type MeetingNotificationRedisEvent = {
+  event: "meeting:notification:created" | "meeting:notification:updated";
+  notificationId: string;
+  recipientUserId: string;
+  occurredAt: string;
 };
 
 const UUID_PATTERN =
@@ -93,5 +102,20 @@ export function isMeetingStateRedisEvent(
     ].includes(String(event.change)) &&
     typeof event.updatedAt === "string" &&
     Number.isFinite(Date.parse(event.updatedAt))
+  );
+}
+
+export function isMeetingNotificationRedisEvent(
+  value: unknown
+): value is MeetingNotificationRedisEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const event = value as Record<string, unknown>;
+  return (
+    (event.event === "meeting:notification:created" ||
+      event.event === "meeting:notification:updated") &&
+    isUuid(event.notificationId) &&
+    isUuid(event.recipientUserId) &&
+    typeof event.occurredAt === "string" &&
+    Number.isFinite(Date.parse(event.occurredAt))
   );
 }
