@@ -250,7 +250,7 @@ def test_fixed_korean_suite_loads() -> None:
     suite = load_evaluation_suite(suite_path)
 
     assert suite.version == "agent-planner-korean:v1"
-    assert len(suite.cases) == 49
+    assert len(suite.cases) == 50
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
         "create_calendar_event",
@@ -284,6 +284,7 @@ def test_fixed_korean_suite_loads() -> None:
         "generate_sql_erd",
         "inspect_sql_erd_schema",
         "focus_sql_erd_tables",
+        "search_workspace_documents",
     }
     expectations = {case.case_id: case.expectation for case in suite.cases}
     assert expectations["calendar_today"].input_contains == {
@@ -331,3 +332,7 @@ def test_fixed_korean_suite_loads() -> None:
     }
     assert expectations["sql_erd_missing_entities"].status == "needs_clarification"
     assert expectations["sql_erd_database_execution"].status == "unsupported"
+    assert expectations["workspace_document_search"].tool_name == "search_workspace_documents"
+    assert expectations["workspace_document_search"].input_contains == {
+        "query": "세인이 ERD 1차 MVP를 어디까지 구현한다고 했지?"
+    }

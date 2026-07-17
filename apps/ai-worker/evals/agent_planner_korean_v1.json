@@ -1,6 +1,6 @@
 {
   "version": "agent-planner-korean:v1",
-  "toolSchemaVersion": "agent-tools:v5",
+  "toolSchemaVersion": "agent-tools:v6",
   "tools": [
     {
       "name": "list_calendar_events",
@@ -1247,6 +1247,31 @@
           }
         }
       }
+    },
+    {
+      "name": "search_workspace_documents",
+      "description": "Workspace에서 최신 상태로 인덱싱된 문서를 의미 기반으로 검색합니다. 문서 제목에 없는 내용으로도 검색하며, 문서를 수정하지 않습니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "topK": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          }
+        }
+      }
     }
   ],
   "cases": [
@@ -1800,6 +1825,18 @@
           "sessionSelectionToken": "88888888-8888-4888-8888-888888888888"
         },
         "requiresConfirmation": null
+      }
+    },
+    {
+      "id": "workspace_document_search",
+      "prompt": "세인이 ERD 1차 MVP를 어디까지 구현한다고 했지?",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "search_workspace_documents",
+        "inputContains": {
+          "query": "세인이 ERD 1차 MVP를 어디까지 구현한다고 했지?"
+        },
+        "requiresConfirmation": false
       }
     }
   ]

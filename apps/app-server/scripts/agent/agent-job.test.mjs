@@ -24,6 +24,9 @@ const { BoardAgentToolsService } = require(
 const { SqlErdAgentToolsService } = require(
   "../../dist/modules/agent/tools/sql-erd-agent-tools.service.js"
 );
+const { DriveAgentToolsService } = require(
+  "../../dist/modules/agent/tools/drive-agent-tools.service.js"
+);
 
 const originalEnv = {
   AWS_REGION: process.env.AWS_REGION,
@@ -82,7 +85,10 @@ const payload = {
     new CalendarAgentToolsService({}),
     new MeetingAgentToolsService({}),
     new BoardAgentToolsService({}),
-    new SqlErdAgentToolsService({})
+    new SqlErdAgentToolsService({}),
+    undefined,
+    undefined,
+    new DriveAgentToolsService({})
   );
   const actualSnapshot = registry.listDefinitions().map((definition) => ({
     name: definition.name,
@@ -92,6 +98,10 @@ const payload = {
     inputSchema: definition.inputSchema
   }));
 
+  assert.ok(
+    registry.getDefinition("search_workspace_documents"),
+    "Drive document search must be registered for Agent planning"
+  );
   assert.deepEqual(suite.tools, actualSnapshot);
 }
 
