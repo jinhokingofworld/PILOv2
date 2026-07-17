@@ -9,6 +9,7 @@ import type {
   CanvasAgentPresentationMode,
   CanvasAgentProgress,
   CanvasAgentRun,
+  CanvasAgentSelectedScene,
   CanvasAgentViewport,
 } from "../api/canvas-agent-types";
 import {
@@ -17,6 +18,7 @@ import {
   resolveCanvasAgentToolTarget,
 } from "./canvas-agent-tool-targets";
 import { focusCanvasAgentResult } from "./canvas-agent-camera";
+import { insertCanvasAgentHtmlArtifact } from "./canvas-agent-html-insertion";
 import { buildCanvasAgentShapeSummaries } from "./canvas-agent-shape-context";
 import {
   buildCanvasAgentSelectedScene,
@@ -58,6 +60,8 @@ export function useCanvasAgent({
   const [error, setError] = useState<string | null>(null);
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const runIdRef = useRef<string | null>(null);
+  const selectedSceneByRunIdRef = useRef(new Map<string, CanvasAgentSelectedScene>());
+  const insertedHtmlArtifactRunIdsRef = useRef(new Set<string>());
   const focusRetryTimerRef = useRef<number | null>(null);
   const progressHideTimerRef = useRef<number | null>(null);
   const longRunningTimerRef = useRef<number | null>(null);
@@ -84,6 +88,25 @@ export function useCanvasAgent({
   const presentRun = useCallback(
     (nextRun: CanvasAgentRun) => {
       setRun(nextRun);
+      if (
+        editor &&
+        nextRun.artifact?.kind === "html" &&
+        !insertedHtmlArtifactRunIdsRef.current.has(nextRun.id)
+      ) {
+        const selectedScene = selectedSceneByRunIdRef.current.get(nextRun.id);
+        if (selectedScene) {
+          const insertion = insertCanvasAgentHtmlArtifact(
+            editor,
+            nextRun.id,
+            nextRun.artifact,
+            selectedScene,
+          );
+          if (insertion) {
+            insertedHtmlArtifactRunIdsRef.current.add(nextRun.id);
+            selectedSceneByRunIdRef.current.delete(nextRun.id);
+          }
+        }
+      }
       const progress = nextRun.presentationMode === "background" ? null : nextRun.progress;
       clearProgressHideTimer();
       if (!ACTIVE_STATUSES.has(nextRun.status)) {
@@ -243,7 +266,7 @@ export function useCanvasAgent({
             }
           : undefined;
       try {
-        let selectedScene = null;
+        let selectedScene: CanvasAgentSelectedScene | null = null;
         let selectedSceneError: string | null = null;
         try {
           selectedScene = buildCanvasAgentSelectedScene(editor);
@@ -288,6 +311,9 @@ export function useCanvasAgent({
           clientRequestId: crypto.randomUUID(),
         });
         runIdRef.current = result.run.id;
+        if (selectedScene) {
+          selectedSceneByRunIdRef.current.set(result.run.id, selectedScene);
+        }
         presentRun(result.run);
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : "Canvas AI 요청에 실패했습니다.");

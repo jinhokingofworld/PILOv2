@@ -18,6 +18,10 @@ export type CalendarEvent = {
   createdByUser: CalendarEventUser;
   createdAt: string;
   updatedAt: string;
+  googleSync: {
+    status: "pending" | "synced" | "failed";
+    lastError: string | null;
+  } | null;
 };
 
 export type ListCalendarEventsQuery = {

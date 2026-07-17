@@ -19,6 +19,8 @@ def system_prompt() -> str:
         "If the request is neither an existing-shape search nor selected-scene HTML generation, "
         "choose unsupported. Never reinterpret a mutation request as a search. "
         "For find_shapes, extract a concise query naming the existing content the user wants. "
+        "Keep the query in the same language as the user's prompt. Preserve exact names and "
+        "quoted phrases from the prompt or matching shape summaries; never translate them. "
         "requestContext.shapeSummaries is a bounded snapshot of shapes currently loaded in the "
         "requester's Canvas. If one or more summaries match the request, return only their exact "
         "ids in arguments.shapeIds, prioritizing matching selectedShapeIds. Otherwise return an "

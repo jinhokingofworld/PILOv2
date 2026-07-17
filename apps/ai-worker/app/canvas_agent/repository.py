@@ -11,6 +11,7 @@ from app.canvas_agent.types import (
 )
 
 CODE_GENERATION_FAILURE_MESSAGE = "코드 생성 중 오류가 났어요. 다시 시도해 주세요."
+GENERIC_FAILURE_MESSAGE = "Canvas AI 작업을 완료하지 못했습니다."
 
 
 class PgCanvasAgentRepository:
@@ -207,29 +208,22 @@ class PgCanvasAgentRepository:
 
     def mark_failed(self, run_id: str, error_message: str) -> None:
         safe_error_message = error_message[:4096]
-        user_message = "디자인 초안을 만드는 중 오류가 났어요. 다시 시도해 주세요."
-        if safe_error_message == CODE_GENERATION_FAILURE_MESSAGE:
-            user_message = CODE_GENERATION_FAILURE_MESSAGE
+        user_message = (
+            CODE_GENERATION_FAILURE_MESSAGE
+            if safe_error_message == CODE_GENERATION_FAILURE_MESSAGE
+            else GENERIC_FAILURE_MESSAGE
+        )
         self.connection.execute(
             """
             UPDATE canvas_agent_runs
             SET status = 'failed', error_code = 'CANVAS_AGENT_PLANNER_FAILED',
                 error_message = %s,
-                result_summary = CASE
-                    WHEN %s THEN %s
-                    WHEN prompt ~* %s THEN %s
-                    ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
-                END,
+                result_summary = %s,
                 result_json = jsonb_set(
                     COALESCE(result_json, '{}'::jsonb),
                     '{progress}',
                     jsonb_build_object(
-                        'message',
-                        CASE
-                            WHEN %s THEN %s
-                            WHEN prompt ~* %s THEN %s
-                            ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
-                        END,
+                        'message', %s,
                         'highlightedShapeIds', '[]'::jsonb,
                         'targetViewport', NULL,
                         'toolTarget', NULL,
@@ -243,13 +237,7 @@ class PgCanvasAgentRepository:
             """,
             (
                 safe_error_message,
-                safe_error_message == CODE_GENERATION_FAILURE_MESSAGE,
-                CODE_GENERATION_FAILURE_MESSAGE,
-                "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
                 user_message,
-                safe_error_message == CODE_GENERATION_FAILURE_MESSAGE,
-                CODE_GENERATION_FAILURE_MESSAGE,
-                "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
                 user_message,
                 run_id,
             ),
@@ -259,26 +247,18 @@ class PgCanvasAgentRepository:
         if not self.try_acquire_run_lock(run_id):
             return False
         try:
-            user_message = "디자인 초안을 만드는 중 오류가 났어요. 다시 시도해 주세요."
             cursor = self.connection.execute(
                 """
                 UPDATE canvas_agent_runs
                 SET status = 'failed',
                     error_code = 'CANVAS_AGENT_PLANNER_RETRY_EXHAUSTED',
                     error_message = 'Canvas AI request could not be planned. Please try again.',
-                    result_summary = CASE
-                        WHEN prompt ~* %s THEN %s
-                        ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
-                    END,
+                    result_summary = %s,
                     result_json = jsonb_set(
                         COALESCE(result_json, '{}'::jsonb),
                         '{progress}',
                         jsonb_build_object(
-                            'message',
-                            CASE
-                                WHEN prompt ~* %s THEN %s
-                                ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
-                            END,
+                            'message', %s,
                             'highlightedShapeIds', '[]'::jsonb,
                             'targetViewport', NULL,
                             'toolTarget', NULL,
@@ -291,10 +271,8 @@ class PgCanvasAgentRepository:
                   AND status IN ('queued', 'planning')
                 """,
                 (
-                    "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
-                    user_message,
-                    "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
-                    user_message,
+                    GENERIC_FAILURE_MESSAGE,
+                    GENERIC_FAILURE_MESSAGE,
                     run_id,
                 ),
             )
@@ -318,6 +296,82 @@ class PgCanvasAgentRepository:
             (workspace_id, canvas_id),
         ).fetchone()
         return row is not None
+
+    def search_text_shapes(
+        self,
+        workspace_id: str,
+        canvas_id: str,
+        query: str,
+        limit: int = 4,
+    ) -> list[CanvasSemanticShapeMatch]:
+        normalized = query.strip()
+        if not normalized:
+            return []
+
+        exact_pattern = f"%{_escape_like(normalized)}%"
+        term_patterns = [f"%{_escape_like(term)}%" for term in _search_terms(normalized)]
+        rows = self.connection.execute(
+            """
+            WITH scoped_shapes AS MATERIALIZED (
+              SELECT
+                shape.id,
+                shape.updated_at,
+                concat_ws(
+                  ' ',
+                  COALESCE(shape.title, ''),
+                  COALESCE(shape.text_content, ''),
+                  shape.shape_type
+                ) AS searchable_text
+              FROM canvas_freeform_shapes shape
+              INNER JOIN canvas board ON board.id = shape.canvas_id
+              WHERE board.workspace_id = %s
+                AND board.id = %s
+                AND board.board_type = 'freeform'
+                AND shape.canvas_id = %s
+                AND shape.deleted_at IS NULL
+            )
+            SELECT
+              id,
+              CASE
+                WHEN searchable_text ILIKE %s ESCAPE '\\' THEN 1.0
+                WHEN cardinality(%s::text[]) > 0
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM unnest(%s::text[]) AS search_term(pattern)
+                    WHERE searchable_text NOT ILIKE search_term.pattern ESCAPE '\\'
+                  ) THEN 0.95
+                ELSE 0.8
+              END AS similarity
+            FROM scoped_shapes
+            WHERE searchable_text ILIKE %s ESCAPE '\\'
+              OR EXISTS (
+                SELECT 1
+                FROM unnest(%s::text[]) AS search_term(pattern)
+                WHERE searchable_text ILIKE search_term.pattern ESCAPE '\\'
+              )
+            ORDER BY similarity DESC, updated_at DESC, id ASC
+            LIMIT %s
+            """,
+            (
+                workspace_id,
+                canvas_id,
+                canvas_id,
+                exact_pattern,
+                term_patterns,
+                term_patterns,
+                exact_pattern,
+                term_patterns,
+                max(1, min(limit, 20)),
+            ),
+        ).fetchall()
+
+        return [
+            CanvasSemanticShapeMatch(
+                shape_id=str(row["id"]),
+                similarity=float(row["similarity"]),
+            )
+            for row in rows
+        ]
 
     def search_semantic_shapes(
         self,
@@ -631,6 +685,43 @@ def _shape_ids(action_input: dict[str, object]) -> list[str]:
         if isinstance(value, list):
             return [item for item in value if isinstance(item, str)][:40]
     return []
+
+
+def _search_terms(query: str) -> list[str]:
+    stop_words = {
+        "canvas",
+        "shape",
+        "캔버스",
+        "쉐입",
+        "도형",
+        "메모",
+        "노트",
+        "찾아",
+        "찾아줘",
+        "검색",
+        "검색해",
+        "검색해줘",
+        "보여",
+        "보여줘",
+        "어디",
+        "위치",
+        "이동",
+        "가줘",
+        "있는",
+        "관련",
+    }
+    terms: list[str] = []
+    for term in query.replace("/", " ").replace("_", " ").split():
+        normalized = term.strip(" \t\n\r\"'`“”‘’.,!?()[]{}")
+        if len(normalized) < 2 or normalized.lower() in stop_words:
+            continue
+        if normalized not in terms:
+            terms.append(normalized[:80])
+    return terms[:12]
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _advisory_lock_key(value: str) -> int:

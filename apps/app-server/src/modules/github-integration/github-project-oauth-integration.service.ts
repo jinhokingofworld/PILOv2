@@ -146,8 +146,21 @@ export class GithubProjectOAuthIntegrationService {
       token.accessToken,
       config
     );
+    const encryptedRefreshToken = token.refreshToken
+      ? this.tokenEncryptionService.encryptToken(token.refreshToken, config)
+      : null;
     try {
-      const row = await this.connectionService.saveConnection({ userId: storedState.userId, purpose: "project_v2", githubUserId: githubUser.id, githubLogin: githubUser.login, encryptedToken, tokenScope: token.scope });
+      const row = await this.connectionService.saveConnection({
+        userId: storedState.userId,
+        purpose: "project_v2",
+        githubUserId: githubUser.id,
+        githubLogin: githubUser.login,
+        encryptedToken,
+        encryptedRefreshToken,
+        tokenScope: token.scope,
+        accessTokenExpiresAt: token.accessTokenExpiresAt,
+        refreshTokenExpiresAt: token.refreshTokenExpiresAt
+      });
       const githubConnectedAt = this.toNullableIsoString(row.connected_at);
       if (!githubConnectedAt) throw new Error("missing connection time");
       return { connected: true, githubUserId: githubUser.id, githubLogin: githubUser.login, tokenScope: row.token_scope, githubConnectedAt, returnUrl: storedState.returnUrl };

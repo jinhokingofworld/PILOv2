@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { ActivityLogService } from "../../common/activity-log.service";
 import { badRequest, notFound } from "../../common/api-error";
@@ -7,6 +7,7 @@ import {
   DatabaseTransaction
 } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import { GoogleCalendarSyncService } from "./google-calendar-sync.service";
 
 interface CalendarEventRow extends QueryResultRow {
   id: string | number;
@@ -23,6 +24,9 @@ interface CalendarEventRow extends QueryResultRow {
   created_by_user_avatar_url: string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  google_sync_status: "active" | "disconnected" | "failed" | null;
+  google_sync_google_event_id: string | null;
+  google_sync_last_error: string | null;
 }
 
 export interface NormalizedCalendarEventInput {
@@ -70,6 +74,10 @@ export interface CalendarEventPayload {
   };
   createdAt: string;
   updatedAt: string;
+  googleSync: {
+    status: "pending" | "synced" | "failed";
+    lastError: string | null;
+  } | null;
 }
 
 export interface DeleteCalendarEventPayload {
@@ -110,9 +118,14 @@ const CALENDAR_EVENT_SELECT = `
     users.name AS created_by_user_name,
     users.avatar_url AS created_by_user_avatar_url,
     calendar_events.created_at,
-    calendar_events.updated_at
+    calendar_events.updated_at,
+    google_sync.status AS google_sync_status,
+    google_sync.google_event_id AS google_sync_google_event_id,
+    google_sync.last_error AS google_sync_last_error
   FROM calendar_events
   JOIN users ON users.id = calendar_events.created_by
+  LEFT JOIN calendar_event_google_syncs AS google_sync
+    ON google_sync.calendar_event_id = calendar_events.id
 `;
 
 @Injectable()
@@ -120,7 +133,8 @@ export class CalendarService {
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
-    private readonly activityLogService: ActivityLogService
+    private readonly activityLogService: ActivityLogService,
+    @Optional() private readonly googleCalendarSyncService?: GoogleCalendarSyncService
   ) {}
 
   getModuleInfo() {
@@ -372,6 +386,11 @@ export class CalendarService {
       if (activityLog) {
         await this.activityLogService.append(transaction, activityLog);
       }
+      await this.googleCalendarSyncService?.enqueueUpdatedEventInTransaction(
+        transaction,
+        workspaceId,
+        this.mapEvent(updated)
+      );
       return updated;
     });
 
@@ -394,6 +413,12 @@ export class CalendarService {
       if (!existing) {
         throw notFound("Calendar event not found");
       }
+
+      await this.googleCalendarSyncService?.enqueueDeletedEventInTransaction(
+        transaction,
+        workspaceId,
+        this.mapEvent(existing)
+      );
 
       const removed = await transaction.queryOne<{ id: string | number }>(
         `
@@ -843,8 +868,18 @@ export class CalendarService {
         avatarUrl: event.created_by_user_avatar_url
       },
       createdAt: this.toIsoString(event.created_at),
-      updatedAt: this.toIsoString(event.updated_at)
+      updatedAt: this.toIsoString(event.updated_at),
+      googleSync: this.mapGoogleSync(event)
     };
+  }
+
+  private mapGoogleSync(event: CalendarEventRow): CalendarEventPayload["googleSync"] {
+    if (!event.google_sync_status || event.google_sync_status === "disconnected") return null;
+    if (event.google_sync_status === "failed") {
+      return { status: "failed", lastError: event.google_sync_last_error };
+    }
+    if (event.google_sync_google_event_id) return { status: "synced", lastError: null };
+    return { status: "pending", lastError: null };
   }
 
   private toDateString(value: Date | string): string {

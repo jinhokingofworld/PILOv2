@@ -49,6 +49,7 @@
 | `SESSION_SECRET` | session/cookie secret |
 | `GOOGLE_OAUTH_CLIENT_ID` | Google 로그인 OAuth client id |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google 로그인 OAuth client secret |
+| `GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY` | `google_calendar_connections`의 Google Calendar access/refresh token 암복호화 키 |
 | `GITHUB_LOGIN_CLIENT_ID` | GitHub 로그인 OAuth client id |
 | `GITHUB_LOGIN_CLIENT_SECRET` | GitHub 로그인 OAuth client secret |
 | `GITHUB_USER_OAUTH_CLIENT_ID` | GitHub App user authorization client id. Installation verification and user-scoped GitHub actions use this token. |

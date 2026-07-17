@@ -8,6 +8,10 @@ const {
 const {
   BoardIssueAssigneeService
 } = require("../../dist/modules/board/board-issue-assignee.service.js");
+const { badRequest } = require("../../dist/common/api-error.js");
+const {
+  GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE
+} = require("../../dist/modules/github-integration/github-oauth-refresh.error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -209,6 +213,37 @@ for (const [invalidBoardId, invalidIssueId, expectedField] of [
         "GitHub issue assignee lookup failed"
       );
       assert.doesNotMatch(JSON.stringify(error.getResponse()), /raw provider/);
+      return true;
+    }
+  );
+}
+
+{
+  const { service } = createSubject(
+    {
+      repository_owner_login: "Developer-EJ",
+      repository_name: "PILO"
+    },
+    {
+      error: badRequest(GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE)
+    }
+  );
+
+  await assert.rejects(
+    () =>
+      service.listAssigneeOptions(
+        currentUserId,
+        workspaceId,
+        boardId,
+        issueId
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+      assert.equal(
+        error.getResponse().error.message,
+        GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE
+      );
       return true;
     }
   );

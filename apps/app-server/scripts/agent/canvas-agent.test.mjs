@@ -432,6 +432,34 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 
 {
   const repository = new FakeRepository();
+  repository.shapesById = [shape("shape:dashboard", {
+    shape_type: "frame",
+    title: "대시보드 와이어프레임",
+  })];
+  const service = new CanvasAgentActionService(repository);
+
+  const result = await service.execute(
+    run("대시보드 와이어프레임 어디 있어?"),
+    step({
+      intent: "find_shapes",
+      arguments: {
+        query: "대시보드 와이어프레임",
+        shapeIds: ["shape:dashboard"],
+        routingSource: "database_text",
+      },
+    }, "route_intent")
+  );
+
+  assert.deepEqual(repository.findByIdCalls, [{
+    canvasId: "canvas-1",
+    shapeIds: ["shape:dashboard"],
+  }]);
+  assert.deepEqual(result.resourceRefs, ["shape:dashboard"]);
+  assert.match(result.summary, /DB 검색으로/);
+}
+
+{
+  const repository = new FakeRepository();
   const service = new CanvasAgentActionService(repository);
   const html = "<!doctype html><html><head><style>body{margin:0}</style></head><body>대시보드</body></html>";
 

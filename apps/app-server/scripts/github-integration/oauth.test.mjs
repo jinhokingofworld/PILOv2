@@ -50,6 +50,8 @@ class FakeDatabase {
 }
 
 const fixedNow = new Date("2026-07-04T12:00:00.000Z");
+const accessTokenExpiresAt = "2026-07-04T20:00:00.000Z";
+const refreshTokenExpiresAt = "2027-01-04T12:00:00.000Z";
 const baseConfig = {
   clientId: "client-id",
   clientSecret: "client-secret",
@@ -82,6 +84,9 @@ const connectedRow = {
   github_user_id: "12345678",
   github_login: "juhyeong",
   access_token_encrypted: tokenEncryption.encryptToken("plain-access-token", baseConfig),
+  refresh_token_encrypted: null,
+  access_token_expires_at: null,
+  refresh_token_expires_at: null,
   token_scope: "",
   connected_at: fixedNow,
   revoked_at: null
@@ -90,6 +95,9 @@ const projectOAuthConnectedRow = {
   github_user_id: "12345678",
   github_login: "juhyeong",
   access_token_encrypted: tokenEncryption.encryptToken("project-access-token", projectOAuthConfig),
+  refresh_token_encrypted: null,
+  access_token_expires_at: null,
+  refresh_token_expires_at: null,
   token_scope: "read:user,user:email,project,repo",
   connected_at: fixedNow,
   revoked_at: null
@@ -346,7 +354,10 @@ const projectOAuthConnectedRow = {
       );
       return {
         accessToken: "plain-project-access-token",
-        scope: "read:user,user:email,project,repo"
+        scope: "read:user,user:email,project,repo",
+        refreshToken: "plain-project-refresh-token",
+        accessTokenExpiresAt,
+        refreshTokenExpiresAt
       };
     },
     async getAuthenticatedUser(accessToken) {
@@ -390,6 +401,10 @@ const projectOAuthConnectedRow = {
   assert.equal(update.values[3], "juhyeong");
   assert.notEqual(update.values[4], "plain-project-access-token");
   assert.match(update.values[4], /^v1:/);
+  assert.notEqual(update.values[5], "plain-project-refresh-token");
+  assert.equal(tokenEncryption.decryptToken(update.values[5], projectOAuthConfig), "plain-project-refresh-token");
+  assert.equal(update.values[7], accessTokenExpiresAt);
+  assert.equal(update.values[8], refreshTokenExpiresAt);
 }
 
 {
@@ -594,7 +609,10 @@ const projectOAuthConnectedRow = {
       assert.equal(input.redirectUri, "https://api.pilo.test/api/v1/github/oauth/callback");
       return {
         accessToken: "plain-access-token",
-        scope: ""
+        scope: "",
+        refreshToken: "plain-refresh-token",
+        accessTokenExpiresAt,
+        refreshTokenExpiresAt
       };
     },
     async getAuthenticatedUser(accessToken) {
@@ -635,6 +653,10 @@ const projectOAuthConnectedRow = {
   assert.equal(update.values[3], "juhyeong");
   assert.notEqual(update.values[4], "plain-access-token");
   assert.match(update.values[4], /^v1:/);
+  assert.notEqual(update.values[5], "plain-refresh-token");
+  assert.equal(tokenEncryption.decryptToken(update.values[5], baseConfig), "plain-refresh-token");
+  assert.equal(update.values[7], accessTokenExpiresAt);
+  assert.equal(update.values[8], refreshTokenExpiresAt);
 }
 
 {

@@ -6,6 +6,7 @@ import { useEditor } from "tldraw";
 import type { PiloCanvasLocalInteractionState } from "../../canvas-engine-types";
 import {
   getCanvasActiveMutationShapeIds,
+  getCanvasInteractionToolPath,
   isCanvasFreehandInteractionActive,
 } from "../../interactions/canvas-local-interaction-policy";
 import type {
@@ -35,7 +36,7 @@ export function CanvasLocalInteractionReporter({
       const selectedShapeIds = editor.getSelectedShapeIds();
       const editingShapeId = editor.getEditingShapeId();
       const pageState = editor.getCurrentPageState();
-      const currentToolId = editor.getCurrentToolId();
+      const currentToolId = getCanvasInteractionToolPath(editor);
       const isDragging = editor.inputs.getIsDragging();
       const isPointing = editor.inputs.getIsPointing();
       const normalizedEditingShapeId = editingShapeId

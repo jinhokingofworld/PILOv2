@@ -162,7 +162,8 @@ async function assertBadRequest(action, messagePattern) {
         avatarUrl: "https://example.com/avatar.png"
       },
       createdAt: "2026-07-03T00:00:00.000Z",
-      updatedAt: "2026-07-03T01:00:00.000Z"
+      updatedAt: "2026-07-03T01:00:00.000Z",
+      googleSync: null
     }
   ]);
 }

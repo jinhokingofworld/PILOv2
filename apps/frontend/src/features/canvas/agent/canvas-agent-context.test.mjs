@@ -5,6 +5,10 @@ import {
 } from "./canvas-agent-shape-context.ts";
 import { focusCanvasAgentResult } from "./canvas-agent-camera.ts";
 import {
+  buildCanvasAgentHtmlInsertionPlan,
+  buildHtmlFileName,
+} from "./canvas-agent-html-insertion-plan.ts";
+import {
   buildCanvasAgentSelectedScene,
   CanvasAgentSelectedSceneError,
 } from "./canvas-agent-selected-scene.ts";
@@ -17,6 +21,21 @@ function shape(id, x, text) {
     x,
     y: 20,
   };
+}
+
+{
+  const plan = buildCanvasAgentHtmlInsertionPlan(
+    { x: 100, y: 200, w: 1000, h: 800 },
+    { x: 100, y: 200, w: 1000, h: 800 },
+    { width: 460, height: 300 },
+  );
+
+  assert.deepEqual(plan.codeBlockPosition, { x: 1220, y: 450 });
+  assert.deepEqual(plan.connectorStart, { x: 1100, y: 600 });
+  assert.deepEqual(plan.connectorEnd, { x: 1220, y: 600 });
+  assert.equal(buildHtmlFileName("대시보드: 와이어프레임"), "대시보드- 와이어프레임.html");
+  assert.equal(buildHtmlFileName("dashboard.HTML"), "dashboard.HTML");
+  assert.equal(buildHtmlFileName("  "), "canvas-page.html");
 }
 
 {

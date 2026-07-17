@@ -10,6 +10,12 @@ export type CanvasMutationInteractionSnapshot =
     selectedShapeIds: readonly string[];
   };
 
+export type CanvasInteractionToolPathSource = {
+  getCurrentTool: () => {
+    getPath: () => string;
+  };
+};
+
 const canvasSelectMutationToolIds = [
   "select.pointing_shape",
   "select.pointing_handle",
@@ -20,6 +26,12 @@ const canvasSelectMutationToolIds = [
   "select.crop",
   "select.cropping",
 ] as const;
+
+export function getCanvasInteractionToolPath(
+  source: CanvasInteractionToolPathSource,
+) {
+  return source.getCurrentTool().getPath();
+}
 
 export function isCanvasFreehandToolId(toolId: string) {
   return toolId.includes("draw") || toolId.includes("highlight");
