@@ -1653,12 +1653,14 @@ class OpenAiMeetingReportClient:
                 transcript_text,
                 transcript_segments,
                 activity_evidence,
+                document_change_evidence,
             )
         except EvidenceValidationError as error:
             return self._generate_report_once(
                 transcript_text,
                 transcript_segments,
                 activity_evidence,
+                document_change_evidence,
                 evidence_repair_code=error.code,
             )
 
@@ -1667,6 +1669,7 @@ class OpenAiMeetingReportClient:
         transcript_text: str,
         transcript_segments: list[TranscriptSegment],
         activity_evidence: list[ActivityEvidence],
+        document_change_evidence: list[DocumentChangeEvidence],
         evidence_repair_code: str | None = None,
     ) -> GeneratedMeetingReport:
         try:

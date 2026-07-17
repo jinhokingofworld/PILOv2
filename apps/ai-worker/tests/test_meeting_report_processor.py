@@ -1054,6 +1054,7 @@ def test_openai_report_retries_once_with_evidence_repair_instruction() -> None:
         "원문",
         [TranscriptSegment(0, 0, 1_000, "원문")],
         [],
+        [],
     )
 
     assert report.summary == "근거를 연결한 회의록입니다."
@@ -1091,6 +1092,7 @@ def test_openai_report_stops_after_one_evidence_repair_attempt() -> None:
         ai_client.generate_report(
             "원문",
             [TranscriptSegment(0, 0, 1_000, "원문")],
+            [],
             [],
         )
 
