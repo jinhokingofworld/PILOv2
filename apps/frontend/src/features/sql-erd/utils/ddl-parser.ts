@@ -60,6 +60,11 @@ type PostgreSqlSyntaxNode = ReturnType<
   typeof PostgreSQL.language.parser.parse
 >["topNode"];
 
+type PostgreSqlParserSourceParts = {
+  declaredTypes: string[];
+  erdStatements: string[];
+};
+
 const parser = new Parser();
 
 export function parseSqlDdlToErdModel(
@@ -97,6 +102,11 @@ export function parseSqlDdlToErdModel(
         database === "postgresql"
           ? preparePostgreSqlParserSource(sourceText)
           : sourceText;
+      if (!parserSourceText.trim()) {
+        astNodes = [];
+        resolvedDialect = database;
+        break;
+      }
       const ast = parser.astify(parserSourceText, { database });
       astNodes = (Array.isArray(ast) ? ast : [ast]) as unknown as SqlParserAstNode[];
       resolvedDialect = database;
@@ -176,11 +186,8 @@ export function isSqlErdSourceTextTooLarge(sourceText: string) {
 }
 
 function preparePostgreSqlParserSource(sourceText: string) {
-  const declaredTypes = collectPostgreSqlUserDefinedTypeDeclarations(sourceText);
-
-  if (declaredTypes.length === 0) {
-    return sourceText;
-  }
+  const { declaredTypes, erdStatements } =
+    collectPostgreSqlParserSourceParts(sourceText);
 
   // node-sql-parser registers CREATE TYPE names but not CREATE DOMAIN names.
   // Register both in a parser-only prelude so table columns keep their original type.
@@ -191,18 +198,25 @@ function preparePostgreSqlParserSource(sourceText: string) {
     )
     .join("\n");
 
-  return `${parserPrelude}\n${sourceText}`;
+  return [parserPrelude, ...erdStatements].filter(Boolean).join("\n");
 }
 
 export function collectPostgreSqlUserDefinedTypeDeclarations(
   sourceText: string
 ) {
+  return collectPostgreSqlParserSourceParts(sourceText).declaredTypes;
+}
+
+function collectPostgreSqlParserSourceParts(
+  sourceText: string
+): PostgreSqlParserSourceParts {
   const tree = PostgreSQL.language.parser.parse(sourceText);
   const rootCursor = tree.cursor();
   const declaredTypes = new Map<string, string>();
+  const erdStatements: string[] = [];
 
   if (!rootCursor.firstChild()) {
-    return [];
+    return { declaredTypes: [], erdStatements };
   }
 
   do {
@@ -212,8 +226,24 @@ export function collectPostgreSqlUserDefinedTypeDeclarations(
 
     const statementNodes = getPostgreSqlStatementNodes(rootCursor.node);
     let cursor = 0;
+    const firstKeyword = readPostgreSqlKeyword(
+      statementNodes[cursor],
+      sourceText
+    );
 
-    if (readPostgreSqlKeyword(statementNodes[cursor], sourceText) !== "CREATE") {
+    if (firstKeyword === "ALTER") {
+      if (
+        readPostgreSqlKeyword(statementNodes[cursor + 1], sourceText) ===
+        "TABLE"
+      ) {
+        erdStatements.push(
+          sourceText.slice(rootCursor.from, rootCursor.to).trim()
+        );
+      }
+      continue;
+    }
+
+    if (firstKeyword !== "CREATE") {
       continue;
     }
 
@@ -226,10 +256,25 @@ export function collectPostgreSqlUserDefinedTypeDeclarations(
       cursor += 2;
     }
 
+    while (
+      ["TEMP", "TEMPORARY", "UNLOGGED"].includes(
+        readPostgreSqlKeyword(statementNodes[cursor], sourceText) ?? ""
+      )
+    ) {
+      cursor += 1;
+    }
+
     const declarationKind = readPostgreSqlKeyword(
       statementNodes[cursor],
       sourceText
     );
+
+    if (declarationKind === "TABLE") {
+      erdStatements.push(
+        sourceText.slice(rootCursor.from, rootCursor.to).trim()
+      );
+      continue;
+    }
 
     if (declarationKind !== "TYPE" && declarationKind !== "DOMAIN") {
       continue;
@@ -246,7 +291,10 @@ export function collectPostgreSqlUserDefinedTypeDeclarations(
     }
   } while (rootCursor.nextSibling());
 
-  return [...declaredTypes.values()];
+  return {
+    declaredTypes: [...declaredTypes.values()],
+    erdStatements
+  };
 }
 
 function getPostgreSqlStatementNodes(statementNode: PostgreSqlSyntaxNode) {

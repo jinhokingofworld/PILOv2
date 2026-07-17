@@ -4899,6 +4899,71 @@ assert.equal(
   "TIMESTAMP WITH TIME ZONE"
 );
 
+const postgresFullSchemaSourceText = `CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  PERFORM 'CREATE TABLE body_only (id UUID)';
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TYPE account_status AS ENUM ('active', 'disabled');
+
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status account_status NOT NULL
+);
+
+CREATE TABLE sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id)
+);
+
+CREATE TRIGGER trg_users_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();`;
+const postgresFullSchemaParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: postgresFullSchemaSourceText
+  });
+
+assert.equal(postgresFullSchemaParseResult.ok, true);
+if (!postgresFullSchemaParseResult.ok) {
+  throw new Error(postgresFullSchemaParseResult.error.message);
+}
+assert.deepEqual(
+  postgresFullSchemaParseResult.modelJson.schema.tables.map(
+    ({ name }) => name
+  ),
+  ["users", "sessions"]
+);
+assert.equal(
+  postgresFullSchemaParseResult.modelJson.schema.relations.length,
+  1
+);
+assert.equal(
+  postgresFullSchemaParseResult.sourceMap.sourceText,
+  postgresFullSchemaSourceText
+);
+
+const invalidPostgresTableWithFunction =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `CREATE FUNCTION noop() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;
+CREATE TABLE broken_table (id UUID NOT NULL;`
+  });
+
+assert.equal(invalidPostgresTableWithFunction.ok, false);
+if (invalidPostgresTableWithFunction.ok) {
+  throw new Error("Invalid CREATE TABLE must fail");
+}
+assert.equal(invalidPostgresTableWithFunction.error.code, "PARSE_FAILED");
+
 const mysqlSourceText = `CREATE TABLE users (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
