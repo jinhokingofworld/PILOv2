@@ -1,4 +1,4 @@
-import { PostgreSQL } from "@codemirror/lang-sql";
+import { MySQL, PostgreSQL, SQLite } from "@codemirror/lang-sql";
 import sqlParser from "node-sql-parser";
 
 import {
@@ -56,9 +56,11 @@ type MutableTableParseState = {
   columnsByName: Map<string, ErdColumn>;
 };
 
-type PostgreSqlSyntaxNode = ReturnType<
+type SqlSyntaxNode = ReturnType<
   typeof PostgreSQL.language.parser.parse
 >["topNode"];
+
+type PostgreSqlSyntaxNode = SqlSyntaxNode;
 
 type PostgreSqlParserSourceParts = {
   declaredTypes: string[];
@@ -95,29 +97,35 @@ export function parseSqlDdlToErdModel(
   let astNodes: SqlParserAstNode[] | null = null;
   let resolvedDialect: SqltoerdResolvedDialect | null = null;
   let lastParseErrorMessage = "Failed to parse SQL DDL.";
+  let hasParserSource = false;
+  let hasParserError = false;
 
   for (const database of databases) {
     try {
-      const parserSourceText =
-        database === "postgresql"
-          ? preparePostgreSqlParserSource(sourceText)
-          : sourceText;
+      const parserSourceText = prepareParserSource(database, sourceText);
       if (!parserSourceText.trim()) {
-        astNodes = [];
-        resolvedDialect = database;
-        break;
+        continue;
       }
+      hasParserSource = true;
       const ast = parser.astify(parserSourceText, { database });
       astNodes = (Array.isArray(ast) ? ast : [ast]) as unknown as SqlParserAstNode[];
       resolvedDialect = database;
       break;
     } catch (error) {
+      hasParserError = true;
       lastParseErrorMessage =
         error instanceof Error ? error.message : lastParseErrorMessage;
     }
   }
 
   if (!astNodes || !resolvedDialect) {
+    if (!hasParserSource && !hasParserError) {
+      return createParseFailure(
+        "NO_CREATE_TABLE",
+        "SQLtoERD MVP parser expects one or more CREATE TABLE statements."
+      );
+    }
+
     return createParseFailure(
       "PARSE_FAILED",
       lastParseErrorMessage
@@ -183,6 +191,283 @@ export function isSqlErdSourceTextTooLarge(sourceText: string) {
     new TextEncoder().encode(sourceText).byteLength >
     SQL_ERD_SOURCE_TEXT_MAX_BYTES
   );
+}
+
+function prepareParserSource(
+  database: SqltoerdResolvedDialect,
+  sourceText: string
+) {
+  if (database === "postgresql") {
+    return preparePostgreSqlParserSource(sourceText);
+  }
+
+  if (database === "mysql") {
+    return prepareMySqlParserSource(sourceText);
+  }
+
+  return prepareSqliteParserSource(sourceText);
+}
+
+function prepareMySqlParserSource(sourceText: string) {
+  return splitMySqlStatements(sourceText)
+    .filter(isMySqlErdStatement)
+    .map((statement) => `${statement};`)
+    .join("\n");
+}
+
+function splitMySqlStatements(sourceText: string) {
+  const statements: string[] = [];
+  let delimiter = ";";
+  let chunks: string[] = [];
+  let index = 0;
+  let lineStart = true;
+  let state:
+    | "normal"
+    | "single_quote"
+    | "double_quote"
+    | "backtick"
+    | "line_comment"
+    | "block_comment" = "normal";
+
+  const finishStatement = () => {
+    const statement = chunks.join("").trim();
+
+    if (statement) {
+      statements.push(statement);
+    }
+
+    chunks = [];
+  };
+
+  while (index < sourceText.length) {
+    if (state === "normal" && lineStart) {
+      const lineEnd = sourceText.indexOf("\n", index);
+      const line = sourceText.slice(
+        index,
+        lineEnd === -1 ? sourceText.length : lineEnd
+      );
+      const delimiterDirective =
+        /^\s*DELIMITER\s+(\S+)\s*$/i.exec(line);
+
+      if (delimiterDirective) {
+        finishStatement();
+        delimiter = delimiterDirective[1];
+        index = lineEnd === -1 ? sourceText.length : lineEnd + 1;
+        lineStart = true;
+        continue;
+      }
+    }
+
+    const character = sourceText[index];
+    const nextCharacter = sourceText[index + 1];
+
+    if (state === "line_comment") {
+      chunks.push(character);
+      index += 1;
+
+      if (character === "\n") {
+        state = "normal";
+        lineStart = true;
+      }
+      continue;
+    }
+
+    if (state === "block_comment") {
+      chunks.push(character);
+
+      if (character === "*" && nextCharacter === "/") {
+        chunks.push(nextCharacter);
+        index += 2;
+        state = "normal";
+      } else {
+        index += 1;
+      }
+
+      lineStart = character === "\n";
+      continue;
+    }
+
+    if (
+      state === "single_quote" ||
+      state === "double_quote" ||
+      state === "backtick"
+    ) {
+      const quote =
+        state === "single_quote" ? "'" : state === "double_quote" ? '"' : "`";
+      chunks.push(character);
+
+      if (character === "\\" && nextCharacter !== undefined) {
+        chunks.push(nextCharacter);
+        index += 2;
+        lineStart = nextCharacter === "\n";
+        continue;
+      }
+
+      if (character === quote && nextCharacter === quote) {
+        chunks.push(nextCharacter);
+        index += 2;
+        lineStart = false;
+        continue;
+      }
+
+      index += 1;
+      lineStart = character === "\n";
+
+      if (character === quote) {
+        state = "normal";
+      }
+      continue;
+    }
+
+    if (sourceText.startsWith(delimiter, index)) {
+      finishStatement();
+      index += delimiter.length;
+      lineStart = false;
+      continue;
+    }
+
+    if (character === "'" || character === '"' || character === "`") {
+      chunks.push(character);
+      state =
+        character === "'"
+          ? "single_quote"
+          : character === '"'
+            ? "double_quote"
+            : "backtick";
+      index += 1;
+      lineStart = false;
+      continue;
+    }
+
+    if (
+      character === "#" ||
+      (character === "-" &&
+        nextCharacter === "-" &&
+        (sourceText[index + 2] === undefined ||
+          /\s/.test(sourceText[index + 2])))
+    ) {
+      chunks.push(character);
+      state = "line_comment";
+      index += 1;
+      lineStart = false;
+      continue;
+    }
+
+    if (character === "/" && nextCharacter === "*") {
+      chunks.push(character, nextCharacter);
+      state = "block_comment";
+      index += 2;
+      lineStart = false;
+      continue;
+    }
+
+    chunks.push(character);
+    index += 1;
+    lineStart = character === "\n";
+  }
+
+  finishStatement();
+  return statements;
+}
+
+function isMySqlErdStatement(sourceText: string) {
+  const tree = MySQL.language.parser.parse(sourceText);
+  const rootCursor = tree.cursor();
+
+  if (!rootCursor.firstChild()) {
+    return false;
+  }
+
+  do {
+    if (rootCursor.name !== "Statement") {
+      continue;
+    }
+
+    return isErdDdlStatement(rootCursor.node, sourceText);
+  } while (rootCursor.nextSibling());
+
+  return false;
+}
+
+function prepareSqliteParserSource(sourceText: string) {
+  const tree = SQLite.language.parser.parse(sourceText);
+  const rootCursor = tree.cursor();
+  const erdStatements: string[] = [];
+
+  if (!rootCursor.firstChild()) {
+    return "";
+  }
+
+  do {
+    if (
+      rootCursor.name === "Statement" &&
+      isErdDdlStatement(rootCursor.node, sourceText)
+    ) {
+      erdStatements.push(
+        sourceText.slice(rootCursor.from, rootCursor.to).trim()
+      );
+    }
+  } while (rootCursor.nextSibling());
+
+  return erdStatements.join("\n");
+}
+
+function isErdDdlStatement(
+  statementNode: SqlSyntaxNode,
+  sourceText: string
+) {
+  const statementNodes = getErdDdlStatementNodes(statementNode);
+  let cursor = 0;
+  const firstKeyword = readErdDdlKeyword(
+    statementNodes[cursor],
+    sourceText
+  );
+
+  if (firstKeyword === "ALTER") {
+    return readErdDdlKeyword(statementNodes[cursor + 1], sourceText) === "TABLE";
+  }
+
+  if (firstKeyword !== "CREATE") {
+    return false;
+  }
+
+  cursor += 1;
+
+  while (
+    ["TEMP", "TEMPORARY"].includes(
+      readErdDdlKeyword(statementNodes[cursor], sourceText) ?? ""
+    )
+  ) {
+    cursor += 1;
+  }
+
+  return readErdDdlKeyword(statementNodes[cursor], sourceText) === "TABLE";
+}
+
+function getErdDdlStatementNodes(statementNode: SqlSyntaxNode) {
+  const cursor = statementNode.cursor();
+  const nodes: SqlSyntaxNode[] = [];
+
+  if (!cursor.firstChild()) {
+    return nodes;
+  }
+
+  do {
+    if (!cursor.name.endsWith("Comment")) {
+      nodes.push(cursor.node);
+    }
+  } while (cursor.nextSibling());
+
+  return nodes;
+}
+
+function readErdDdlKeyword(
+  node: SqlSyntaxNode | undefined,
+  sourceText: string
+) {
+  return node?.name === "Keyword"
+    ? sourceText.slice(node.from, node.to).toUpperCase()
+    : null;
 }
 
 function preparePostgreSqlParserSource(sourceText: string) {
@@ -392,6 +677,13 @@ function resolveParserDatabases(
 function getAutoParserDatabases(
   sourceText: string
 ): SqltoerdResolvedDialect[] {
+  const hasMySqlDumpMarker =
+    /^\s*DELIMITER\s+\S+\s*$/im.test(sourceText) ||
+    /\/\*!\d{5}\s/.test(sourceText) ||
+    /^\s*(?:LOCK|UNLOCK)\s+TABLES\b/im.test(sourceText);
+  const hasSqliteDumpMarker =
+    /^\s*PRAGMA\b/im.test(sourceText) ||
+    /\bsqlite_sequence\b/i.test(sourceText);
   const hasMySqlMarker =
     /\b(?:AUTO_INCREMENT|UNSIGNED|UNIQUE\s+KEY|DATETIME)\b|\bENGINE\s*=|`[^`]+`/i.test(
       sourceText
@@ -404,6 +696,14 @@ function getAutoParserDatabases(
     /\b(?:AUTOINCREMENT|WITHOUT\s+ROWID|STRICT)\b|\bON\s+CONFLICT\b/i.test(
       sourceText
     );
+
+  if (hasMySqlDumpMarker) {
+    return ["mysql", "postgresql"];
+  }
+
+  if (hasSqliteDumpMarker) {
+    return ["sqlite", "postgresql", "mysql"];
+  }
 
   if (hasSqliteMarker && !hasMySqlMarker && !hasPostgreSqlMarker) {
     return ["sqlite", "postgresql", "mysql"];
