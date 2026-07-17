@@ -199,9 +199,7 @@ def test_canvas_agent_processor_generates_html_for_selected_scene() -> None:
 
     def get_run_context(job):
         context = original_get_run_context(job)
-        context.request_context["selectedScene"] = {
-            "shapes": [{"id": "shape:meeting"}]
-        }
+        context.request_context["selectedScene"] = {"shapes": [{"id": "shape:meeting"}]}
         return context
 
     repository.get_run_context = get_run_context

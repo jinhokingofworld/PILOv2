@@ -22,8 +22,8 @@ from app.agent_processor import (
 )
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
 from app.canvas_agent.embeddings import LocalSentenceTransformerCanvasEmbedder
-from app.canvas_agent.planning.planner import OpenAiCanvasAgentIntentClassifier
 from app.canvas_agent.planning.html_generator import OpenAiCanvasAgentHtmlGenerator
+from app.canvas_agent.planning.planner import OpenAiCanvasAgentIntentClassifier
 from app.canvas_agent.processor import CanvasAgentProcessor
 from app.canvas_agent.repository import PgCanvasAgentRepository
 from app.canvas_agent.routing.semantic_router import CanvasSemanticRouter

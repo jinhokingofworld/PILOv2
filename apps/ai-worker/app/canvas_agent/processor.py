@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
-from app.canvas_agent.planning.planner import CanvasAgentIntentClassifierError
 from app.canvas_agent.planning.html_generator import CanvasAgentHtmlGeneratorError
+from app.canvas_agent.planning.planner import CanvasAgentIntentClassifierError
 from app.canvas_agent.types import (
     CANVAS_AGENT_JOB_TYPE,
     CANVAS_AGENT_SCHEMA_VERSION,

@@ -24,7 +24,10 @@ def test_parse_html_artifact_accepts_static_document() -> None:
         json.dumps(
             {
                 "title": "대시보드",
-                "html": "<!doctype html><html><head><style>body{margin:0}</style></head><body><main>대시보드</main></body></html>",
+                "html": (
+                    "<!doctype html><html><head><style>body{margin:0}</style></head>"
+                    "<body><main>대시보드</main></body></html>"
+                ),
             }
         ),
         scene(),
