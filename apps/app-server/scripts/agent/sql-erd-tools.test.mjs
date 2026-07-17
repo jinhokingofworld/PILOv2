@@ -776,6 +776,12 @@ const [agentApiContract, sqlErdApiContract] = await Promise.all([
 ]);
 for (const contract of [agentApiContract, sqlErdApiContract]) {
   assert.match(contract, /generate_sql_erd/);
+  assert.match(contract, /inspect_sql_erd_schema/);
+  assert.match(contract, /focus_sql_erd_tables/);
+  assert.match(contract, /table_focus/);
+  assert.match(contract, /primaryTableIds/);
+  assert.match(contract, /relatedTableIds/);
+  assert.match(contract, /sessionRevision/);
   assert.match(contract, /SqlErdSchemaSpecV1/);
   assert.match(contract, /new_session/);
   assert.match(contract, /replace_current/);
