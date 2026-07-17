@@ -24,6 +24,7 @@ import {
   type SqlErdCanvasTool
 } from "@/features/sql-erd/components/sql-erd-canvas-toolbar";
 import { SqlErdTableFocusProvider } from "@/features/sql-erd/components/sql-erd-table-focus-context";
+import { SqlErdSelectionContextProvider } from "@/features/sql-erd/components/sql-erd-selection-context";
 import { SqlErdRealtimeBridge } from "@/features/sql-erd/realtime/sql-erd-realtime-bridge";
 import {
   createSqlErdTableMoveCompletionKey,
@@ -162,6 +163,7 @@ import {
 } from "@/features/sql-erd/utils/agent-table-focus";
 import {
   areSqlErdSelectionsEqual,
+  getSqlErdContextRelationIds,
   getSqlErdSelectionFromSelectedShapes,
   resolveSqlErdTableInteractionSelection,
   selectSqlErdCanvasShapeAtPoint
@@ -2916,6 +2918,10 @@ export function SqlErdCanvas({
     () => createSqlErdCanvasContentKey({ modelJson, sessionId }),
     [modelJson, sessionId]
   );
+  const contextRelationIds = useMemo(
+    () => getSqlErdContextRelationIds(modelJson, selectedSqlErdObject),
+    [modelJson, selectedSqlErdObject]
+  );
   const handleMount = useCallback(
     (editor: Editor) => {
       editorRef.current = editor;
@@ -3488,8 +3494,9 @@ export function SqlErdCanvas({
       onPointerMoveCapture={handlePointerMoveCapture}
       onPointerUpCapture={handlePointerUpCapture}
     >
-      <SqlErdTableFocusProvider focus={tableFocus}>
-        <TldrawSurface
+      <SqlErdSelectionContextProvider relationIds={contextRelationIds}>
+        <SqlErdTableFocusProvider focus={tableFocus}>
+          <TldrawSurface
           className={cn(
             "h-full w-full bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]",
             className
@@ -3566,8 +3573,9 @@ export function SqlErdCanvas({
             selectedSqlErdObject={selectedSqlErdObject}
           />
         ) : null}
-        </TldrawSurface>
-      </SqlErdTableFocusProvider>
+          </TldrawSurface>
+        </SqlErdTableFocusProvider>
+      </SqlErdSelectionContextProvider>
       {onLayoutPatch && canvasEditor ? (
         <SqlErdCanvasToolbar
           editor={canvasEditor}

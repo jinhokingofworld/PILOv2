@@ -22,6 +22,7 @@ async function compileSqlErdRuntimeModules() {
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
   const sqlSourceMapOutputPath = join(outputDir, "sql-source-map.mjs");
+  const sourceNavigationOutputPath = join(outputDir, "source-navigation.mjs");
   const sqlSourceDecorationOutputPath = join(
     outputDir,
     "sql-source-decoration.mjs"
@@ -119,6 +120,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/sql-source-map.ts",
       sqlSourceMapOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/source-navigation.ts",
+      sourceNavigationOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/sql-source-decoration.ts",
@@ -225,6 +230,10 @@ async function compileSqlErdRuntimeModules() {
         ],
         [
           /from "@\/features\/sql-erd\/components\/sql-erd-table-focus-context"/g,
+          'from "./table-focus-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/components\/sql-erd-selection-context"/g,
           'from "./table-focus-stub.mjs"'
         ],
         [
@@ -368,6 +377,7 @@ async function compileSqlErdRuntimeModules() {
       join(outputDir, "table-focus-stub.mjs"),
       [
         "export function useSqlErdTableFocus() { return null; }",
+        "export function useSqlErdContextRelationIds() { return new Set(); }",
         "export function getSqlErdFocusedTableRole() { return 'dimmed'; }",
         "export function getSqlErdFocusedRelationRole() { return 'dimmed'; }"
       ].join("\n")
@@ -380,6 +390,7 @@ async function compileSqlErdRuntimeModules() {
       inspectorRuntime,
       ddlParserRuntime,
       sqlSourceMapRuntime,
+      sourceNavigationRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
       parseWorkerProtocolRuntime,
@@ -408,6 +419,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
       import(pathToFileHref(sqlSourceMapOutputPath)),
+      import(pathToFileHref(sourceNavigationOutputPath)),
       import(pathToFileHref(sqlSourceDecorationOutputPath)),
       import(pathToFileHref(generateSessionOutputPath)),
       import(pathToFileHref(parseWorkerProtocolOutputPath)),
@@ -436,6 +448,7 @@ async function compileSqlErdRuntimeModules() {
       canvasSelectionRuntime,
       ddlParserRuntime,
       sqlSourceMapRuntime,
+      sourceNavigationRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
       parseWorkerProtocolRuntime,
@@ -816,6 +829,7 @@ const {
   canvasSelectionRuntime,
   ddlParserRuntime,
   sqlSourceMapRuntime,
+  sourceNavigationRuntime,
   sqlSourceDecorationRuntime,
   generateSessionRuntime,
   parseWorkerProtocolRuntime,
@@ -4757,6 +4771,52 @@ assert.deepEqual(
     "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
   ]
 );
+assert.deepEqual(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.orders.user_id.users.id",
+    "constraint"
+  ),
+  postgresTableRelationRange.constraintRange
+);
+assert.deepEqual(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.orders.user_id.users.id",
+    "from"
+  ),
+  postgresTableRelationRange.fromColumnRanges[0]
+);
+assert.deepEqual(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.orders.user_id.users.id",
+    "to"
+  ),
+  postgresTableRelationRange.toColumnRanges[0]
+);
+assert.equal(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.missing",
+    "constraint"
+  ),
+  null
+);
+assert.deepEqual(
+  sourceNavigationRuntime.clampSqlErdSourceNavigationRange(
+    { from: 8, to: 30 },
+    12
+  ),
+  { from: 8, to: 12 }
+);
+assert.equal(
+  sourceNavigationRuntime.clampSqlErdSourceNavigationRange(
+    { from: 20, to: 30 },
+    12
+  ),
+  null
+);
 const postgresAlterTableSourceText = `CREATE TABLE users (
   id BIGSERIAL PRIMARY KEY
 );
@@ -6370,6 +6430,18 @@ assert.deepEqual(
 );
 assert.deepEqual(
   relationShapeRuntime.getSqlErdRelationVisualStyle({
+    isContextual: true,
+    isHovered: false,
+    isSelected: false
+  }),
+  {
+    stroke: "rgba(37, 99, 235, 0.74)",
+    strokeWidth: 3
+  }
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdRelationVisualStyle({
+    isContextual: true,
     isHovered: true,
     isSelected: true
   }),
@@ -6377,6 +6449,24 @@ assert.deepEqual(
     stroke: "rgba(37, 99, 235, 0.98)",
     strokeWidth: 4
   }
+);
+assert.deepEqual(
+  [...canvasSelectionRuntime.getSqlErdContextRelationIds(runtimeModel, {
+    type: "table",
+    tableId: "table.users"
+  })],
+  [
+    "relation.orders.user_id.users.id",
+    "relation.users.manager_id.users.id"
+  ]
+);
+assert.deepEqual(
+  [...canvasSelectionRuntime.getSqlErdContextRelationIds(runtimeModel, {
+    type: "column",
+    tableId: "table.users",
+    columnId: "column.users.id"
+  })],
+  []
 );
 const selectedRelationHighlight = {
   relationId: "relation.orders.user_id.users.id",
@@ -7172,7 +7262,14 @@ assert.match(panel, /function CollapsedSourcePanel/);
 assert.match(panel, /href="\/home"/);
 assert.match(panel, /aria-label="홈으로 이동"/);
 assert.match(panel, /<CollapsedSourcePanel onToggle=\{onToggle\} \/>/);
-assert.doesNotMatch(panel, /scrollIntoView/);
+assert.match(panel, /EditorView\.scrollIntoView/);
+assert.match(panel, /y: "center"/);
+assert.match(panel, /const transaction: TransactionSpec = \{ effects \}/);
+assert.match(panel, /transaction\.selection/);
+assert.match(panel, /참조하는 컬럼 SQL/);
+assert.match(panel, /참조되는 컬럼 SQL/);
+assert.match(canvasSurface, /SqlErdSelectionContextProvider/);
+assert.match(relationShape, /contextual/);
 assert.match(panel, /resolveSqlSourceEditorDialect/);
 assert.match(panel, /setLastResolvedDialect\(parseResult\.resolvedDialect\)/);
 assert.match(panel, /languageCompartmentRef/);

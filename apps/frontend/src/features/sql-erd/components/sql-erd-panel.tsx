@@ -19,7 +19,11 @@ import {
   indentOnInput,
   syntaxHighlighting
 } from "@codemirror/language";
-import { Compartment, EditorState } from "@codemirror/state";
+import {
+  Compartment,
+  EditorState,
+  type TransactionSpec
+} from "@codemirror/state";
 import {
   drawSelection,
   EditorView,
@@ -181,6 +185,12 @@ import {
   type SqltoerdSourceRange
 } from "@/features/sql-erd/utils/sql-source-map";
 import {
+  clampSqlErdSourceNavigationRange,
+  resolveSqlErdSourceNavigationTarget,
+  type SqlErdSourceNavigationRequest,
+  type SqlErdSourceNavigationTarget
+} from "@/features/sql-erd/utils/source-navigation";
+import {
   createSqlErdModelSqlHistory,
   createSqlErdNormalizedSqlPreview,
   createSqlErdSqlLineDiff,
@@ -341,6 +351,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const panelContainerRef = useRef<HTMLElement | null>(null);
   const manualAutosaveRetryRef = useRef(false);
   const sessionLoadRequestIdRef = useRef(0);
+  const sourceNavigationRequestIdRef = useRef(0);
+  const lastAutoNavigatedRelationIdRef = useRef<string | null>(null);
   const hasLoadedSessionRef = useRef(false);
   const currentSessionIdRef = useRef(sessionId);
   const autosaveGateRef = useRef<SqlErdAutosaveGateState>({
@@ -551,6 +563,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     useState<SqltoerdResolvedDialect | null>(null);
   const [sqlSourceMap, setSqlSourceMap] =
     useState<SqltoerdSourceMap | null>(null);
+  const [sourceNavigationRequest, setSourceNavigationRequest] =
+    useState<SqlErdSourceNavigationRequest | null>(null);
   const [normalizedSqlPreview, setNormalizedSqlPreview] =
     useState<SqlErdNormalizedSqlPreview | null>(null);
   const [normalizedSqlApplyError, setNormalizedSqlApplyError] = useState<
@@ -792,6 +806,62 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       }),
     [selectedSqlErdObject, sqlErdEditState.draftSourceText, sqlSourceMap]
   );
+  const handleNavigateRelationSource = useCallback(
+    (
+      relationId: string,
+      target: SqlErdSourceNavigationTarget = "constraint"
+    ) => {
+      if (
+        !sqlSourceMap ||
+        sqlSourceMap.sourceText !==
+          sqlErdEditStateRef.current.draftSourceText
+      ) {
+        return false;
+      }
+
+      const range = resolveSqlErdSourceNavigationTarget(
+        sqlSourceMap,
+        relationId,
+        target
+      );
+
+      if (!range) {
+        return false;
+      }
+
+      sourceNavigationRequestIdRef.current += 1;
+      setIsSourceOpen(true);
+      setSourceNavigationRequest({
+        id: sourceNavigationRequestIdRef.current,
+        range
+      });
+      return true;
+    },
+    [sqlSourceMap]
+  );
+  useEffect(() => {
+    if (selectedSqlErdObject.type !== "relation") {
+      lastAutoNavigatedRelationIdRef.current = null;
+      return;
+    }
+
+    if (
+      lastAutoNavigatedRelationIdRef.current ===
+      selectedSqlErdObject.relationId
+    ) {
+      return;
+    }
+
+    if (
+      handleNavigateRelationSource(
+        selectedSqlErdObject.relationId,
+        "constraint"
+      )
+    ) {
+      lastAutoNavigatedRelationIdRef.current =
+        selectedSqlErdObject.relationId;
+    }
+  }, [handleNavigateRelationSource, selectedSqlErdObject]);
   const modelIndex = useMemo(
     () => createSqltoerdModelIndex(sqlErdViewSession.modelJson),
     [sqlErdViewSession.modelJson]
@@ -846,6 +916,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     setTablePinState(createSqlErdTablePinState());
+    setSourceNavigationRequest(null);
+    sourceNavigationRequestIdRef.current = 0;
+    lastAutoNavigatedRelationIdRef.current = null;
   }, [sessionId]);
 
   useEffect(() => {
@@ -2285,6 +2358,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         sourceText={sqlErdEditState.draftSourceText}
         resolvedDialect={sourceEditorDialect}
         relationSourceRanges={selectedRelationSourceRanges}
+        sourceNavigationRequest={sourceNavigationRequest}
         width={clampedSourcePanelWidth}
       />
       {isSourceOpen ? (
@@ -2361,6 +2435,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         onDeleteForeignKey={handlePreviewForeignKeyDelete}
         onClearTablePin={handleClearTablePin}
         onNavigateToPinnedTable={handleNavigateToPinnedTable}
+        onNavigateRelationSource={handleNavigateRelationSource}
         onPinTable={handlePinTable}
         onUpdateForeignKey={handlePreviewForeignKeyUpdate}
         onToggle={() => setIsInspectorOpen((current) => !current)}
@@ -2565,6 +2640,7 @@ type SourcePanelProps = PanelToggleProps & {
   sourceText: string;
   resolvedDialect: SqltoerdResolvedDialect;
   relationSourceRanges: SqltoerdSourceRange[];
+  sourceNavigationRequest: SqlErdSourceNavigationRequest | null;
   width: number;
 };
 
@@ -2587,6 +2663,7 @@ function SourcePanel({
   sourceText,
   resolvedDialect,
   relationSourceRanges,
+  sourceNavigationRequest,
   width
 }: SourcePanelProps) {
   if (!isOpen) {
@@ -2697,6 +2774,7 @@ function SourcePanel({
           onChange={onSourceTextChange}
           readOnly={isSourceTextReadOnly}
           relationSourceRanges={relationSourceRanges}
+          navigationRequest={sourceNavigationRequest}
           value={sourceText}
         />
       </div>
@@ -2766,6 +2844,7 @@ function CollapsedSourcePanel({ onToggle }: { onToggle: () => void }) {
 
 type SqlSourceEditorProps = {
   dialect: SqltoerdResolvedDialect;
+  navigationRequest: SqlErdSourceNavigationRequest | null;
   onChange: (sourceText: string) => void;
   readOnly: boolean;
   relationSourceRanges: SqltoerdSourceRange[];
@@ -2774,6 +2853,7 @@ type SqlSourceEditorProps = {
 
 function SqlSourceEditor({
   dialect,
+  navigationRequest,
   onChange,
   readOnly,
   relationSourceRanges,
@@ -2785,6 +2865,7 @@ function SqlSourceEditor({
   const readOnlyCompartmentRef = useRef(new Compartment());
   const relationSourceCompartmentRef = useRef(new Compartment());
   const isApplyingExternalValueRef = useRef(false);
+  const lastNavigationRequestIdRef = useRef<number | null>(null);
   const onChangeRef = useRef(onChange);
 
   useEffect(() => {
@@ -2851,37 +2932,67 @@ function SqlSourceEditor({
   useEffect(() => {
     const view = viewRef.current;
 
-    if (!view || view.state.doc.toString() === value) {
-      return;
-    }
-
-    isApplyingExternalValueRef.current = true;
-    view.dispatch({
-      changes: {
-        from: 0,
-        insert: value,
-        to: view.state.doc.length
-      }
-    });
-    isApplyingExternalValueRef.current = false;
-  }, [value]);
-
-  useEffect(() => {
-    const view = viewRef.current;
-
     if (!view) {
       return;
     }
 
-    view.dispatch({
-      effects: relationSourceCompartmentRef.current.reconfigure(
+    const hasDocumentChange = view.state.doc.toString() !== value;
+    const isNewNavigationRequest = Boolean(
+      navigationRequest &&
+        navigationRequest.id !== lastNavigationRequestIdRef.current
+    );
+    const navigationRange =
+      isNewNavigationRequest && navigationRequest
+        ? clampSqlErdSourceNavigationRange(
+            navigationRequest.range,
+            value.length
+          )
+        : null;
+    const effects = [
+      relationSourceCompartmentRef.current.reconfigure(
         createSqlErdRelationSourceDecorationExtension(
           relationSourceRanges,
-          view.state.doc.length
+          value.length
         )
       )
-    });
-  }, [relationSourceRanges]);
+    ];
+
+    if (navigationRange) {
+      effects.push(
+        EditorView.scrollIntoView(navigationRange.from, { y: "center" })
+      );
+    }
+
+    const transaction: TransactionSpec = { effects };
+
+    if (hasDocumentChange) {
+      transaction.changes = {
+        from: 0,
+        insert: value,
+        to: view.state.doc.length
+      };
+    }
+
+    if (navigationRange) {
+      transaction.selection = {
+        anchor: navigationRange.from,
+        head: navigationRange.to
+      };
+      lastNavigationRequestIdRef.current = navigationRequest?.id ?? null;
+    } else if (hasDocumentChange) {
+      transaction.selection = {
+        anchor: Math.min(view.state.selection.main.anchor, value.length),
+        head: Math.min(view.state.selection.main.head, value.length)
+      };
+    }
+
+    isApplyingExternalValueRef.current = hasDocumentChange;
+    try {
+      view.dispatch(transaction);
+    } finally {
+      isApplyingExternalValueRef.current = false;
+    }
+  }, [navigationRequest, relationSourceRanges, value]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
@@ -3263,6 +3374,10 @@ type InspectorPanelProps = PanelToggleProps & {
   }) => SqltoerdForeignKeyEditResult | null;
   onClearTablePin: () => void;
   onNavigateToPinnedTable: () => void;
+  onNavigateRelationSource: (
+    relationId: string,
+    target: SqlErdSourceNavigationTarget
+  ) => boolean;
   onPinTable: () => void;
   onUpdateForeignKey: (input: {
     relationId: string;
@@ -3285,6 +3400,7 @@ function InspectorPanel({
   onDeleteForeignKey,
   onClearTablePin,
   onNavigateToPinnedTable,
+  onNavigateRelationSource,
   onPinTable,
   onUpdateForeignKey,
   onToggle,
@@ -3342,6 +3458,7 @@ function InspectorPanel({
           onAddForeignKey={onAddForeignKey}
           onConvertAnnotationToForeignKey={onConvertAnnotationToForeignKey}
           onDeleteForeignKey={onDeleteForeignKey}
+          onNavigateRelationSource={onNavigateRelationSource}
           onUpdateForeignKey={onUpdateForeignKey}
           viewModel={viewModel}
         />
@@ -3508,6 +3625,7 @@ function InspectorContent({
   onAddForeignKey,
   onConvertAnnotationToForeignKey,
   onDeleteForeignKey,
+  onNavigateRelationSource,
   onUpdateForeignKey,
   viewModel
 }: {
@@ -3527,6 +3645,10 @@ function InspectorContent({
   onDeleteForeignKey: (input: {
     relationId: string;
   }) => SqltoerdForeignKeyEditResult | null;
+  onNavigateRelationSource: (
+    relationId: string,
+    target: SqlErdSourceNavigationTarget
+  ) => boolean;
   onUpdateForeignKey: (input: {
     relationId: string;
     toColumnId: string;
@@ -3555,6 +3677,7 @@ function InspectorContent({
         canEditForeignKey={canAddForeignKey}
         modelJson={modelJson}
         onDeleteForeignKey={onDeleteForeignKey}
+        onNavigateRelationSource={onNavigateRelationSource}
         onUpdateForeignKey={onUpdateForeignKey}
         viewModel={viewModel}
       />
@@ -3864,6 +3987,7 @@ function RelationInspector({
   canEditForeignKey,
   modelJson,
   onDeleteForeignKey,
+  onNavigateRelationSource,
   onUpdateForeignKey,
   viewModel
 }: {
@@ -3872,6 +3996,10 @@ function RelationInspector({
   onDeleteForeignKey: (input: {
     relationId: string;
   }) => SqltoerdForeignKeyEditResult | null;
+  onNavigateRelationSource: (
+    relationId: string,
+    target: SqlErdSourceNavigationTarget
+  ) => boolean;
   onUpdateForeignKey: (input: {
     relationId: string;
     toColumnId: string;
@@ -3989,6 +4117,24 @@ function RelationInspector({
           />
         ) : null}
         {relationNote ? <InspectorRow label="메모" value={relationNote} /> : null}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          aria-label="참조하는 컬럼의 SQL 위치로 이동"
+          className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-medium transition-colors hover:bg-muted"
+          onClick={() => onNavigateRelationSource(relation.id, "from")}
+          type="button"
+        >
+          참조하는 컬럼 SQL
+        </button>
+        <button
+          aria-label="참조되는 컬럼의 SQL 위치로 이동"
+          className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-medium transition-colors hover:bg-muted"
+          onClick={() => onNavigateRelationSource(relation.id, "to")}
+          type="button"
+        >
+          참조되는 컬럼 SQL
+        </button>
       </div>
       <div className="space-y-3 rounded-md border p-3">
         <div className="flex items-center justify-between gap-3">
