@@ -31,6 +31,24 @@ export type AgentRunRequestContext =
       surface: "pr_review";
       sessionId: string;
     }
+  | {
+      surface: "canvas";
+      canvasId: string;
+      canvasContext: {
+        presentationMode: "interactive" | "background";
+        selectedShapeIds?: string[];
+        shapeSummaries?: unknown[];
+        selectedScene?: Record<string, unknown> | null;
+        selectedSceneError?: string | null;
+        toolHelpMode?: boolean;
+        viewport?: {
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+        } | null;
+      };
+    }
   | null;
 
 export type AgentResourceRef = {

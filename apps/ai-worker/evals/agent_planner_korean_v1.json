@@ -1,6 +1,6 @@
 {
   "version": "agent-planner-korean:v1",
-  "toolSchemaVersion": "agent-tools:v4",
+  "toolSchemaVersion": "agent-tools:v5",
   "tools": [
     {
       "name": "list_calendar_events",

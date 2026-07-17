@@ -20,9 +20,9 @@ not read, create, update, delete, or represent them as Canvas shapes.
 - AI Worker classifies the request into a bounded Canvas intent and extracts
   typed arguments. It must not choose an arbitrary executable action, mutate
   Canvas tables, or call Canvas domain services.
-- The schema reserves `parentAgentRunId` for a future general-Agent-to-Canvas
-  delegation path. That integration is not exposed by this API yet, and it must
-  remain Canvas-only when added.
+- General PILO Agent delegation uses the internal `CanvasAgentService` contract
+  with `parentAgentRunId` and `source=general_agent_delegate`. These fields are
+  server-owned and are not accepted from the public Canvas Agent create body.
 - The requester alone can read or cancel their Canvas Agent runs. Legacy draft
   apply/discard endpoints remain available only for previews created before the
   read-only action restriction.
@@ -51,6 +51,24 @@ Frontend -> App Server Canvas Agent API -> Canvas Agent run + SQS job
   -> result saved to run/step
   -> completed explanation/search/navigation result or static HTML artifact
 ```
+
+The same runtime also accepts internal delegation from PILO Agent:
+
+```text
+PILO Agent planner -> delegate_canvas_agent App Server tool
+  -> resolve one Workspace Canvas and keep the latest user prompt unchanged
+  -> CanvasAgentService creates a child run
+     (source=general_agent_delegate, parentAgentRunId=PILO Agent run id)
+  -> normal Canvas Agent routing and handlers
+  -> child resultSummary copied verbatim to the parent Agent finalAnswer
+```
+
+The parent Agent does not call the Canvas planner directly and does not classify
+Canvas sub-intents. When the child produces an HTML artifact, PILO AI fetches the
+same child-run detail and renders the same sandboxed preview/copy experience. If
+the matching Canvas editor is currently active, the existing Canvas presenter may
+also create the code block and bound connector through the normal roomState patch
+path; outside that Canvas, delegation remains non-mutating.
 
 For a shape-finding request, Canvas Agent uses this bounded route:
 
@@ -128,9 +146,9 @@ must not add JavaScript behavior or contradict user-authored content.
   produced by the previous Worker remain executable during rollout.
 - Deterministic toolbar-help actions skip AI Worker classification only when the
   request explicitly uses tool-help mode.
-- In normal mode every prompt is interpreted as a search for existing Canvas
-  content. Generation or mutation wording cannot enable a write action; the
-  classifier extracts only the existing content to search for.
+- In normal mode the bounded classifier can select `find_shapes`, `generate_html`,
+  or `unsupported`. Only `generate_html` with a complete explicit selection can
+  produce a static artifact; mutation wording cannot enable Canvas shape writes.
 
 ## Disabled legacy generation contract
 

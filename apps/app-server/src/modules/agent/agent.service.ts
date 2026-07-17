@@ -234,7 +234,7 @@ const MAX_PROMPT_BYTES = 32768;
 const MAX_RUN_INPUT_BYTES = 4000;
 const MAX_CLIENT_REQUEST_ID_BYTES = 128;
 const MAX_TIMEZONE_LENGTH = 64;
-const MAX_REQUEST_CONTEXT_BYTES = 2048;
+const MAX_REQUEST_CONTEXT_BYTES = 196_608;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const AGENT_RUN_STATUSES: AgentRunStatus[] = [
@@ -723,14 +723,36 @@ export class AgentService {
       return null;
     }
 
+    if (!this.isPlainObject(value)) {
+      throw badRequest("requestContext must be a valid Agent request context");
+    }
+
+    if (value.surface === "canvas") {
+      if (
+        Object.keys(value).length !== 3 ||
+        typeof value.canvasId !== "string" ||
+        !UUID_PATTERN.test(value.canvasId) ||
+        !this.isPlainObject(value.canvasContext) ||
+        Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_REQUEST_CONTEXT_BYTES
+      ) {
+        throw badRequest("requestContext must be a valid Agent request context");
+      }
+      if (this.containsForbiddenJsonKey(value.canvasContext)) {
+        throw badRequest("requestContext.canvasContext contains a forbidden field");
+      }
+      return {
+        surface: "canvas",
+        canvasId: value.canvasId,
+        canvasContext: value.canvasContext
+      };
+    }
+
     if (
-      !this.isPlainObject(value) ||
       Object.keys(value).length !== 2 ||
       (value.surface !== "sql_erd" && value.surface !== "pr_review") ||
       typeof value.sessionId !== "string" ||
       !UUID_PATTERN.test(value.sessionId) ||
-      Buffer.byteLength(JSON.stringify(value), "utf8") >
-        MAX_REQUEST_CONTEXT_BYTES
+      Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_REQUEST_CONTEXT_BYTES
     ) {
       throw badRequest("requestContext must be a valid Agent request context");
     }
@@ -763,6 +785,23 @@ export class AgentService {
 
       if (!session) {
         throw notFound("SQLtoERD session not found");
+      }
+      return;
+    }
+
+    if (requestContext.surface === "canvas") {
+      const canvas = await this.database.queryOne<{ id: string }>(
+        `
+          SELECT id
+          FROM canvas
+          WHERE id = $1
+            AND workspace_id = $2
+            AND board_type = 'freeform'
+        `,
+        [requestContext.canvasId, workspaceId]
+      );
+      if (!canvas) {
+        throw notFound("Canvas not found");
       }
       return;
     }
@@ -1095,6 +1134,20 @@ export class AgentService {
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
         value
       )
+    );
+  }
+
+  private containsForbiddenJsonKey(value: unknown): boolean {
+    if (Array.isArray(value)) {
+      return value.some((item) => this.containsForbiddenJsonKey(item));
+    }
+    if (!this.isPlainObject(value)) {
+      return false;
+    }
+    return Object.entries(value).some(
+      ([key, child]) =>
+        (this.isForbiddenJsonKey(key) && !this.isSafeSelectionToken(key, child)) ||
+        this.containsForbiddenJsonKey(child)
     );
   }
 

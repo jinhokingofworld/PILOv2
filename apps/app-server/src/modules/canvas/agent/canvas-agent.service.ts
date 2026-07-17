@@ -70,6 +70,44 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     canvasId: string,
     input: CreateCanvasAgentRunRequest
   ): Promise<CanvasAgentRunPayload> {
+    return this.createRunWithOrigin(currentUserId, workspaceId, canvasId, input, {
+      parentAgentRunId: null,
+      source: "canvas_chat"
+    });
+  }
+
+  async createDelegatedRun(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    parentAgentRunId: string,
+    input: CreateCanvasAgentRunRequest
+  ): Promise<CanvasAgentRunPayload> {
+    if (
+      !(await this.repository.isOwnedParentAgentRun(
+        parentAgentRunId,
+        workspaceId,
+        currentUserId
+      ))
+    ) {
+      throw notFound("Parent Agent run not found");
+    }
+    return this.createRunWithOrigin(currentUserId, workspaceId, canvasId, input, {
+      parentAgentRunId,
+      source: "general_agent_delegate"
+    });
+  }
+
+  private async createRunWithOrigin(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: CreateCanvasAgentRunRequest,
+    origin: {
+      parentAgentRunId: string | null;
+      source: "canvas_chat" | "general_agent_delegate";
+    }
+  ): Promise<CanvasAgentRunPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
     const values = validateCanvasAgentRunRequest(input);
     const canvasRevision = await this.repository.getCanvasLatestOpSeq(workspaceId, canvasId);
@@ -78,7 +116,12 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     if (values.clientRequestId) {
       const existing = await this.repository.findRunByClientRequestId(workspaceId, canvasId, currentUserId, values.clientRequestId);
       if (existing) {
-        if (existing.prompt !== values.prompt || JSON.stringify(this.normalizeContext(existing.context_json)) !== JSON.stringify(values.context)) {
+        if (
+          existing.prompt !== values.prompt ||
+          existing.source !== origin.source ||
+          existing.parent_agent_run_id !== origin.parentAgentRunId ||
+          JSON.stringify(this.normalizeContext(existing.context_json)) !== JSON.stringify(values.context)
+        ) {
           throw canvasAgentClientRequestIdConflict("Canvas Agent clientRequestId was already used for a different request");
         }
         return this.mapRun(existing);
@@ -91,7 +134,9 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       clientRequestId: values.clientRequestId,
       context: values.context,
       currentUserId,
+      parentAgentRunId: origin.parentAgentRunId,
       prompt: values.prompt,
+      source: origin.source,
       workspaceId
     });
 

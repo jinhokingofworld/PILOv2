@@ -15,6 +15,7 @@ const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
 const SQL_ERD_SECOND_SESSION_ID = "88888888-8888-4888-8888-888888888888";
 const PR_REVIEW_SESSION_ID = "99999999-9999-4999-8999-999999999998";
+const CANVAS_ID = "99999999-9999-4999-8999-999999999999";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CONFIRMATION_ID = "55555555-5555-5555-5555-555555555555";
 const MESSAGE_ID = "66666666-6666-4666-8666-666666666666";
@@ -43,6 +44,19 @@ const prReviewRequestContextMigration = readFileSync(
   prReviewRequestContextMigrationPath,
   "utf8"
 );
+const canvasRequestContextMigrationPath = new URL(
+  "../../../../db/migrations/096_add_canvas_agent_request_context.sql",
+  import.meta.url
+);
+assert.equal(
+  existsSync(canvasRequestContextMigrationPath),
+  true,
+  "Canvas request context migration should exist"
+);
+const canvasRequestContextMigration = readFileSync(
+  canvasRequestContextMigrationPath,
+  "utf8"
+);
 assert.match(
   prReviewRequestContextMigration,
   /request_context_json->>'surface' IN \('sql_erd', 'pr_review'\)/
@@ -50,6 +64,22 @@ assert.match(
 assert.match(
   prReviewRequestContextMigration,
   /request_context_json - 'surface' - 'sessionId'\) = '\{\}'::jsonb/
+);
+assert.match(
+  canvasRequestContextMigration,
+  /request_context_json->>'surface' = 'canvas'/
+);
+assert.match(
+  canvasRequestContextMigration,
+  /request_context_json \?& ARRAY\['surface', 'canvasId', 'canvasContext'\]/
+);
+assert.match(
+  canvasRequestContextMigration,
+  /request_context_json - 'surface' - 'canvasId' - 'canvasContext'\) = '\{\}'::jsonb/
+);
+assert.match(
+  canvasRequestContextMigration,
+  /octet_length\(request_context_json::text\) <= 262144/
 );
 
 assert.match(
@@ -353,6 +383,18 @@ class FakeDatabaseService {
         (this.state.prReviewSessionRows ?? []).find(
           (session) =>
             session.id === sessionId && session.workspace_id === workspaceId
+        ) ?? null
+      );
+    }
+
+    if (text.includes("FROM canvas")) {
+      const [canvasId, workspaceId] = values;
+      return (
+        (this.state.canvasRows ?? []).find(
+          (canvas) =>
+            canvas.id === canvasId &&
+            canvas.workspace_id === workspaceId &&
+            canvas.board_type === "freeform"
         ) ?? null
       );
     }
@@ -1071,6 +1113,45 @@ for (const latestStep of [
 }
 
 {
+  const requestContext = {
+    surface: "canvas",
+    canvasId: CANVAS_ID,
+    canvasContext: {
+      presentationMode: "interactive",
+      selectedShapeIds: ["shape:frame"],
+      toolHelpMode: false
+    }
+  };
+  const { service, agentLoggingService } = createService({
+    loggingResult: {
+      run: createStoredRun({ requestContext }),
+      created: true
+    },
+    state: {
+      listRows: [],
+      runRows: [],
+      stepRows: [],
+      confirmationRows: [],
+      canvasRows: [
+        {
+          id: CANVAS_ID,
+          workspace_id: WORKSPACE_ID,
+          board_type: "freeform"
+        }
+      ]
+    }
+  });
+
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "선택한 화면을 HTML로 만들어줘",
+    requestContext
+  });
+
+  assert.deepEqual(result.run.requestContext, requestContext);
+  assert.deepEqual(agentLoggingService.calls[0].input.requestContext, requestContext);
+}
+
+{
   const { service, agentLoggingService } = createService({
     state: {
       listRows: [],
@@ -1129,6 +1210,8 @@ for (const requestContext of [
   { surface: "board", sessionId: SQL_ERD_SESSION_ID },
   { surface: "sql_erd", sessionId: "not-a-uuid" },
   { surface: "sql_erd", sessionId: SQL_ERD_SESSION_ID, extra: true },
+  { surface: "canvas", canvasId: CANVAS_ID, canvasContext: {}, extra: true },
+  { surface: "canvas", canvasId: "not-a-uuid", canvasContext: {} },
   "sql_erd"
 ]) {
   const { service } = createService();

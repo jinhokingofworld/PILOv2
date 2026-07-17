@@ -7,7 +7,8 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState
+  useState,
+  useSyncExternalStore
 } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -18,6 +19,7 @@ import {
   MessageCircle,
   SendHorizontal,
   Workflow,
+  Wrench,
   X
 } from "lucide-react";
 
@@ -35,6 +37,11 @@ import {
 import { AgentConfirmationCard } from "@/features/agent/components/agent-confirmation-card";
 import { AgentResourceLinks } from "@/features/agent/components/agent-resource-links";
 import { AgentSqlErdSessionCandidates } from "@/features/agent/components/agent-sql-erd-session-candidates";
+import { AgentCanvasArtifact } from "@/features/agent/components/agent-canvas-artifact";
+import {
+  getCanvasAgentDelegationAdapter,
+  subscribeCanvasAgentDelegationAdapter,
+} from "@/features/agent/canvas-delegation-context";
 import { readAgentRequestContext } from "@/features/agent/request-context";
 import {
   didAgentRunAcceptInput,
@@ -321,6 +328,12 @@ export function AgentChatWidget() {
     useState<AgentConfirmationActionState | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const activeRunAbortControllerRef = useRef<AbortController | null>(null);
+  const canvasDelegationAdapter = useSyncExternalStore(
+    subscribeCanvasAgentDelegationAdapter,
+    getCanvasAgentDelegationAdapter,
+    () => null,
+  );
+  const [isCanvasToolHelpMode, setIsCanvasToolHelpMode] = useState(false);
 
   const isBusy = busyState !== "idle";
   const hasActiveAgentRequest =
@@ -350,6 +363,10 @@ export function AgentChatWidget() {
       activeRunAbortControllerRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    setIsCanvasToolHelpMode(false);
+  }, [canvasDelegationAdapter?.canvasId]);
 
   useEffect(() => {
     if (!hasPendingConfirmation) {
@@ -600,10 +617,12 @@ export function AgentChatWidget() {
     setBusyState("submitting");
 
     try {
-      const requestContext = readAgentRequestContext(
-        window.location.pathname,
-        window.location.search
-      );
+      const requestContext = canvasDelegationAdapter
+        ? await canvasDelegationAdapter.buildRequestContext(isCanvasToolHelpMode)
+        : readAgentRequestContext(
+            window.location.pathname,
+            window.location.search
+          );
       const createdRunPayload = await agentApiClient.createRun(
         workspaceId,
         {
@@ -835,6 +854,20 @@ export function AgentChatWidget() {
                 </div>
               </div>
 
+              {canvasDelegationAdapter ? (
+                <Button
+                  type="button"
+                  variant={isCanvasToolHelpMode ? "secondary" : "ghost"}
+                  size="sm"
+                  aria-pressed={isCanvasToolHelpMode}
+                  onClick={() => setIsCanvasToolHelpMode((current) => !current)}
+                  className="ml-auto gap-1.5"
+                >
+                  <Wrench className="size-3.5" />
+                  기능 설명
+                </Button>
+              ) : null}
+
               <Button
                 type="button"
                 variant="ghost"
@@ -923,6 +956,9 @@ export function AgentChatWidget() {
                       ) : null}
                       {message.run ? (
                         <AgentResourceLinks run={message.run} />
+                      ) : null}
+                      {message.run?.status === "completed" ? (
+                        <AgentCanvasArtifact run={message.run} />
                       ) : null}
                     </div>
                   </div>

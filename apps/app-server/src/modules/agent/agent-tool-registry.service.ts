@@ -4,6 +4,7 @@ import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service"
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
 import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service";
+import { CanvasAgentDelegationToolsService } from "./tools/canvas-agent-delegation-tools.service";
 import type {
   AgentRunRequestContext,
   AgentToolDefinition
@@ -18,7 +19,8 @@ export class AgentToolRegistryService {
     meetingAgentToolsService?: MeetingAgentToolsService,
     boardAgentToolsService?: BoardAgentToolsService,
     sqlErdAgentToolsService?: SqlErdAgentToolsService,
-    prReviewAgentToolsService?: PrReviewAgentToolsService
+    prReviewAgentToolsService?: PrReviewAgentToolsService,
+    canvasAgentDelegationToolsService?: CanvasAgentDelegationToolsService
   ) {
     if (calendarAgentToolsService) {
       this.registerMany(calendarAgentToolsService.listDefinitions());
@@ -38,6 +40,10 @@ export class AgentToolRegistryService {
 
     if (prReviewAgentToolsService) {
       this.registerMany(prReviewAgentToolsService.listDefinitions());
+    }
+
+    if (canvasAgentDelegationToolsService) {
+      this.registerMany(canvasAgentDelegationToolsService.listDefinitions());
     }
   }
 

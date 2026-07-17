@@ -25,6 +25,8 @@ import {
 } from "tldraw";
 import { useValue } from "@tldraw/state-react";
 import { useCanvasAgent } from "@/features/canvas/agent/use-canvas-agent";
+import { buildCanvasAgentDelegationRequestContext } from "@/features/canvas/agent/canvas-agent-delegation-context";
+import { registerCanvasAgentDelegationAdapter } from "@/features/agent/canvas-delegation-context";
 import { CanvasWorkspaceLocationAdapter } from "@/features/canvas/canvas-workspace-location-adapter";
 import { TldrawSurface } from "@/shared/tldraw";
 import type { CanvasPresenceController } from "@/features/canvas/collaboration/useCanvasRoom";
@@ -1123,6 +1125,20 @@ export function CanvasEditor({
     onFrameSubtreeRequest,
     workspaceId: board.workspaceId,
   });
+  useEffect(() => {
+    if (!canvasEditor) return;
+    return registerCanvasAgentDelegationAdapter({
+      canvasId: board.id,
+      buildRequestContext: (toolHelpMode) =>
+        buildCanvasAgentDelegationRequestContext({
+          canvasId: board.id,
+          editor: canvasEditor,
+          onFrameSubtreeRequest,
+          toolHelpMode,
+        }),
+      presentRun: canvasAgent.adoptRun,
+    });
+  }, [board.id, canvasAgent.adoptRun, canvasEditor, onFrameSubtreeRequest]);
   const scheduleShapePreviewSend = useCallback(
     (payload: PendingShapePreviewPayload) => {
       if (!presence?.enabled) return;

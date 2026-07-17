@@ -344,6 +344,17 @@ export function useCanvasAgent({
     }
   }, [canvasId, client, presentRun, workspaceId]);
 
+  const adoptRun = useCallback(
+    (nextRun: CanvasAgentRun, selectedScene: CanvasAgentSelectedScene | null) => {
+      runIdRef.current = nextRun.id;
+      if (selectedScene) {
+        selectedSceneByRunIdRef.current.set(nextRun.id, selectedScene);
+      }
+      presentRun(nextRun);
+    },
+    [presentRun],
+  );
+
   const applyDraft = useCallback(async () => {
     if (!draft) return;
     try {
@@ -430,6 +441,7 @@ export function useCanvasAgent({
 
   return {
     applyDraft,
+    adoptRun,
     cancel,
     discardDraft,
     draft: draft?.status === "preview" ? draft : null,

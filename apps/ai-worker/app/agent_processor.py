@@ -13,7 +13,7 @@ from app.meeting_report_processor import InfrastructureError
 
 AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
 AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE = "agent_grounded_answer_requested"
-AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v4"
+AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v5"
 AGENT_PLANNER_TURN_LIMIT_MESSAGE = (
     "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. "
     "다음 요청에서 계속 진행할 내용을 알려주세요."
@@ -538,10 +538,24 @@ def _require_non_empty_string(payload: dict[str, object], key: str) -> str:
 def _parse_request_context(value: object) -> dict[str, str] | None:
     if value is None:
         return None
-    if not isinstance(value, dict) or set(value) != {"surface", "sessionId"}:
+    if not isinstance(value, dict):
         raise ValueError("Invalid requestContext")
 
     surface = value.get("surface")
+    if surface == "canvas":
+        if set(value) != {"surface", "canvasId"}:
+            raise ValueError("Invalid requestContext")
+        canvas_id = value.get("canvasId")
+        if not isinstance(canvas_id, str):
+            raise ValueError("Invalid requestContext")
+        try:
+            UUID(canvas_id)
+        except (ValueError, AttributeError, TypeError) as error:
+            raise ValueError("Invalid requestContext") from error
+        return {"surface": "canvas", "canvasId": canvas_id}
+
+    if set(value) != {"surface", "sessionId"}:
+        raise ValueError("Invalid requestContext")
     session_id = value.get("sessionId")
     if surface not in {"sql_erd", "pr_review"} or not isinstance(session_id, str):
         raise ValueError("Invalid requestContext")
@@ -1036,6 +1050,9 @@ def _agent_planner_system_prompt() -> str:
         "You are the PILO Workspace Agent planner. "
         "Return only JSON that matches the schema. "
         "Choose only tools from the provided tool list. "
+        "When delegate_canvas_agent is available, use it for requests about Canvas content, "
+        "the active Canvas selection, Canvas tool help, or static HTML generation from a Canvas selection. "
+        "Do not rewrite the user's prompt into the tool input; the App Server forwards the original wording. "
         "If no provided tool can handle the request, return unsupported. "
         "High-risk or excluded actions such as delete, PR review submission, "
         "label, milestone, or due date changes "

@@ -13,7 +13,10 @@ import {
   AgentToolSchemaSnapshotItem
 } from "./agent-job.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
-import type { AgentRunRequestContext } from "./types/agent-tool.types";
+import type {
+  AgentPlannerRequestContext,
+  AgentRunRequestContext
+} from "./types/agent-tool.types";
 
 const OUTBOX_SWEEP_INTERVAL_MS = 60_000;
 const OUTBOX_CLAIM_TIMEOUT_SECONDS = 60;
@@ -120,7 +123,7 @@ export class AgentOutboxPublisherService
         runId: claim.run_id,
         workspaceId: claim.workspace_id,
         requestedByUserId: claim.requested_by_user_id,
-        requestContext: claim.request_context_json,
+        requestContext: this.toPlannerRequestContext(claim.request_context_json),
         turnSequence: Number(claim.turn_sequence),
         toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
         tools: this.buildToolSchemaSnapshot(claim.request_context_json)
@@ -129,6 +132,19 @@ export class AgentOutboxPublisherService
     } catch {
       await this.markPublishFailure(claim);
     }
+  }
+
+  private toPlannerRequestContext(
+    requestContext: AgentRunRequestContext
+  ): AgentPlannerRequestContext {
+    if (requestContext?.surface !== "canvas") {
+      return requestContext;
+    }
+
+    return {
+      surface: "canvas",
+      canvasId: requestContext.canvasId
+    };
   }
 
   private async claimDueEvent(

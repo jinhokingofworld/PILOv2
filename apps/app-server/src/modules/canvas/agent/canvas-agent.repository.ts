@@ -45,7 +45,9 @@ export class CanvasAgentRepository {
     clientRequestId: string | null;
     context: CanvasAgentRequestContext;
     currentUserId: string;
+    parentAgentRunId: string | null;
     prompt: string;
+    source: "canvas_chat" | "general_agent_delegate";
     workspaceId: string;
   }): Promise<CanvasAgentRunRow> {
     const run = await this.database.queryOne<CanvasAgentRunRow>(
@@ -54,6 +56,7 @@ export class CanvasAgentRepository {
           workspace_id,
           canvas_id,
           requested_by_user_id,
+          parent_agent_run_id,
           source,
           status,
           prompt,
@@ -62,13 +65,15 @@ export class CanvasAgentRepository {
           client_request_id,
           result_json
         )
-        VALUES ($1, $2, $3, 'canvas_chat', 'queued', $4, $5::jsonb, $6, $7, '{}'::jsonb)
+        VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7::jsonb, $8, $9, '{}'::jsonb)
         RETURNING *
       `,
       [
         input.workspaceId,
         input.canvasId,
         input.currentUserId,
+        input.parentAgentRunId,
+        input.source,
         input.prompt,
         JSON.stringify(input.context),
         input.canvasRevision,
@@ -81,6 +86,24 @@ export class CanvasAgentRepository {
     }
 
     return run;
+  }
+
+  async isOwnedParentAgentRun(
+    parentAgentRunId: string,
+    workspaceId: string,
+    currentUserId: string
+  ): Promise<boolean> {
+    const row = await this.database.queryOne<{ id: string }>(
+      `
+        SELECT id
+        FROM agent_runs
+        WHERE id = $1
+          AND workspace_id = $2
+          AND requested_by_user_id = $3
+      `,
+      [parentAgentRunId, workspaceId, currentUserId]
+    );
+    return Boolean(row);
   }
 
   async findRunForRequester(

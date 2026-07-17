@@ -127,6 +127,17 @@ export interface CompleteAgentToolStepAndAdvanceResult {
   queuedNextPlannerTurn: boolean;
 }
 
+export interface DeferAgentToolStepInput extends CompleteAgentStepInput {
+  message: string;
+  riskLevel?: AgentRiskLevel | null;
+}
+
+export interface SettleDelegatedAgentToolInput extends CompleteAgentStepInput {
+  finalAnswer: string;
+  childStatus: "completed" | "failed" | "cancelled" | "expired";
+  errorMessage?: string | null;
+}
+
 export interface AgentRunPayload {
   id: string;
   workspaceId: string;
@@ -382,7 +393,22 @@ export class AgentLoggingService {
       return left === right;
     }
 
-    return left.surface === right.surface && left.sessionId === right.sessionId;
+    if (left.surface !== right.surface) {
+      return false;
+    }
+
+    if (left.surface === "canvas" && right.surface === "canvas") {
+      return (
+        left.canvasId === right.canvasId &&
+        JSON.stringify(left.canvasContext) === JSON.stringify(right.canvasContext)
+      );
+    }
+
+    return (
+      left.surface !== "canvas" &&
+      right.surface !== "canvas" &&
+      left.sessionId === right.sessionId
+    );
   }
 
   async startStep(
@@ -695,6 +721,178 @@ export class AgentLoggingService {
       });
 
       return this.mapStep(step);
+    });
+  }
+
+  async deferToolStep(
+    currentUserId: string,
+    workspaceId: string,
+    input: DeferAgentToolStepInput
+  ): Promise<AgentStepPayload> {
+    const outputSummary = this.assertSafeObject(
+      input.outputSummary ?? {},
+      OUTPUT_JSON_MAX_BYTES,
+      "step output"
+    );
+    const resourceRefs = this.assertSafeResourceRefs(
+      input.resourceRefs ?? [],
+      RESOURCE_REFS_MAX_BYTES,
+      "step resource refs"
+    );
+    const message = this.normalizeRequiredText(input.message, "deferred message");
+
+    return this.database.transaction(async (transaction) => {
+      const run = await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      if (run.status !== "running") {
+        throw new Error("Agent run is not running");
+      }
+      const step = await transaction.queryOne<AgentStepRow>(
+        `
+          UPDATE agent_steps
+          SET output_json = $3,
+              resource_refs = $4::jsonb,
+              error_code = NULL,
+              error_message = NULL,
+              updated_at = now()
+          WHERE id = $1
+            AND run_id = $2
+            AND status = 'running'
+          RETURNING *
+        `,
+        [
+          input.stepId,
+          input.runId,
+          outputSummary,
+          this.serializeResourceRefs(resourceRefs)
+        ]
+      );
+      if (!step) {
+        throw notFound("Agent step not found");
+      }
+      await transaction.execute(
+        `
+          UPDATE agent_runs
+          SET message = $2,
+              risk_level = COALESCE($3, risk_level),
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'running'
+        `,
+        [input.runId, message, input.riskLevel ?? null]
+      );
+      return this.mapStep(step);
+    });
+  }
+
+  async settleDelegatedToolStep(
+    currentUserId: string,
+    workspaceId: string,
+    input: SettleDelegatedAgentToolInput
+  ): Promise<boolean> {
+    const outputSummary = this.assertSafeObject(
+      input.outputSummary ?? {},
+      OUTPUT_JSON_MAX_BYTES,
+      "step output"
+    );
+    const finalAnswer = this.normalizeRequiredText(
+      input.finalAnswer,
+      "delegated final answer"
+    );
+    const errorMessage = input.errorMessage
+      ? this.normalizeRequiredText(input.errorMessage, "delegated error message")
+      : finalAnswer;
+
+    return this.database.transaction(async (transaction) => {
+      const run = await transaction.queryOne<AgentRunRow>(
+        `
+          SELECT *
+          FROM agent_runs
+          WHERE id = $1
+            AND workspace_id = $2
+            AND requested_by_user_id = $3
+          FOR UPDATE
+        `,
+        [input.runId, workspaceId, currentUserId]
+      );
+      if (!run || run.status !== "running") {
+        return false;
+      }
+
+      const completed = input.childStatus === "completed";
+      const step = await transaction.queryOne<AgentStepRow>(
+        `
+          UPDATE agent_steps
+          SET status = $3,
+              output_json = $4,
+              error_code = CASE WHEN $5::boolean THEN NULL ELSE 'CANVAS_AGENT_DELEGATION_FAILED' END,
+              error_message = CASE WHEN $5::boolean THEN NULL ELSE $6 END,
+              completed_at = now(),
+              updated_at = now()
+          WHERE id = $1
+            AND run_id = $2
+            AND status = 'running'
+          RETURNING *
+        `,
+        [
+          input.stepId,
+          input.runId,
+          completed ? "completed" : "failed",
+          outputSummary,
+          completed,
+          errorMessage
+        ]
+      );
+      if (!step) {
+        return false;
+      }
+
+      const settledRun = await transaction.queryOne<AgentRunRow>(
+        `
+          UPDATE agent_runs
+          SET status = $2,
+              message = $3,
+              final_answer = CASE WHEN $4::boolean THEN $3 ELSE NULL END,
+              error_code = CASE WHEN $4::boolean THEN NULL ELSE 'CANVAS_AGENT_DELEGATION_FAILED' END,
+              error_message = CASE WHEN $4::boolean THEN NULL ELSE $5 END,
+              completed_at = now(),
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'running'
+          RETURNING *
+        `,
+        [
+          input.runId,
+          completed ? "completed" : "failed",
+          finalAnswer,
+          completed,
+          errorMessage
+        ]
+      );
+      if (!settledRun) {
+        throw new Error("Delegated Agent run could not be settled");
+      }
+
+      await this.insertLog(transaction, {
+        workspaceId,
+        runId: input.runId,
+        stepId: step.id,
+        actorType: "app_server",
+        actorUserId: null,
+        level: completed ? "info" : "error",
+        eventType: completed
+          ? "canvas_delegation_completed"
+          : "canvas_delegation_failed",
+        message: completed
+          ? "Canvas Agent delegation completed"
+          : "Canvas Agent delegation failed",
+        metadata: { childStatus: input.childStatus },
+        resourceRefs: step.resource_refs
+      });
+      return true;
     });
   }
 

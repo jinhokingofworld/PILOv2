@@ -5,7 +5,7 @@ export type AgentResourceLink = {
   focus?: SqlErdAgentTableFocus;
   href: string;
   key: string;
-  label: "ERD 및 DDL 열기" | "집중 보기 열기";
+  label: string;
 };
 
 export type SqlErdSessionCandidate = {
@@ -17,6 +17,7 @@ export type SqlErdSessionCandidate = {
 };
 
 const SQL_ERD_SESSION_PATH = "/sql-erd/session";
+const CANVAS_PATH = "/canvas";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_SQL_ERD_SESSION_CANDIDATES = 5;
@@ -98,7 +99,7 @@ export function getAgentResourceLinks(
     }
 
     for (const resourceRef of step.resourceRefs) {
-      const link = toSqlErdSessionLink(resourceRef);
+      const link = toSqlErdSessionLink(resourceRef) ?? toCanvasLink(resourceRef);
       if (link) {
         links.set(link.key, link);
       }
@@ -106,6 +107,33 @@ export function getAgentResourceLinks(
   }
 
   return [...links.values()];
+}
+
+function toCanvasLink(
+  resourceRef: Record<string, unknown>
+): AgentResourceLink | null {
+  const metadata = isPlainObject(resourceRef.metadata) ? resourceRef.metadata : null;
+  const canvasId = metadata?.canvasId;
+  if (
+    resourceRef.domain !== "canvas" ||
+    resourceRef.resourceType !== "canvas_agent_run" ||
+    typeof resourceRef.resourceId !== "string" ||
+    !UUID_PATTERN.test(resourceRef.resourceId) ||
+    typeof canvasId !== "string" ||
+    !UUID_PATTERN.test(canvasId) ||
+    typeof resourceRef.url !== "string"
+  ) {
+    return null;
+  }
+  const href = `${CANVAS_PATH}?canvasId=${encodeURIComponent(canvasId)}`;
+  if (resourceRef.url !== href) {
+    return null;
+  }
+  return {
+    href,
+    key: `canvas:agent-run:${resourceRef.resourceId}`,
+    label: "캔버스에서 열기"
+  };
 }
 
 function toSqlErdSessionLink(

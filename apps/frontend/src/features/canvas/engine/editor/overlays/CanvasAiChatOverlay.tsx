@@ -7,7 +7,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { Bot, Check, Copy, Eye, SendHorizontal, X } from "lucide-react";
+import { Bot, SendHorizontal, X } from "lucide-react";
+import { CanvasHtmlArtifactPreview } from "@/components/canvas-html-artifact-preview";
 import { canvasAgentToolTargets } from "@/features/canvas/agent/canvas-agent-tool-targets";
 import type {
   CanvasAgentConversationMessage,
@@ -136,17 +137,6 @@ function toConversationMessages(messages: CanvasAiMessage[]): CanvasAgentConvers
     .slice(-10);
 }
 
-function buildSandboxedPreviewDocument(html: string) {
-  const policy = "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:";
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${policy}">`;
-  if (/<head(?:\s[^>]*)?>/i.test(html)) {
-    return html.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${meta}`);
-  }
-  return /<html(?:\s[^>]*)?>/i.test(html)
-    ? html.replace(/<html(?:\s[^>]*)?>/i, (root) => `${root}<head>${meta}</head>`)
-    : `<html><head>${meta}</head><body>${html}</body></html>`;
-}
-
 export function CanvasAiChatOverlay({
   anchor,
   artifact,
@@ -162,8 +152,6 @@ export function CanvasAiChatOverlay({
   statusMessage,
 }: CanvasAiChatOverlayProps) {
   const [input, setInput] = useState("");
-  const [isArtifactPreviewVisible, setIsArtifactPreviewVisible] = useState(false);
-  const [isArtifactCopied, setIsArtifactCopied] = useState(false);
   const [isToolHelpMode, setIsToolHelpMode] = useState(false);
   const [layout, setLayout] = useState<CanvasAiChatLayout | null>(null);
   const [messages, setMessages] = useState<CanvasAiMessage[]>([
@@ -220,11 +208,6 @@ export function CanvasAiChatOverlay({
     window.addEventListener("resize", keepLayoutInViewport);
     return () => window.removeEventListener("resize", keepLayoutInViewport);
   }, [anchor]);
-
-  useEffect(() => {
-    setIsArtifactPreviewVisible(false);
-    setIsArtifactCopied(false);
-  }, [artifact?.html]);
 
   useEffect(() => {
     if (!assistantFeedback || lastAssistantFeedbackRef.current === assistantFeedback) {
@@ -285,17 +268,6 @@ export function CanvasAiChatOverlay({
       );
       return nextMode;
     });
-  }
-
-  async function copyArtifact() {
-    if (!artifact) return;
-    try {
-      await navigator.clipboard.writeText(artifact.html);
-      setIsArtifactCopied(true);
-      window.setTimeout(() => setIsArtifactCopied(false), 1800);
-    } catch {
-      setIsArtifactCopied(false);
-    }
   }
 
   function beginLayoutInteraction(
@@ -443,38 +415,7 @@ export function CanvasAiChatOverlay({
               </p>
             ))}
             {artifact ? (
-              <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-xs text-slate-700">
-                <strong className="block text-sm text-slate-950">{artifact.title}</strong>
-                <span className="mt-1 block text-slate-500">
-                  정적 HTML/CSS 초안 · {artifact.sourceShapeIds.length}개 도형
-                </span>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    className="inline-flex items-center gap-1 rounded-lg bg-slate-950 px-3 py-1.5 font-medium text-white"
-                    onClick={() => void copyArtifact()}
-                    type="button"
-                  >
-                    {isArtifactCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                    {isArtifactCopied ? "복사됨" : "HTML 복사"}
-                  </button>
-                  <button
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700"
-                    onClick={() => setIsArtifactPreviewVisible((visible) => !visible)}
-                    type="button"
-                  >
-                    <Eye className="size-3.5" />
-                    {isArtifactPreviewVisible ? "미리보기 닫기" : "미리보기"}
-                  </button>
-                </div>
-                {isArtifactPreviewVisible ? (
-                  <iframe
-                    className="mt-3 aspect-[16/10] min-h-52 w-full rounded-lg border border-slate-200 bg-white"
-                    sandbox=""
-                    srcDoc={buildSandboxedPreviewDocument(artifact.html)}
-                    title={`${artifact.title} 미리보기`}
-                  />
-                ) : null}
-              </div>
+              <CanvasHtmlArtifactPreview artifact={artifact} />
             ) : null}
             {draft ? (
               <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-xs text-slate-700">

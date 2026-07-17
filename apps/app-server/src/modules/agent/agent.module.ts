@@ -7,6 +7,8 @@ import { MeetingModule } from "../meeting/meeting.module";
 import { PrReviewModule } from "../pr-review/pr-review.module";
 import { SqlErdModule } from "../sql-erd/sql-erd.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
+import { CanvasAgentModule } from "../canvas/agent/canvas-agent.module";
+import { AgentCanvasDelegationCompletionService } from "./agent-canvas-delegation-completion.service";
 import { AgentConfirmationService } from "./agent-confirmation.service";
 import { AgentController } from "./agent.controller";
 import { AgentExecutionService } from "./agent-execution.service";
@@ -26,6 +28,7 @@ import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service"
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
 import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service";
+import { CanvasAgentDelegationToolsService } from "./tools/canvas-agent-delegation-tools.service";
 
 @Module({
   imports: [
@@ -36,7 +39,8 @@ import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service
     MeetingModule,
     BoardModule,
     SqlErdModule,
-    PrReviewModule
+    PrReviewModule,
+    CanvasAgentModule
   ],
   controllers: [AgentController, AgentInternalController],
   providers: [
@@ -51,10 +55,12 @@ import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service
     AgentGroundedAnswerOutboxPublisherService,
     AgentPlannerService,
     AgentToolRegistryService,
+    AgentCanvasDelegationCompletionService,
     BoardContextResolverService,
     BoardAgentToolsService,
     CalendarAgentToolsService,
     MeetingAgentToolsService,
+    CanvasAgentDelegationToolsService,
     SqlErdAgentToolsService,
     PrReviewAgentToolsService
   ]

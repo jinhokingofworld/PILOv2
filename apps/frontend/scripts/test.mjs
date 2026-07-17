@@ -178,6 +178,10 @@ const canvasAiChatOverlay = await readFile(
   ),
   "utf8"
 );
+const canvasHtmlArtifactPreview = await readFile(
+  new URL("../src/components/canvas-html-artifact-preview.tsx", import.meta.url),
+  "utf8"
+);
 const canvasShapeSync = await readFile(
   new URL("../src/features/canvas/persistence/canvas-shape-sync.ts", import.meta.url),
   "utf8"
@@ -1540,7 +1544,8 @@ assert.match(canvasAiChatOverlay, /layoutStorageKey/);
 assert.match(canvasAiChatOverlay, /moveCanvasAiChatLayout/);
 assert.match(canvasAiChatOverlay, /resizeCanvasAiChatLayout/);
 assert.match(canvasAiChatOverlay, /min-h-0 flex-1/);
-assert.match(canvasAiChatOverlay, /aspect-\[16\/10\]/);
+assert.match(canvasAiChatOverlay, /CanvasHtmlArtifactPreview/);
+assert.match(canvasHtmlArtifactPreview, /aspect-\[16\/10\]/);
 assert.match(canvasAiChatOverlay, /overflow-y-auto/);
 assert.match(canvasAiChatOverlay, /scrollbar-width:none/);
 assert.match(piloCanvasShapeFactory, /createImportedCodeFolderShapes/);

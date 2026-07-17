@@ -751,6 +751,22 @@ export class AgentExecutionService {
       const outputSummary = this.buildOutputSummary(result);
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
 
+      if (result.status === "delegated") {
+        await this.agentLoggingService.deferToolStep(
+          currentUserId,
+          workspaceId,
+          {
+            runId,
+            stepId: step.id,
+            outputSummary,
+            resourceRefs,
+            riskLevel: definition.riskLevel,
+            message: "Canvas AI가 요청을 처리하고 있습니다."
+          }
+        );
+        return { status: "skipped", reason: "already_started" };
+      }
+
       if (definition.requiresGroundedAnswer) {
         await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs });
         await this.agentGroundedAnswerOutboxPublisherService

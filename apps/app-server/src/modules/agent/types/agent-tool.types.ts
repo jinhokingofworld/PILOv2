@@ -1,6 +1,17 @@
 export type AgentRiskLevel = "low" | "medium" | "high";
 
-export type AgentSurface = "sql_erd" | "pr_review";
+export type AgentJsonPrimitive = string | number | boolean | null;
+
+export type AgentJsonValue =
+  | AgentJsonPrimitive
+  | AgentJsonObject
+  | AgentJsonValue[];
+
+export interface AgentJsonObject {
+  [key: string]: AgentJsonValue;
+}
+
+export type AgentSurface = "sql_erd" | "pr_review" | "canvas";
 
 export type AgentToolExecutionMode =
   | "auto"
@@ -16,18 +27,19 @@ export type AgentRunRequestContext =
       surface: "pr_review";
       sessionId: string;
     }
+  | {
+      surface: "canvas";
+      canvasId: string;
+      canvasContext: AgentJsonObject;
+    }
   | null;
 
-export type AgentJsonPrimitive = string | number | boolean | null;
-
-export type AgentJsonValue =
-  | AgentJsonPrimitive
-  | AgentJsonObject
-  | AgentJsonValue[];
-
-export interface AgentJsonObject {
-  [key: string]: AgentJsonValue;
-}
+export type AgentPlannerRequestContext =
+  | Exclude<AgentRunRequestContext, { surface: "canvas" }>
+  | {
+      surface: "canvas";
+      canvasId: string;
+    };
 
 export type AgentToolInputSchema = AgentJsonObject;
 
