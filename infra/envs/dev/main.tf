@@ -213,6 +213,7 @@ module "ecs" {
         SQS_PR_REVIEW_ANALYSIS_QUEUE_URL    = module.sqs.pr_review_analysis_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL       = module.sqs.github_webhooks_queue_url
         SQS_GITHUB_SYNC_JOBS_QUEUE_URL      = module.sqs.github_sync_jobs_queue_url
+        SQS_WORKSPACE_INDEXING_QUEUE_URL    = module.sqs.workspace_indexing_queue_url
         FRONTEND_URL                        = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
         API_PUBLIC_ORIGIN                   = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         API_BASE_PATH                       = "/api/v1"

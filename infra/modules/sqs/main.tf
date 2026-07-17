@@ -87,3 +87,18 @@ resource "aws_sqs_queue" "github_sync_jobs" {
     maxReceiveCount     = 3
   })
 }
+
+resource "aws_sqs_queue" "workspace_indexing_dlq" {
+  name                      = "${var.name_prefix}-workspace-indexing-dlq"
+  message_retention_seconds = 1209600
+}
+
+resource "aws_sqs_queue" "workspace_indexing" {
+  name                       = "${var.name_prefix}-workspace-indexing"
+  visibility_timeout_seconds = 900
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.workspace_indexing_dlq.arn
+    maxReceiveCount     = 3
+  })
+}

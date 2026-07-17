@@ -54,6 +54,14 @@ output "github_sync_worker_dlq_arns" {
   value = [aws_sqs_queue.github_webhooks_dlq.arn, aws_sqs_queue.github_sync_jobs_dlq.arn]
 }
 
+output "workspace_indexing_queue_url" {
+  value = aws_sqs_queue.workspace_indexing.url
+}
+
+output "workspace_indexing_queue_arn" {
+  value = aws_sqs_queue.workspace_indexing.arn
+}
+
 output "queue_arns" {
   value = [
     aws_sqs_queue.ai_jobs.arn,
@@ -68,5 +76,7 @@ output "queue_arns" {
     aws_sqs_queue.github_webhooks_dlq.arn,
     aws_sqs_queue.github_sync_jobs.arn,
     aws_sqs_queue.github_sync_jobs_dlq.arn,
+    aws_sqs_queue.workspace_indexing.arn,
+    aws_sqs_queue.workspace_indexing_dlq.arn,
   ]
 }
