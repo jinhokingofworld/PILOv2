@@ -45,6 +45,9 @@ export function MeetingAudioPreflightDialog({
   };
 
   const levelPercent = Math.round(inputLevel * 100);
+  const selectedDevice = devices.find(
+    (device) => device.deviceId === selectedDeviceId
+  );
 
   return (
     <div
@@ -52,7 +55,7 @@ export function MeetingAudioPreflightDialog({
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm"
       role="dialog"
     >
-      <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-lg">
+      <div className="w-full min-w-0 max-w-md overflow-hidden rounded-xl border bg-card p-6 shadow-lg">
         <div className="space-y-2">
           <h2 className="text-base font-semibold">마이크 확인</h2>
           <p className="text-sm leading-6 text-muted-foreground">
@@ -61,12 +64,13 @@ export function MeetingAudioPreflightDialog({
         </div>
 
         <div className="mt-6 grid gap-5">
-          <label className="grid gap-2 text-sm font-medium" htmlFor="meeting-audio-device">
+          <label className="grid min-w-0 gap-2 text-sm font-medium" htmlFor="meeting-audio-device">
             입력 장치
             <select
               id="meeting-audio-device"
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+              className="h-10 w-full min-w-0 max-w-full truncate rounded-md border bg-background px-3 text-sm"
               disabled={status !== "ready" || devices.length === 0}
+              title={selectedDevice ? getDeviceLabel(selectedDevice, devices.indexOf(selectedDevice)) : undefined}
               value={selectedDeviceId ?? ""}
               onChange={(event) => void selectDevice(event.target.value)}
             >
@@ -79,9 +83,9 @@ export function MeetingAudioPreflightDialog({
           </label>
 
           <div className="grid gap-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-medium">입력 감도</span>
-              <span className="text-muted-foreground">{levelPercent}%</span>
+            <div className="flex min-w-0 items-center justify-between gap-3 text-sm">
+              <span className="min-w-0 font-medium">입력 감도</span>
+              <span className="shrink-0 text-muted-foreground">{levelPercent}%</span>
             </div>
             <div
               aria-label="마이크 입력 감도"

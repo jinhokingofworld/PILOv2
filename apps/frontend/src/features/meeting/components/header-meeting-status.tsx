@@ -1,15 +1,11 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { usePathname } from "next/navigation";
 
-import { useAuthSession } from "@/features/auth";
 import type {
   LiveKitConnectionQuality,
   LiveKitMeetingRoomStatus
 } from "@/features/meeting/hooks/use-livekit-meeting-room";
-import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
-import { useMeetingStateInvalidation } from "@/features/meeting/stores/meeting-state-invalidation-store";
 import {
   getHeaderMeetingStatusServerSnapshot,
   getHeaderMeetingStatusSnapshot,
@@ -128,42 +124,28 @@ function StatusIndicator({
 }
 
 export function HeaderMeetingStatus() {
-  const pathname = usePathname();
-  const authSession = useAuthSession();
-  const workspaceId = authSession?.activeWorkspaceId ?? "";
-  const accessToken = authSession?.accessToken.trim() ?? "";
-  const isMeetingRoute = pathname === "/meeting" || pathname.startsWith("/meeting/");
   const headerMeetingStatus = useSyncExternalStore(
     subscribeHeaderMeetingStatus,
     getHeaderMeetingStatusSnapshot,
     getHeaderMeetingStatusServerSnapshot
   );
-  const { canLoad, currentRecording, reloadCurrentMeeting } =
-    useMeetingWorkspaceData({
-      accessToken,
-      enabled: Boolean(workspaceId && accessToken && !isMeetingRoute),
-      reportsEnabled: false,
-      workspaceId
-    });
   const connectionStatus = headerMeetingStatus.connectionStatus;
   const connectionQuality = headerMeetingStatus.connectionQuality;
-  const recordingStatus = isMeetingRoute
-    ? headerMeetingStatus.recordingStatus
-    : currentRecording?.status;
+  const recordingStatus = headerMeetingStatus.recordingStatus;
 
-  useMeetingStateInvalidation(canLoad, reloadCurrentMeeting);
+  if (!headerMeetingStatus.hasConnectionSession) {
+    return null;
+  }
 
   return (
     <div
       aria-label="회의 상태"
       className="flex min-w-0 shrink-0 flex-nowrap items-center justify-end gap-2"
     >
-      {headerMeetingStatus.hasConnectionSession ? (
-        <StatusIndicator
-          label={getConnectionStatusLabel(connectionStatus, connectionQuality)}
-          tone={getConnectionTone(connectionStatus, connectionQuality)}
-        />
-      ) : null}
+      <StatusIndicator
+        label={getConnectionStatusLabel(connectionStatus, connectionQuality)}
+        tone={getConnectionTone(connectionStatus, connectionQuality)}
+      />
       <StatusIndicator
         label={getRecordingStatusLabel(recordingStatus)}
         tone={getRecordingTone(recordingStatus)}

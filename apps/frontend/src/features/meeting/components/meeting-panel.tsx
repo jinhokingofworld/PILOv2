@@ -7,6 +7,8 @@ import {
   Loader2,
   Mic,
   MicOff,
+  Volume2,
+  VolumeX,
   Phone,
   PhoneOff,
   Pencil,
@@ -1341,6 +1343,10 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
                         isCurrentUser && liveKitRoom.status === "connected";
                       const isMicEnabled =
                         hasKnownMicState && liveKitRoom.isMicrophoneEnabled;
+                      const remoteAudioSettings =
+                        liveKitRoom.remoteParticipantAudioSettings[
+                          participant.livekitIdentity
+                        ] ?? { muted: false, volume: 100 };
 
                       return (
                         <div
@@ -1376,6 +1382,55 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
                               )}
                             </div>
                           </div>
+                          {!isCurrentUser ? (
+                            <div className="flex shrink-0 items-center gap-2">
+                              <label className="sr-only" htmlFor={`participant-volume-${participant.id}`}>
+                                {getParticipantName(participant)} 수신 음량
+                              </label>
+                              <input
+                                aria-label={`${getParticipantName(participant)} 수신 음량`}
+                                className="h-2 w-20 accent-primary"
+                                id={`participant-volume-${participant.id}`}
+                                max="100"
+                                min="0"
+                                type="range"
+                                value={remoteAudioSettings.volume}
+                                onChange={(event) =>
+                                  liveKitRoom.setRemoteParticipantAudioSettings(
+                                    participant.livekitIdentity,
+                                    { volume: Number(event.target.value) }
+                                  )
+                                }
+                              />
+                              <Tooltip>
+                                <TooltipTrigger
+                                  aria-label={
+                                    remoteAudioSettings.muted
+                                      ? `${getParticipantName(participant)} 수신 음소거 해제`
+                                      : `${getParticipantName(participant)} 수신 음소거`
+                                  }
+                                  className="flex size-9 items-center justify-center rounded-full border border-border bg-card text-muted-foreground"
+                                  onClick={() =>
+                                    liveKitRoom.setRemoteParticipantAudioSettings(
+                                      participant.livekitIdentity,
+                                      { muted: !remoteAudioSettings.muted }
+                                    )
+                                  }
+                                >
+                                  {remoteAudioSettings.muted ? (
+                                    <VolumeX className="size-4" />
+                                  ) : (
+                                    <Volume2 className="size-4" />
+                                  )}
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {remoteAudioSettings.muted
+                                    ? "내 수신 음소거 해제"
+                                    : "내 수신 음소거"}
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          ) : null}
                           <Tooltip>
                             <TooltipTrigger
                               aria-label={

@@ -63,13 +63,6 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
   const [activeSession, setActiveSessionState] =
     useState<MeetingRuntimeActiveSession | null>(null);
 
-  useMeetingStateRealtime({
-    accessToken: authSession?.accessToken ?? null,
-    enabled: Boolean(authSession?.accessToken && authSession?.activeWorkspaceId),
-    onStateInvalidated: notifyMeetingStateInvalidated,
-    workspaceId: authSession?.activeWorkspaceId ?? ""
-  });
-
   const setActiveSession = useCallback(
     (nextSession: MeetingRuntimeActiveSession | null) => {
       activeSessionRef.current = nextSession;
@@ -77,6 +70,41 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
     },
     []
   );
+
+  const refreshHeaderRecordingStatus = useCallback(() => {
+    const session = activeSessionRef.current;
+    if (!session) return;
+
+    const meetingClient = createMeetingApiClient({
+      accessToken: session.accessToken
+    });
+    void meetingClient
+      .getCurrentRecording(session.workspaceId, session.meetingId)
+      .then((result) => {
+        const currentSession = activeSessionRef.current;
+        if (
+          !currentSession ||
+          currentSession.workspaceId !== session.workspaceId ||
+          currentSession.meetingId !== session.meetingId
+        ) {
+          return;
+        }
+        setHeaderMeetingRecordingStatus(result.recording?.status ?? null);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const handleMeetingStateInvalidated = useCallback(() => {
+    notifyMeetingStateInvalidated();
+    refreshHeaderRecordingStatus();
+  }, [refreshHeaderRecordingStatus]);
+
+  useMeetingStateRealtime({
+    accessToken: authSession?.accessToken ?? null,
+    enabled: Boolean(authSession?.accessToken && authSession?.activeWorkspaceId),
+    onStateInvalidated: handleMeetingStateInvalidated,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
 
   const clearActiveMeeting = useCallback(() => {
     setActiveSession(null);
@@ -134,18 +162,25 @@ export function MeetingRuntimeProvider({ children }: { children: ReactNode }) {
         await leaveSession(previousSession);
       }
 
-      await connectLiveKitRoom(livekit, audioDeviceId);
+      await connectLiveKitRoom(
+        livekit,
+        audioDeviceId,
+        previousSession?.workspaceId === workspaceId &&
+          previousSession.meetingId === meeting.id
+      );
       setActiveSession({
         accessToken,
         meetingId: meeting.id,
         workspaceId
       });
+      refreshHeaderRecordingStatus();
     },
     [
       authSession?.accessToken,
       authSession?.activeWorkspaceId,
       connectLiveKitRoom,
       leaveSession,
+      refreshHeaderRecordingStatus,
       setActiveSession
     ]
   );
