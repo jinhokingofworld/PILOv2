@@ -83,6 +83,7 @@ class AgentPlanningRequest:
     tool_schema_version: str
     tools: tuple[AgentToolSchema, ...]
     planning_context: str = ""
+    context_surface: str | None = None
 
 
 @dataclass(frozen=True)
@@ -399,6 +400,9 @@ class AgentRunProcessor:
                     tool_schema_version=job.tool_schema_version,
                     tools=job.tools,
                     planning_context=context.planning_context,
+                    context_surface=(
+                        job.request_context["surface"] if job.request_context is not None else None
+                    ),
                 )
             )
             normalized = normalize_agent_planner_decision(
@@ -1108,6 +1112,10 @@ def _agent_planner_system_prompt() -> str:
         "that exact sessionId and sessionRevision, primaryTableRefs, relatedTableRefs, confidence, "
         "and one concise reason per selected ref. Do not derive refs from memory or a stale "
         "result. "
+        "When contextSurface is pr_review, the App Server has already identified and revalidated "
+        "the current immutable PR Review revision. If recommend_pr_review_focus is in the provided "
+        "tool list, use it for requests about the current PR's key files, review priority, or risk. "
+        "It needs no session ID or Workspace ID input; never request or invent either identifier. "
         "Normalize relative dates using the provided timezone and currentDate. For Korean week "
         "phrases, '이번 주말' means the nearest Saturday-Sunday that is not fully past: include "
         "the current Saturday, but on Sunday use the following weekend. '다음 주 월요일' means "
@@ -1147,6 +1155,7 @@ def _agent_planner_user_prompt(request: AgentPlanningRequest) -> str:
             "timezone": request.timezone,
             "currentDate": request.current_date,
             "toolSchemaVersion": request.tool_schema_version,
+            "contextSurface": request.context_surface,
             "tools": tools,
             "prompt": request.prompt,
             "planningContext": request.planning_context,
