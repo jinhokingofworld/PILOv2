@@ -594,6 +594,7 @@ assert.equal(inspectDefinition.inputSchema.additionalProperties, false);
 assert.deepEqual(focusDefinition.inputSchema.required, [
   "sessionId",
   "sessionRevision",
+  "modelFingerprint",
   "featureLabel",
   "primaryTableRefs",
   "relatedTableRefs",
@@ -610,6 +611,10 @@ assert.deepEqual(await inspectDefinition.prepareExecution(context, inspectInput)
 const inspected = await inspectDefinition.execute(context, inspectInput);
 assert.equal(inspected.outputSummary.sessionId, SESSION_ID);
 assert.equal(inspected.outputSummary.sessionRevision, 7);
+assert.equal(
+  inspected.outputSummary.modelFingerprint,
+  createSqlErdModelFingerprint(focusModelJson())
+);
 assert.equal(inspected.outputSummary.title, focusSqlErdService.session.title);
 assert.equal(inspected.outputSummary.projection.tables.length, 4);
 assert.equal(JSON.stringify(inspected.outputSummary).includes("CREATE TABLE"), false);
@@ -766,6 +771,7 @@ assert.equal(emptyPreparation.outputSummary.reason, "no_sessions");
 const focusInput = focusDefinition.validateInput({
   sessionId: SESSION_ID,
   sessionRevision: 7,
+  modelFingerprint: inspected.outputSummary.modelFingerprint,
   featureLabel: "결제 기능",
   primaryTableRefs: ["t2"],
   relatedTableRefs: ["t1", "t3"],
@@ -776,6 +782,15 @@ const focusInput = focusDefinition.validateInput({
     { tableRef: "t3", reason: "결제 시도 이력입니다." }
   ]
 });
+assert.throws(
+  () =>
+    focusDefinition.validateInput({
+      ...focusInput,
+      modelFingerprint: "fnv1a32:not-valid"
+    }),
+  (error) =>
+    /modelFingerprint is invalid/.test(error.getResponse().error.message)
+);
 const focused = await focusDefinition.execute(context, focusInput);
 assert.equal(focused.outputSummary.action, "focused");
 assert.deepEqual(
@@ -816,6 +831,24 @@ assert.equal(JSON.stringify(focused).includes('"modelJson"'), false);
 focusSqlErdService.session = sessionPayload({
   ...focusSqlErdService.session,
   revision: 8
+});
+focusSqlErdService.sessions = [focusSqlErdService.session];
+const focusedAfterLayoutRevision = await focusDefinition.execute(
+  context,
+  focusInput
+);
+assert.equal(focusedAfterLayoutRevision.outputSummary.sessionRevision, 8);
+assert.equal(
+  focusedAfterLayoutRevision.resourceRefs[0].metadata.modelFingerprint,
+  focusInput.modelFingerprint
+);
+
+const changedFocusModelJson = structuredClone(focusModelJson());
+changedFocusModelJson.schema.tables[0].name = "renamed_orders";
+focusSqlErdService.session = sessionPayload({
+  ...focusSqlErdService.session,
+  modelJson: changedFocusModelJson,
+  revision: 9
 });
 focusSqlErdService.sessions = [focusSqlErdService.session];
 await assert.rejects(

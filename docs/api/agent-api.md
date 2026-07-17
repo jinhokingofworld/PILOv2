@@ -824,7 +824,7 @@ Status code: `200 OK`
 | `diagnose_board_freshness` | `low` | 가능 | active source, Board/issue/PR cache freshness와 Unmapped 진단 |
 | `generate_sql_erd` | `medium` | 상황별 | `SqlErdSchemaSpecV1`을 검증해 새 session을 만들거나 현재 operations_v1 session의 schema를 교체 |
 | `inspect_sql_erd_schema` | `low` | 가능 | session의 modelJson을 bounded compact projection으로 조회하고 여러 session이면 사용자 선택을 요청 |
-| `focus_sql_erd_tables` | `low` | 가능 | inspect 결과의 compact ref와 `sessionRevision`을 재검증해 일회성 `table_focus` resource ref 생성 |
+| `focus_sql_erd_tables` | `low` | 가능 | inspect 결과의 compact ref와 `modelFingerprint`를 재검증해 일회성 `table_focus` resource ref 생성 |
 | `recommend_pr_review_focus` | `low` | 가능 | PR Review context의 immutable revision 안전 projection에서 핵심 검토 파일과 연결 파일을 추천 |
 | `delegate_canvas_agent` | `low` | 가능 | 사용자 원문과 검증된 Canvas context를 별도 Canvas Agent run으로 위임 |
 
@@ -860,12 +860,15 @@ Status code: `200 OK`
   기존 `/inputs` endpoint로 보내며 UUID를 사용자 bubble에 표시하지 않는다.
 - inspect 결과의 table은 `t1`, `t2` 형태의 요청별 compact ref로 표시한다. projection은 최대
   9,000자이며 내부 table/column ID와 sourceText, DDL, 전체 modelJson을 Agent step에 복제하지 않는다.
-- `focus_sql_erd_tables`는 inspect 결과의 `sessionId`, `sessionRevision`, compact
+- inspect 성공 output은 `sessionId`, 진단용 `sessionRevision`, compact ref 검증용
+  `modelFingerprint`를 포함한다.
+- `focus_sql_erd_tables`는 inspect 결과의 `sessionId`, `sessionRevision`, `modelFingerprint`, compact
   `primaryTableRefs`·`relatedTableRefs`, confidence와 선택 table별 짧은 reason을 받는다. primary는
   기능에 직접 해당하는 table이고 related는 primary와 직접 FK로 연결된 의미 있는 1-hop table만
   허용한다. 기본 2-hop 확장은 하지 않는다.
-- App Server는 현재 session revision과 compact ref, primary/related 중복, primary-related 직접 FK를
-  다시 검증한다. revision이 바뀌면 `409 CONFLICT`로 거부하고 inspect부터 다시 수행한다.
+- App Server는 현재 model fingerprint와 compact ref, primary/related 중복, primary-related 직접 FK를
+  다시 검증한다. layout/annotation 변경으로 revision만 증가한 경우에는 focus를 허용하고, 실제
+  modelJson 변경으로 fingerprint가 달라진 경우에만 `409 CONFLICT`로 거부해 inspect부터 다시 수행한다.
 - 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`, `modelFingerprint`,
   `featureLabel`, `primaryTableIds`, `relatedTableIds`, `relationIds`, `confidence`를 가진 resource ref다.
   Frontend는 핵심·관련 table과 그 사이 relation만 선명하게 표시하고 나머지 table/relation을 흐리게
