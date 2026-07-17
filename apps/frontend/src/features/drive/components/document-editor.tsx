@@ -347,7 +347,7 @@ function DocumentEditorSurface({
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ undoRedo: false }),
+      StarterKit.configure({ undoRedo: false, dropcursor: false }),
       DriveFileAttachment,
       Collaboration.configure({ document: yDoc }),
       Dropcursor.configure({ color: "var(--primary)", width: 2 }),

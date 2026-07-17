@@ -1,0 +1,332 @@
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const redis = require("redis");
+const originalCreateClient = redis.createClient;
+const originalRedisUrl = process.env.REDIS_URL;
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function fakeEvent(id) {
+  return {
+    version: 1,
+    type: "message.deleted",
+    workspaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    occurredAt: "2026-07-16T00:00:00.000Z",
+    messageId: id,
+    deletedAt: "2026-07-16T00:00:00.000Z"
+  };
+}
+
+try {
+  process.env.REDIS_URL = "redis://chat-test.invalid:6379";
+  const connectGate = deferred();
+  const clients = [];
+  redis.createClient = () => {
+    const client = {
+      connectCalls: 0,
+      destroyCalls: 0,
+      publishCalls: [],
+      quitCalls: 0,
+      on() {
+        return client;
+      },
+      async connect() {
+        client.connectCalls += 1;
+        return connectGate.promise;
+      },
+      async publish(channel, payload) {
+        client.publishCalls.push({ channel, payload });
+      },
+      async quit() {
+        client.quitCalls += 1;
+      },
+      destroy() {
+        client.destroyCalls += 1;
+      }
+    };
+    clients.push(client);
+    return client;
+  };
+
+  const {
+    ChatPublisherService
+  } = require("../../dist/modules/chat/chat-publisher.service.js");
+  const publisher = new ChatPublisherService();
+  publisher.logger = { error() {}, warn() {} };
+
+  const firstPublish = publisher.publish(fakeEvent("message-1"));
+  const secondPublish = publisher.publish(fakeEvent("message-2"));
+  await Promise.resolve();
+  assert.equal(
+    clients.length,
+    1,
+    "concurrent first publishes must share one Redis client"
+  );
+  assert.equal(clients[0].connectCalls, 1);
+  connectGate.resolve();
+  await Promise.all([firstPublish, secondPublish]);
+  assert.equal(clients[0].publishCalls.length, 2);
+  await publisher.onModuleDestroy();
+  assert.equal(clients[0].quitCalls, 1);
+
+  const oldUrl = "redis://old-chat-test.invalid:6379";
+  const replacementUrl = "redis://new-chat-test.invalid:6379";
+  const oldConnectGate = deferred();
+  const transitionClients = [];
+  process.env.REDIS_URL = oldUrl;
+  redis.createClient = ({ url }) => {
+    const client = {
+      destroyCalls: 0,
+      publishCalls: [],
+      quitCalls: 0,
+      url,
+      on() {
+        return client;
+      },
+      async connect() {
+        if (url === oldUrl) return oldConnectGate.promise;
+      },
+      async publish(channel, payload) {
+        client.publishCalls.push({ channel, payload: JSON.parse(payload) });
+      },
+      async quit() {
+        client.quitCalls += 1;
+      },
+      destroy() {
+        client.destroyCalls += 1;
+      }
+    };
+    transitionClients.push(client);
+    return client;
+  };
+
+  const transitionPublisher = new ChatPublisherService();
+  transitionPublisher.logger = { error() {}, warn() {} };
+  const oldPublish = transitionPublisher.publish(fakeEvent("message-old-url"));
+  await Promise.resolve();
+  assert.equal(transitionClients.length, 1);
+
+  process.env.REDIS_URL = replacementUrl;
+  const firstReplacementPublish = transitionPublisher.publish(
+    fakeEvent("message-new-url-1")
+  );
+  const secondReplacementPublish = transitionPublisher.publish(
+    fakeEvent("message-new-url-2")
+  );
+  await Promise.resolve();
+  assert.equal(transitionClients.length, 1);
+
+  oldConnectGate.resolve();
+  await Promise.all([
+    oldPublish,
+    firstReplacementPublish,
+    secondReplacementPublish
+  ]);
+  const oldClients = transitionClients.filter(client => client.url === oldUrl);
+  const replacementClients = transitionClients.filter(
+    client => client.url === replacementUrl
+  );
+  assert.equal(oldClients.length, 1);
+  assert.equal(oldClients[0].quitCalls, 1);
+  assert.equal(oldClients[0].destroyCalls, 0);
+  assert.equal(
+    replacementClients.length,
+    1,
+    "concurrent URL transitions must create one replacement client"
+  );
+  assert.deepEqual(
+    replacementClients[0].publishCalls.map(call => call.payload.messageId).sort(),
+    ["message-new-url-1", "message-new-url-2"]
+  );
+  await transitionPublisher.onModuleDestroy();
+  assert.equal(replacementClients[0].quitCalls, 1);
+
+  const cancelledConnectGate = deferred();
+  const rotationShutdownClients = [];
+  process.env.REDIS_URL = oldUrl;
+  redis.createClient = ({ url }) => {
+    const client = {
+      destroyCalls: 0,
+      publishCalls: 0,
+      quitCalls: 0,
+      url,
+      on() {
+        return client;
+      },
+      async connect() {
+        return cancelledConnectGate.promise;
+      },
+      async publish() {
+        client.publishCalls += 1;
+      },
+      async quit() {
+        client.quitCalls += 1;
+      },
+      destroy() {
+        client.destroyCalls += 1;
+        cancelledConnectGate.reject(new Error("connect cancelled"));
+      }
+    };
+    rotationShutdownClients.push(client);
+    return client;
+  };
+
+  const rotationShutdownPublisher = new ChatPublisherService();
+  rotationShutdownPublisher.logger = { error() {}, warn() {} };
+  const pendingOldPublish = rotationShutdownPublisher.publish(
+    fakeEvent("message-pending-old-url")
+  );
+  await Promise.resolve();
+  assert.equal(rotationShutdownClients.length, 1);
+
+  process.env.REDIS_URL = replacementUrl;
+  const queuedReplacementPublish = rotationShutdownPublisher.publish(
+    fakeEvent("message-queued-new-url")
+  );
+  await Promise.resolve();
+
+  let rotationShutdownResolved = false;
+  const rotationShutdown = rotationShutdownPublisher.onModuleDestroy().then(() => {
+    rotationShutdownResolved = true;
+  });
+  assert.equal(
+    rotationShutdownClients[0].destroyCalls,
+    1,
+    "shutdown must cancel the current attempt before waiting for URL rotation"
+  );
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(
+    rotationShutdownResolved,
+    true,
+    "cancelled URL rotation must not delay shutdown settlement"
+  );
+  await Promise.all([
+    pendingOldPublish,
+    queuedReplacementPublish,
+    rotationShutdown
+  ]);
+  assert.equal(rotationShutdownClients.length, 1);
+  assert.equal(rotationShutdownClients[0].publishCalls, 0);
+  assert.equal(rotationShutdownClients[0].quitCalls, 0);
+  process.env.REDIS_URL = "redis://chat-test.invalid:6379";
+
+  const shutdownConnectGate = deferred();
+  const shutdownClients = [];
+  redis.createClient = () => {
+    const client = {
+      destroyCalls: 0,
+      publishCalls: 0,
+      quitCalls: 0,
+      on() {
+        return client;
+      },
+      async connect() {
+        return shutdownConnectGate.promise;
+      },
+      async publish() {
+        client.publishCalls += 1;
+      },
+      async quit() {
+        client.quitCalls += 1;
+      },
+      destroy() {
+        client.destroyCalls += 1;
+      }
+    };
+    shutdownClients.push(client);
+    return client;
+  };
+
+  const shutdownPublisher = new ChatPublisherService();
+  shutdownPublisher.logger = { error() {}, warn() {} };
+  const pendingPublish = shutdownPublisher.publish(fakeEvent("message-shutdown"));
+  await Promise.resolve();
+  assert.equal(shutdownClients.length, 1);
+
+  let shutdownResolved = false;
+  const shutdown = shutdownPublisher.onModuleDestroy().then(() => {
+    shutdownResolved = true;
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(
+    shutdownClients[0].destroyCalls,
+    1,
+    "teardown must cancel ownership of a pending Redis client"
+  );
+  assert.equal(
+    shutdownResolved,
+    false,
+    "teardown must wait for the pending connection to settle"
+  );
+
+  shutdownConnectGate.resolve();
+  await Promise.all([pendingPublish, shutdown]);
+  assert.equal(shutdownClients[0].publishCalls, 0);
+  assert.equal(
+    shutdownClients[0].quitCalls,
+    1,
+    "a pending client that connects after cancellation must be closed"
+  );
+  await shutdownPublisher.publish(fakeEvent("message-after-shutdown"));
+  assert.equal(shutdownClients.length, 1);
+  assert.equal(shutdownClients[0].publishCalls, 0);
+
+  const failureGate = deferred();
+  let attempt = 0;
+  const retryClients = [];
+  redis.createClient = () => {
+    attempt += 1;
+    const currentAttempt = attempt;
+    const client = {
+      destroyCalls: 0,
+      publishCalls: 0,
+      on() {
+        return client;
+      },
+      async connect() {
+        if (currentAttempt === 1) return failureGate.promise;
+      },
+      async publish() {
+        client.publishCalls += 1;
+      },
+      async quit() {},
+      destroy() {
+        client.destroyCalls += 1;
+      }
+    };
+    retryClients.push(client);
+    return client;
+  };
+
+  const retryPublisher = new ChatPublisherService();
+  retryPublisher.logger = { error() {}, warn() {} };
+  const failedFirst = retryPublisher.publish(fakeEvent("message-3"));
+  const failedSecond = retryPublisher.publish(fakeEvent("message-4"));
+  await Promise.resolve();
+  assert.equal(retryClients.length, 1);
+  failureGate.reject(new Error("connect failed"));
+  await Promise.all([failedFirst, failedSecond]);
+  assert.equal(retryClients[0].destroyCalls, 1);
+
+  await retryPublisher.publish(fakeEvent("message-5"));
+  assert.equal(retryClients.length, 2, "a failed connection must be retryable");
+  assert.equal(retryClients[1].publishCalls, 1);
+  await retryPublisher.onModuleDestroy();
+} finally {
+  redis.createClient = originalCreateClient;
+  if (originalRedisUrl === undefined) {
+    delete process.env.REDIS_URL;
+  } else {
+    process.env.REDIS_URL = originalRedisUrl;
+  }
+}

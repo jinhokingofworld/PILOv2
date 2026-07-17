@@ -243,7 +243,39 @@ function assertNoSecretLookup(database) {
   const database = new FakeDatabase({
     queryOneRows: [
       (text, values) => {
+        assert.match(text, /gp\.installation_id IS NOT NULL/i);
+        assert.deepEqual(values, [workspaceId, repositoryId]);
+        return { total: "0" };
+      }
+    ],
+    queryRows: [
+      (text, values) => {
+        assert.match(text, /gp\.installation_id IS NOT NULL/i);
+        assert.deepEqual(values, [workspaceId, repositoryId, 20, 0]);
+        return [];
+      }
+    ]
+  });
+  const { service } = createService(database);
+
+  const projects = await service.listGithubProjectsV2(
+    currentUserId,
+    workspaceId,
+    { repositoryId, management: true }
+  );
+
+  assert.deepEqual(projects, {
+    data: [],
+    meta: { page: 1, limit: 20, total: 0 }
+  });
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
         assert.match(text, /FROM github_projects_v2/i);
+        assert.match(text, /gp\.installation_id IS NOT NULL/i);
         assert.deepEqual(values, [workspaceId, projectV2Id]);
         return projectRow();
       }
@@ -285,7 +317,13 @@ function assertNoSecretLookup(database) {
 
 {
   const database = new FakeDatabase({
-    queryOneRows: [projectRow()],
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /installation_id IS NOT NULL/i);
+        assert.deepEqual(values, [workspaceId, projectV2Id]);
+        return projectRow();
+      }
+    ],
     queryRows: [
       (text, values) => {
         assert.match(text, /FROM github_project_v2_fields/i);
@@ -470,7 +508,13 @@ function assertNoSecretLookup(database) {
 
 {
   const database = new FakeDatabase({
-    queryOneRows: [null]
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /gp\.installation_id IS NOT NULL/i);
+        assert.deepEqual(values, [workspaceId, projectV2Id]);
+        return null;
+      }
+    ]
   });
   const { service } = createService(database);
 

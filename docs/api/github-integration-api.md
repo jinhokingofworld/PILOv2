@@ -209,12 +209,16 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
 - GitHub App installation 삭제는 GitHub 원격 `DELETE /app/installations/{installation_id}`를
   App JWT로 호출한 뒤 local `github_installations` row를 삭제한다. GitHub가 `404`를
   반환하면 이미 원격에서 삭제된 상태로 보고 local cleanup을 진행한다.
-- GitHub App installation 삭제 시 `github_projects_v2` 계열 cache는 FK cascade로
-  삭제된다. `github_repositories`, `github_issues`, `github_pull_requests`, PR review
-  기록은 과거 cache로 남기며, repository 목록 API는 현재 active installation에 연결된
-  repository만 반환한다. 같은 Workspace에서 재설치 후 full sync가 같은
-  `github_repository_id`를 다시 발견하면 해당 Workspace 안의 기존 repository cache
-  `installation_id`가 새 installation으로 갱신된다.
+- GitHub App installation 삭제 시 `github_repositories.installation_id`와
+  `github_projects_v2.installation_id`는 `NULL`로 분리한다. repository, ProjectV2,
+  repository-ProjectV2 link, field/item, Board cache는 과거 identity를 보존하지만 active
+  installation이 아니므로 active repository 목록, installation-scoped sync, Board write
+  대상에는 포함하지 않는다.
+- 같은 Workspace에서 재설치 후 sync가 같은 `github_repository_id`와
+  `github_project_node_id`를 다시 발견하면 workspace-scoped upsert가 보존된 repository와
+  ProjectV2 row의 `installation_id`를 새 installation으로 갱신한다. 기존 link와
+  `(project_v2_id, repository_id)` Board hydration identity를 재사용하므로 반복 재연결도
+  새 Board row를 만들지 않는다.
 
 ## 공통 조회/페이지네이션 규칙
 
@@ -405,9 +409,16 @@ GET /api/v1/workspaces/{workspaceId}/github/projects-v2?repositoryId=repository_
 | `ownerLogin` | GitHub owner login exact match |
 | `closed` | `true`면 closed ProjectV2도 포함. 생략 또는 `false`면 `closed=false`만 반환 |
 | `q` | `title`, `shortDescription` 부분 검색 |
+| `management` | `true`면 repository에 연결된 미선택 ProjectV2도 포함. active installation cache만 반환 |
 | `page`, `limit` | 기본 `1`, `20`; 최대 limit `100` |
 
-ProjectV2 목록은 `ownerLogin ASC, projectNumber ASC, id ASC`로 정렬한다.
+ProjectV2 목록은 `management=true`를 포함해 항상 `installation_id IS NOT NULL`인 active
+installation cache만 반환하며 `ownerLogin ASC, projectNumber ASC, id ASC`로 정렬한다.
+installation 삭제 뒤 identity 보존을 위해 남은 disconnected ProjectV2 cache는 공개 목록에
+포함하지 않는다. ProjectV2 상세, access status, field, status option, kanban, item read도
+active installation 연결을 요구하며 disconnected id에는 `404 NOT_FOUND`와
+`GitHub ProjectV2 not found`를 반환한다. 공개 payload의 `installationId`는 계속 문자열이며
+`null`을 반환하지 않는다.
 
 Repository PR 목록:
 
@@ -863,6 +874,11 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 - GitHub가 `202`를 반환하면 local `github_installations` row를 삭제한다.
 - GitHub가 `404`를 반환하면 이미 원격에서 삭제된 상태로 보고 local
   `github_installations` row를 삭제한다.
+- local row 삭제는 repository와 ProjectV2의 `installation_id`만 `NULL`로 분리하며,
+  repository, ProjectV2, repository-ProjectV2 link와 Board identity는 보존한다.
+  disconnected cache는 새 installation sync가 같은 remote identity를 다시 발견해 두
+  `installation_id`를 같은 active installation으로 재결합할 때까지 sync와 Board issue
+  생성 대상이 아니다.
 - GitHub가 `401`, `403`, `5xx` 등 실패 응답을 반환하거나 네트워크 오류가 발생하면
   provider raw error를 노출하지 않고 safe error를 반환하며 local row는 유지한다.
 - API 응답이나 로그에 GitHub App private key, JWT, installation token, 사용자 OAuth

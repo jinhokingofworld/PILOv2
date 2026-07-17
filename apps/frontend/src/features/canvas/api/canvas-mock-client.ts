@@ -1,4 +1,7 @@
-import { readCanvasStorage, writeCanvasStorage } from "../utils/canvas-storage";
+import {
+  readCanvasStorage,
+  writeCanvasStorage,
+} from "../persistence/canvas-storage";
 import type {
   CanvasBoardDetail,
   CanvasOperationsCatchupPayload,

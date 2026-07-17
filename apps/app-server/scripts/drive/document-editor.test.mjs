@@ -206,6 +206,11 @@ assert.equal(
   attachmentActivityLogService.calls[0].input.metadata.data.driveItemId,
   "66666666-6666-4666-8666-666666666666"
 );
+assert.equal(attachmentActivityLogService.calls[0].input.metadata.data.version, 1);
+assert.equal(
+  Object.hasOwn(attachmentActivityLogService.calls[0].input.metadata.data, "contentJson"),
+  false
+);
 
 const detachedAttachmentDatabase = new FakeDatabase([
   lockedDocumentRow({
@@ -245,6 +250,7 @@ assert.equal(
   detachedAttachmentActivityLogService.calls[0].input.metadata.data.operation,
   "detached"
 );
+assert.equal(detachedAttachmentActivityLogService.calls[0].input.metadata.data.version, 1);
 
 console.log("Document editor tests passed.");
 

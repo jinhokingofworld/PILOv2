@@ -52,19 +52,58 @@ const canvasModule = await readSource("../src/modules/canvas/canvas.module.ts");
 const canvasController = await readSource(
   "../src/modules/canvas/canvas.controller.ts"
 );
-const canvasService = await readSource("../src/modules/canvas/canvas.service.ts");
-const canvasTypes = await readSource("../src/modules/canvas/canvas.types.ts");
+const canvasServiceFacade = await readSource(
+  "../src/modules/canvas/canvas.service.ts"
+);
+const canvasBoardService = await readSource(
+  "../src/modules/canvas/board/canvas-board.service.ts"
+);
+const canvasAccessService = await readSource(
+  "../src/modules/canvas/policies/canvas-access.service.ts"
+);
+const canvasOperationQueryService = await readSource(
+  "../src/modules/canvas/operation/canvas-operation-query.service.ts"
+);
+const canvasShapeCommandService = await readSource(
+  "../src/modules/canvas/shape/canvas-shape-command.service.ts"
+);
+const canvasShapeQueryService = await readSource(
+  "../src/modules/canvas/shape/canvas-shape-query.service.ts"
+);
+const canvasShapeCleanupService = await readSource(
+  "../src/modules/canvas/infrastructure/canvas-shape-cleanup.service.ts"
+);
+const canvasSyncDocumentService = await readSource(
+  "../src/modules/canvas/sync-document/canvas-sync-document.service.ts"
+);
+const canvasUserStateService = await readSource(
+  "../src/modules/canvas/user-state/canvas-user-state.service.ts"
+);
+const canvasService = [
+  canvasServiceFacade,
+  canvasAccessService,
+  canvasBoardService,
+  canvasOperationQueryService,
+  canvasShapeCleanupService,
+  canvasShapeCommandService,
+  canvasShapeQueryService,
+  canvasSyncDocumentService,
+  canvasUserStateService
+].join("\n");
+const canvasTypes = await readSource(
+  "../src/modules/canvas/contracts/canvas.types.ts"
+);
 const canvasShapeValidation = await readSource(
-  "../src/modules/canvas/canvas-shape.validation.ts"
+  "../src/modules/canvas/shape/canvas-shape.validation.ts"
 );
 const canvasShapeMapper = await readSource(
-  "../src/modules/canvas/canvas-shape.mapper.ts"
+  "../src/modules/canvas/shape/canvas-shape.mapper.ts"
 );
 const canvasShapeHash = await readSource(
-  "../src/modules/canvas/canvas-shape-hash.ts"
+  "../src/modules/canvas/shape/canvas-shape-hash.ts"
 );
 const canvasOperationPublisher = await readSource(
-  "../src/modules/canvas/canvas-operation-publisher.service.ts"
+  "../src/modules/canvas/operation/canvas-operation-publisher.service.ts"
 );
 const canvasAgentRepository = await readSource(
   "../src/modules/canvas/agent/canvas-agent.repository.ts"
@@ -374,7 +413,10 @@ assert.match(workspaceMembershipMigration, /ENABLE ROW LEVEL SECURITY/);
 assert.match(workspaceMembershipMigration, /ON CONFLICT \(workspace_id, user_id\) DO NOTHING/);
 assert.match(canvasModule, /controllers: \[CanvasController\]/);
 assert.match(canvasModule, /CanvasOperationPublisherService/);
-assert.match(canvasModule, /providers: \[CanvasOperationPublisherService, CanvasService\]/);
+assert.match(canvasModule, /CanvasShapeCommandService/);
+assert.match(canvasModule, /CanvasShapeQueryService/);
+assert.match(canvasModule, /CanvasSyncDocumentService/);
+assert.match(canvasModule, /CanvasUserStateService/);
 assert.match(canvasController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(canvasController, /@Get\("canvases"\)/);
 assert.match(canvasController, /@Post\("canvases"\)/);
@@ -485,9 +527,9 @@ assert.match(canvasAgentRepository, /async discardDraft/);
 assert.match(canvasAgentRepository, /DELETE FROM canvas_agent_drafts/);
 assert.doesNotMatch(canvasAgentRepository, /SET status = 'discarded'/);
 assert.match(canvasAgentConstants, /코드 생성 중 오류가 났어요\. 다시 시도해 주세요\./);
-assert.match(canvasAgentActionService, /shouldCreateCodeDraft/);
-assert.match(canvasAgentActionService, /hasCodeDraftContent/);
-assert.match(canvasAgentActionService, /CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE/);
+assert.match(canvasAgentActionService, /Canvas Agent shape creation is disabled/);
+assert.doesNotMatch(canvasAgentActionService, /shouldCreateCodeDraft/);
+assert.doesNotMatch(canvasAgentActionService, /createConnectionBatch/);
 assert.match(canvasAgentDraftService, /value\.fileName/);
 assert.match(canvasAgentDraftService, /value\.content/);
 assert.match(canvasAgentDraftService, /CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE/);
@@ -602,6 +644,17 @@ await import("./sqltoerd/operation-delivery.test.mjs");
 await import("./sqltoerd/source-snapshot.test.mjs");
 await import("./sqltoerd/operation-publisher.test.mjs");
 await import("./sqltoerd/operations-v1-cutover-manifest.test.mjs");
+await import("./chat/schema.test.mjs");
+await import("./chat/idempotency.test.mjs");
+await import("./chat/service.test.mjs");
+await import("./chat/contract.test.mjs");
+await import("./chat/publisher.test.mjs");
+await import("./workspace/membership-revocation.test.mjs");
+await import("./workspace/membership-revocation-publisher.test.mjs");
+await import("./user/account-deletion-revocation.test.mjs");
+if (process.env.CHAT_POSTGRES_TEST_URL) {
+  await import("./chat/postgres.test.mjs");
+}
 await import("./sqltoerd/schema-generator.test.mjs");
 if (process.env.DATABASE_URL) {
   await import("./sqltoerd/schema-generator-postgres.test.mjs");

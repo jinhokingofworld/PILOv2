@@ -204,6 +204,14 @@ Request Body:
   `active_workspace_id`는 `null`, `deleted_at`은 현재 시각으로 갱신한다.
 - 위 DB 변경은 하나의 transaction에서 처리한다. provider revoke 같은 외부 작업이
   필요하면 실패/재시도 정책을 별도로 적용하고 secret을 로그에 남기지 않는다.
+- transaction 안에서 삭제한 모든 member membership의 `workspace_id`를 수집하고,
+  commit 후 Workspace별로 `workspace:membership-revocations` channel에 exact V1
+  `membership.revoked` event를 한 번씩 발행한다.
+- membership revocation Redis 연결 또는 publish 실패는 안전하게 기록하지만 이미
+  commit된 계정 탈퇴를 rollback하거나 성공 응답을 바꾸지 않는다. Transaction 실패
+  시에는 event를 발행하지 않는다.
+- Realtime Server는 event를 받은 모든 Chat tab을 즉시 퇴출한다. Event가 유실되어도
+  다음 Chat fan-out 직전 batch membership recheck에서 탈퇴 사용자의 수신을 차단한다.
 - 성공 응답 뒤 Frontend는 local access token과 선택 Workspace를 삭제하고 로그인
   화면으로 이동한다.
 - 익명화 이후 같은 provider로 로그인하면 과거 계정을 복구하지 않고 새 사용자로

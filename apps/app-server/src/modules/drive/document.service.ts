@@ -478,7 +478,7 @@ export class DocumentService {
       metadata: {
         version: 1,
         summary,
-        data: { driveItemId, operation }
+        data: { driveItemId, operation, version }
       }
     };
   }

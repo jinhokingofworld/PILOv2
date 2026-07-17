@@ -164,28 +164,6 @@ ALLOWED_ACTIONS: list[dict[str, object]] = [
     },
     {"name": "select_shapes", "input": {"shapeIds": ["shape id"]}},
     {"name": "focus_viewport", "input": {"shapeIds": ["shape id"]}},
-    {
-        "name": "connect_shapes",
-        "input": {
-            "fromShapeId": "source existing shape id",
-            "toShapeId": "target existing shape id",
-            "connectionKind": "arrow or line",
-            "label": "optional short label",
-        },
-    },
-    {
-        "name": "create_draft",
-        "input": {
-            "kind": "diagram or code",
-            "title": "short title",
-            "summary": "short summary",
-            "style": "short style",
-            "sourceShapeIds": ["optional selected shape id"],
-            "nodes": ["Canvas nodes using only availableCanvasTools"],
-            "connections": ["Canvas node connections using arrow or line"],
-            "recommendedColors": ["Chosen colors from availableCanvasColors with usage"],
-        },
-    },
     {"name": "finish", "input": {"summary": "short result"}},
 ]
 

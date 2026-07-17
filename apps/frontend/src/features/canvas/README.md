@@ -11,34 +11,37 @@ API contract: `docs/api/canvas-api.md`
 저장되는 PILO freeform canvas는 아래 순서로 조합한다.
 
 ```text
-WorkspaceCanvas -> PiloCanvasRuntime -> PiloTldrawCanvas -> TldrawSurface
+WorkspaceCanvas -> ClassicCanvasRuntime -> CanvasEditor -> TldrawSurface
 ```
 
 - `WorkspaceCanvas`: `/canvas` 화면, toolbar, board 선택과 생성 흐름
-- `engine/runtime/PiloCanvasRuntime`: Canvas board hydration, local/API 저장 모드, shape sync queue
-- `engine/surface/PiloTldrawCanvas`: Canvas 전용 shape, placement, overlay, editor action 조립
+- `engine/runtime/ClassicCanvasRuntime`: Canvas board hydration, local/API 저장 모드, shape sync queue
+- `engine/editor/CanvasEditor`: Canvas 전용 shape, placement, overlay, editor action 조립
 - `TldrawSurface`: `src/shared/tldraw`의 순수 tldraw rendering surface
 
 `src/shared/tldraw`를 사용하지만, PILO freeform Canvas의 source of truth는 Canvas
 도메인에 남는다. 즉 저장, hydration, sync queue, Canvas API/DB 흐름은
 `src/features/canvas/`가 소유한다.
 
-`engine/` 하위 폴더는 책임별로 나눈다.
+주요 폴더는 사용자가 코드를 따라가기 쉬운 책임 단위로 나눈다.
 
-- `types.ts`: engine 내부에서 공유하는 freeform shape/view setting 타입
+- `components/screen/`: 화면 배치, toolbar, dialog, runtime 선택
+- `engine/canvas-engine-types.ts`: engine 내부에서 공유하는 shape/view 타입
 - `runtime/`: 저장, hydration, sync queue, local/API mode
-- `surface/`: Canvas 전용 tldraw surface 조립, 배경, state reporter
+- `editor/`: Canvas 전용 tldraw editor 조립, 배경, reporter, overlay
 - `shapes/`: shape 등록, shape factory, shape type guard, shape별 ShapeUtil/UI
 - `interactions/`: placement, smart guide, selection stacking
 - `assets/`: image/video asset 생성과 복원
-- `realtime/`: freeform Canvas 전용 room presence, lock, preview, operation catch-up hook
+- `collaboration/`: room presence, preview, operation catch-up hook
+- `persistence/`: local storage, shape diff, batch queue와 retry
+- `imports/`: 파일과 폴더 탐색, 코드 파일 검증과 import 데이터 생성
 
 `shapes/code-block/`은 code block shape의 tldraw 연결과 editor UI 책임을 파일 단위로
 분리한다. `PiloCodeBlockShapeUtil`은 shape props schema, geometry, resize,
 component 연결만 담당하고, CodeMirror 설정과 code editor UI는 code-block 하위
 컴포넌트/타입 파일에서 담당한다.
 
-`runtime/`은 `PiloCanvasRuntime`을 조립자로 두고 책임별 파일을 평평하게 나눈다.
+`runtime/`은 `ClassicCanvasRuntime`을 조립자로 두고 책임별 파일을 평평하게 나눈다.
 
 - `useCanvasRuntimeHydration`: board 변경 시 초기 shape와 view setting 복원
 - `useCanvasShapePersistence`: freeform shape 변경 감지, local/API 저장, dirty shape 방어
@@ -67,8 +70,8 @@ truth를 유지해야 한다.
 
 ## tldraw_sync Canvas 연결 계약
 
-`engineType === "tldraw_sync"`인 Canvas는 기존 `PiloCanvasRuntime`의
-shape batch/operation log 경로로 들어가지 않고 `PiloTldrawSyncRuntime`으로
+`engineType === "tldraw_sync"`인 Canvas는 기존 `ClassicCanvasRuntime`의
+shape batch/operation log 경로로 들어가지 않고 `TldrawSyncCanvasRuntime`으로
 분기한다.
 
 현재 구현은 `NEXT_PUBLIC_PILO_REALTIME_SERVER_URL`과 bearer session token이 있으면
@@ -129,8 +132,8 @@ Canvas의 아래 흐름은 Canvas 도메인 전용이다.
 - Canvas Socket.IO protocol, client 생성기와 remote cursor overlay는
   `src/shared/canvas-realtime/`에서 Canvas와 PR Review가 함께 사용한다.
 - freeform Canvas의 presence, lock, preview, operation catch-up 조립은
-  `src/features/canvas/realtime/`에 남는다.
-- `PiloCanvasRuntime`은 socket state를 만들고, `PiloTldrawCanvas`는 `TldrawSurface` child에서 `useEditor()` 기반 cursor 좌표, selection, edit intent를 report한다.
+  `src/features/canvas/collaboration/`에 남는다.
+- `ClassicCanvasRuntime`은 socket state를 만들고, `CanvasEditor`는 `TldrawSurface` child에서 `useEditor()` 기반 cursor 좌표, selection, edit intent를 report한다.
 - cursor 좌표, selection, `editingShapeId`, `editingMode` presence는 DB에 저장하지 않는다.
 - local UI Preview의 fake session은 realtime-server DB session 검증을 통과하지 않으므로 presence를 켜지 않는다.
 - `src/shared/tldraw/TldrawSurface`는 presence를 소유하지 않는다. PR Review는 공통 Socket

@@ -8,20 +8,16 @@ import { badRequest } from "../../../common/api-error";
 import { serializeGithubJsonb } from "../../github-integration/github-jsonb";
 import type { GithubIssueApiItem } from "../../github-integration/github-app.client";
 import type { BoardIssueState } from "../types";
+import type { BoardIssueCreateTarget } from "../board-issue-create-target";
 
-export interface BoardIssueCreateTargetRow extends QueryResultRow {
+export interface BoardIssueCreateTargetRow
+  extends QueryResultRow,
+    BoardIssueCreateTarget {
   board_id: string;
-  repository_id: string | null;
-  repository_owner_login: string | null;
-  repository_name: string | null;
-  project_v2_id: string | null;
-  github_project_node_id: string | null;
-  status_field_id: string | null;
-  github_field_node_id: string | null;
+  board_name: string;
   status_field_name: string | null;
   target_column_id: string;
-  target_status_option_id: string | null;
-  target_status_option_github_id: string | null;
+  target_column_name: string;
   target_status_name: string | null;
   target_status_normalized_name: string | null;
 }
@@ -101,40 +97,60 @@ export class BoardIssueCreateQueries {
     columnId: string
   ): Promise<BoardIssueCreateTargetRow | null> {
     return this.database.queryOne<BoardIssueCreateTargetRow>(
-      `
-        SELECT
-          b.id::text AS board_id,
-          b.repository_id,
-          gr.owner_login AS repository_owner_login,
-          gr.name AS repository_name,
-          b.project_v2_id,
-          gp.github_project_node_id,
-          b.status_field_id,
-          sf.github_field_node_id,
-          sf.field_name AS status_field_name,
-          target_col.id::text AS target_column_id,
-          target_col.status_option_id::text AS target_status_option_id,
-          target_col.status_option_github_id AS target_status_option_github_id,
-          target_col.name AS target_status_name,
-          target_col.normalized_name AS target_status_normalized_name
-        FROM boards b
-        JOIN board_columns target_col
-          ON target_col.id = $3::bigint
-         AND target_col.board_id = b.id
-        JOIN github_repositories gr
-          ON gr.id = b.repository_id
-         AND gr.workspace_id = b.workspace_id
-        LEFT JOIN github_projects_v2 gp
-          ON gp.id = b.project_v2_id
-         AND gp.workspace_id = b.workspace_id
-        LEFT JOIN github_project_v2_fields sf
-          ON sf.id = b.status_field_id
-         AND sf.project_v2_id = b.project_v2_id
-        WHERE b.workspace_id = $1
-          AND b.id = $2::bigint
-      `,
+      this.issueCreateTargetQuery(`
+        target_col.id = $3::bigint
+        AND b.workspace_id = $1
+        AND b.id = $2::bigint
+      `),
       [workspaceId, boardId, columnId]
     );
+  }
+
+  async listIssueCreateTargets(
+    workspaceId: string
+  ): Promise<BoardIssueCreateTargetRow[]> {
+    return this.database.query<BoardIssueCreateTargetRow>(
+      `${this.issueCreateTargetQuery("b.workspace_id = $1")}
+       ORDER BY b.updated_at DESC, b.id ASC, target_col.position ASC, target_col.id ASC`,
+      [workspaceId]
+    );
+  }
+
+  private issueCreateTargetQuery(whereSql: string): string {
+    return `
+      SELECT
+        b.id::text AS board_id,
+        b.name AS board_name,
+        b.repository_id,
+        gr.installation_id AS repository_installation_id,
+        gr.owner_login AS repository_owner_login,
+        gr.name AS repository_name,
+        b.project_v2_id,
+        gp.installation_id AS project_installation_id,
+        gp.github_project_node_id,
+        b.status_field_id,
+        sf.github_field_node_id,
+        sf.field_name AS status_field_name,
+        target_col.id::text AS target_column_id,
+        target_col.name AS target_column_name,
+        target_col.status_option_id::text AS target_status_option_id,
+        target_col.status_option_github_id AS target_status_option_github_id,
+        target_col.name AS target_status_name,
+        target_col.normalized_name AS target_status_normalized_name
+      FROM boards b
+      JOIN board_columns target_col
+        ON target_col.board_id = b.id
+      JOIN github_repositories gr
+        ON gr.id = b.repository_id
+       AND gr.workspace_id = b.workspace_id
+      LEFT JOIN github_projects_v2 gp
+        ON gp.id = b.project_v2_id
+       AND gp.workspace_id = b.workspace_id
+      LEFT JOIN github_project_v2_fields sf
+        ON sf.id = b.status_field_id
+       AND sf.project_v2_id = b.project_v2_id
+      WHERE ${whereSql}
+    `;
   }
 
   async upsertGithubIssueCache(

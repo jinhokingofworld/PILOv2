@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 const { createCanvasAccessService } = await import(
-  "../src/canvas/canvas-access.service.ts"
+  "../src/canvas/room/canvas-access.service.ts"
 );
 
 function createDatabase(row) {

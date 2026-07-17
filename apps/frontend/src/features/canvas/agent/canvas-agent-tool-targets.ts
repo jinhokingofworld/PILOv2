@@ -282,7 +282,7 @@ export const canvasAgentToolTargets = [
   },
   {
     aliases: ["ai", "canvas ai", "캔버스 ai", "채팅", "도움", "c"],
-    description: "Canvas AI는 캔버스 안에서 도형을 찾고, 화면을 이동하고, 초안을 만들거나 기능 위치를 안내해주는 전용 도우미야.",
+    description: "Canvas AI는 Canvas 기능을 설명하고, 캔버스 안에 이미 있는 도형을 찾아 선택하거나 해당 위치로 화면을 이동해주는 전용 도우미야.",
     label: "Canvas AI",
     message: "나는 여기서 다시 부를 수 있어. 오른쪽 위 AI 아이콘을 누르거나 단축키 C를 0.5초 길게 눌러줘.",
     target: "toolbar.canvas_ai",

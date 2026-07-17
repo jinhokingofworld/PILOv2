@@ -237,7 +237,8 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 {
   const plan = deterministicPlan("선택한 메모들 정리해줘", ["shape:a", "shape:b"]);
 
-  assert.equal(plan, null);
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /새 도형을 만들거나 기존 도형을 변경하지 않습니다/);
 }
 
 {
@@ -249,18 +250,17 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 {
   const plan = deterministicPlan("로그인 흐름 다이어그램 초안 만들어줘");
 
-  assert.equal(plan, null);
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /새 도형을 만들거나 기존 도형을 변경하지 않습니다/);
+  assert.equal(plan.input.suppressProgress, true);
 }
 
 {
   const plan = deterministicPlan("연결해줘", ["shape:login", "shape:auth"]);
 
-  assert.equal(plan.actionName, "connect_shapes");
-  assert.deepEqual(plan.input, {
-    fromShapeId: "shape:login",
-    toShapeId: "shape:auth",
-    connectionKind: "arrow",
-  });
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /새 도형을 만들거나 기존 도형을 변경하지 않습니다/);
+  assert.equal(plan.input.suppressProgress, true);
 }
 
 {
@@ -277,7 +277,7 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 
   assert.equal(plan.actionName, "finish");
   assert.match(plan.input.summary, /PILO Canvas AI/);
-  assert.match(plan.input.summary, /캔버스 위 도형/);
+  assert.match(plan.input.summary, /이미 있는 도형/);
   assert.equal(plan.input.suppressProgress, true);
   assert.equal(plan.showProgress, false);
 }
@@ -317,7 +317,7 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 
 {
   const repository = new FakeRepository();
-  const service = new CanvasAgentActionService({}, repository);
+  const service = new CanvasAgentActionService(repository);
 
   const result = await service.execute(
     run("자동 정렬 기능 설명해줘"),
@@ -331,7 +331,7 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 
 {
   const repository = new FakeRepository();
-  const service = new CanvasAgentActionService({}, repository);
+  const service = new CanvasAgentActionService(repository);
 
   const result = await service.execute(
     run("메모 도구 어디 있어?"),
@@ -346,7 +346,7 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 
 {
   const repository = new FakeRepository();
-  const service = new CanvasAgentActionService({}, repository);
+  const service = new CanvasAgentActionService(repository);
 
   const result = await service.execute(
     run(),
@@ -361,7 +361,7 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 {
   const repository = new FakeRepository();
   repository.shapesById = [shape("shape:auth"), shape("shape:login", { x: 240 })];
-  const service = new CanvasAgentActionService({}, repository);
+  const service = new CanvasAgentActionService(repository);
 
   const result = await service.execute(
     run("인증 흐름 있는 곳으로 가줘"),
@@ -384,172 +384,38 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 }
 
 {
-  const drafts = new CanvasAgentDraftService();
   const repository = new FakeRepository();
-  repository.shapesById = [
-    shape("shape:login", { x: 100, y: 120, width: 180, height: 100 }),
-    shape("shape:auth", { x: 420, y: 120, width: 180, height: 100 }),
-  ];
-  const service = new CanvasAgentActionService(drafts, repository);
+  const service = new CanvasAgentActionService(repository);
 
-  const result = await service.execute(
-    run("로그인 화면이랑 인증 메모 연결해줘"),
-    {
-      action_name: "connect_shapes",
-      id: "step-connect",
-      input_json: {
-        fromShapeId: "shape:login",
-        toShapeId: "shape:auth",
-        connectionKind: "arrow",
+  await assert.rejects(
+    service.execute(
+      run("로그인 화면이랑 인증 메모 연결해줘"),
+      {
+        action_name: "connect_shapes",
+        id: "step-connect",
+        input_json: {
+          fromShapeId: "shape:login",
+          toShapeId: "shape:auth",
+          connectionKind: "arrow",
+        },
       },
-    },
+    ),
+    (error) => error.response?.error?.message === "Canvas Agent shape creation is disabled",
   );
-
-  assert.equal(result.shouldContinue, false);
-  assert.equal(result.shapeBatch.operations.length, 1);
-  assert.equal(result.shapeBatch.operations[0].payload.shapeType, "arrow");
-  assert.equal(result.shapeBatch.operations[0].payload.x, 280);
-  assert.equal(result.shapeBatch.operations[0].payload.y, 170);
-  assert.equal(result.shapeBatch.operations[0].payload.width, 140);
-  assert.equal(result.shapeBatch.operations[0].payload.height, 1);
-  assert.deepEqual(result.shapeBatch.operations[0].payload.rawShape.props.start, {
-    type: "point",
-    x: 0,
-    y: 0,
-  });
-  assert.deepEqual(result.shapeBatch.operations[0].payload.rawShape.props.end, {
-    type: "point",
-    x: 140,
-    y: 0,
-  });
-  assert.equal(result.shapeBatch.operations[0].payload.rawShape.props.arrowheadEnd, "arrow");
-  assert.deepEqual(result.shapeBatch.operations[0].payload.rawShape.meta.piloArrowBindingsV1, [
-    {
-      type: "arrow",
-      typeName: "binding",
-      fromId: result.shapeBatch.operations[0].shapeId,
-      toId: "shape:login",
-      props: {
-        terminal: "start",
-        normalizedAnchor: { x: 0.5, y: 0.5 },
-        isExact: false,
-        isPrecise: false,
-        snap: "center",
-      },
-      meta: {},
-    },
-    {
-      type: "arrow",
-      typeName: "binding",
-      fromId: result.shapeBatch.operations[0].shapeId,
-      toId: "shape:auth",
-      props: {
-        terminal: "end",
-        normalizedAnchor: { x: 0.5, y: 0.5 },
-        isExact: false,
-        isPrecise: false,
-        snap: "center",
-      },
-      meta: {},
-    },
-  ]);
-  assert.deepEqual(repository.findByIdCalls, [
-    { canvasId: "canvas-1", shapeIds: ["shape:login", "shape:auth"] },
-  ]);
+  assert.deepEqual(repository.findByIdCalls, []);
 }
 
 {
-  const drafts = new CanvasAgentDraftService();
   const repository = new FakeRepository();
-  const service = new CanvasAgentActionService(drafts, repository);
+  const service = new CanvasAgentActionService(repository);
 
-  const result = await service.execute(
-    {
-      ...run("로그인 흐름 다이어그램 만들어줘"),
-      context_json: {
-        selectedShapeIds: [],
-        viewport: { x: 100, y: 100, width: 900, height: 600 },
-      },
-    },
-    step(
-      {
-        title: "로그인 흐름",
-        summary: "로그인 과정을 Canvas 도구로 배치했습니다.",
-        nodes: [
-          {
-            id: "frame-1",
-            kind: "frame",
-            title: "로그인 흐름",
-            x: 100,
-            y: 100,
-            width: 720,
-            height: 360,
-            color: "blue",
-          },
-          {
-            id: "step-1",
-            kind: "rectangle",
-            title: "로그인 페이지",
-            x: 48,
-            y: 120,
-            width: 180,
-            height: 88,
-            color: "blue",
-            parentId: "frame-1",
-          },
-          {
-            id: "step-2",
-            kind: "text",
-            title: "검증",
-            text: "이메일과 비밀번호를 확인합니다.",
-            x: 300,
-            y: 132,
-            width: 240,
-            height: 72,
-            color: "violet",
-            parentId: "frame-1",
-          },
-        ],
-        connections: [{ id: "arrow-1", from: "step-1", to: "step-2", kind: "arrow" }],
-        recommendedColors: [
-          { name: "blue", label: "파랑", usage: "핵심 화면과 주요 흐름을 표현합니다." },
-          { name: "green", label: "초록", usage: "성공 상태를 표현합니다." },
-          { name: "pink", label: "분홍", usage: "허용되지 않는 색상입니다." },
-        ],
-      },
-      "create_draft",
+  await assert.rejects(
+    service.execute(
+      run("로그인 흐름 다이어그램 만들어줘"),
+      step({}, "create_draft"),
     ),
+    (error) => error.response?.error?.message === "Canvas Agent shape creation is disabled",
   );
-
-  assert.equal(result.shouldContinue, false);
-  assert.equal(result.draftSpec.nodes.length, 3);
-  assert.equal(result.draftSpec.nodes[0].x, 180);
-  assert.equal(result.draftSpec.nodes[0].y, 180);
-  assert.ok(result.draftSpec.nodes.some((node) => node.kind === "rectangle"));
-  assert.equal(result.draftSpec.toolSteps.length, 8);
-  assert.deepEqual(result.draftSpec.availableColors.map((color) => color.name), [
-    "default",
-    "black",
-    "blue",
-    "violet",
-    "green",
-    "yellow",
-    "red",
-  ]);
-  assert.deepEqual(result.draftSpec.recommendedColors.map((color) => color.name), ["blue", "green"]);
-
-  const batch = drafts.toShapeBatch(result.draftSpec, "client-op");
-  assert.equal(batch.operations.length, 4);
-  assert.deepEqual(
-    batch.operations.map((operation) => operation.payload.shapeType).sort(),
-    ["arrow", "frame", "geo", "text"]
-  );
-  const arrowOperation = batch.operations.find((operation) => operation.payload.shapeType === "arrow");
-  assert.equal(arrowOperation.payload.rawShape.meta.piloArrowBindingsV1.length, 2);
-  assert.equal(arrowOperation.payload.rawShape.meta.piloArrowBindingsV1[0].fromId, arrowOperation.shapeId);
-  assert.equal(arrowOperation.payload.rawShape.meta.piloArrowBindingsV1[0].props.terminal, "start");
-  assert.equal(arrowOperation.payload.rawShape.meta.piloArrowBindingsV1[1].fromId, arrowOperation.shapeId);
-  assert.equal(arrowOperation.payload.rawShape.meta.piloArrowBindingsV1[1].props.terminal, "end");
 }
 
 {

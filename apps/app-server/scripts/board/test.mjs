@@ -293,3 +293,4 @@ await import("./full-sync-project-items.test.mjs");
 await import("./project-v2-repository-links.test.mjs");
 await import("./project-item-position-hydration.test.mjs");
 await import("./board-hydration-timestamp-migration.test.mjs");
+await import("./delivery-options.test.mjs");

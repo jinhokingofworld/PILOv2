@@ -63,8 +63,19 @@ assert.match(calendarPanel, /dateBarLayout\.connectsToNext/);
 assert.match(calendarPanel, /border-l-0/);
 assert.match(calendarPanel, /border-r-0/);
 assert.match(calendarPanel, /dateBarLayout\.laneCount/);
+assert.match(calendarPanel, /const CALENDAR_EVENT_LANE_HEIGHT = 28/);
+assert.match(
+  calendarPanel,
+  /minHeight: `\$\{128 \+ dateBarLayout\.laneCount \* CALENDAR_EVENT_LANE_HEIGHT\}px`/
+);
+assert.match(
+  calendarPanel,
+  /marginTop: `\$\{12 \+ dateBarLayout\.laneCount \* CALENDAR_EVENT_LANE_HEIGHT\}px`/
+);
 assert.match(calendarPanel, /CalendarEventBar/);
-assert.match(calendarPanel, /pointer-events-none absolute inset-x-0 top-10/);
+assert.match(calendarPanel, /pointer-events-none absolute inset-x-0\.75 top-11/);
+assert.match(calendarPanel, /grid-cols-7 auto-rows-7 gap-x-1\.5 gap-y-0/);
+assert.match(calendarPanel, /flex h-7 min-w-0 items-center border-y/);
 assert.match(calendarPanel, /CalendarEventDialog/);
 assert.match(
   calendarPanel,

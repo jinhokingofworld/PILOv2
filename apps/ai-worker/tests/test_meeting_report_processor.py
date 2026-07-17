@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.meeting_document_evidence import DocumentChangeEvidence, DocumentTextChange
 from app.meeting_report_processor import (
     ActivityEvidence,
     AudioObjectMetadata,
@@ -186,6 +187,7 @@ class FakeAiClient:
         self.transcribe_calls: list[str] = []
         self.generate_calls: list[str] = []
         self.generate_activity_evidence: list[list[ActivityEvidence]] = []
+        self.generate_document_change_evidence: list[list[DocumentChangeEvidence]] = []
 
     def transcribe(self, audio_file_path: str) -> list[TranscriptSegment]:
         self.transcribe_calls.append(audio_file_path)
@@ -194,10 +196,15 @@ class FakeAiClient:
         return [TranscriptSegment(0, 0, 1_000, "진호: 회의록 조회 API와 worker 처리를 정리합니다.")]
 
     def generate_report(
-        self, transcript_text: str, transcript_segments, activity_evidence=None
+        self,
+        transcript_text: str,
+        transcript_segments,
+        activity_evidence=None,
+        document_change_evidence=None,
     ) -> GeneratedMeetingReport:
         self.generate_calls.append(transcript_text)
         self.generate_activity_evidence.append(list(activity_evidence or []))
+        self.generate_document_change_evidence.append(list(document_change_evidence or []))
         if self.llm_failure:
             raise self.llm_failure
         return parse_generated_report_json(
@@ -304,6 +311,28 @@ def test_processor_completes_processing_report() -> None:
     assert completed.transcript_text.startswith("진호:")
     assert completed.action_item_candidates[0].assignee_user_id is None
     assert repository.release_calls == [REPORT_ID]
+
+
+def test_processor_passes_document_change_evidence_to_existing_llm_call() -> None:
+    document_evidence = [
+        DocumentChangeEvidence(
+            "document-1",
+            "PILO 기획서",
+            "2026-07-17T01:00:00+00:00",
+            [DocumentTextChange("added", "일정을 1주일 연기한다.")],
+        )
+    ]
+    ai_client = FakeAiClient()
+    processor = MeetingReportProcessor(
+        FakeRepository(report_context(document_change_evidence=document_evidence)),
+        FakeStorage(),
+        ai_client,
+    )
+
+    result = processor.process_message(meeting_report_job_payload())
+
+    assert result.reason == "completed"
+    assert ai_client.generate_document_change_evidence == [document_evidence]
 
 
 def test_processor_publishes_each_progress_and_completed_state_without_affecting_result() -> None:
@@ -503,6 +532,7 @@ def test_processor_marks_invalid_action_item_payload_as_llm_failure() -> None:
             transcript_text: str,
             transcript_segments: list[TranscriptSegment],
             activity_evidence=None,
+            document_change_evidence=None,
         ) -> GeneratedMeetingReport:
             self.generate_calls.append(transcript_text)
             return parse_generated_report_json(

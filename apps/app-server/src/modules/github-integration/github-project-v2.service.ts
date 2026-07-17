@@ -690,8 +690,9 @@ export class GithubProjectV2Service {
     return this.database.queryOne<GithubProjectV2Row>(
       `
         ${this.githubProjectV2SelectSql()}
-        WHERE workspace_id = $1
-          AND id = $2
+        WHERE gp.workspace_id = $1
+          AND gp.id = $2
+          AND gp.installation_id IS NOT NULL
       `,
       [workspaceId, projectV2Id]
     );
@@ -722,6 +723,7 @@ export class GithubProjectV2Service {
         FROM github_projects_v2
         WHERE workspace_id = $1
           AND id = $2
+          AND installation_id IS NOT NULL
       `,
       [workspaceId, projectV2Id]
     );
@@ -790,7 +792,10 @@ export class GithubProjectV2Service {
     repositoryId: string | null
   ): { whereSql: string; values: unknown[] } {
     const values: unknown[] = [workspaceId];
-    const filters = ["gp.workspace_id = $1"];
+    const filters = [
+      "gp.workspace_id = $1",
+      "gp.installation_id IS NOT NULL"
+    ];
 
     if (ownerLogin) {
       values.push(ownerLogin);

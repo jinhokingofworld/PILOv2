@@ -6,8 +6,18 @@ import type { DocumentCheckpointService } from "./document-checkpoint.service";
 import type { DocumentHocuspocusInstance } from "./document-hocuspocus-transport";
 import type { DocumentRoomRef } from "./document-types";
 
+type HocuspocusDocumentConnection = {
+  close: (event: { code: number; reason: string }) => void;
+  context: DocumentHocuspocusContext;
+};
+
+type HocuspocusDocumentConnectionStore = {
+  getConnections: () => readonly HocuspocusDocumentConnection[];
+};
+
 type HocuspocusDocumentServer = DocumentHocuspocusInstance & {
   closeConnections: () => void;
+  documents: Map<string, HocuspocusDocumentConnectionStore>;
   flushPendingStores: () => void;
   getConnectionsCount: () => number;
   getDocumentsCount: () => number;

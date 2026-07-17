@@ -10,25 +10,40 @@ import { createBoardRoomService } from "../board/board-room.service";
 import { createBoardSourceRoomService } from "../board/board-source-room.service";
 import { registerBoardSocketHandlers } from "../board/board-socket-handlers";
 import { registerBoardSourceSocketHandlers } from "../board/board-source-socket-handlers";
+import { createChatAccessService } from "../chat/chat-access.service";
+import { createChatFanOut } from "../chat/chat-fan-out";
+import {
+  createChatMembershipRevocationHandler,
+} from "../chat/chat-membership-revocation";
+import { registerChatSocketHandlers } from "../chat/chat-socket-handlers";
+import { createChatSubscriptionWorkQueue } from "../chat/chat-subscription-work";
 import { createGithubSourceAccessService } from "../github-source/github-source-access.service";
 import { createGithubSourceFanOut } from "../github-source/github-source-fan-out";
 import { createGithubSourceRoomService } from "../github-source/github-source-room.service";
 import { registerGithubSourceSocketHandlers } from "../github-source/github-source-socket-handlers";
-import { canvasClientEvents, canvasServerEvents } from "../canvas/canvas-socket-events";
+import { canvasServerEvents } from "../canvas/socket/canvas-socket-events";
 import {
   createCanvasAccessService,
   type CanvasAccessContext,
   type CanvasRoomAccess,
-} from "../canvas/canvas-access.service";
-import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
-import { createCanvasRoomCheckpointService } from "../canvas/canvas-room-checkpoint.service";
-import { createCanvasRoomService } from "../canvas/canvas-room.service";
+} from "../canvas/room/canvas-access.service";
+import { createCanvasPresenceService } from "../canvas/presence/canvas-presence.service";
+import { createCanvasRoomCheckpointService } from "../canvas/checkpoint/canvas-room-checkpoint.service";
+import { createCanvasRoomService } from "../canvas/room/canvas-room.service";
 import {
   createCanvasRoomStateService,
   type CanvasRoomStateStats,
-} from "../canvas/canvas-room-state.service";
-import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.service";
-import { createCanvasShapePreviewService } from "../canvas/canvas-shape-preview.service";
+} from "../canvas/state/canvas-room-state.service";
+import { createCanvasShapeLockService } from "../canvas/review-lock/canvas-shape-lock.service";
+import { createCanvasShapePreviewService } from "../canvas/preview/canvas-shape-preview.service";
+import {
+  assertCanvasRoomWritable,
+  emitCanvasError,
+  registerCanvasSocketHandlers,
+} from "../canvas/socket/canvas-socket-handlers";
+import {
+  isCanvasShapeOperationPayload,
+} from "../canvas/socket/canvas-socket-payloads";
 import { createSqlErdAccessService } from "../sql-erd/sql-erd-access.service";
 import {
   createSqlErdPresenceService,
@@ -66,18 +81,25 @@ import type {
   PageCursorPresenceState,
   PageCursorRoomRef,
 } from "../page-cursor/page-cursor-types";
+import { createPdfCollaborationAccessService } from "../pdf-collaboration/pdf-collaboration-access.service";
+import { createPdfCollaborationMembershipRevocationHandler } from "../pdf-collaboration/pdf-collaboration-membership-revocation";
+import {
+  pdfCollaborationClientEvents,
+  pdfCollaborationServerEvents,
+} from "../pdf-collaboration/pdf-collaboration-events";
+import {
+  readPdfCollaborationPageUpdate,
+  readPdfCollaborationPointerUpdate,
+  readPdfCollaborationRoomRef,
+  readPdfCollaborationStrokeCommit,
+  readPdfCollaborationStrokeRemove,
+} from "../pdf-collaboration/pdf-collaboration-payload";
+import { createPdfCollaborationRoomName } from "../pdf-collaboration/pdf-collaboration-room";
+import { createPdfCollaborationRoomState } from "../pdf-collaboration/pdf-collaboration-room-state";
+import { WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL } from "../workspace-membership-revocation/workspace-membership-revocation";
 import type {
-  CanvasJoinPayload,
-  CanvasPresenceEditingMode,
-  CanvasPresencePoint,
-  CanvasPresenceUpdatePayload,
-  CanvasRoomShapePatchPayload,
   CanvasRoomRef,
-  CanvasViewportLoadedPayload,
-  CanvasShapeOperationPayload,
-  CanvasShapePreviewClearRequestPayload,
-  CanvasShapePreviewPayload,
-} from "../canvas/canvas-types";
+} from "../canvas/contracts/canvas-types";
 import type {
   SqlErdPresenceEditingMode,
   SqlErdPresencePoint,
@@ -128,6 +150,9 @@ export type RealtimeSocketServerOptions = {
   config: RealtimeServerConfig;
   database?: RealtimeDatabase;
   httpServer: HttpServer;
+  membershipRevocationHandlers?: Array<{
+    handle: (payload: unknown) => Promise<boolean>;
+  }>;
 };
 
 type AuthedSocket = Socket & {
@@ -149,6 +174,7 @@ const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
 const BOARD_SOURCE_REDIS_CHANNEL = "board:source-events";
 const GITHUB_SOURCE_INVALIDATION_REDIS_CHANNEL = "github:source-invalidations";
+const CHAT_REDIS_CHANNEL = "chat:events";
 
 function createConflictDraftShapeLockId(
   reviewSessionId: string,
@@ -197,17 +223,6 @@ function readRequiredString(
   if (!value.trim()) return null;
 
   return value;
-}
-
-function readRoomRef(payload: unknown): CanvasRoomRef | null {
-  if (!isRecord(payload)) return null;
-
-  const workspaceId = readRequiredString(payload, "workspaceId");
-  const canvasId = readRequiredString(payload, "canvasId");
-
-  if (!workspaceId || !canvasId) return null;
-
-  return { canvasId, workspaceId };
 }
 
 function readSqlErdRoomRef(payload: unknown): SqlErdRoomRef | null {
@@ -313,313 +328,8 @@ function readSqlErdPresenceUpdatePayload(
   };
 }
 
-function isCanvasPresencePoint(value: unknown): value is CanvasPresencePoint {
-  return (
-    isRecord(value) &&
-    typeof value.x === "number" &&
-    typeof value.y === "number" &&
-    Number.isFinite(value.x) &&
-    Number.isFinite(value.y)
-  );
-}
-
-function isCanvasPresenceViewport(
-  value: unknown,
-): value is CanvasPresenceUpdatePayload["viewport"] {
-  return (
-    isRecord(value) &&
-    typeof value.height === "number" &&
-    typeof value.width === "number" &&
-    typeof value.x === "number" &&
-    typeof value.y === "number" &&
-    typeof value.zoom === "number" &&
-    Number.isFinite(value.height) &&
-    Number.isFinite(value.width) &&
-    Number.isFinite(value.x) &&
-    Number.isFinite(value.y) &&
-    Number.isFinite(value.zoom)
-  );
-}
-
-function isCanvasPresenceEditingMode(
-  value: unknown,
-): value is CanvasPresenceEditingMode {
-  return (
-    value === "code" ||
-    value === "draw" ||
-    value === "hand" ||
-    value === "move" ||
-    value === "placement" ||
-    value === "resize" ||
-    value === "select" ||
-    value === "text"
-  );
-}
-
 function isIsoDateString(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
-}
-
-function isCanvasShapeOperationPayload(
-  value: unknown,
-): value is CanvasShapeOperationPayload {
-  return (
-    isRecord(value) &&
-    typeof value.id === "string" &&
-    typeof value.workspaceId === "string" &&
-    typeof value.canvasId === "string" &&
-    typeof value.shapeId === "string" &&
-    typeof value.actorUserId === "string" &&
-    typeof value.clientOperationId === "string" &&
-    typeof value.contentHash === "string" &&
-    isIsoDateString(value.createdAt) &&
-    (value.operationType === "create" ||
-      value.operationType === "update" ||
-      value.operationType === "delete") &&
-    typeof value.opSeq === "number" &&
-    Number.isInteger(value.opSeq) &&
-    value.opSeq > 0 &&
-    (value.baseRevision === null ||
-      (typeof value.baseRevision === "number" &&
-        Number.isInteger(value.baseRevision) &&
-        value.baseRevision > 0)) &&
-    typeof value.resultRevision === "number" &&
-    Number.isInteger(value.resultRevision) &&
-    value.resultRevision > 0 &&
-    isRecord(value.payload)
-  );
-}
-
-function readJoinPayload(payload: unknown): CanvasJoinPayload | null {
-  const room = readRoomRef(payload);
-
-  if (!room || !isRecord(payload)) return null;
-
-  const initialViewportBounds =
-    payload.initialViewportBounds === undefined
-      ? null
-      : readLoadedViewportBounds(payload.initialViewportBounds);
-  const lastSeenOpSeq = payload.lastSeenOpSeq;
-
-  if (
-    payload.initialViewportBounds !== undefined &&
-    initialViewportBounds === null
-  ) {
-    return null;
-  }
-
-  return {
-    ...room,
-    ...(initialViewportBounds ? { initialViewportBounds } : {}),
-    ...(typeof lastSeenOpSeq === "number" &&
-    Number.isInteger(lastSeenOpSeq) &&
-    lastSeenOpSeq >= 0
-      ? { lastSeenOpSeq }
-      : {}),
-  };
-}
-
-function readPresenceUpdatePayload(
-  payload: unknown,
-): CanvasPresenceUpdatePayload | null {
-  const room = readRoomRef(payload);
-
-  if (!room || !isRecord(payload)) return null;
-
-  const cursor = payload.cursor;
-  const selectedShapeIds = payload.selectedShapeIds;
-  const editingShapeId = payload.editingShapeId;
-  const editingMode = payload.editingMode;
-  const sentAt = payload.sentAt;
-  const viewport = payload.viewport;
-  const validCursor = cursor === null || isCanvasPresencePoint(cursor);
-
-  if (!validCursor) return null;
-  if (
-    editingShapeId !== undefined &&
-    editingShapeId !== null &&
-    typeof editingShapeId !== "string"
-  ) {
-    return null;
-  }
-  if (
-    editingMode !== undefined &&
-    editingMode !== null &&
-    !isCanvasPresenceEditingMode(editingMode)
-  ) {
-    return null;
-  }
-  if (sentAt !== undefined && !isIsoDateString(sentAt)) return null;
-  if (viewport !== undefined && !isCanvasPresenceViewport(viewport)) return null;
-  if (
-    !Array.isArray(selectedShapeIds) ||
-    !selectedShapeIds.every((shapeId) => typeof shapeId === "string")
-  ) {
-    return null;
-  }
-
-  return {
-    ...room,
-    cursor,
-    editingMode: editingMode ?? null,
-    editingShapeId:
-      typeof editingShapeId === "string" && editingShapeId
-        ? editingShapeId
-        : null,
-    selectedShapeIds,
-    ...(sentAt ? { sentAt } : {}),
-    ...(viewport ? { viewport } : {}),
-  };
-}
-
-function readShapeIdList(value: unknown): string[] | null {
-  if (
-    !Array.isArray(value) ||
-    !value.every((shapeId) => typeof shapeId === "string")
-  ) {
-    return null;
-  }
-
-  return Array.from(
-    new Set(value.map((shapeId) => shapeId.trim()).filter(Boolean)),
-  );
-}
-
-function readShapeIds(payload: Record<string, unknown>): string[] | null {
-  return readShapeIdList(payload.shapeIds);
-}
-
-function isShapePreviewPhase(
-  value: unknown,
-): value is CanvasShapePreviewPayload["phase"] {
-  return (
-    value === "delete" ||
-    value === "move" ||
-    value === "resize" ||
-    value === "unknown"
-  );
-}
-
-function readShapePreviewPayload(
-  payload: unknown,
-): CanvasShapePreviewPayload | null {
-  const room = readRoomRef(payload);
-
-  if (!room || !isRecord(payload)) return null;
-
-  const shapes = payload.shapes;
-  const deletedShapeIds =
-    payload.deletedShapeIds === undefined
-      ? undefined
-      : readShapeIdList(payload.deletedShapeIds);
-
-  if (!Array.isArray(shapes) || !shapes.every(isRecord)) return null;
-  if (payload.deletedShapeIds !== undefined && !deletedShapeIds) return null;
-  if (!shapes.length && !deletedShapeIds?.length) return null;
-
-  return {
-    ...room,
-    ...(deletedShapeIds?.length ? { deletedShapeIds } : {}),
-    phase: isShapePreviewPhase(payload.phase) ? payload.phase : "unknown",
-    shapes,
-  };
-}
-
-function readShapePreviewClearPayload(
-  payload: unknown,
-): CanvasShapePreviewClearRequestPayload | null {
-  const room = readRoomRef(payload);
-
-  if (!room || !isRecord(payload)) return null;
-
-  const shapeIds = readShapeIds(payload);
-
-  if (!shapeIds?.length) return null;
-
-  return {
-    ...room,
-    shapeIds,
-  };
-}
-
-function readLoadedViewportBounds(
-  bounds: unknown,
-): CanvasViewportLoadedPayload["bounds"] | null {
-  if (!isRecord(bounds)) return null;
-
-  const { height, margin, width, x, y } = bounds;
-
-  if (
-    typeof height !== "number" ||
-    typeof margin !== "number" ||
-    typeof width !== "number" ||
-    typeof x !== "number" ||
-    typeof y !== "number" ||
-    !Number.isFinite(height) ||
-    !Number.isFinite(margin) ||
-    !Number.isFinite(width) ||
-    !Number.isFinite(x) ||
-    !Number.isFinite(y) ||
-    height <= 0 ||
-    width <= 0 ||
-    margin < 0
-  ) {
-    return null;
-  }
-
-  return { height, margin, width, x, y };
-}
-
-function readViewportLoadedPayload(
-  payload: unknown,
-): CanvasViewportLoadedPayload | null {
-  const room = readRoomRef(payload);
-
-  if (!room || !isRecord(payload)) return null;
-
-  const bounds = readLoadedViewportBounds(payload.bounds);
-  const shapes = payload.shapes;
-
-  if (!bounds) return null;
-  if (!Array.isArray(shapes) || !shapes.every(isRecord)) {
-    return null;
-  }
-
-  return {
-    ...room,
-    bounds,
-    shapes,
-  };
-}
-
-function readRoomShapePatchPayload(
-  payload: unknown,
-): CanvasRoomShapePatchPayload | null {
-  const room = readRoomRef(payload);
-
-  if (!room || !isRecord(payload)) return null;
-
-  const upsertShapes = payload.upsertShapes;
-  const deletedShapeIds = readShapeIdList(payload.deletedShapeIds);
-
-  if (!Array.isArray(upsertShapes) || !upsertShapes.every(isRecord)) {
-    return null;
-  }
-  if (!deletedShapeIds) return null;
-  if (!upsertShapes.length && !deletedShapeIds.length) return null;
-
-  return {
-    ...room,
-    deletedShapeIds,
-    upsertShapes,
-  };
-}
-
-function emitCanvasError(socket: Socket, message: string) {
-  socket.emit(
-    canvasServerEvents.error,
-    createSocketErrorPayload("invalid_payload", message),
-  );
 }
 
 function emitSqlErdError(socket: Socket, message: string) {
@@ -689,23 +399,6 @@ async function getSqlErdRoomSocketPresence(
   return [...presenceByUserId.values()];
 }
 
-function assertCanvasRoomWritable(
-  socket: AuthedSocket,
-  roomName: string,
-): boolean {
-  const access = socket.data.canvasRoomAccess.get(roomName);
-
-  if (access && !access.readOnly) {
-    return true;
-  }
-
-  socket.emit(
-    canvasServerEvents.error,
-    createSocketErrorPayload("forbidden", "canvas room is read-only"),
-  );
-  return false;
-}
-
 function readMeetingWorkspaceId(payload: unknown): string | null {
   if (!isRecord(payload)) return null;
   return readRequiredString(payload, "workspaceId");
@@ -718,6 +411,13 @@ function emitMeetingError(socket: Socket, message: string) {
 function emitPageCursorError(socket: Socket, message: string) {
   socket.emit(
     pageCursorServerEvents.error,
+    createSocketErrorPayload("invalid_payload", message),
+  );
+}
+
+function emitPdfCollaborationError(socket: Socket, message: string) {
+  socket.emit(
+    pdfCollaborationServerEvents.error,
     createSocketErrorPayload("invalid_payload", message),
   );
 }
@@ -774,6 +474,7 @@ export async function createRealtimeSocketServer({
   config,
   database: providedDatabase,
   httpServer,
+  membershipRevocationHandlers = [],
 }: RealtimeSocketServerOptions): Promise<RealtimeSocketServerHandle> {
   const io = new Server(httpServer, {
     cors: {
@@ -802,10 +503,14 @@ export async function createRealtimeSocketServer({
 
   const sessionService = createRealtimeSessionService(database);
   const accessService = createCanvasAccessService(database);
+  const pdfCollaborationAccessService = createPdfCollaborationAccessService({
+    database,
+  });
   const sqlErdAccessService = createSqlErdAccessService(database);
   const boardAccessService = createBoardAccessService(database);
   const presenceService = createCanvasPresenceService();
   const roomStateService = createCanvasRoomStateService();
+  const pdfCollaborationRoomState = createPdfCollaborationRoomState();
   const sqlErdPresenceService = createSqlErdPresenceService();
   const shapeLockService = createCanvasShapeLockService({
     redisClient: redisAdapter?.stateClient ?? null,
@@ -839,6 +544,20 @@ export async function createRealtimeSocketServer({
   const workspacePresenceAccessService =
     createWorkspacePresenceAccessService(database);
   const workspacePresenceService = createWorkspacePresenceService();
+  const chatAccessService = createChatAccessService(database);
+  const chatFanOut = createChatFanOut({ database, io });
+  const chatMembershipRevocationHandler =
+    createChatMembershipRevocationHandler({ io });
+  const pdfCollaborationMembershipRevocationHandler =
+    createPdfCollaborationMembershipRevocationHandler({
+      io,
+      roomState: pdfCollaborationRoomState,
+    });
+  const chatSubscriptionWork = createChatSubscriptionWorkQueue({
+    onRejected() {
+      console.error("Chat Redis subscription work failed");
+    },
+  });
   const boardRoomService = createBoardRoomService({
     accessService: boardAccessService,
   });
@@ -935,6 +654,36 @@ export async function createRealtimeSocketServer({
         },
       )
     : null;
+  const unsubscribeChatEvents = redisAdapter
+    ? await redisAdapter.subscribe(CHAT_REDIS_CHANNEL, (payload) => {
+        chatSubscriptionWork.enqueueChatEvent(async () => {
+          if (!(await chatFanOut.fanOut(payload))) {
+            console.error("Chat Redis payload or access recheck failed");
+          }
+        });
+      })
+    : null;
+  const unsubscribeWorkspaceMembershipRevocations = redisAdapter
+    ? await redisAdapter.subscribe(
+        WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
+        (payload) => {
+          chatSubscriptionWork.trackRevocation(async () => {
+            const handled = await Promise.all(
+              [
+                chatMembershipRevocationHandler.handle(payload),
+                pdfCollaborationMembershipRevocationHandler.handle(payload),
+                ...membershipRevocationHandlers.map((handler) =>
+                  handler.handle(payload),
+                ),
+              ],
+            );
+            if (handled.some((result) => !result)) {
+              console.error("Workspace membership revocation handling failed");
+            }
+          });
+        },
+      )
+    : null;
   const unsubscribePrReviewDecisions = redisAdapter
     ? await redisAdapter.subscribe(PR_REVIEW_DECISION_REDIS_CHANNEL, (payload) => {
         if (!isPrReviewDecisionUpdatedEvent(payload)) {
@@ -1008,6 +757,10 @@ export async function createRealtimeSocketServer({
   io.on("connection", (socket) => {
     const authedSocket = socket as AuthedSocket;
 
+    registerChatSocketHandlers({
+      accessService: chatAccessService,
+      socket,
+    });
     registerWorkspacePresenceSocketHandlers({
       accessService: workspacePresenceAccessService,
       io,
@@ -1015,48 +768,18 @@ export async function createRealtimeSocketServer({
       socket,
     });
 
-    socket.on(canvasClientEvents.join, async (payload) => {
-      const joinPayload = readJoinPayload(payload);
-
-      if (!joinPayload) {
-        emitCanvasError(socket, "canvas:join payload is invalid");
-        return;
-      }
-
-      const result = await roomService.joinCanvasRoom(
-        authedSocket.data.auth,
-        joinPayload,
-      );
-
-      if (!result.joined) {
-        socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload("forbidden", "canvas room access denied"),
-        );
-        return;
-      }
-
-      await roomCheckpointService.flushCheckpointNow(
-        joinPayload,
-        authedSocket.data.auth.token,
-      );
-      const checkpointState =
-        roomStateService.getCheckpointState(joinPayload);
-      const joinedPayload = {
-        ...result.payload,
-        checkpointHistorySeq: checkpointState.checkpointHistorySeq,
-        checkpointVersion: checkpointState.checkpointVersion,
-        historySeq: checkpointState.historySeq,
-        roomShapes: roomStateService.getCachedShapes(joinPayload),
-      };
-
-      await socket.join(result.roomName);
-      authedSocket.data.canvasRoomAccess.set(result.roomName, result.access);
-      authedSocket.data.canvasRoomsByName.set(result.roomName, {
-        canvasId: joinPayload.canvasId,
-        workspaceId: joinPayload.workspaceId,
-      });
-      socket.emit(canvasServerEvents.joined, joinedPayload);
+    registerCanvasSocketHandlers({
+      emitLockReleases(payload) {
+        emitConflictDraftLockReleases(io, payload);
+      },
+      io,
+      presenceService,
+      roomCheckpointService,
+      roomService,
+      roomStateService,
+      shapeLockService,
+      shapePreviewService,
+      socket: authedSocket,
     });
 
     socket.on(sqlErdClientEvents.join, async (payload) => {
@@ -1170,48 +893,46 @@ export async function createRealtimeSocketServer({
       });
     });
 
-    socket.on(canvasClientEvents.leave, async (payload) => {
-      const room = readRoomRef(payload);
-
+    socket.on(pdfCollaborationClientEvents.join, async (payload) => {
+      const room = readPdfCollaborationRoomRef(payload);
       if (!room) {
-        emitCanvasError(socket, "canvas:leave payload is invalid");
+        emitPdfCollaborationError(socket, "pdf-collaboration:join payload is invalid");
         return;
       }
 
-      const roomName = createCanvasRoomName(room);
-      const leavePayload = presenceService.clearRoomPresence(socket.id, room);
-      const lockReleasePayload = await shapeLockService.clearRoomLocks(
-        socket.id,
-        authedSocket.data.auth.userId ?? socket.id,
+      const access = await pdfCollaborationAccessService.getPdfCollaborationRoomAccess(
+        authedSocket.data.auth,
         room,
       );
-      const previewClearPayload = await shapePreviewService.clearRoomPreview(
-        socket.id,
-        authedSocket.data.auth.userId ?? socket.id,
-        room,
-      );
+      if (!access) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("forbidden", "PDF collaboration room access denied"),
+        );
+        return;
+      }
 
-      await roomCheckpointService.flushCheckpointNow(
-        room,
-        authedSocket.data.auth.token,
-      );
+      const roomName = createPdfCollaborationRoomName(room);
+      await socket.join(roomName);
+      const snapshot = pdfCollaborationRoomState.join(room, socket.id, {
+        displayName: authedSocket.data.auth.displayName,
+        pageNumber: 1,
+        userId: authedSocket.data.auth.userId ?? socket.id,
+      });
+      socket.emit(pdfCollaborationServerEvents.joined, snapshot);
+    });
+
+    socket.on(pdfCollaborationClientEvents.leave, async (payload) => {
+      const room = readPdfCollaborationRoomRef(payload);
+      if (!room) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:leave payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(room);
+      const presence = pdfCollaborationRoomState.leave(room, socket.id);
       await socket.leave(roomName);
-      authedSocket.data.canvasRoomAccess.delete(roomName);
-      authedSocket.data.canvasRoomsByName.delete(roomName);
-
-      if (leavePayload) {
-        socket.to(roomName).emit(canvasServerEvents.presenceLeave, leavePayload);
-      }
-
-      if (lockReleasePayload) {
-        emitConflictDraftLockReleases(io, lockReleasePayload);
-      }
-
-      if (previewClearPayload) {
-        socket
-          .to(roomName)
-          .emit(canvasServerEvents.shapePreviewClear, previewClearPayload);
-      }
+      if (presence) socket.to(roomName).emit(pdfCollaborationServerEvents.leave, presence);
     });
 
     socket.on(sqlErdClientEvents.leave, async (payload) => {
@@ -1245,39 +966,6 @@ export async function createRealtimeSocketServer({
       context: authedSocket.data.auth,
       roomService: githubSourceRoomService,
       socket,
-    });
-
-    socket.on(canvasClientEvents.presenceUpdate, (payload) => {
-      const presencePayload = readPresenceUpdatePayload(payload);
-
-      if (!presencePayload) {
-        emitCanvasError(socket, "canvas:presence:update payload is invalid");
-        return;
-      }
-
-      const roomName = createCanvasRoomName(presencePayload);
-
-      if (!socket.rooms.has(roomName)) {
-        socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before sending presence",
-          ),
-        );
-        return;
-      }
-
-      const presence = presenceService.updatePresence(
-        socket.id,
-        {
-          displayName: authedSocket.data.auth.displayName,
-          userId: authedSocket.data.auth.userId ?? socket.id,
-        },
-        presencePayload,
-      );
-
-      socket.to(roomName).emit(canvasServerEvents.presenceUpdate, presence);
     });
 
     socket.on(sqlErdClientEvents.presenceUpdate, (payload) => {
@@ -1346,275 +1034,112 @@ export async function createRealtimeSocketServer({
       socket.to(roomName).emit(pageCursorServerEvents.update, presence);
     });
 
-    socket.on(canvasClientEvents.viewportLoaded, (payload) => {
-      const loadedPayload = readViewportLoadedPayload(payload);
-
-      if (!loadedPayload) {
-        emitCanvasError(socket, "canvas:viewport:loaded payload is invalid");
+    socket.on(pdfCollaborationClientEvents.pageUpdate, (payload) => {
+      const update = readPdfCollaborationPageUpdate(payload);
+      if (!update) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:page:update payload is invalid");
         return;
       }
 
-      const roomName = createCanvasRoomName(loadedPayload);
-
+      const roomName = createPdfCollaborationRoomName(update);
       if (!socket.rooms.has(roomName)) {
         socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before reporting loaded viewport",
-          ),
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before updating page"),
         );
         return;
       }
 
-      const loadedRegions = roomStateService.recordLoadedViewport(
-        loadedPayload,
-        loadedPayload.bounds,
-        loadedPayload.shapes,
-      );
-
-      io.to(roomName).emit(canvasServerEvents.shapesHydrate, {
-        canvasId: loadedPayload.canvasId,
-        loadedRegions,
-        shapes: loadedPayload.shapes,
-        workspaceId: loadedPayload.workspaceId,
-      });
-    });
-
-    socket.on(canvasClientEvents.shapePatch, (payload) => {
-      const patchPayload = readRoomShapePatchPayload(payload);
-
-      if (!patchPayload) {
-        emitCanvasError(socket, "canvas:room:shape:patch payload is invalid");
-        return;
-      }
-
-      const roomName = createCanvasRoomName(patchPayload);
-
-      if (!socket.rooms.has(roomName)) {
-        socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before sending room shape patch",
-          ),
-        );
-        return;
-      }
-
-      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
-        return;
-      }
-
-      const actorUserId = authedSocket.data.auth.userId ?? socket.id;
-      const historyState = roomStateService.applyShapePatch(
-        patchPayload,
-        patchPayload,
-        {
-          actorUserId,
-        },
-      );
-      const patchedShapeIds = [
-        ...patchPayload.deletedShapeIds,
-        ...patchPayload.upsertShapes.flatMap((shape) =>
-          typeof shape.id === "string" ? [shape.id] : [],
-        ),
-      ];
-      roomCheckpointService.scheduleCheckpoint(
-        patchPayload,
-        authedSocket.data.auth.token,
-      );
-      io.to(roomName).emit(canvasServerEvents.shapePatch, {
-        ...patchPayload,
-        actorUserId,
-        canRedo: historyState.canRedo,
-        canUndo: historyState.canUndo,
-        historySeq: historyState.historySeq,
-        sentAt: new Date().toISOString(),
-      });
-      void shapePreviewService
-        .clearRoomPreview(
-          socket.id,
-          actorUserId,
-          patchPayload,
-          patchedShapeIds,
-        )
-        .then((previewClearPayload) => {
-          if (!previewClearPayload) return;
-
-          io.to(roomName).emit(
-            canvasServerEvents.shapePreviewClear,
-            previewClearPayload,
-          );
-        })
-        .catch((error: unknown) => {
-          console.warn("Canvas committed shape preview cleanup failed.", error);
-        });
-    });
-
-    socket.on(canvasClientEvents.historyUndo, (payload) => {
-      const room = readRoomRef(payload);
-
-      if (!room) {
-        emitCanvasError(socket, "canvas:room:history:undo payload is invalid");
-        return;
-      }
-
-      const roomName = createCanvasRoomName(room);
-
-      if (!socket.rooms.has(roomName)) {
-        socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before undoing room history",
-          ),
-        );
-        return;
-      }
-
-      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
-        return;
-      }
-
-      const historyPatch = roomStateService.undoLastHistory(room, {
-        actorUserId: authedSocket.data.auth.userId ?? socket.id,
-      });
-
-      if (!historyPatch) return;
-
-      roomCheckpointService.scheduleCheckpoint(room, authedSocket.data.auth.token);
-      io.to(roomName).emit(canvasServerEvents.shapePatch, {
-        ...room,
-        actorUserId: authedSocket.data.auth.userId ?? socket.id,
-        canRedo: historyPatch.canRedo,
-        canUndo: historyPatch.canUndo,
-        deletedShapeIds: historyPatch.deletedShapeIds,
-        historySeq: historyPatch.historySeq,
-        sentAt: new Date().toISOString(),
-        upsertShapes: historyPatch.upsertShapes,
-      });
-    });
-
-    socket.on(canvasClientEvents.historyRedo, (payload) => {
-      const room = readRoomRef(payload);
-
-      if (!room) {
-        emitCanvasError(socket, "canvas:room:history:redo payload is invalid");
-        return;
-      }
-
-      const roomName = createCanvasRoomName(room);
-
-      if (!socket.rooms.has(roomName)) {
-        socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before redoing room history",
-          ),
-        );
-        return;
-      }
-
-      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
-        return;
-      }
-
-      const historyPatch = roomStateService.redoLastHistory(room, {
-        actorUserId: authedSocket.data.auth.userId ?? socket.id,
-      });
-
-      if (!historyPatch) return;
-
-      roomCheckpointService.scheduleCheckpoint(room, authedSocket.data.auth.token);
-      io.to(roomName).emit(canvasServerEvents.shapePatch, {
-        ...room,
-        actorUserId: authedSocket.data.auth.userId ?? socket.id,
-        canRedo: historyPatch.canRedo,
-        canUndo: historyPatch.canUndo,
-        deletedShapeIds: historyPatch.deletedShapeIds,
-        historySeq: historyPatch.historySeq,
-        sentAt: new Date().toISOString(),
-        upsertShapes: historyPatch.upsertShapes,
-      });
-    });
-
-    socket.on(canvasClientEvents.shapePreview, async (payload) => {
-      const previewPayload = readShapePreviewPayload(payload);
-
-      if (!previewPayload) {
-        emitCanvasError(socket, "canvas:shape:preview payload is invalid");
-        return;
-      }
-
-      const roomName = createCanvasRoomName(previewPayload);
-
-      if (!socket.rooms.has(roomName)) {
-        socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before sending shape previews",
-          ),
-        );
-        return;
-      }
-
-      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
-        return;
-      }
-
-      const previewEvent = {
-        ...previewPayload,
-        actorUserId: authedSocket.data.auth.userId ?? socket.id,
-        sentAt: new Date().toISOString(),
-      };
-
-      await shapePreviewService.updatePreview(
+      const presence = pdfCollaborationRoomState.updatePage(
+        update,
         socket.id,
-        previewEvent.actorUserId,
-        previewEvent,
+        update.pageNumber,
       );
-
-      socket.to(roomName).emit(canvasServerEvents.shapePreview, previewEvent);
+      if (presence) socket.to(roomName).emit(pdfCollaborationServerEvents.pageUpdate, presence);
     });
 
-    socket.on(canvasClientEvents.shapePreviewClear, async (payload) => {
-      const clearPayload = readShapePreviewClearPayload(payload);
-
-      if (!clearPayload) {
-        emitCanvasError(socket, "canvas:shape:preview:clear payload is invalid");
+    socket.on(pdfCollaborationClientEvents.pointerUpdate, (payload) => {
+      const update = readPdfCollaborationPointerUpdate(payload);
+      if (!update) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:pointer:update payload is invalid");
         return;
       }
 
-      const roomName = createCanvasRoomName(clearPayload);
-
+      const roomName = createPdfCollaborationRoomName(update);
       if (!socket.rooms.has(roomName)) {
         socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before clearing shape previews",
-          ),
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before updating pointer"),
         );
         return;
       }
 
-      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+      const pointer = pdfCollaborationRoomState.updatePointer(update, socket.id, update);
+      if (pointer) socket.to(roomName).emit(pdfCollaborationServerEvents.pointerUpdate, pointer);
+    });
+
+    socket.on(pdfCollaborationClientEvents.strokeCommit, (payload) => {
+      const commit = readPdfCollaborationStrokeCommit(payload);
+      if (!commit) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:stroke:commit payload is invalid");
         return;
       }
 
-      const clearEvent = await shapePreviewService.clearRoomPreview(
-        socket.id,
-        authedSocket.data.auth.userId ?? socket.id,
-        clearPayload,
-        clearPayload.shapeIds,
-      );
+      const roomName = createPdfCollaborationRoomName(commit);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before drawing"),
+        );
+        return;
+      }
 
-      if (!clearEvent) return;
+      const stroke = pdfCollaborationRoomState.commitStroke(commit, commit);
+      socket.to(roomName).emit(pdfCollaborationServerEvents.strokeCommit, {
+        ...commit,
+        stroke,
+      });
+    });
 
-      socket.to(roomName).emit(canvasServerEvents.shapePreviewClear, clearEvent);
+    socket.on(pdfCollaborationClientEvents.strokeRemove, (payload) => {
+      const remove = readPdfCollaborationStrokeRemove(payload);
+      if (!remove) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:stroke:remove payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(remove);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before erasing"),
+        );
+        return;
+      }
+
+      if (pdfCollaborationRoomState.removeStroke(remove, remove.pageNumber, remove.strokeId)) {
+        socket.to(roomName).emit(pdfCollaborationServerEvents.strokeRemove, remove);
+      }
+    });
+
+    socket.on(pdfCollaborationClientEvents.strokesClear, (payload) => {
+      const clear = readPdfCollaborationPageUpdate(payload);
+      if (!clear) {
+        emitPdfCollaborationError(socket, "pdf-collaboration:strokes:clear payload is invalid");
+        return;
+      }
+
+      const roomName = createPdfCollaborationRoomName(clear);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          pdfCollaborationServerEvents.error,
+          createSocketErrorPayload("room_not_joined", "join PDF room before clearing drawings"),
+        );
+        return;
+      }
+
+      pdfCollaborationRoomState.clearPageStrokes(clear, clear.pageNumber);
+      socket.to(roomName).emit(pdfCollaborationServerEvents.strokesClear, clear);
     });
 
     socket.on(PR_REVIEW_CONFLICT_DRAFT_LOCK_CLAIM_EVENT, async payload => {
@@ -1682,35 +1207,12 @@ export async function createRealtimeSocketServer({
 
     socket.on("disconnect", () => {
       void (async () => {
-        const canvasRooms: CanvasRoomRef[] = Array.from(
-          authedSocket.data.canvasRoomsByName.values(),
-        );
-        const leaveEvents = presenceService.clearSocket(socket.id);
         const sqlErdClearResults = sqlErdPresenceService.clearSocket(socket.id);
         const pageCursorLeaveEvents: PageCursorPresenceState[] = Object.values(
           authedSocket.data.pageCursorPresenceByRoom,
         );
-        authedSocket.data.canvasRoomAccess.clear();
-        authedSocket.data.canvasRoomsByName.clear();
+        const pdfCollaborationLeaveEvents = pdfCollaborationRoomState.clearSocket(socket.id);
         authedSocket.data.pageCursorPresenceByRoom = {};
-        const [lockReleaseEvents, previewClearEvents] = await Promise.all([
-          shapeLockService.clearSocket(socket.id),
-          shapePreviewService.clearSocket(socket.id),
-          Promise.all(
-            canvasRooms.map((room) =>
-              roomCheckpointService.flushCheckpointNow(
-                room,
-                authedSocket.data.auth.token,
-              ),
-            ),
-          ),
-        ]);
-
-        for (const leavePayload of leaveEvents) {
-          socket
-            .to(createCanvasRoomName(leavePayload))
-            .emit(canvasServerEvents.presenceLeave, leavePayload);
-        }
 
         for (const clearResult of sqlErdClearResults) {
           emitSqlErdPresenceClearResult(socket, clearResult);
@@ -1726,15 +1228,10 @@ export async function createRealtimeSocketServer({
               workspaceId: pageCursorPresence.workspaceId,
             });
         }
-
-        for (const lockReleasePayload of lockReleaseEvents) {
-          emitConflictDraftLockReleases(io, lockReleasePayload);
-        }
-
-        for (const previewClearPayload of previewClearEvents) {
+        for (const pdfCollaborationPresence of pdfCollaborationLeaveEvents) {
           socket
-            .to(createCanvasRoomName(previewClearPayload))
-            .emit(canvasServerEvents.shapePreviewClear, previewClearPayload);
+            .to(createPdfCollaborationRoomName(pdfCollaborationPresence))
+            .emit(pdfCollaborationServerEvents.leave, pdfCollaborationPresence);
         }
       })().catch((error) => {
         console.error("Realtime socket disconnect cleanup failed", error);
@@ -1751,6 +1248,9 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardInvalidations?.();
       await unsubscribeBoardSourceEvents?.();
       await unsubscribeGithubSourceInvalidations?.();
+      await unsubscribeChatEvents?.();
+      await unsubscribeWorkspaceMembershipRevocations?.();
+      await chatSubscriptionWork.drain();
       await unsubscribePrReviewDecisions?.();
       await unsubscribePrReviewRoomDeleted?.();
       await unsubscribePrReviewConflictDrafts?.();

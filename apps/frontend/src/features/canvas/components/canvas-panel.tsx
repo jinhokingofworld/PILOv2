@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 
-import { WorkspaceCanvas } from "@/features/canvas/components/workspace-canvas";
+import { WorkspaceCanvas } from "@/features/canvas/components/screen/WorkspaceCanvas";
 
 export function CanvasPanel() {
   const searchParams = useSearchParams();

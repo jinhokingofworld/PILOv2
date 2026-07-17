@@ -19,12 +19,32 @@ Canvas Agent contract: `docs/api/canvas-agent-api.md`
 구조:
 
 - `canvas.controller.ts`: Canvas API route와 response wrapping
-- `canvas.service.ts`: Workspace 접근 확인, DB query/transaction, Canvas use case 조립
-- `canvas.types.ts`: Canvas DB row, request, response, 내부 write 값 타입
-- `canvas-shape.validation.ts`: Canvas/shape request와 query validation
-- `canvas-shape.mapper.ts`: SQL row를 Canvas API response로 변환
-- `canvas-shape-hash.ts`: canonical shape content 기준 `contentHash` 계산
+- `canvas.service.ts`: 기존 Controller와 Canvas Agent가 사용하는 얇은 public facade
+- `board/`: Canvas 목록, 생성, engine 전환, 상세와 viewport 설정
+- `shape/`: shape 조회와 mutation, validation, mapper, content hash
+- `operation/`: operation catch-up, activity log와 Redis publish
+- `sync-document/`: `tldraw_sync` snapshot 저장과 복원
+- `user-state/`: Canvas 입장과 퇴장 상태
+- `policies/`: Canvas 접근 판정과 Review system shape 보호 정책
+- `contracts/`: Canvas DB row, request, response, 내부 write 값 타입
+- `infrastructure/`: soft-deleted shape 정리 같은 lifecycle 작업
 - `agent/`: Canvas Agent run, step, draft API와 SQS planning/job boundary
+
+호출 흐름:
+
+```text
+CanvasController
+  -> CanvasService
+    -> board / shape / operation / sync-document / user-state service
+```
+
+`CanvasService`의 public method 이름과 API payload는 기존 계약을 유지한다. shape
+create/update/delete/batch는 `CanvasShapeCommandService`가 같은 transaction 안에서
+처리하며, operation publish는 DB transaction이 끝난 뒤 실행한다.
+
+Canvas 루트의 `canvas.types.ts`, `canvas-shape-hash.ts`,
+`canvas-review-shape-policy.ts` 같은 파일은 기존 PR Review import 경로를 보존하는
+호환 re-export다. Canvas 내부 구현은 각 기능 폴더의 실제 파일을 import한다.
 
 `agent/`는 Canvas 전용 AI orchestration을 담당한다. 실제 Canvas shape mutation은
 `CanvasService`를 호출하며, AI Worker는 Canvas action 계획만 만든다. Canvas shape

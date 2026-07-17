@@ -1,5 +1,5 @@
 import { QueryResultRow } from "pg";
-import type { CanvasShapeBatchPayload } from "../canvas.types";
+import type { CanvasShapeBatchPayload } from "../contracts/canvas.types";
 
 export const CANVAS_AGENT_ACTION_NAMES = [
   "find_canvas_tool",

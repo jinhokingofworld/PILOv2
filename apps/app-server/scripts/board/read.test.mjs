@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const { BoardReadQueries } = require("../../dist/modules/board/queries/board-read.queries.js");
+const { BoardIssueCreateQueries } = require("../../dist/modules/board/queries/board-issue-create.queries.js");
 const { BoardReadService } = require("../../dist/modules/board/board-read.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
 
@@ -58,7 +59,11 @@ class FakeWorkspaceService {
 function createSubject(database = new FakeDatabase()) {
   const workspaceService = new FakeWorkspaceService();
   const readQueries = new BoardReadQueries(database);
-  const readService = new BoardReadService(readQueries, workspaceService);
+  const readService = new BoardReadService(
+    readQueries,
+    workspaceService,
+    new BoardIssueCreateQueries(database)
+  );
   const service = new BoardService(
     { createBoard: () => assert.fail("createBoard should not be called") },
     readService

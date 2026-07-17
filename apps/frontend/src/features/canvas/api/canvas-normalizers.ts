@@ -9,7 +9,7 @@ import type {
 import {
   PILO_CHILD_SHAPE_COUNT_META_KEY,
   isRecord as isCanvasRecord,
-} from "../utils/canvas-collapse";
+} from "../engine/shapes/frame/canvas-frame-collapse";
 
 const defaultCanvasBoardId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 

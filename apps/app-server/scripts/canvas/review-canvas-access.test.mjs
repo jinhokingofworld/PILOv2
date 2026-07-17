@@ -1,10 +1,56 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const canvasService = await readFile(
-  new URL("../../src/modules/canvas/canvas.service.ts", import.meta.url),
+const canvasAccessService = await readFile(
+  new URL(
+    "../../src/modules/canvas/policies/canvas-access.service.ts",
+    import.meta.url
+  ),
   "utf8"
 );
+const canvasBoardService = await readFile(
+  new URL(
+    "../../src/modules/canvas/board/canvas-board.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasShapeCommandService = await readFile(
+  new URL(
+    "../../src/modules/canvas/shape/canvas-shape-command.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasShapeQueryService = await readFile(
+  new URL(
+    "../../src/modules/canvas/shape/canvas-shape-query.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasOperationQueryService = await readFile(
+  new URL(
+    "../../src/modules/canvas/operation/canvas-operation-query.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasUserStateService = await readFile(
+  new URL(
+    "../../src/modules/canvas/user-state/canvas-user-state.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasService = [
+  canvasAccessService,
+  canvasBoardService,
+  canvasOperationQueryService,
+  canvasShapeCommandService,
+  canvasShapeQueryService,
+  canvasUserStateService
+].join("\n");
 const canvasAgentRepository = await readFile(
   new URL(
     "../../src/modules/canvas/agent/canvas-agent.repository.ts",
@@ -14,14 +60,14 @@ const canvasAgentRepository = await readFile(
 );
 const canvasShapeValidation = await readFile(
   new URL(
-    "../../src/modules/canvas/canvas-shape.validation.ts",
+    "../../src/modules/canvas/shape/canvas-shape.validation.ts",
     import.meta.url
   ),
   "utf8"
 );
 const canvasShapeMapper = await readFile(
   new URL(
-    "../../src/modules/canvas/canvas-shape.mapper.ts",
+    "../../src/modules/canvas/shape/canvas-shape.mapper.ts",
     import.meta.url
   ),
   "utf8"
@@ -45,39 +91,67 @@ const {
 
 function readMethod(source, methodName, nextMethodName) {
   const start = source.indexOf(`  async ${methodName}(`);
-  const end = source.indexOf(`  async ${nextMethodName}(`, start + 1);
+  const end = nextMethodName
+    ? source.indexOf(`  async ${nextMethodName}(`, start + 1)
+    : source.length;
 
   assert.notEqual(start, -1, `${methodName} must exist`);
-  assert.notEqual(end, -1, `${nextMethodName} must follow ${methodName}`);
+  if (nextMethodName) {
+    assert.notEqual(end, -1, `${nextMethodName} must follow ${methodName}`);
+  }
 
   return source.slice(start, end);
 }
 
-const listCanvases = readMethod(canvasService, "listCanvases", "createCanvas");
-const createCanvas = readMethod(canvasService, "createCanvas", "getCanvas");
-const getCanvas = readMethod(canvasService, "getCanvas", "listShapesInViewport");
+const listCanvases = readMethod(
+  canvasBoardService,
+  "listCanvases",
+  "createCanvas"
+);
+const createCanvas = readMethod(
+  canvasBoardService,
+  "createCanvas",
+  "convertCanvasEngine"
+);
+const getCanvas = readMethod(
+  canvasBoardService,
+  "getCanvas",
+  "updateViewSetting"
+);
 const listShapes = readMethod(
-  canvasService,
+  canvasShapeQueryService,
   "listShapesInViewport",
-  "listOperationsAfterSeq"
-);
-const listOperations = readMethod(
-  canvasService,
-  "listOperationsAfterSeq",
-  "createShape"
-);
-const createShape = readMethod(canvasService, "createShape", "syncShapesBatch");
-const syncShapes = readMethod(
-  canvasService,
-  "syncShapesBatch",
   "getShapeDetail"
 );
-const enterCanvas = readMethod(canvasService, "enterCanvas", "leaveCanvas");
-const leaveCanvas = readMethod(canvasService, "leaveCanvas", "updateViewSetting");
-const updateViewSetting = readMethod(
-  canvasService,
-  "updateViewSetting",
+const listOperations = readMethod(
+  canvasOperationQueryService,
+  "listOperationsAfterSeq",
+  undefined
+);
+const createShape = readMethod(
+  canvasShapeCommandService,
+  "createShape",
+  "syncShapesBatch"
+);
+const syncShapes = readMethod(
+  canvasShapeCommandService,
+  "syncShapesBatch",
   "updateShape"
+);
+const enterCanvas = readMethod(
+  canvasUserStateService,
+  "enterCanvas",
+  "leaveCanvas"
+);
+const leaveCanvas = readMethod(
+  canvasUserStateService,
+  "leaveCanvas",
+  undefined
+);
+const updateViewSetting = readMethod(
+  canvasBoardService,
+  "updateViewSetting",
+  undefined
 );
 
 assert.match(canvasService, /const CANVAS_READ_ACCESS_SQL = `[\s\S]*pr_review_rooms/);
@@ -90,19 +164,49 @@ assert.doesNotMatch(listCanvases, /CANVAS_READ_ACCESS_SQL/);
 assert.match(createCanvas, /engine_type/);
 assert.match(createCanvas, /engine_version/);
 assert.match(createCanvas, /VALUES \(\$1, \$2, 'freeform', \$3, 1, \$4\)/);
-assert.match(getCanvas, /findCanvas\(workspaceId, canvasId\)/);
-assert.match(listShapes, /findCanvas\(workspaceId, canvasId\)/);
+assert.match(
+  getCanvas,
+  /canvasAccess\.findCanvas\(\s*workspaceId,\s*canvasId\s*\)/
+);
+assert.match(
+  listShapes,
+  /canvasAccess\.findCanvas\(\s*workspaceId,\s*canvasId\s*\)/
+);
 assert.match(listOperations, /CANVAS_READ_ACCESS_SQL/);
-assert.match(createShape, /findCanvas\(workspaceId, canvasId, "write"\)/);
-assert.match(syncShapes, /findCanvas\(workspaceId, canvasId, "write"\)/);
-assert.match(enterCanvas, /findCanvas\(workspaceId, canvasId\)/);
-assert.match(leaveCanvas, /findCanvas\(workspaceId, canvasId\)/);
-assert.match(updateViewSetting, /findCanvas\(workspaceId, canvasId, "write"\)/);
+assert.match(
+  createShape,
+  /canvasAccess\.findCanvas\(\s*workspaceId,\s*canvasId,\s*"write"\s*\)/
+);
+assert.match(
+  syncShapes,
+  /canvasAccess\.findCanvas\(\s*workspaceId,\s*canvasId,\s*"write"\s*\)/
+);
+assert.match(
+  enterCanvas,
+  /canvasAccess\.findCanvas\(\s*workspaceId,\s*canvasId\s*\)/
+);
+assert.match(
+  leaveCanvas,
+  /canvasAccess\.findCanvas\(\s*workspaceId,\s*canvasId\s*\)/
+);
+assert.match(
+  updateViewSetting,
+  /canvasAccess\.findCanvas\(\s*workspaceId,\s*canvasId,\s*"write"\s*\)/
+);
 assert.match(updateViewSetting, /CANVAS_WRITE_ACCESS_SQL/);
-assert.match(canvasService, /getShapeDetail[\s\S]*CANVAS_READ_ACCESS_SQL/);
-assert.match(canvasService, /updateShape[\s\S]*CANVAS_WRITE_ACCESS_SQL/);
-assert.match(canvasService, /deleteShape[\s\S]*CANVAS_WRITE_ACCESS_SQL/);
-assert.match(canvasService, /writeShapeOperation[\s\S]*CANVAS_WRITE_ACCESS_SQL/);
+assert.match(canvasShapeQueryService, /getShapeDetail[\s\S]*CANVAS_READ_ACCESS_SQL/);
+assert.match(
+  canvasShapeCommandService,
+  /updateShape[\s\S]*CANVAS_WRITE_ACCESS_SQL/
+);
+assert.match(
+  canvasShapeCommandService,
+  /deleteShape[\s\S]*CANVAS_WRITE_ACCESS_SQL/
+);
+assert.match(
+  canvasShapeCommandService,
+  /writeShapeOperation[\s\S]*CANVAS_WRITE_ACCESS_SQL/
+);
 assert.match(canvasAgentRepository, /board_type = 'freeform'/);
 assert.match(canvasShapeValidation, /PR_REVIEW_FILE_NODE_SHAPE_TYPE/);
 assert.match(canvasShapeValidation, /PR_REVIEW_RELATION_EDGE_SHAPE_TYPE/);

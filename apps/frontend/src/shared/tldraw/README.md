@@ -35,5 +35,5 @@ PR Review가 이 surface를 재사용하더라도 `review_flows`, `review_files`
 저장되는 PILO freeform canvas는 아래처럼 조합한다.
 
 ```text
-WorkspaceCanvas -> PiloCanvasRuntime -> PiloTldrawCanvas -> TldrawSurface
+WorkspaceCanvas -> ClassicCanvasRuntime -> CanvasEditor -> TldrawSurface
 ```

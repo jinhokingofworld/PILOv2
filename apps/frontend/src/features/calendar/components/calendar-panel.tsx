@@ -69,6 +69,7 @@ type CalendarEventsDialogState = {
 } | null;
 
 const DEFAULT_EVENT_COLOR = "#3B82F6";
+const CALENDAR_EVENT_LANE_HEIGHT = 28;
 const CALENDAR_DRAFT_ACTION_SEARCH_PARAM = "calendarAction";
 const CALENDAR_SELECTED_DATE_SEARCH_PARAM = "date";
 const CALENDAR_DRAFT_SEARCH_PARAMS = [
@@ -329,7 +330,7 @@ function CalendarEventBar({
       })}
       type="button"
       className={classNames(
-        "pointer-events-auto flex h-6 min-w-0 items-center border-y px-2 text-left text-xs font-medium shadow-sm transition hover:brightness-95 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "pointer-events-auto flex h-7 min-w-0 items-center border-y px-2 text-left text-xs font-medium shadow-sm transition hover:brightness-95 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         segment.continuesFromPreviousWeek
           ? "rounded-l-none border-l-0"
           : "rounded-l-md border-l",
@@ -1561,7 +1562,7 @@ export function CalendarPanel() {
                         isToday && !isSelected && "border-primary/40 bg-primary/5"
                       )}
                       style={{
-                        minHeight: `${128 + dateBarLayout.laneCount * 28}px`
+                        minHeight: `${128 + dateBarLayout.laneCount * CALENDAR_EVENT_LANE_HEIGHT}px`
                       }}
                     >
                       <button
@@ -1583,7 +1584,7 @@ export function CalendarPanel() {
                       <div
                         className="relative z-20 flex flex-col gap-1"
                         style={{
-                          marginTop: `${12 + dateBarLayout.laneCount * 28}px`
+                          marginTop: `${12 + dateBarLayout.laneCount * CALENDAR_EVENT_LANE_HEIGHT}px`
                         }}
                       >
                         {visibleEvents.map((event) => (
@@ -1622,7 +1623,7 @@ export function CalendarPanel() {
                   );
                 })}
 
-                <div className="pointer-events-none absolute inset-x-0 top-10 z-30 grid grid-cols-7 auto-rows-6 gap-y-1">
+                <div className="pointer-events-none absolute inset-x-0.75 top-11 z-30 grid grid-cols-7 auto-rows-7 gap-x-1.5 gap-y-0">
                   {week.segments.map((segment) => (
                     <CalendarEventBar
                       key={`${segment.weekIndex}-${segment.event.id}`}
