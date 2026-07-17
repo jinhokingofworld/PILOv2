@@ -237,37 +237,8 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
 
       try {
         const result = await this.actions.execute(claimed.run, claimed.step);
-        let resourceRefs = result.resourceRefs;
-        if (result.draftSpec) {
-          const draft = await this.repository.createDraft({
-            runId: claimed.run.id,
-            canvasId: claimed.run.canvas_id,
-            currentUserId: claimed.run.requested_by_user_id,
-            spec: result.draftSpec
-          });
-          resourceRefs = [...resourceRefs, draft.id];
-        }
-        let createdShapeIds: string[] = [];
-        let latestOpSeq: number | null = null;
-        if (result.shapeBatch) {
-          const batch = await this.canvasService.syncShapesBatch(
-            claimed.run.requested_by_user_id,
-            claimed.run.workspace_id,
-            claimed.run.canvas_id,
-            result.shapeBatch,
-            "agent"
-          );
-          createdShapeIds = batch.shapes.map((shape) => shape.id);
-          latestOpSeq = Math.max(0, ...batch.shapes.map((shape) => shape.opSeq ?? 0));
-          resourceRefs = [...resourceRefs, ...createdShapeIds];
-        }
-        const output = { progress: result.progress, summary: result.summary, createdShapeIds, latestOpSeq };
-        await this.repository.completeStep(claimed.step.id, output, resourceRefs);
-
-        if (result.draftSpec) {
-          await this.repository.markRunDraftReady(claimed.run.id, result.summary, output);
-          return;
-        }
+        const output = { progress: result.progress, summary: result.summary };
+        await this.repository.completeStep(claimed.step.id, output, result.resourceRefs);
         if (result.shouldContinue) {
           const steps = await this.repository.listSteps(claimed.run.id);
           if (steps.length >= MAX_CANVAS_AGENT_STEPS) {
@@ -315,7 +286,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
 
   private planDeterministicAction(
     prompt: string,
-    selectedShapeIds: string[],
+    _selectedShapeIds: string[],
     toolHelpMode = false
   ): CanvasAgentPlannedAction | null {
     const normalized = prompt.trim();
@@ -358,19 +329,13 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       };
     }
 
-    if (!toolHelpMode && selectedShapeIds.length === 2 && this.isConnectPrompt(normalized)) {
-      const connectionKind = this.isLineConnectPrompt(normalized) ? "line" : "arrow";
-      const message = connectionKind === "line"
-        ? "선택한 두 도형을 선으로 연결할게요."
-        : "선택한 두 도형을 화살표로 연결할게요.";
+    if (!toolHelpMode && this.isCanvasMutationPrompt(normalized)) {
+      const message = "현재 Canvas AI는 새 도형을 만들거나 기존 도형을 변경하지 않습니다. 캔버스 기능 설명과 기존 도형 검색·선택·화면 이동을 도와드릴 수 있어요.";
       return {
-        actionName: "connect_shapes",
-        input: {
-          fromShapeId: selectedShapeIds[0],
-          toShapeId: selectedShapeIds[1],
-          connectionKind
-        },
-        message
+        actionName: "finish",
+        input: { summary: message, suppressProgress: true },
+        message,
+        showProgress: false
       };
     }
 
@@ -418,7 +383,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       return null;
     }
 
-    return "안녕하세요. 저는 PILO Canvas AI예요. 캔버스 위 도형을 찾거나 화면을 이동하고, 선택한 도형을 연결하거나, 다이어그램/와이어프레임/코드 초안을 만드는 걸 도와드릴 수 있어요.";
+    return "안녕하세요. 저는 PILO Canvas AI예요. Canvas 기능을 설명하고, 캔버스에 이미 있는 도형을 찾아 선택하거나 해당 위치로 화면을 이동하는 걸 도와드릴 수 있어요.";
   }
 
   private readDeterministicShapeSearchQuery(value: string): string | null {
@@ -447,12 +412,8 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     return query ? query.slice(0, 120) : null;
   }
 
-  private isConnectPrompt(value: string): boolean {
-    return /(연결|이어|이어서|화살표|커넥터|선으로|선으?로\s*이어)/.test(value);
-  }
-
-  private isLineConnectPrompt(value: string): boolean {
-    return /(선으로|선으?로\s*이어|연결선)/.test(value) && !/(화살표)/.test(value);
+  private isCanvasMutationPrompt(value: string): boolean {
+    return /(연결|이어|화살표|커넥터|만들|생성|그려|작성|초안|디자인|와이어|코드|구현|추가|복제|삭제|수정|바꿔|변경|정리|배치|정렬)/.test(value);
   }
 
   private async assertDraftSourcesCurrent(canvasId: string, draft: CanvasAgentDraftRow): Promise<void> {

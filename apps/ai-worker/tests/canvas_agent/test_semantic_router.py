@@ -177,7 +177,7 @@ def test_semantic_router_uses_text_search_without_embedding_index() -> None:
     assert repository.text_search_calls == 1
 
 
-def test_semantic_router_uses_text_search_for_connection_before_embedding() -> None:
+def test_semantic_router_does_not_plan_connection_from_text_matches() -> None:
     repository = FakeRepository(
         has_shapes=False,
         text_shapes={
@@ -202,11 +202,7 @@ def test_semantic_router_uses_text_search_for_connection_before_embedding() -> N
 
     plan = CanvasSemanticRouter(repository, FailingEmbedder()).plan(context)
 
-    assert plan is not None
-    assert plan.action_name == "connect_shapes"
-    assert plan.input["fromShapeId"] == "shape:meeting"
-    assert plan.input["toShapeId"] == "shape:issue"
-    assert plan.input["routingSource"] == "deterministic_search"
+    assert plan is None
     assert repository.search_calls == 0
 
 
@@ -228,7 +224,7 @@ def test_semantic_router_skips_generation_prompt_for_planner() -> None:
     assert plan is None
 
 
-def test_semantic_router_connects_two_confident_shape_matches() -> None:
+def test_semantic_router_does_not_plan_connection_from_semantic_matches() -> None:
     repository = FakeRepository()
     context = CanvasAgentRunContext(
         run_id="run-1",
@@ -243,8 +239,4 @@ def test_semantic_router_connects_two_confident_shape_matches() -> None:
 
     plan = CanvasSemanticRouter(repository, FakeEmbedder()).plan(context)
 
-    assert plan is not None
-    assert plan.action_name == "connect_shapes"
-    assert plan.input["fromShapeId"] == "shape:login"
-    assert plan.input["toShapeId"] == "shape:auth"
-    assert plan.input["connectionKind"] == "arrow"
+    assert plan is None

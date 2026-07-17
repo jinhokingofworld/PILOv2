@@ -81,63 +81,6 @@ class CanvasSemanticRouter:
         return f"local:{self.embedder.model_name}@{self.embedder.model_version}"
 
     def plan(self, context: CanvasAgentRunContext) -> CanvasAgentPlan | None:
-        connection_request = _connect_request(context)
-        if connection_request is not None:
-            left_query, right_query, connection_kind = connection_request
-            text_plan = self._plan_text_connection(
-                context,
-                left_query,
-                right_query,
-                connection_kind,
-            )
-            if text_plan is not None:
-                return text_plan
-
-            if not self.repository.has_semantic_shapes(context.workspace_id, context.canvas_id):
-                return None
-
-            try:
-                left_embedding = self.embedder.embed_query(left_query)
-                right_embedding = self.embedder.embed_query(right_query)
-            except CanvasEmbeddingError:
-                return None
-
-            left_matches = self.repository.search_semantic_shapes(
-                context.workspace_id,
-                context.canvas_id,
-                left_embedding,
-            )
-            right_matches = self.repository.search_semantic_shapes(
-                context.workspace_id,
-                context.canvas_id,
-                right_embedding,
-            )
-            left_match = _confident(
-                left_matches,
-                self.shape_similarity_min,
-                self.similarity_margin_min,
-            )
-            right_match = _confident(
-                right_matches,
-                self.shape_similarity_min,
-                self.similarity_margin_min,
-            )
-            if (
-                isinstance(left_match, CanvasSemanticShapeMatch)
-                and isinstance(right_match, CanvasSemanticShapeMatch)
-                and left_match.shape_id != right_match.shape_id
-            ):
-                return CanvasAgentPlan(
-                    action_name="connect_shapes",
-                    input={
-                        "fromShapeId": left_match.shape_id,
-                        "toShapeId": right_match.shape_id,
-                        "connectionKind": connection_kind,
-                        "routingSource": "shape_embedding",
-                    },
-                    message="임베딩 검색으로 두 도형을 찾았어요. 바로 연결할게요.",
-                )
-
         request = _semantic_request(context)
         if request is None:
             return None
@@ -202,34 +145,6 @@ class CanvasSemanticRouter:
 
         return None
 
-    def _plan_text_connection(
-        self,
-        context: CanvasAgentRunContext,
-        left_query: str,
-        right_query: str,
-        connection_kind: str,
-    ) -> CanvasAgentPlan | None:
-        left_match = _single_text_match(
-            self.repository.search_text_shapes(context.canvas_id, left_query, limit=2)
-        )
-        right_match = _single_text_match(
-            self.repository.search_text_shapes(context.canvas_id, right_query, limit=2)
-        )
-
-        if left_match is None or right_match is None or left_match.shape_id == right_match.shape_id:
-            return None
-
-        return CanvasAgentPlan(
-            action_name="connect_shapes",
-            input={
-                "fromShapeId": left_match.shape_id,
-                "toShapeId": right_match.shape_id,
-                "connectionKind": connection_kind,
-                "routingSource": "deterministic_search",
-            },
-            message="Canvas 검색으로 두 도형을 찾았어요. 바로 연결할게요.",
-        )
-
     def _is_shape_search(self, query_embedding: list[float]) -> bool:
         prototypes = self._get_prototype_embeddings()
         shape_score = _max_similarity(query_embedding, prototypes.shape_search)
@@ -280,46 +195,6 @@ def _semantic_request(context: CanvasAgentRunContext) -> tuple[str, bool] | None
     return (normalized[:120], False) if normalized else None
 
 
-def _connect_request(context: CanvasAgentRunContext) -> tuple[str, str, str] | None:
-    if context.previous_action is not None:
-        return None
-    normalized = " ".join(context.prompt.strip().split())
-    if not normalized or not _is_connect_prompt(normalized):
-        return None
-    selected_shape_ids = context.request_context.get("selectedShapeIds")
-    if isinstance(selected_shape_ids, list) and len(selected_shape_ids) >= 2:
-        return None
-
-    connection_kind = "line" if _is_line_connect_prompt(normalized) else "arrow"
-    subject = re.split(r"(?:연결|이어|이어서|화살표|커넥터|선으로)", normalized, maxsplit=1)[
-        0
-    ].strip()
-    if not subject:
-        return None
-
-    directed = re.match(r"^(.+?)에서\s+(.+?)(?:로|으로)$", subject)
-    if directed:
-        left = _clean_query_part(directed.group(1))
-        right = _clean_query_part(directed.group(2))
-        return (left, right, connection_kind) if left and right and left != right else None
-
-    subject = re.sub(r"(?:을|를|에|에게|까지|좀|바로|서로|둘\s*)+$", "", subject).strip()
-    parts = re.split(r"\s*(?:이랑|랑|와|과|하고|및|,|\+)\s*", subject, maxsplit=1)
-    if len(parts) != 2:
-        return None
-    left = _clean_query_part(parts[0])
-    right = _clean_query_part(parts[1])
-    return (left, right, connection_kind) if left and right and left != right else None
-
-
-def _is_connect_prompt(value: str) -> bool:
-    return bool(re.search(r"(연결|이어|이어서|화살표|커넥터|선으로)", value))
-
-
-def _is_line_connect_prompt(value: str) -> bool:
-    return bool(re.search(r"(선으로|연결선)", value)) and "화살표" not in value
-
-
 def _is_direct_text_search_prompt(value: str) -> bool:
     if not re.search(r"(찾아|찾기|검색|어디|위치|보여|이동|가줘|하이라이트)", value):
         return False
@@ -327,10 +202,6 @@ def _is_direct_text_search_prompt(value: str) -> bool:
         r"(만들|생성|그려|초안|디자인|와이어|다이어그램|코드|작성|추가|수정|바꿔)",
         value,
     )
-
-
-def _clean_query_part(value: str) -> str:
-    return re.sub(r"^(?:이|그|저)\s+", "", value).strip(" \t\n\r\"'`“”‘’")
 
 
 T = TypeVar("T")
@@ -352,13 +223,6 @@ def _confident(
         if top_similarity - next_similarity < margin_min:
             return None
     return top
-
-
-def _single_text_match(matches: list[CanvasSemanticShapeMatch]) -> CanvasSemanticShapeMatch | None:
-    if len(matches) != 1:
-        return None
-    match = matches[0]
-    return match if match.similarity >= 0.9 else None
 
 
 def _max_similarity(query_embedding: list[float], prototype_embeddings: list[list[float]]) -> float:

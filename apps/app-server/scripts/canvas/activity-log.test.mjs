@@ -145,7 +145,11 @@ assert.equal(executed[0].values[6], noteCreate.dedupeKey);
 assert.match(activityLogServiceSource, /append\(\s*transaction: DatabaseTransaction/);
 assert.match(canvasServiceSource, /activityLogService\.append\(transaction/);
 assert.match(canvasServiceSource, /if \(!writeResult\.isNewOperation\)/);
-assert.match(canvasAgentServiceSource, /result\.shapeBatch,\s*"agent"/);
+assert.match(
+  canvasAgentServiceSource,
+  /this\.drafts\.toShapeBatch\(draft\.draft_spec_json, clientOperationId\),\s*"agent"/,
+);
+assert.doesNotMatch(canvasAgentServiceSource, /result\.shapeBatch/);
 assert.match(activityLogMigration, /ADD COLUMN dedupe_key TEXT/);
 assert.match(activityLogMigration, /SET dedupe_key = 'legacy:' \|\| id::text/);
 assert.match(activityLogMigration, /ALTER COLUMN dedupe_key SET NOT NULL/);
