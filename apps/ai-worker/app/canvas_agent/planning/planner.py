@@ -104,6 +104,13 @@ def parse_canvas_agent_intent_classification(
             if isinstance(shape_ids, list)
             else []
         )
+    elif intent == "generate_html":
+        sanitized_arguments = {}
+    elif intent == "unsupported":
+        query = sanitized_arguments.get("query")
+        sanitized_arguments = {
+            "query": query.strip()[:120] if isinstance(query, str) else ""
+        }
 
     return CanvasAgentIntentClassification(
         intent=intent,

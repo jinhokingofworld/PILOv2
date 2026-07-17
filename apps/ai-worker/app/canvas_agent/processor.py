@@ -4,6 +4,7 @@ from typing import Protocol
 from uuid import UUID
 
 from app.canvas_agent.planning.planner import CanvasAgentIntentClassifierError
+from app.canvas_agent.planning.html_generator import CanvasAgentHtmlGeneratorError
 from app.canvas_agent.types import (
     CANVAS_AGENT_JOB_TYPE,
     CANVAS_AGENT_SCHEMA_VERSION,
@@ -48,6 +49,12 @@ class CanvasSemanticIntentRouter(Protocol):
     def classify(self, context: CanvasAgentRunContext, query_override: str | None = None): ...
 
 
+class CanvasHtmlGenerator(Protocol):
+    model: str
+
+    def generate(self, context: CanvasAgentRunContext) -> dict[str, object]: ...
+
+
 def parse_canvas_agent_job_payload(payload: dict[str, object]) -> CanvasAgentJob:
     if payload.get("jobType") != CANVAS_AGENT_JOB_TYPE:
         raise ValueError("Unsupported Canvas Agent job type")
@@ -69,10 +76,12 @@ class CanvasAgentProcessor:
         repository: CanvasAgentRepository,
         intent_classifier: CanvasAgentIntentClassifier,
         semantic_router: CanvasSemanticIntentRouter | None = None,
+        html_generator: CanvasHtmlGenerator | None = None,
     ) -> None:
         self.repository = repository
         self.intent_classifier = intent_classifier
         self.semantic_router = semantic_router
+        self.html_generator = html_generator
 
     def process_payload(self, payload: dict[str, object]) -> CanvasAgentProcessResult:
         try:
@@ -116,35 +125,60 @@ class CanvasAgentProcessor:
                 )
                 classification = self.intent_classifier.classify(context)
                 arguments = dict(classification.arguments)
-                shape_ids = arguments.get("shapeIds")
-                has_client_match = isinstance(shape_ids, list) and any(
-                    isinstance(item, str) and item for item in shape_ids
-                )
                 model_name = self.intent_classifier.model
                 message = classification.message
                 result_reason = "canvas_agent_intent_classified"
 
-                if has_client_match:
-                    arguments["routingSource"] = "client_shape_context"
-                    arguments["focusResult"] = True
-                else:
-                    query = arguments.get("query")
-                    semantic_classification = self._semantic_classification(
-                        context,
-                        query if isinstance(query, str) else None,
+                if classification.intent == "find_shapes":
+                    shape_ids = arguments.get("shapeIds")
+                    has_client_match = isinstance(shape_ids, list) and any(
+                        isinstance(item, str) and item for item in shape_ids
                     )
-                    if semantic_classification is not None:
-                        arguments = dict(semantic_classification.arguments)
-                        message = semantic_classification.message
-                        model_name = (
-                            self.semantic_router.model
-                            if self.semantic_router
-                            else "local:canvas-embedding"
-                        )
-                        result_reason = "canvas_agent_semantic_intent_classified"
+                    if has_client_match:
+                        arguments["routingSource"] = "client_shape_context"
+                        arguments["focusResult"] = True
                     else:
-                        arguments["shapeIds"] = []
-                        arguments["routingSource"] = "llm_intent_classifier"
+                        query = arguments.get("query")
+                        semantic_classification = self._semantic_classification(
+                            context,
+                            query if isinstance(query, str) else None,
+                        )
+                        if semantic_classification is not None:
+                            arguments = dict(semantic_classification.arguments)
+                            message = semantic_classification.message
+                            model_name = (
+                                self.semantic_router.model
+                                if self.semantic_router
+                                else "local:canvas-embedding"
+                            )
+                            result_reason = "canvas_agent_semantic_intent_classified"
+                        else:
+                            arguments["shapeIds"] = []
+                            arguments["routingSource"] = "llm_intent_classifier"
+                elif classification.intent == "generate_html":
+                    selection_error = context.request_context.get("selectedSceneError")
+                    selected_scene = context.request_context.get("selectedScene")
+                    if isinstance(selection_error, str) and selection_error.strip():
+                        arguments = {"selectionError": selection_error.strip()[:500]}
+                        message = selection_error.strip()[:1000]
+                    elif not isinstance(selected_scene, dict):
+                        arguments = {"missingSelection": True}
+                        message = "HTML로 만들 캔버스 영역을 먼저 선택해주세요."
+                    else:
+                        if self.html_generator is None:
+                            raise CanvasAgentHtmlGeneratorError(
+                                "Canvas Agent HTML generator is not configured"
+                            )
+                        self.repository.update_progress(
+                            context.run_id,
+                            "선택한 영역을 정적 HTML/CSS로 변환하고 있어요.",
+                        )
+                        arguments = {"artifact": self.html_generator.generate(context)}
+                        model_name = self.html_generator.model
+                        message = "선택한 영역의 정적 HTML/CSS 초안을 만들었습니다."
+                        result_reason = "canvas_agent_html_generated"
+                else:
+                    arguments = {}
 
                 self.repository.create_classified_intent(
                     context,
@@ -152,6 +186,16 @@ class CanvasAgentProcessor:
                     arguments,
                     message,
                     model_name,
+                )
+            except CanvasAgentHtmlGeneratorError:
+                self.repository.mark_failed(
+                    job.run_id,
+                    "코드 생성 중 오류가 났어요. 다시 시도해 주세요.",
+                )
+                return CanvasAgentProcessResult(
+                    True,
+                    "canvas_agent_html_generation_failed",
+                    job.run_id,
                 )
             except CanvasAgentIntentClassifierError as error:
                 self.repository.mark_failed(job.run_id, str(error))

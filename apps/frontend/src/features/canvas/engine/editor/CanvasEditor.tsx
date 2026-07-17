@@ -209,6 +209,7 @@ type CanvasEditorProps = {
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onFrameChildShapesUnload: (shapes: PiloCanvasFreeformShape[]) => void;
   onFrameChildrenRequest: (frameId: string) => void;
+  onFrameSubtreeRequest: (frameId: string) => Promise<void>;
   getPreservedFreeformShapeSnapshots?: () => PiloCanvasFreeformShape[];
   isShapePatchProtected: (shapeId: string) => boolean;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
@@ -1047,6 +1048,7 @@ export function CanvasEditor({
   onViewChange,
   onFrameChildShapesUnload,
   onFrameChildrenRequest,
+  onFrameSubtreeRequest,
   getPreservedFreeformShapeSnapshots,
   isShapePatchProtected,
   onViewportBoundsChange,
@@ -1117,6 +1119,7 @@ export function CanvasEditor({
     editor: canvasEditor,
     enabled: canvasAgentEnabled,
     onApplied: handleCanvasAgentApplied,
+    onFrameSubtreeRequest,
     workspaceId: board.workspaceId,
   });
   const scheduleShapePreviewSend = useCallback(
@@ -2579,6 +2582,7 @@ export function CanvasEditor({
       </CanvasRemotePresenceProvider>
       <CanvasAiChatOverlay
         anchor={canvasAiChatAnchor}
+        artifact={canvasAgent.artifact}
         draft={canvasAgent.draft}
         error={canvasAgent.error}
         holdProgress={canvasAiChatHoldProgress}

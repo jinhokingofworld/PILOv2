@@ -216,6 +216,7 @@ class PgCanvasAgentRepository:
             SET status = 'failed', error_code = 'CANVAS_AGENT_PLANNER_FAILED',
                 error_message = %s,
                 result_summary = CASE
+                    WHEN %s THEN %s
                     WHEN prompt ~* %s THEN %s
                     ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
                 END,
@@ -225,6 +226,7 @@ class PgCanvasAgentRepository:
                     jsonb_build_object(
                         'message',
                         CASE
+                            WHEN %s THEN %s
                             WHEN prompt ~* %s THEN %s
                             ELSE 'Canvas AI 작업을 완료하지 못했습니다.'
                         END,
@@ -241,8 +243,12 @@ class PgCanvasAgentRepository:
             """,
             (
                 safe_error_message,
+                safe_error_message == CODE_GENERATION_FAILURE_MESSAGE,
+                CODE_GENERATION_FAILURE_MESSAGE,
                 "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
                 user_message,
+                safe_error_message == CODE_GENERATION_FAILURE_MESSAGE,
+                CODE_GENERATION_FAILURE_MESSAGE,
                 "(디자인|와이어|페이지|화면|초안|그려|만들|생성)",
                 user_message,
                 run_id,

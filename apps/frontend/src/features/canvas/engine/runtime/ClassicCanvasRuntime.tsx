@@ -1182,7 +1182,7 @@ function ClassicCanvasRuntimeInner({
     );
   }, []);
 
-  const { loadFrameChildren, loadShapeDetail, loadViewportShapes } =
+  const { loadFrameChildren, loadFrameSubtree, loadShapeDetail, loadViewportShapes } =
     useCanvasViewportQueries({
     board,
     canvasClient,
@@ -1288,6 +1288,7 @@ function ClassicCanvasRuntimeInner({
           onFrameChildShapesUnload={handleFrameChildShapesUnload}
           onViewportBoundsChange={loadViewportShapes}
           onFrameChildrenRequest={loadFrameChildren}
+          onFrameSubtreeRequest={loadFrameSubtree}
           getPreservedFreeformShapeSnapshots={
             getPreservedFreeformShapeSnapshots
           }

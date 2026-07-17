@@ -272,6 +272,79 @@ export function useCanvasViewportQueries({
     ],
   );
 
+  const loadFrameSubtree = useCallback(
+    async (rootFrameId: string) => {
+      const visitedFrameIds = new Set<string>();
+
+      async function visit(frameId: string, depth: number): Promise<void> {
+        if (visitedFrameIds.has(frameId) || visitedFrameIds.size >= 160 || depth > 12) return;
+        visitedFrameIds.add(frameId);
+
+        const cachedShapes = Array.from(shapeDetailCacheRef.current.values()).filter(
+          (shape) =>
+            shape.parentId === frameId &&
+            (typeof shape.id !== "string" || !deletedShapeIdsRef.current.has(shape.id)),
+        );
+        let loadedShapes = cachedShapes;
+
+        if (
+          storageMode === "api" &&
+          canvasClient?.listShapesInViewport
+        ) {
+          const queryKey = buildFrameChildrenQueryKey({
+            boardId: board.id,
+            frameId,
+            workspaceId: board.workspaceId,
+          });
+          const shapes = await queryClient.fetchQuery({
+            queryKey,
+            staleTime: 0,
+            queryFn: ({ signal }) =>
+              canvasClient.listShapesInViewport!(
+                board.id,
+                { parentShapeId: frameId },
+                { signal, workspaceId: board.workspaceId },
+              ),
+          });
+          rememberPersistedShapeMetadata(shapes);
+          loadedShapes = normalizeCanvasFreeformShapes(shapes) as PiloCanvasFreeformShape[];
+        }
+
+        const nextShapes = loadedShapes.filter(
+          (shape) => typeof shape.id !== "string" || !deletedShapeIdsRef.current.has(shape.id),
+        );
+        nextShapes.forEach((shape) => {
+          if (typeof shape.id !== "string") return;
+          unloadedShapeIdsRef.current.delete(shape.id);
+          shapeDetailCacheRef.current.set(shape.id, shape);
+        });
+        if (nextShapes.length) mergeLoadedFreeformShapes(nextShapes);
+
+        await Promise.all(
+          nextShapes.flatMap((shape) =>
+            shape.type === "frame" && typeof shape.id === "string"
+              ? [visit(shape.id, depth + 1)]
+              : []
+          ),
+        );
+      }
+
+      await visit(rootFrameId, 0);
+    },
+    [
+      board.id,
+      board.workspaceId,
+      canvasClient,
+      deletedShapeIdsRef,
+      mergeLoadedFreeformShapes,
+      queryClient,
+      rememberPersistedShapeMetadata,
+      shapeDetailCacheRef,
+      storageMode,
+      unloadedShapeIdsRef,
+    ],
+  );
+
   const loadViewportShapes = useCallback(
     (bounds: PiloCanvasViewportBounds) => {
       latestViewportBoundsRef.current = bounds;
@@ -520,6 +593,7 @@ export function useCanvasViewportQueries({
 
   return {
     loadFrameChildren,
+    loadFrameSubtree,
     loadShapeDetail,
     loadViewportShapes,
   };
