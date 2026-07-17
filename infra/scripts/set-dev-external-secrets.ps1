@@ -53,6 +53,7 @@ $jwtSecret = Read-OptionalSecureText "JWT_SECRET"
 $sessionSecret = Read-OptionalSecureText "SESSION_SECRET"
 $googleOAuthClientId = Read-Host "GOOGLE_OAUTH_CLIENT_ID"
 $googleOAuthClientSecret = Read-OptionalSecureText "GOOGLE_OAUTH_CLIENT_SECRET"
+$googleCalendarTokenEncryptionKey = Read-OptionalSecureText "GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY"
 $githubLoginClientId = Read-Host "GITHUB_LOGIN_CLIENT_ID"
 $githubLoginClientSecret = Read-OptionalSecureText "GITHUB_LOGIN_CLIENT_SECRET"
 $githubUserOAuthClientId = Read-Host "GITHUB_USER_OAUTH_CLIENT_ID"
@@ -91,6 +92,7 @@ Put-SecretIfPresent "pilo-dev/app-server/SESSION_SECRET" $sessionSecret
 
 Put-SecretIfPresent "pilo-dev/app-server/GOOGLE_OAUTH_CLIENT_ID" $googleOAuthClientId
 Put-SecretIfPresent "pilo-dev/app-server/GOOGLE_OAUTH_CLIENT_SECRET" $googleOAuthClientSecret
+Put-SecretIfPresent "pilo-dev/app-server/GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY" $googleCalendarTokenEncryptionKey
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_LOGIN_CLIENT_ID" $githubLoginClientId
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_LOGIN_CLIENT_SECRET" $githubLoginClientSecret
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_USER_OAUTH_CLIENT_ID" $githubUserOAuthClientId
