@@ -745,6 +745,11 @@ shape ids, and an optional target viewport. The client renders any virtual
 pointer and selection highlight locally; it does not publish those
 values through shared Canvas presence or store pointer coordinates in the DB.
 
+When an authorized requester polls an `executing` run, App Server also attempts
+to claim and execute that run's pending action before returning the refreshed
+detail. The periodic action sweep remains a recovery fallback, so completion
+does not depend on another Canvas Agent request waking the executor.
+
 ## Intent and executor set
 
 ```text
