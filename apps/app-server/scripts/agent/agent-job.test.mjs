@@ -51,7 +51,7 @@ const originalEnv = {
 };
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "e59386f0bbe4e45767137a2e001f2a5e25d34c5c6c6bfd309e3e1aefeb9a2045";
+  "44967e7f36a86bf51a915713466a1b09818b6514d563d9f03887c39f8f432cdc";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -124,7 +124,7 @@ const payload = {
   assert.deepEqual(suite.tools, actualSnapshot);
 
   const capabilityCatalog = registry.listCapabilityCatalogForContext(null);
-  assert.equal(capabilityCatalog.version, "agent-tool-capabilities:v1");
+  assert.equal(capabilityCatalog.version, "agent-tool-capabilities:v2");
   assert.match(capabilityCatalog.sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(
     capabilityCatalog.descriptors.map((descriptor) => descriptor.toolName),
@@ -145,10 +145,31 @@ const payload = {
   assert.ok(
     capabilityCatalog.descriptors.every(
       (descriptor) =>
-        descriptor.whenToUse &&
+      descriptor.whenToUse &&
         descriptor.mustNotUseFor.length > 0 &&
-        descriptor.capabilityIds.length > 0
+        descriptor.capabilityIds.length > 0 &&
+        descriptor.selectorKinds.length > 0 &&
+        descriptor.requiresConfirmation ===
+          (descriptor.executionMode === "confirmation_required")
     )
+  );
+  assert.ok(
+    capabilityCatalog.capabilities.every(
+      (capability) =>
+        capability.examples.length === 5 &&
+        new Set(capability.examples.map((example) => example.kind)).size === 5 &&
+        capability.selectorKinds.length > 0
+    ),
+    "every capability must carry DB-independent canonical and variation fixtures"
+  );
+  assert.ok(
+    capabilityCatalog.capabilities.some(
+      (capability) =>
+        capability.id === "meeting.action_items.create" &&
+        capability.availability === "unsupported" &&
+        capability.toolNames.length === 0
+    ),
+    "unsupported boundaries must remain explicit instead of becoming executable tools"
   );
   assert.deepEqual(
     registry.listCapabilityCatalogForContext(null),
@@ -426,15 +447,17 @@ class FakeOutboxToolRegistryService {
         whenToUse: definition.description,
         mustNotUseFor: ["다른 도메인의 요청"],
         acceptedSelectorFields: [],
+        selectorKinds: ["date_range"],
         prerequisiteToolNames: [],
         followUpToolNames: [],
         riskLevel: definition.riskLevel,
         executionMode: definition.executionMode,
+        requiresConfirmation: false,
         contextSurface: definition.contextRequirement?.surface ?? null
       })
     );
     return {
-      version: "agent-tool-capabilities:v1",
+      version: "agent-tool-capabilities:v2",
       sha256: "a".repeat(64),
       descriptors
     };
@@ -604,7 +627,7 @@ try {
       }
     ]);
     assert.deepEqual(jobService.calls[0].toolCapabilityCatalog, {
-      version: "agent-tool-capabilities:v1",
+      version: "agent-tool-capabilities:v2",
       sha256: "a".repeat(64),
       descriptors: [
         {
@@ -615,10 +638,12 @@ try {
           whenToUse: "Calendar 일정 목록을 조회합니다.",
           mustNotUseFor: ["다른 도메인의 요청"],
           acceptedSelectorFields: [],
+          selectorKinds: ["date_range"],
           prerequisiteToolNames: [],
           followUpToolNames: [],
           riskLevel: "low",
           executionMode: "auto",
+          requiresConfirmation: false,
           contextSurface: null
         }
       ]
