@@ -116,6 +116,7 @@ function SqlErdAnnotationLine({ shape }: { shape: SqlErdAnnotationShape }) {
   const [draftLabel, setDraftLabel] = useState(shape.props.label);
   const [isEditing, setIsEditing] = useState(false);
   const isSelected = shape.props.selected;
+  const shouldShowLabel = isSelected || shape.props.label.length > 0;
   const pathData = getSqlErdRelationCurvePathData(
     shape.props.points,
     shape.props.startSide,
@@ -221,7 +222,8 @@ function SqlErdAnnotationLine({ shape }: { shape: SqlErdAnnotationShape }) {
         strokeLinecap="round"
         strokeWidth={isSelected ? 2.5 : 2}
       />
-      <foreignObject
+      {shouldShowLabel ? (
+        <foreignObject
         height={40}
         overflow="visible"
         width={220}
@@ -283,7 +285,8 @@ function SqlErdAnnotationLine({ shape }: { shape: SqlErdAnnotationShape }) {
             </button>
           ) : null}
         </div>
-      </foreignObject>
+        </foreignObject>
+      ) : null}
     </SVGContainer>
   );
 }
@@ -317,6 +320,8 @@ export class SqlErdAnnotationShapeUtil extends ShapeUtil<SqlErdAnnotationShape> 
   override canBind() {
     return false;
   }
+
+  override hideRotateHandle() { return true; }
 
   override canResize() {
     return false;

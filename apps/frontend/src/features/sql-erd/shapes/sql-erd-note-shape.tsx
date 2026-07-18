@@ -54,6 +54,7 @@ export class SqlErdNoteShapeUtil extends ShapeUtil<SqlErdNoteShape> {
 
   override canBind() { return false; }
   override canEdit() { return false; }
+  override hideRotateHandle() { return true; }
   override canResize() { return true; }
   override onResize(shape: SqlErdNoteShape, info: TLResizeInfo<SqlErdNoteShape>) {
     return resizeBox(shape, info, { minWidth: 120, minHeight: 80 });

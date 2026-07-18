@@ -969,14 +969,22 @@ function ClassicCanvasRuntimeInner({
   );
 
   useEffect(() => {
-    if (canvasPresence.checkpointStatus?.status !== "delayed") {
-      return;
+    switch (canvasPresence.checkpointStatus?.status) {
+      case "saving":
+        showCanvasSyncNotice("Canvas 변경사항을 저장하는 중이에요.");
+        break;
+      case "saved":
+        showCanvasSyncNotice("Canvas 변경사항을 모두 저장했어요.");
+        break;
+      case "delayed":
+        showCanvasSyncNotice(
+          "Canvas 변경사항 저장이 지연되고 있어요. 연결이 회복되면 다시 저장을 시도합니다.",
+          "warning",
+        );
+        break;
+      default:
+        break;
     }
-
-    showCanvasSyncNotice(
-      "Canvas 변경사항 저장이 지연되고 있어요. 연결이 회복되면 다시 저장을 시도합니다.",
-      "warning",
-    );
   }, [canvasPresence.checkpointStatus, showCanvasSyncNotice]);
 
   useEffect(() => {
@@ -1121,7 +1129,10 @@ function ClassicCanvasRuntimeInner({
   }, []);
 
   const {
+    additionalViewportLoadStatus,
     initialViewportLoadStatus,
+    isLoadingFrameChildren,
+    isLoadingFrameSubtree,
     loadFrameChildren,
     loadFrameSubtree,
     loadViewportShapes,
@@ -1143,6 +1154,20 @@ function ClassicCanvasRuntimeInner({
       viewportShapeLoadRequestSeqRef,
       viewportShapeLoadTimerRef,
     });
+
+  const lazyLoadNoticeMessage = isLoadingFrameSubtree
+    ? "중첩 프레임의 Shape를 불러오는 중이에요."
+    : isLoadingFrameChildren
+      ? "프레임 안의 Shape를 불러오는 중이에요."
+      : additionalViewportLoadStatus === "retrying"
+        ? "새 영역의 Canvas Shape를 다시 불러오는 중이에요."
+        : additionalViewportLoadStatus === "loading"
+          ? "새 영역의 Canvas Shape를 불러오는 중이에요."
+          : initialViewportLoadStatus === "retrying"
+            ? "Canvas Shape를 다시 불러오는 중이에요."
+            : initialViewportLoadStatus === "loading"
+              ? "Canvas Shape를 불러오는 중이에요."
+              : null;
 
   useEffect(() => {
     if (
@@ -1231,17 +1256,12 @@ function ClassicCanvasRuntimeInner({
           shapePatchVersion={canvasShapePatchVersion}
           canvasAgentEnabled={storageMode === "api"}
         />
-        {canvasSyncNotice ||
-        initialViewportLoadStatus === "loading" ||
-        initialViewportLoadStatus === "retrying" ? (
+        {canvasSyncNotice || lazyLoadNoticeMessage ? (
           <div
             className={`canvas-sync-notice canvas-sync-notice--${canvasSyncNotice?.tone ?? "info"}`}
             role="status"
           >
-            {canvasSyncNotice?.message ??
-              (initialViewportLoadStatus === "retrying"
-                ? "Canvas Shape를 다시 불러오는 중이에요."
-                : "Canvas Shape를 불러오는 중이에요.")}
+            {canvasSyncNotice?.message ?? lazyLoadNoticeMessage}
           </div>
         ) : null}
       </section>

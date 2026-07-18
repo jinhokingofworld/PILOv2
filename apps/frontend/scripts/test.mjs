@@ -935,7 +935,12 @@ assert.match(canvasRuntime, /onReady\(canvasActions\)/);
 assert.match(canvasRuntime, /canvasActions=\{canvasActions\}/);
 assert.match(canvasRuntime, /onRoomShapePatch: sendRoomShapePatch/);
 assert.match(canvasRuntime, /persistThroughRoomState,\s*[\r\n]\s*remoteShapeRevisionRef/);
-assert.match(canvasRuntime, /checkpointStatus\?\.status !== "delayed"/);
+assert.match(canvasRuntime, /switch \(canvasPresence\.checkpointStatus\?\.status\)/);
+assert.match(canvasRuntime, /case "saving":/);
+assert.match(canvasRuntime, /case "saved":/);
+assert.match(canvasRuntime, /case "delayed":/);
+assert.match(canvasRuntime, /저장하는 중이에요/);
+assert.match(canvasRuntime, /모두 저장했어요/);
 assert.match(canvasRuntime, /저장이 지연되고 있어요/);
 assert.match(canvasViewportQueries, /shapeDetailCacheRef\.current\.set\(shape\.id, shape\)/);
 assert.match(canvasRemoteOperations, /applyCanvasRemoteOperation/);
@@ -2097,6 +2102,7 @@ async function runScenarioBatchFallback(operations, runBatch) {
 await import("./calendar/test.mjs");
 await import("../src/features/agent/agent-feature.test.mjs");
 await import("../src/features/canvas/agent/canvas-agent-context.test.mjs");
+await import("../src/features/canvas/integrations/drive/canvas-drive-file.test.mjs");
 await import(
   "../src/features/canvas/engine/runtime/canvas-lazy-load-retry.test.mjs"
 );

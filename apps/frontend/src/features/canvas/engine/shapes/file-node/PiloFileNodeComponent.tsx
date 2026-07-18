@@ -1,6 +1,7 @@
 "use client";
 
 import { FileWarning, Loader2, RefreshCw } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { HTMLContainer } from "tldraw";
 
@@ -15,6 +16,23 @@ import { useCanvasDriveWorkspaceId } from "../../../integrations/drive/CanvasDri
 import type { PiloFileNodeShape } from "./PiloFileNodeShapeTypes";
 
 const MAX_INLINE_TEXT_BYTES = 2 * 1024 * 1024;
+const FILE_NODE_HEADER_HEIGHT = 42;
+
+const PiloFileNodePdfPreview = dynamic(
+  () =>
+    import("./PiloFileNodePdfPreview").then(
+      (module) => module.PiloFileNodePdfPreview,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="pilo-file-node-status">
+        <Loader2 className="animate-spin" />
+        <span>PDF 렌더러를 불러오는 중입니다.</span>
+      </div>
+    ),
+  },
+);
 
 type PreviewState =
   | { status: "loading" }
@@ -158,11 +176,18 @@ export function PiloFileNodeComponent({
         ) : null}
 
         {preview.status === "pdf" ? (
-          <iframe
-            loading="lazy"
-            sandbox="allow-same-origin"
-            src={preview.url}
-            title={`${shape.props.fileName} 미리보기`}
+          <PiloFileNodePdfPreview
+            fileName={shape.props.fileName}
+            height={Math.max(1, shape.props.h - FILE_NODE_HEADER_HEIGHT)}
+            url={preview.url}
+            width={shape.props.w}
+            onError={() =>
+              setPreview({
+                status: "error",
+                message:
+                  "PDF URL이 만료되었거나 파일을 표시하지 못했습니다.",
+              })
+            }
           />
         ) : null}
 

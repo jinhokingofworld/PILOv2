@@ -165,6 +165,7 @@ import {
   areSqlErdSelectionsEqual,
   getSqlErdContextRelationIds,
   getSqlErdSelectionFromSelectedShapes,
+  isSqlErdCanvasBackgroundPoint,
   resolveSqlErdTableInteractionSelection,
   selectSqlErdCanvasShapeAtPoint,
   shouldHandleSqlErdSchemaDeleteShortcut
@@ -3089,7 +3090,7 @@ export function SqlErdCanvas({
             height: 420,
             title: "프레임",
             color: nextFrameColor,
-            isLocked: true
+            isLocked: false
           }]
         });
       } else {
@@ -3480,11 +3481,7 @@ export function SqlErdCanvas({
 
       if (
         toolRef.current === null &&
-        !editor.getShapeAtPoint(pagePoint, {
-          hitInside: true,
-          hitLabels: true,
-          hitLocked: true
-        })
+        isSqlErdCanvasBackgroundPoint(editor, pagePoint)
       ) {
         editor.selectNone();
         onSelectionChange?.({ type: "none" });

@@ -75,6 +75,8 @@ export class SqlErdTextShapeUtil extends ShapeUtil<SqlErdTextShape> {
     return false;
   }
 
+  override hideRotateHandle() { return true; }
+
   override canResize() {
     return true;
   }
