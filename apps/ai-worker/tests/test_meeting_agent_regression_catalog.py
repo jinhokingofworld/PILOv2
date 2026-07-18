@@ -163,10 +163,10 @@ def test_catalog_builds_separate_canonical_and_held_out_planner_suites() -> None
 
     assert canonical.version == "meeting-agent-regression:v1:canonical"
     assert held_out.version == "meeting-agent-regression:v1:held_out"
-    assert len(canonical.cases) == 18 * 4 * 3
-    assert len(held_out.cases) == 18 * 3
-    assert len(counterexamples.cases) == 18 * 4
-    assert len(context.cases) == 18 * 3
+    assert len(canonical.cases) == 18 * 4 * 3 + 1
+    assert len(held_out.cases) == 18 * 3 + 1
+    assert len(counterexamples.cases) == 18 * 4 + 1
+    assert len(context.cases) == 18 * 3 + 1
     assert {case.kind for case in counterexamples.cases} == {"counterexample"}
     assert {case.kind for case in context.cases} == {"context"}
     assert all(case.planning_context.startswith("previous assistant:") for case in context.cases)
@@ -178,3 +178,22 @@ def test_catalog_builds_separate_canonical_and_held_out_planner_suites() -> None
         case.expectation.tool_name for case in canonical.cases if case.expectation.tool_name
     }
     assert expected_tool_names <= EXPECTED_MEETING_TOOLS
+    quality_cases = {
+        case.case_id: case
+        for suite in (canonical, held_out, counterexamples, context)
+        for case in suite.cases
+        if case.case_id.startswith("quality:")
+    }
+    assert quality_cases[
+        "quality:meeting_summary_sections_canonical"
+    ].expectation.input_contains == {"sections": ["discussionPoints", "decisions"]}
+    assert quality_cases[
+        "quality:meeting_summary_sections_held_out"
+    ].expectation.input_contains == {"sections": ["decisions", "actionItems"]}
+    assert (
+        quality_cases["quality:meeting_decision_evidence_counterexample"].expectation.tool_name
+        == "get_meeting_decision_evidence"
+    )
+    assert quality_cases["quality:meeting_summary_sections_context"].planning_context.startswith(
+        "previous assistant:"
+    )

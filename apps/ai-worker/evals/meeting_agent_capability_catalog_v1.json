@@ -27,6 +27,73 @@
       "expectedStatus": "needs_clarification"
     }
   ],
+  "qualityCases": [
+    {
+      "id": "meeting_summary_sections_canonical",
+      "kind": "canonical",
+      "prompt": "회의록의 논의사항과 결정사항만 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "summarize_meeting_report",
+        "inputContains": {
+          "sections": ["discussionPoints", "decisions"]
+        },
+        "requiresConfirmation": false,
+        "domain": "meeting",
+        "capabilityId": "meeting_reports.summary",
+        "requiredToolNames": ["list_meeting_reports", "summarize_meeting_report"],
+        "supported": true
+      }
+    },
+    {
+      "id": "meeting_summary_sections_held_out",
+      "kind": "held_out",
+      "prompt": "직전 미팅의 결론과 할 일만 정리해줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "summarize_meeting_report",
+        "inputContains": {
+          "sections": ["decisions", "actionItems"]
+        },
+        "requiresConfirmation": false,
+        "domain": "meeting",
+        "capabilityId": "meeting_reports.summary",
+        "requiredToolNames": ["list_meeting_reports", "summarize_meeting_report"],
+        "supported": true
+      }
+    },
+    {
+      "id": "meeting_decision_evidence_counterexample",
+      "kind": "counterexample",
+      "prompt": "그 결정의 직접 근거 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "get_meeting_decision_evidence",
+        "requiresConfirmation": false,
+        "domain": "meeting",
+        "capabilityId": "meeting.decision_evidence",
+        "requiredToolNames": ["list_meeting_reports", "get_meeting_decision_evidence"],
+        "supported": true
+      }
+    },
+    {
+      "id": "meeting_summary_sections_context",
+      "kind": "context",
+      "prompt": "그 회의록의 논의사항만 알려줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "summarize_meeting_report",
+        "inputContains": {
+          "sections": ["discussionPoints"]
+        },
+        "requiresConfirmation": false,
+        "domain": "meeting",
+        "capabilityId": "meeting_reports.summary",
+        "requiredToolNames": ["list_meeting_reports", "summarize_meeting_report"],
+        "supported": true
+      }
+    }
+  ],
   "capabilities": [
     {
       "id": "meeting.rooms.list",

@@ -199,6 +199,9 @@ def load_meeting_regression_suite(
         for capability in capabilities
         if isinstance(capability, dict)
     }
+    quality_cases = catalog.get("qualityCases", [])
+    if not isinstance(quality_cases, list):
+        raise ValueError("Meeting regression qualityCases must be an array")
     cases: list[EvaluationCase] = []
     for capability in capabilities:
         if not isinstance(capability, dict):
@@ -261,6 +264,24 @@ def load_meeting_regression_suite(
                     ),
                 )
             )
+
+    for value in quality_cases:
+        quality_case = _parse_case(value)
+        if quality_case.kind != variant:
+            continue
+        capability_id = quality_case.expectation.capability_id
+        planning_context = (
+            _meeting_regression_context(capability_id)
+            if variant == "context" and capability_id
+            else ""
+        )
+        cases.append(
+            replace(
+                quality_case,
+                case_id=f"quality:{quality_case.case_id}",
+                planning_context=planning_context,
+            )
+        )
 
     if not cases:
         raise ValueError("Meeting regression catalog must produce at least one case")
