@@ -1,12 +1,15 @@
 "use client";
 
 import {
+  Circle,
   ChevronLeft,
   ChevronRight,
   Eraser,
   Highlighter,
   Loader2,
+  Minus,
   PenLine,
+  Plus,
   Trash2,
   Users,
 } from "lucide-react";
@@ -44,9 +47,20 @@ function createStrokeId() {
   return globalThis.crypto?.randomUUID?.() ?? `stroke-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function findStrokeAtPoint(strokes: PdfCollaborationStroke[], point: PdfCollaborationPoint) {
+const PDF_STROKE_COLORS = [
+  { label: "Black", value: "#111827" },
+  { label: "Blue", value: "#2563eb" },
+  { label: "Red", value: "#dc2626" },
+  { label: "Green", value: "#16a34a" },
+  { label: "Yellow", value: "#facc15" },
+] as const;
+
+const PEN_WIDTHS = [0.7, 1.2, 1.8] as const;
+const HIGHLIGHTER_WIDTHS = [2.8, 4.2, 5.6] as const;
+
+function findStrokesAtPoint(strokes: PdfCollaborationStroke[], point: PdfCollaborationPoint) {
   const hitRadius = 0.025;
-  return strokes.find((stroke) =>
+  return strokes.filter((stroke) =>
     stroke.points.some((candidate) =>
       Math.hypot(candidate.xRatio - point.xRatio, candidate.yRatio - point.yRatio) <= hitRadius,
     ),
@@ -66,7 +80,7 @@ function StrokePath({ stroke }: { stroke: PdfCollaborationStroke }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeOpacity={isHighlighter ? 0.42 : 1}
-        strokeWidth={isHighlighter ? 2.8 : 0.7}
+        strokeWidth={stroke.width}
       />
       {stroke.points.length === 1 ? (
         <circle
@@ -74,7 +88,7 @@ function StrokePath({ stroke }: { stroke: PdfCollaborationStroke }) {
           cy={stroke.points[0].yRatio * 100}
           fill={stroke.color}
           opacity={isHighlighter ? 0.42 : 1}
-          r={isHighlighter ? 1.4 : 0.35}
+          r={stroke.width / 2}
         />
       ) : null}
     </>
@@ -94,9 +108,14 @@ export function PdfCollaborationSurface({
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageWidth, setPageWidth] = useState(720);
   const [tool, setTool] = useState<PdfCollaborationTool>("pen");
+  const [penColor, setPenColor] = useState("#111827");
+  const [highlighterColor, setHighlighterColor] = useState("#facc15");
+  const [penWidth, setPenWidth] = useState<number>(0.7);
+  const [highlighterWidth, setHighlighterWidth] = useState<number>(2.8);
   const [draftPoints, setDraftPoints] = useState<PdfCollaborationPoint[]>([]);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const draftPointsRef = useRef<PdfCollaborationPoint[] | null>(null);
+  const erasedStrokeIdsRef = useRef<Set<string> | null>(null);
   const {
     clearPageStrokes,
     commitStroke,
@@ -109,6 +128,9 @@ export function PdfCollaborationSurface({
     updatePointer,
   } = usePdfCollaborationRoom({ fileId, workspaceId });
   const strokes = strokesByPage[pageNumber] ?? [];
+  const activeColor = tool === "highlighter" ? highlighterColor : penColor;
+  const activeWidth = tool === "highlighter" ? highlighterWidth : penWidth;
+  const widthOptions = tool === "highlighter" ? HIGHLIGHTER_WIDTHS : PEN_WIDTHS;
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -130,14 +152,60 @@ export function PdfCollaborationSurface({
     [numPages, updatePage],
   );
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.matches("input, textarea, select, [contenteditable='true']") ||
+          target.closest("[role='menu'], [role='listbox']"))
+      ) {
+        return;
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        movePage(pageNumber - 1);
+      }
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        movePage(pageNumber + 1);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [movePage, pageNumber]);
+
   const finishStroke = useCallback(() => {
     const points = draftPointsRef.current;
     if (!points?.length || tool === "eraser") return;
 
-    commitStroke({ id: createStrokeId(), pageNumber, points, tool });
+    commitStroke({
+      color: activeColor,
+      id: createStrokeId(),
+      pageNumber,
+      points,
+      tool,
+      width: activeWidth,
+    });
     draftPointsRef.current = null;
     setDraftPoints([]);
-  }, [commitStroke, pageNumber, tool]);
+  }, [activeColor, activeWidth, commitStroke, pageNumber, tool]);
+
+  const eraseAtPoint = useCallback(
+    (point: PdfCollaborationPoint) => {
+      const erasedStrokeIds = erasedStrokeIdsRef.current;
+      if (!erasedStrokeIds) return;
+
+      for (const stroke of findStrokesAtPoint(strokes, point)) {
+        if (erasedStrokeIds.has(stroke.id)) continue;
+        erasedStrokeIds.add(stroke.id);
+        eraseStroke(pageNumber, stroke.id);
+      }
+    },
+    [eraseStroke, pageNumber, strokes],
+  );
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
@@ -145,8 +213,9 @@ export function PdfCollaborationSurface({
       updatePointer(pageNumber, point);
 
       if (tool === "eraser") {
-        const matchedStroke = findStrokeAtPoint(strokes, point);
-        if (matchedStroke) eraseStroke(pageNumber, matchedStroke.id);
+        event.currentTarget.setPointerCapture(event.pointerId);
+        erasedStrokeIdsRef.current = new Set();
+        eraseAtPoint(point);
         return;
       }
 
@@ -154,13 +223,18 @@ export function PdfCollaborationSurface({
       draftPointsRef.current = [point];
       setDraftPoints([point]);
     },
-    [eraseStroke, pageNumber, strokes, tool, updatePointer],
+    [eraseAtPoint, pageNumber, tool, updatePointer],
   );
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
       const point = pointFromEvent(event);
       updatePointer(pageNumber, point);
+
+      if (tool === "eraser") {
+        eraseAtPoint(point);
+        return;
+      }
 
       const points = draftPointsRef.current;
       if (!points) return;
@@ -173,7 +247,7 @@ export function PdfCollaborationSurface({
       draftPointsRef.current = nextPoints;
       setDraftPoints(nextPoints);
     },
-    [pageNumber, updatePointer],
+    [eraseAtPoint, pageNumber, tool, updatePointer],
   );
 
   const handlePointerUp = useCallback(
@@ -181,9 +255,13 @@ export function PdfCollaborationSurface({
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
+      if (tool === "eraser") {
+        erasedStrokeIdsRef.current = null;
+        return;
+      }
       finishStroke();
     },
-    [finishStroke],
+    [finishStroke, tool],
   );
 
   return (
@@ -259,6 +337,50 @@ export function PdfCollaborationSurface({
             <Trash2 />
           </Button>
         </div>
+        {tool !== "eraser" ? (
+          <>
+            <div className={styles.pdfCollaborationControls} aria-label="Stroke color">
+              {PDF_STROKE_COLORS.map((color) => (
+                <button
+                  key={color.value}
+                  type="button"
+                  aria-label={`${color.label} color`}
+                  aria-pressed={activeColor === color.value}
+                  className={`${styles.pdfColorSwatch} ${
+                    activeColor === color.value ? styles.pdfColorSwatchActive : ""
+                  }`}
+                  style={{ backgroundColor: color.value }}
+                  title={`${color.label} color`}
+                  onClick={() => {
+                    if (tool === "highlighter") setHighlighterColor(color.value);
+                    else setPenColor(color.value);
+                  }}
+                />
+              ))}
+            </div>
+            <div className={styles.pdfCollaborationControls} aria-label="Stroke width">
+              {widthOptions.map((width, index) => {
+                const WidthIcon = index === 0 ? Minus : index === 1 ? Circle : Plus;
+                return (
+                  <Button
+                    key={width}
+                    type="button"
+                    variant={activeWidth === width ? "secondary" : "ghost"}
+                    size="icon-sm"
+                    aria-label={`Stroke width ${index + 1}`}
+                    title={`Stroke width ${index + 1}`}
+                    onClick={() => {
+                      if (tool === "highlighter") setHighlighterWidth(width);
+                      else setPenWidth(width);
+                    }}
+                  >
+                    <WidthIcon />
+                  </Button>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
         <div className={styles.pdfCollaborationPresence} title={isConnected ? "공동 열람 연결됨" : "공동 열람 연결 중"}>
           <Users />
           {presence.length === 0 ? (
@@ -310,11 +432,12 @@ export function PdfCollaborationSurface({
             {draftPoints.length > 0 && tool !== "eraser" ? (
               <StrokePath
                 stroke={{
-                  color: tool === "highlighter" ? "#facc15" : "#111827",
+                  color: activeColor,
                   id: "draft",
                   pageNumber,
                   points: draftPoints,
                   tool,
+                  width: activeWidth,
                 }}
               />
             ) : null}

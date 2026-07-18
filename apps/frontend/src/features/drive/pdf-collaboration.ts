@@ -18,6 +18,7 @@ export type PdfCollaborationStroke = {
   pageNumber: number;
   points: PdfCollaborationPoint[];
   tool: Exclude<PdfCollaborationTool, "eraser">;
+  width: number;
 };
 
 export type PdfCollaborationPresence = {
@@ -198,14 +199,10 @@ export function usePdfCollaborationRoom({
   );
 
   const commitStroke = useCallback(
-    (stroke: Omit<PdfCollaborationStroke, "color">) => {
-      const committed = {
-        ...stroke,
-        color: stroke.tool === "highlighter" ? "#facc15" : "#111827",
-      } satisfies PdfCollaborationStroke;
+    (stroke: PdfCollaborationStroke) => {
       setSnapshot((current) => ({
         ...current,
-        strokesByPage: appendStroke(current.strokesByPage, committed),
+        strokesByPage: appendStroke(current.strokesByPage, stroke),
       }));
       if (canJoin) socket?.emit("pdf-collaboration:stroke:commit", { ...room, ...stroke });
     },
