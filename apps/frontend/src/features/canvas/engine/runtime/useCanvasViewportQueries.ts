@@ -10,6 +10,7 @@ import type {
   CanvasRuntimeStorageMode,
   CanvasViewSettingApiClient,
 } from "./canvas-runtime-types";
+import { shouldAcceptPersistedCanvasShape } from "./canvas-roomstate-hydration";
 import {
   buildFrameChildrenQueryKey,
   buildViewportShapeQueryKey,
@@ -55,6 +56,7 @@ type UseCanvasViewportQueriesOptions = {
   queryClient: QueryClient;
   remoteShapeContentHashRef: RuntimeRef<Map<string, string>>;
   remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
+  roomStateShapeIdsRef: RuntimeRef<Set<string>>;
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
   storageMode: CanvasRuntimeStorageMode;
   onViewportShapesLoaded?: (bounds: {
@@ -124,6 +126,7 @@ export function useCanvasViewportQueries({
   queryClient,
   remoteShapeContentHashRef,
   remoteShapeRevisionRef,
+  roomStateShapeIdsRef,
   shapeDetailCacheRef,
   storageMode,
   onViewportShapesLoaded,
@@ -264,12 +267,32 @@ export function useCanvasViewportQueries({
     loadingFrameChildrenRef.current.clear();
     pendingFrameChildrenReloadRef.current.clear();
   }, [board.id]);
+  const filterPersistedShapes = useCallback(
+    (shapes: PiloCanvasFreeformShape[]) =>
+      shapes.filter(
+        (shape) => shouldAcceptPersistedCanvasShape({
+          deletedShapeIds: deletedShapeIdsRef.current,
+          roomStateShapeIds: roomStateShapeIdsRef.current,
+          shapeId: typeof shape.id === "string" ? shape.id : null,
+        }),
+      ),
+    [deletedShapeIdsRef, roomStateShapeIdsRef],
+  );
   const rememberPersistedShapeMetadata = useCallback(
     (value: unknown) => {
       const shapes = Array.isArray(value) ? value : [value];
 
       shapes.forEach((shape) => {
-        if (!isRecord(shape) || typeof shape.id !== "string") return;
+        if (!isRecord(shape) || typeof shape.id !== "string") {
+          return;
+        }
+        if (!shouldAcceptPersistedCanvasShape({
+          deletedShapeIds: deletedShapeIdsRef.current,
+          roomStateShapeIds: roomStateShapeIdsRef.current,
+          shapeId: shape.id,
+        })) {
+          return;
+        }
 
         const revision = readPersistedRevision(shape.revision);
         const contentHash = readPersistedContentHash(shape.contentHash);
@@ -286,7 +309,12 @@ export function useCanvasViewportQueries({
         }
       });
     },
-    [remoteShapeContentHashRef, remoteShapeRevisionRef],
+    [
+      deletedShapeIdsRef,
+      remoteShapeContentHashRef,
+      remoteShapeRevisionRef,
+      roomStateShapeIdsRef,
+    ],
   );
   const loadFrameChildren = useCallback(
     (frameId: string, visitedFrameIds = new Set<string>()) => {
@@ -405,9 +433,11 @@ export function useCanvasViewportQueries({
 
           rememberPersistedShapeMetadata(shapes);
 
-          const loadedShapes = normalizeCanvasFreeformShapes(
-            shapes,
-          ) as PiloCanvasFreeformShape[];
+          const loadedShapes = filterPersistedShapes(
+            normalizeCanvasFreeformShapes(
+              shapes,
+            ) as PiloCanvasFreeformShape[],
+          );
 
           mergeFrameChildren(loadedShapes);
         })
@@ -462,6 +492,7 @@ export function useCanvasViewportQueries({
       board.workspaceId,
       canvasClient,
       deletedShapeIdsRef,
+      filterPersistedShapes,
       mergeLoadedFreeformShapes,
       rememberPersistedShapeMetadata,
       queryClient,
@@ -533,7 +564,9 @@ export function useCanvasViewportQueries({
               return;
             }
             rememberPersistedShapeMetadata(shapes);
-            loadedShapes = normalizeCanvasFreeformShapes(shapes) as PiloCanvasFreeformShape[];
+            loadedShapes = filterPersistedShapes(
+              normalizeCanvasFreeformShapes(shapes) as PiloCanvasFreeformShape[],
+            );
           }
 
           const nextShapes = loadedShapes.filter(
@@ -602,6 +635,7 @@ export function useCanvasViewportQueries({
       board.workspaceId,
       canvasClient,
       deletedShapeIdsRef,
+      filterPersistedShapes,
       mergeLoadedFreeformShapes,
       queryClient,
       rememberPersistedShapeMetadata,
@@ -743,9 +777,11 @@ export function useCanvasViewportQueries({
 
             rememberPersistedShapeMetadata(shapes);
 
-            const loadedShapes = normalizeCanvasFreeformShapes(
-              shapes,
-            ) as PiloCanvasFreeformShape[];
+            const loadedShapes = filterPersistedShapes(
+              normalizeCanvasFreeformShapes(
+                shapes,
+              ) as PiloCanvasFreeformShape[],
+            );
             const nextLoadedShapes = loadedShapes.filter(
               (shape) =>
                 typeof shape.id !== "string" ||
@@ -825,6 +861,7 @@ export function useCanvasViewportQueries({
       board.workspaceId,
       canvasClient,
       deletedShapeIdsRef,
+      filterPersistedShapes,
       latestViewportBoundsRef,
       loadFrameChildren,
       mergeLoadedFreeformShapes,

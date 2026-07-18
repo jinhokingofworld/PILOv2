@@ -334,6 +334,7 @@ function ClassicCanvasRuntimeInner({
   );
   const remoteShapeRevisionRef = useRef(new Map<string, number>());
   const remoteShapeContentHashRef = useRef(new Map<string, string>());
+  const roomStateShapeIdsRef = useRef(new Set<string>());
   const localShapeVersionRef = useRef(0);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
   const [canvasShapePatchVersion, setCanvasShapePatchVersion] = useState(0);
@@ -354,6 +355,7 @@ function ClassicCanvasRuntimeInner({
     [],
   );
   const markShapeDeleted = useCallback((shapeId: string) => {
+    roomStateShapeIdsRef.current.delete(shapeId);
     deletedShapeIdsRef.current.add(shapeId);
     unloadedShapeIdsRef.current.delete(shapeId);
     shapeDetailCacheRef.current.delete(shapeId);
@@ -759,6 +761,7 @@ function ClassicCanvasRuntimeInner({
         const contentHash = readCanvasRoomStateContentHash(shape.contentHash);
 
         if (!shapeId || deletedShapeIdSet.has(shapeId)) return;
+        roomStateShapeIdsRef.current.add(shapeId);
         if (revision !== null) {
           remoteShapeRevisionRef.current.set(
             shapeId,
@@ -995,6 +998,7 @@ function ClassicCanvasRuntimeInner({
     pendingRoomShapeAckCountsRef.current.clear();
     remoteShapeRevisionRef.current.clear();
     remoteShapeContentHashRef.current.clear();
+    roomStateShapeIdsRef.current.clear();
     deletedShapeIdsRef.current.clear();
     unloadedShapeIdsRef.current.clear();
   }, [board.id]);
@@ -1076,6 +1080,7 @@ function ClassicCanvasRuntimeInner({
     pendingLocalShapeVersionsRef,
     persistThroughRoomState,
     remoteShapeRevisionRef,
+    roomStateShapeIdsRef,
     setFreeformShapes,
     shapeDetailCacheRef,
     shapeSyncQueueRef,
@@ -1146,6 +1151,7 @@ function ClassicCanvasRuntimeInner({
       queryClient,
       remoteShapeContentHashRef,
       remoteShapeRevisionRef,
+      roomStateShapeIdsRef,
       shapeDetailCacheRef,
       storageMode,
       onViewportShapesLoaded: reportLoadedViewport,

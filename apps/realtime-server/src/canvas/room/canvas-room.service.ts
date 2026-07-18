@@ -31,6 +31,7 @@ export type CanvasRoomService = {
   joinCanvasRoom: (
     context: CanvasAccessContext,
     payload: CanvasJoinPayload,
+    options?: { onAccessGranted?: (access: CanvasRoomAccess) => void },
   ) => Promise<CanvasRoomJoinResult>;
 };
 
@@ -54,9 +55,7 @@ export function createCanvasRoomService({
     room: CanvasRoomRef,
     bounds: CanvasLoadedViewportBounds | undefined,
   ) {
-    if (!bounds || roomStateService.getCachedShapes(room).length > 0) {
-      return;
-    }
+    if (!bounds) return null;
 
     const search = new URLSearchParams({
       height: String(bounds.height),
@@ -84,7 +83,7 @@ export function createCanvasRoomService({
           status: response.status,
           workspaceId: room.workspaceId,
         });
-        return;
+        return roomStateService.getViewportHydration(room, bounds);
       }
 
       const responseBody = await readResponseJson(response);
@@ -95,24 +94,26 @@ export function createCanvasRoomService({
           canvasId: room.canvasId,
           workspaceId: room.workspaceId,
         });
-        return;
+        return roomStateService.getViewportHydration(room, bounds);
       }
 
-      roomStateService.recordLoadedViewport(room, bounds, shapes);
+      return roomStateService.recordLoadedViewport(room, bounds, shapes);
     } catch (error) {
       console.warn("Canvas room initial viewport hydrate failed.", error);
+      return roomStateService.getViewportHydration(room, bounds);
     }
   }
 
   return {
-    async joinCanvasRoom(context, payload) {
+    async joinCanvasRoom(context, payload, options = {}) {
       const access = await accessService.getCanvasRoomAccess(context, payload);
 
       if (!access) {
         return { joined: false, reason: "forbidden" };
       }
 
-      await hydrateInitialViewportIfNeeded(
+      options.onAccessGranted?.(access);
+      const initialViewportHydration = await hydrateInitialViewportIfNeeded(
         context,
         payload,
         payload.initialViewportBounds,
@@ -133,11 +134,15 @@ export function createCanvasRoomService({
           checkpointVersion: checkpointState.checkpointVersion,
           historySeq: historyState.historySeq,
           latestOpSeq,
-          loadedRegions: roomStateService.getLoadedRegions(payload),
+          loadedRegions:
+            initialViewportHydration?.loadedRegions ??
+            roomStateService.getLoadedRegions(payload),
           previews: await shapePreviewService.getRoomPreviews(payload),
           presence: presenceService.getPresence(payload),
           readOnly: access.readOnly,
-          roomShapes: roomStateService.getCachedShapes(payload),
+          roomShapes:
+            initialViewportHydration?.shapes ??
+            roomStateService.getCachedShapes(payload),
           shapeLocks: await shapeLockService.getRoomLocks(payload),
           syncRequired: (payload.lastSeenOpSeq ?? 0) < latestOpSeq,
           workspaceId: payload.workspaceId,

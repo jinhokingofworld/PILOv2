@@ -14,6 +14,7 @@ import type {
   CanvasRuntimeStorageMode,
   CanvasViewSettingApiClient,
 } from "./canvas-runtime-types";
+import { shouldAcceptPersistedCanvasShape } from "./canvas-roomstate-hydration";
 import {
   buildFreeformShapeMap,
   getChangedFreeformShapeIds,
@@ -41,6 +42,7 @@ type UseCanvasShapePersistenceOptions = {
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
   persistThroughRoomState?: boolean;
   remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
+  roomStateShapeIdsRef: RuntimeRef<Set<string>>;
   setFreeformShapes: (
     updater:
       | PiloCanvasFreeformShape[]
@@ -65,6 +67,7 @@ export function useCanvasShapePersistence({
   pendingLocalShapeVersionsRef,
   persistThroughRoomState = false,
   remoteShapeRevisionRef,
+  roomStateShapeIdsRef,
   setFreeformShapes,
   shapeDetailCacheRef,
   shapeSyncQueueRef,
@@ -253,9 +256,13 @@ export function useCanvasShapePersistence({
         const shapeId = getFreeformShapeId(shape);
 
         return (
-          !shapeId ||
-          (!deletedShapeIdsRef.current.has(shapeId) &&
-            !pendingLocalShapeVersionsRef.current.has(shapeId))
+          (!shapeId ||
+            !pendingLocalShapeVersionsRef.current.has(shapeId)) &&
+          shouldAcceptPersistedCanvasShape({
+            deletedShapeIds: deletedShapeIdsRef.current,
+            roomStateShapeIds: roomStateShapeIdsRef.current,
+            shapeId,
+          })
         );
       });
 
@@ -280,6 +287,7 @@ export function useCanvasShapePersistence({
       freeformShapesRef,
       deletedShapeIdsRef,
       pendingLocalShapeVersionsRef,
+      roomStateShapeIdsRef,
       onLoadedShapesMerged,
       setFreeformShapes,
     ],

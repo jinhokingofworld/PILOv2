@@ -786,18 +786,26 @@ App Server `/shapes/batch`를 호출한다. realtime-server는
 클라이언트가 App Server shape viewport 조회를 성공적으로 끝낸 뒤, 조회 bounds를
 조회된 shape snapshot과 함께 realtime-server에 보고한다. realtime-server는 room 단위
 `loadedRegions`와 shape cache를 메모리에 누적하고, `canvas:room:shapes:hydrate`로
-같은 room에 공유한다. 새 사용자가 join하면 `canvas:joined.roomShapes`로 현재 room cache를
-함께 받는다. `loadedRegions`와 room shape cache는 삭제 판단에 쓰지 않는다. shape가
+같은 room에 공유한다. 이때 클라이언트가 보낸 raw DB snapshot을 그대로 전파하지 않고,
+같은 ID의 최신 roomState와 tombstone을 우선한 병합 결과만 공유한다. 새 사용자가 join하면
+`canvas:joined.roomShapes`로 initial viewport의 병합 결과를 함께 받는다. `loadedRegions`와
+room shape cache는 삭제 판단에 쓰지 않는다. shape가
 roomState에 없다는 사실은 삭제가 아니라 아직 로딩되지 않았을 가능성으로 본다.
 겹치는 loaded region은 roomState에서 병합하며, cached shape와 loaded region 수는
 서버 메모리 보호를 위해 상한을 둔다.
 
 `canvas:join` payload는 `initialViewportBounds`를 선택적으로 포함할 수 있다.
 형태는 `canvas:viewport:loaded.bounds`와 같은 `{ x, y, width, height, margin }`이다.
-classic Canvas room cache가 비어 있으면 realtime-server는 이 bounds로 App Server
-viewport shape API를 best-effort 조회하고, 조회된 shape를 `canvas:joined.roomShapes`에
-포함할 수 있다. 이 hydrate 실패는 room join을 거부하지 않으며, 클라이언트는 기존
-viewport lazy loading을 fallback으로 계속 수행한다.
+realtime-server는 이 bounds로 App Server viewport shape API를 best-effort 조회해 DB
+baseline을 만들고, socket room join 직후의 최신 roomState와 delete tombstone을 Shape ID로
+병합해 `canvas:joined.roomShapes`에 포함한다. 같은 ID는 roomState가 이기고, tombstone은
+제거하며, DB에만 있는 Shape는 유지한다. viewport 안의 room-only Shape도 포함한다. 이
+hydrate 실패는 room join을 거부하지 않으며, 클라이언트는 기존 viewport lazy loading을
+fallback으로 계속 수행한다.
+
+DB delete가 성공한 tombstone도 짧은 보호 시간 동안 roomState에 유지한다. delete 요청과
+겹쳐 이미 시작된 오래된 viewport 응답은 이 tombstone을 통과할 수 없다. 같은 ID가 명시적으로
+다시 생성되면 tombstone을 즉시 제거한다.
 
 `canvas:room:shape:patch`는 DB 저장 전의 roomState patch 이벤트다. 클라이언트는
 로컬 shape diff에서 upsert shape snapshot과 명시적 `deletedShapeIds`를 만들어 보낸다.
@@ -826,8 +834,8 @@ App Server는 계속 DB transaction, revision/opSeq, operation log의 owner다.
 checkpoint를 실행하지 않는다. 마지막 사용자가 나간 뒤 7.5초 동안 재입장이 없을 때만 남은
 dirty를 모두 저장하고, 성공하면 해당 빈 roomState를 정리한다. 새로고침으로 유예 시간 안에
 재입장하면 빈 room 정리를 취소한다. realtime-server 정상 종료 시에는 남은 dirty 전체의
-저장을 시도한다. 입장 직전 checkpoint는 viewport DB baseline과 roomState 병합 전환이
-완료될 때까지 호환 경로로 유지한다.
+저장을 시도한다. Canvas 입장은 DB baseline과 roomState를 병합하므로 checkpoint를
+강제로 실행하지 않는다.
 
 일부 shape operation의 4xx 오류로 batch 전체가 rollback되면 realtime-server는 실패한
 operation을 격리해 성공 가능한 operation부터 저장한다. 인증 실패, rate limit, App Server

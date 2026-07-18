@@ -23,10 +23,16 @@ import {
 
 const MAX_ROOM_CACHED_SHAPES = 2_000;
 const MAX_ROOM_HISTORY_ITEMS = 200;
+const RECENT_PERSISTED_TOMBSTONE_TTL_MS = 5 * 60 * 1_000;
 
 type CachedRoomShape = {
   cachedAt: string;
   shape: Record<string, unknown>;
+};
+
+type DeletedRoomShapeTombstone = {
+  baseRevision: number | null;
+  persistedAt: number | null;
 };
 
 export type CanvasRoomCheckpointSnapshot = {
@@ -42,6 +48,12 @@ export type CanvasRoomCheckpointState = {
 export type CanvasRoomDirtyState = {
   payloadBytes: number;
   shapeCount: number;
+};
+
+export type CanvasRoomViewportHydration = {
+  deletedShapeIds: string[];
+  loadedRegions: CanvasRoomLoadedRegion[];
+  shapes: Record<string, unknown>[];
 };
 
 export type CanvasRoomHistoryState = {
@@ -100,11 +112,16 @@ export type CanvasRoomStateService = {
   getHistoryState: (room: CanvasRoomRef) => CanvasRoomHistoryState;
   getLoadedRegions: (room: CanvasRoomRef) => CanvasRoomLoadedRegion[];
   getStats: () => CanvasRoomStateStats;
+  getViewportHydration: (
+    room: CanvasRoomRef,
+    bounds: CanvasLoadedViewportBounds,
+    options?: { includeShapeIds?: string[] },
+  ) => CanvasRoomViewportHydration;
   recordLoadedViewport: (
     room: CanvasRoomRef,
     bounds: CanvasLoadedViewportBounds,
     shapes?: Record<string, unknown>[],
-  ) => CanvasRoomLoadedRegion[];
+  ) => CanvasRoomViewportHydration;
   markCheckpointSucceeded: (
     room: CanvasRoomRef,
     operations: CanvasCheckpointSyncOperation[],
@@ -125,7 +142,10 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
   let checkpointOperationSequence = 0;
   const receiveSequenceByRoom = new Map<string, number>();
   const loadedRegionsByRoom = new Map<string, CanvasRoomLoadedRegion[]>();
-  const deletedTombstonesByRoom = new Map<string, Map<string, number | null>>();
+  const deletedTombstonesByRoom = new Map<
+    string,
+    Map<string, DeletedRoomShapeTombstone>
+  >();
   const dirtyShapeIdsByRoom = new Map<string, Set<string>>();
   const dirtyPayloadBytesByRoom = new Map<string, Map<string, number>>();
   const checkpointOperationIdsByRoom = new Map<string, Map<string, string>>();
@@ -162,11 +182,118 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     let tombstones = deletedTombstonesByRoom.get(roomName);
 
     if (!tombstones) {
-      tombstones = new Map<string, number | null>();
+      tombstones = new Map<string, DeletedRoomShapeTombstone>();
       deletedTombstonesByRoom.set(roomName, tombstones);
     }
 
     return tombstones;
+  }
+
+  function purgeExpiredTombstones(roomName: string) {
+    const tombstones = deletedTombstonesByRoom.get(roomName);
+
+    if (!tombstones) return;
+
+    const expiresBefore = Date.now() - RECENT_PERSISTED_TOMBSTONE_TTL_MS;
+
+    tombstones.forEach((tombstone, shapeId) => {
+      if (
+        tombstone.persistedAt !== null &&
+        tombstone.persistedAt <= expiresBefore
+      ) {
+        tombstones.delete(shapeId);
+      }
+    });
+
+    if (!tombstones.size) {
+      deletedTombstonesByRoom.delete(roomName);
+    }
+  }
+
+  function isShapeParentId(value: unknown): value is string {
+    return typeof value === "string" && value.startsWith("shape:");
+  }
+
+  function intersectsViewport(
+    shape: Record<string, unknown>,
+    bounds: CanvasLoadedViewportBounds,
+  ) {
+    const props = readRecord(shape.props);
+    const x = typeof shape.x === "number" && Number.isFinite(shape.x) ? shape.x : 0;
+    const y = typeof shape.y === "number" && Number.isFinite(shape.y) ? shape.y : 0;
+    const width = typeof props.w === "number" && Number.isFinite(props.w)
+      ? Math.max(1, props.w)
+      : 1;
+    const height = typeof props.h === "number" && Number.isFinite(props.h)
+      ? Math.max(1, props.h)
+      : 1;
+    const left = bounds.x - bounds.margin;
+    const top = bounds.y - bounds.margin;
+    const right = bounds.x + bounds.width + bounds.margin;
+    const bottom = bounds.y + bounds.height + bounds.margin;
+
+    return x + width >= left && x <= right && y + height >= top && y <= bottom;
+  }
+
+  function buildViewportHydration(
+    roomName: string,
+    bounds: CanvasLoadedViewportBounds,
+    includeShapeIds: string[] = [],
+  ): CanvasRoomViewportHydration {
+    purgeExpiredTombstones(roomName);
+
+    const shapeCache = shapesByRoom.get(roomName) ?? new Map();
+    const tombstones = deletedTombstonesByRoom.get(roomName) ?? new Map();
+    const includedShapeIds = new Set<string>();
+
+    includeShapeIds.forEach((shapeId) => {
+      if (shapeCache.has(shapeId) && !tombstones.has(shapeId)) {
+        includedShapeIds.add(shapeId);
+      }
+    });
+
+    shapeCache.forEach(({ shape }, shapeId) => {
+      if (!tombstones.has(shapeId) && intersectsViewport(shape, bounds)) {
+        includedShapeIds.add(shapeId);
+      }
+    });
+
+    let didIncludeRelatedShape = true;
+    while (didIncludeRelatedShape) {
+      didIncludeRelatedShape = false;
+      shapeCache.forEach(({ shape }, shapeId) => {
+        if (includedShapeIds.has(shapeId) || tombstones.has(shapeId)) return;
+
+        const parentId = shape.parentId;
+        if (isShapeParentId(parentId) && includedShapeIds.has(parentId)) {
+          includedShapeIds.add(shapeId);
+          didIncludeRelatedShape = true;
+        }
+      });
+      Array.from(includedShapeIds).forEach((shapeId) => {
+        const parentId = shapeCache.get(shapeId)?.shape.parentId;
+
+        if (
+          isShapeParentId(parentId) &&
+          shapeCache.has(parentId) &&
+          !tombstones.has(parentId) &&
+          !includedShapeIds.has(parentId)
+        ) {
+          includedShapeIds.add(parentId);
+          didIncludeRelatedShape = true;
+        }
+      });
+    }
+
+    return {
+      deletedShapeIds: Array.from(tombstones.keys()),
+      loadedRegions: loadedRegionsByRoom.get(roomName) ?? [],
+      shapes: Array.from(includedShapeIds).flatMap((shapeId) => {
+        const shape = shapeCache.get(shapeId)?.shape;
+
+        return shape ? [shape] : [];
+      }),
+    };
   }
 
   function estimateDirtyPayloadBytes(
@@ -303,7 +430,10 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       const deletedShape = shapeCache.get(normalizedShapeId)?.shape;
 
       shapeCache.delete(normalizedShapeId);
-      deletedTombstones.set(normalizedShapeId, readShapeRevision(deletedShape));
+      deletedTombstones.set(normalizedShapeId, {
+        baseRevision: readShapeRevision(deletedShape),
+        persistedAt: null,
+      });
       invalidateCheckpointOperationIds(roomName, normalizedShapeId);
       markShapeDirty(roomName, normalizedShapeId, null);
     });
@@ -494,6 +624,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
     const shapeCache = getRoomShapeCache(roomName);
     const cachedAt = new Date().toISOString();
+    purgeExpiredTombstones(roomName);
     const tombstones = getRoomTombstones(roomName);
 
     shapes.forEach((shape) => {
@@ -503,6 +634,8 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       if (!options.markDirty && tombstones.has(shapeId)) return;
 
       const currentShape = shapeCache.get(shapeId)?.shape;
+      if (!options.markDirty && currentShape) return;
+
       const nextShape = { ...shape };
 
       if (readShapeRevision(nextShape) === null) {
@@ -641,7 +774,10 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         });
 
         shapeCache.delete(normalizedShapeId);
-        deletedTombstones.set(normalizedShapeId, readShapeRevision(deletedShape));
+        deletedTombstones.set(normalizedShapeId, {
+          baseRevision: readShapeRevision(deletedShape),
+          persistedAt: null,
+        });
         invalidateCheckpointOperationIds(roomName, normalizedShapeId);
         markShapeDirty(roomName, normalizedShapeId, null);
       });
@@ -734,8 +870,11 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     },
 
     getDeletedTombstones(room) {
+      const roomName = createCanvasRoomName(room);
+
+      purgeExpiredTombstones(roomName);
       return Array.from(
-        deletedTombstonesByRoom.get(createCanvasRoomName(room))?.keys() ?? [],
+        deletedTombstonesByRoom.get(roomName)?.keys() ?? [],
       );
     },
 
@@ -768,6 +907,9 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     },
 
     getStats() {
+      Array.from(deletedTombstonesByRoom.keys()).forEach(
+        purgeExpiredTombstones,
+      );
       const roomNames = new Set<string>();
 
       [
@@ -797,14 +939,25 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       };
     },
 
+    getViewportHydration(room, bounds, options = {}) {
+      return buildViewportHydration(
+        createCanvasRoomName(room),
+        bounds,
+        options.includeShapeIds,
+      );
+    },
+
     recordLoadedViewport(room, bounds, shapes = []) {
       const roomName = createCanvasRoomName(room);
       const currentRegions = loadedRegionsByRoom.get(roomName) ?? [];
+      const loadedShapeIds = shapes.flatMap((shape) =>
+        typeof shape.id === "string" && shape.id.trim() ? [shape.id] : [],
+      );
 
       upsertRoomShapes(roomName, shapes, { markDirty: false });
 
       if (currentRegions.some((region) => isCoveringRegion(region, bounds))) {
-        return currentRegions;
+        return buildViewportHydration(roomName, bounds, loadedShapeIds);
       }
 
       const nextRegions = mergeLoadedRegions(
@@ -813,7 +966,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       );
 
       loadedRegionsByRoom.set(roomName, nextRegions);
-      return nextRegions;
+      return buildViewportHydration(roomName, bounds, loadedShapeIds);
     },
 
     markCheckpointSucceeded(room, operations, result, options = {}) {
@@ -853,7 +1006,14 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         dirtyPayloadBytes?.delete(operation.shapeId);
         clearCheckpointOperationIds(roomName, operation.shapeId);
         if (operation.type === "delete") {
-          deletedTombstones?.delete(operation.shapeId);
+          const tombstone = deletedTombstones?.get(operation.shapeId);
+
+          if (tombstone) {
+            deletedTombstones?.set(operation.shapeId, {
+              ...tombstone,
+              persistedAt: Date.now(),
+            });
+          }
           return;
         }
 

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import checkpointModule from "../../dist/canvas/checkpoint/canvas-room-checkpoint.service.js";
+import roomModule from "../../dist/canvas/room/canvas-room.service.js";
 import roomStateModule from "../../dist/canvas/state/canvas-room-state.service.js";
 
 const { createCanvasRoomCheckpointService } = checkpointModule;
+const { createCanvasRoomService } = roomModule;
 const { createCanvasRoomStateService } = roomStateModule;
 
 const room = {
@@ -133,7 +135,7 @@ test("checkpoint 실행 중 발생한 최신 변경은 이전 성공 응답이 d
   assert.equal(service.getCheckpointState(room).checkpointVersion, 1);
 });
 
-test("already missing delete checkpoint clears its tombstone", async () => {
+test("already missing delete checkpoint keeps a recent persisted tombstone", async () => {
   const originalFetch = globalThis.fetch;
   const checkpointStatuses = [];
   const service = createCanvasRoomStateService();
@@ -182,11 +184,224 @@ test("already missing delete checkpoint clears its tombstone", async () => {
     );
 
     assert.deepEqual(service.getDirtyShapeIds(room), []);
-    assert.deepEqual(service.getDeletedTombstones(room), []);
+    assert.deepEqual(service.getDeletedTombstones(room), [shape.id]);
     assert.equal(checkpointStatuses.at(-1)?.status, "saved");
     assert.equal(checkpointStatuses.at(-1)?.pendingOperations, 0);
 
     await checkpointService.close();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("DB viewport hydrate는 같은 ID의 최신 roomState를 덮어쓰지 않는다", () => {
+  const hydrationRoom = { ...room, canvasId: "canvas-hydration-merge-test" };
+  const service = createCanvasRoomStateService();
+  const bounds = { height: 600, margin: 200, width: 800, x: 0, y: 0 };
+  const persistedShape = {
+    ...createNote("persisted"),
+    contentHash: "persisted-hash",
+    revision: 1,
+  };
+  const roomShape = {
+    ...createNote("room-latest"),
+    contentHash: "persisted-hash",
+    revision: 1,
+  };
+
+  service.recordLoadedViewport(hydrationRoom, bounds, [persistedShape]);
+  service.applyShapePatch(hydrationRoom, {
+    deletedShapeIds: [],
+    upsertShapes: [roomShape],
+  });
+  const hydration = service.recordLoadedViewport(hydrationRoom, bounds, [
+    persistedShape,
+    createNote("db-only", "shape:db-only"),
+  ]);
+
+  const hydratedById = new Map(hydration.shapes.map((shape) => [shape.id, shape]));
+
+  assert.equal(
+    hydratedById.get("shape:checkpoint-note")?.props.richText.content[0].content[0].text,
+    "room-latest",
+  );
+  assert.equal(
+    hydratedById.get("shape:db-only")?.props.richText.content[0].content[0].text,
+    "db-only",
+  );
+  assert.deepEqual(service.getDirtyShapeIds(hydrationRoom), [
+    "shape:checkpoint-note",
+  ]);
+});
+
+test("delete checkpoint 이후 recent tombstone이 늦은 DB 응답의 부활을 막는다", () => {
+  const tombstoneRoom = { ...room, canvasId: "canvas-tombstone-merge-test" };
+  const service = createCanvasRoomStateService();
+  const bounds = { height: 600, margin: 200, width: 800, x: 0, y: 0 };
+  const persistedShape = {
+    ...createNote("deleted"),
+    revision: 1,
+  };
+
+  service.recordLoadedViewport(tombstoneRoom, bounds, [persistedShape]);
+  service.applyShapePatch(tombstoneRoom, {
+    deletedShapeIds: [persistedShape.id],
+    upsertShapes: [],
+  });
+  const checkpoint = service.getCheckpointSnapshot(tombstoneRoom);
+
+  service.markCheckpointSucceeded(
+    tombstoneRoom,
+    checkpoint.operations,
+    { data: { shapes: [] }, success: true },
+    { advanceCheckpoint: true },
+  );
+  const hydration = service.recordLoadedViewport(tombstoneRoom, bounds, [
+    persistedShape,
+  ]);
+
+  assert.deepEqual(hydration.shapes, []);
+  assert.deepEqual(hydration.deletedShapeIds, [persistedShape.id]);
+  assert.deepEqual(service.getDirtyShapeIds(tombstoneRoom), []);
+});
+
+test("같은 ID를 다시 생성하면 recent tombstone을 즉시 해제한다", () => {
+  const recreateRoom = { ...room, canvasId: "canvas-recreate-test" };
+  const service = createCanvasRoomStateService();
+  const bounds = { height: 600, margin: 200, width: 800, x: 0, y: 0 };
+  const originalShape = {
+    ...createNote("original"),
+    revision: 1,
+  };
+
+  service.recordLoadedViewport(recreateRoom, bounds, [originalShape]);
+  service.applyShapePatch(recreateRoom, {
+    deletedShapeIds: [originalShape.id],
+    upsertShapes: [],
+  });
+  const deleteCheckpoint = service.getCheckpointSnapshot(recreateRoom);
+  service.markCheckpointSucceeded(
+    recreateRoom,
+    deleteCheckpoint.operations,
+    { data: { shapes: [] }, success: true },
+    { advanceCheckpoint: true },
+  );
+  service.applyShapePatch(recreateRoom, {
+    deletedShapeIds: [],
+    upsertShapes: [createNote("recreated")],
+  });
+
+  assert.deepEqual(service.getDeletedTombstones(recreateRoom), []);
+  assert.equal(
+    service.getViewportHydration(recreateRoom, bounds).shapes[0]?.props.richText
+      .content[0].content[0].text,
+    "recreated",
+  );
+});
+
+test("viewport hydration은 보이는 room-only Shape와 중첩 자식을 함께 포함한다", () => {
+  const nestedRoom = { ...room, canvasId: "canvas-nested-hydration-test" };
+  const service = createCanvasRoomStateService();
+  const bounds = { height: 600, margin: 0, width: 800, x: 0, y: 0 };
+  const parent = {
+    ...createNote("parent", "shape:parent"),
+    props: { h: 300, w: 400 },
+    type: "frame",
+  };
+  const child = {
+    ...createNote("child", "shape:child"),
+    parentId: "shape:parent",
+    x: 1_500,
+    y: 1_500,
+  };
+  const grandchild = {
+    ...createNote("grandchild", "shape:grandchild"),
+    parentId: "shape:child",
+    x: 2_000,
+    y: 2_000,
+  };
+
+  service.applyShapePatch(nestedRoom, {
+    deletedShapeIds: [],
+    upsertShapes: [parent, child, grandchild],
+  });
+  const hydration = service.getViewportHydration(nestedRoom, bounds);
+
+  assert.deepEqual(
+    new Set(hydration.shapes.map((shape) => shape.id)),
+    new Set(["shape:parent", "shape:child", "shape:grandchild"]),
+  );
+});
+
+test("Canvas 입장은 access 직후 DB baseline을 조회하고 최신 roomState로 병합한다", async () => {
+  const originalFetch = globalThis.fetch;
+  const joinRoom = { ...room, canvasId: "canvas-join-hydration-test" };
+  const service = createCanvasRoomStateService();
+  const lifecycle = [];
+  const persistedShape = {
+    ...createNote("persisted"),
+    revision: 1,
+  };
+  const latestRoomShape = {
+    ...createNote("room-latest"),
+    revision: 1,
+  };
+
+  service.applyShapePatch(joinRoom, {
+    deletedShapeIds: [],
+    upsertShapes: [latestRoomShape],
+  });
+  globalThis.fetch = async () => {
+    lifecycle.push("db-baseline");
+    return new Response(JSON.stringify({ data: [persistedShape], success: true }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    });
+  };
+
+  try {
+    const roomService = createCanvasRoomService({
+      accessService: {
+        async getCanvasRoomAccess() {
+          lifecycle.push("access");
+          return {
+            boardType: "freeform",
+            engineType: "classic",
+            readOnly: false,
+          };
+        },
+      },
+      appServerUrl: "https://app-server.test",
+      presenceService: { getPresence: () => [] },
+      roomStateService: service,
+      shapeLockService: { getRoomLocks: async () => [] },
+      shapePreviewService: { getRoomPreviews: async () => [] },
+    });
+    const result = await roomService.joinCanvasRoom(
+      { token: "test-token", userId: "test-user" },
+      {
+        ...joinRoom,
+        initialViewportBounds: {
+          height: 600,
+          margin: 200,
+          width: 800,
+          x: 0,
+          y: 0,
+        },
+      },
+      {
+        onAccessGranted() {
+          lifecycle.push("access-granted");
+        },
+      },
+    );
+
+    assert.deepEqual(lifecycle, ["access", "access-granted", "db-baseline"]);
+    assert.equal(result.joined, true);
+    assert.equal(
+      result.payload.roomShapes[0]?.props.richText.content[0].content[0].text,
+      "room-latest",
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

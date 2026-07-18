@@ -11,7 +11,6 @@
 - 실패한 operation은 dirty 상태로 남겨 `1s → 2s → 5s → 10s → 30s` backoff로 재시도한다.
 - 일반 leave/disconnect는 저장하지 않는다. 마지막 사용자가 나간 뒤 7.5초 동안
   재입장이 없을 때만 drain하고, 성공한 빈 roomState를 정리한다.
-- join의 즉시 flush는 hydration 병합 전환이 끝날 때까지 호환 경로로 유지한다.
 - graceful shutdown에서는 모든 room의 남은 dirty operation을 drain한다.
 
 API 계약이나 DB schema를 정의하지 않으며, 기존 Canvas batch 계약의 호출자다.
