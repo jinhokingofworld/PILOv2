@@ -6,8 +6,7 @@ import {
 import { normalizeCanvasFreeformShapes } from "@/features/canvas/persistence/canvas-storage";
 import {
   getPiloChildShapeCount,
-  isPiloFrameCollapsed,
-} from "@/features/canvas/engine/shapes/frame/canvas-frame-collapse";
+} from "@/features/canvas/engine/shapes/canvas-shape-metadata";
 import type {
   PiloCanvasFreeformShape,
   PiloCanvasViewportBounds,
@@ -21,7 +20,7 @@ const PILO_ARROW_BINDINGS_META_KEY = "piloArrowBindingsV1";
 
 type CanvasRemoteOperationApplyResult = {
   changed: boolean;
-  expandedFrameIds: string[];
+  frameIdsToLoad: string[];
   loadedShapeIds: string[];
   nextShapes: PiloCanvasFreeformShape[];
   unloadedShapeIds: string[];
@@ -164,7 +163,7 @@ export function applyCanvasRemoteOperation({
   if (!shapeId) {
     return {
       changed: false,
-      expandedFrameIds: [],
+      frameIdsToLoad: [],
       loadedShapeIds: [],
       nextShapes: currentShapes,
       unloadedShapeIds: [],
@@ -180,7 +179,7 @@ export function applyCanvasRemoteOperation({
 
     return {
       changed: nextShapes.length !== currentShapes.length,
-      expandedFrameIds: [],
+      frameIdsToLoad: [],
       loadedShapeIds: [],
       nextShapes,
       unloadedShapeIds: [],
@@ -192,7 +191,7 @@ export function applyCanvasRemoteOperation({
   if (!incomingShape) {
     return {
       changed: false,
-      expandedFrameIds: [],
+      frameIdsToLoad: [],
       loadedShapeIds: [],
       nextShapes: currentShapes,
       unloadedShapeIds: [],
@@ -204,21 +203,16 @@ export function applyCanvasRemoteOperation({
   const nextShape = preserveArrowBindingMeta(currentShape, cloneShape(incomingShape));
   const parentId =
     typeof nextShape.parentId === "string" ? nextShape.parentId : null;
-  const wasCollapsedFrame = currentShape
-    ? isPiloFrameCollapsed(currentShape)
-    : false;
-  const isCollapsedFrame = isPiloFrameCollapsed(nextShape);
-
   shapeDetailCache.set(shapeId, nextShape);
 
   if (isShapeParentId(parentId)) {
     const parentShape =
       currentShapeMap.get(parentId) ?? shapeDetailCache.get(parentId);
 
-    if (!parentShape || isPiloFrameCollapsed(parentShape)) {
+    if (!parentShape) {
       return {
         changed: false,
-        expandedFrameIds: [],
+        frameIdsToLoad: [],
         loadedShapeIds: [],
         nextShapes: currentShapes,
         unloadedShapeIds: [shapeId],
@@ -229,56 +223,31 @@ export function applyCanvasRemoteOperation({
   if (!currentShape && !intersectsViewport(nextShape, viewportBounds)) {
     return {
       changed: false,
-      expandedFrameIds: [],
+      frameIdsToLoad: [],
       loadedShapeIds: [],
       nextShapes: currentShapes,
       unloadedShapeIds: [],
     };
   }
 
-  let nextShapes = currentShape
+  const nextShapes = currentShape
     ? currentShapes.map((shape) =>
         getFreeformShapeId(shape) === shapeId ? nextShape : shape,
       )
     : [...currentShapes, nextShape];
-  const expandedFrameIds =
+  const frameIdsToLoad =
     nextShape.type === "frame" &&
-    !isCollapsedFrame &&
-    (wasCollapsedFrame ||
-      (!currentShape && getPiloChildShapeCount(nextShape) > 0))
+    !currentShape &&
+    getPiloChildShapeCount(nextShape) > 0
       ? [shapeId]
       : [];
-  let unloadedShapeIds: string[] = [];
-
-  if (isCollapsedFrame) {
-    const descendantIds = collectCanvasFrameDescendantShapeIds(
-      currentShapes,
-      shapeId,
-    );
-
-    if (descendantIds.size) {
-      unloadedShapeIds = Array.from(descendantIds);
-      currentShapes.forEach((shape) => {
-        const descendantShapeId = getFreeformShapeId(shape);
-
-        if (descendantShapeId && descendantIds.has(descendantShapeId)) {
-          shapeDetailCache.set(descendantShapeId, cloneShape(shape));
-        }
-      });
-      nextShapes = nextShapes.filter((shape) => {
-        const nextShapeId = getFreeformShapeId(shape);
-
-        return !nextShapeId || !descendantIds.has(nextShapeId);
-      });
-    }
-  }
 
   return {
     changed: true,
-    expandedFrameIds,
+    frameIdsToLoad,
     loadedShapeIds: [shapeId],
     nextShapes,
-    unloadedShapeIds,
+    unloadedShapeIds: [],
   };
 }
 
@@ -300,13 +269,7 @@ export function applyCanvasRoomShapePatch({
   const deletedShapeIdSet = new Set(deletedShapeIds);
   const previousShapeMap = buildFreeformShapeMap(currentShapes);
   const previousCachedShapeMap = new Map(shapeDetailCache);
-  const incomingShapeMap = buildFreeformShapeMap(
-    upsertShapes.filter((shape) => {
-      const shapeId = getFreeformShapeId(shape);
-      return !shapeId || !deletedShapeIdSet.has(shapeId);
-    }),
-  );
-  const expandedFrameIds = new Set<string>();
+  const frameIdsToLoad = new Set<string>();
   const loadedShapeIds = new Set<string>();
   const unloadedShapeIds = new Set<string>();
   let changed = false;
@@ -347,24 +310,12 @@ export function applyCanvasRoomShapePatch({
     );
     const parentId =
       typeof nextShape.parentId === "string" ? nextShape.parentId : null;
-    const isCollapsedFrame = isPiloFrameCollapsed(nextShape);
-    const wasCollapsedFrame = previousShape
-      ? isPiloFrameCollapsed(previousShape)
-      : false;
-
     shapeDetailCache.set(shapeId, nextShape);
 
     if (isShapeParentId(parentId)) {
-      const parentShape =
-        visibleShapeMap.get(parentId) ??
-        incomingShapeMap.get(parentId) ??
-        shapeDetailCache.get(parentId);
-      const hasVisibleExpandedParent =
-        visibleShapeMap.has(parentId) &&
-        parentShape !== undefined &&
-        !isPiloFrameCollapsed(parentShape);
+      const hasVisibleParent = visibleShapeMap.has(parentId);
 
-      if (!hasVisibleExpandedParent) {
+      if (!hasVisibleParent) {
         unloadedShapeIds.add(shapeId);
 
         if (currentShape) {
@@ -394,44 +345,16 @@ export function applyCanvasRoomShapePatch({
 
     if (
       nextShape.type === "frame" &&
-      !isCollapsedFrame &&
-      (wasCollapsedFrame ||
-        (!currentShape && getPiloChildShapeCount(nextShape) > 0))
+      !currentShape &&
+      getPiloChildShapeCount(nextShape) > 0
     ) {
-      expandedFrameIds.add(shapeId);
+      frameIdsToLoad.add(shapeId);
     }
-
-    if (!isCollapsedFrame) {
-      return;
-    }
-
-    const descendantIds = collectCanvasFrameDescendantShapeIds(
-      nextShapes,
-      shapeId,
-    );
-
-    if (!descendantIds.size) {
-      return;
-    }
-
-    nextShapes.forEach((shape) => {
-      const descendantShapeId = getFreeformShapeId(shape);
-
-      if (descendantShapeId && descendantIds.has(descendantShapeId)) {
-        shapeDetailCache.set(descendantShapeId, cloneShape(shape));
-        unloadedShapeIds.add(descendantShapeId);
-        loadedShapeIds.delete(descendantShapeId);
-      }
-    });
-    nextShapes = nextShapes.filter((shape) => {
-      const nextShapeId = getFreeformShapeId(shape);
-      return !nextShapeId || !descendantIds.has(nextShapeId);
-    });
   });
 
   return {
     changed,
-    expandedFrameIds: [...expandedFrameIds],
+    frameIdsToLoad: [...frameIdsToLoad],
     loadedShapeIds: [...loadedShapeIds],
     nextShapes,
     unloadedShapeIds: [...unloadedShapeIds],
