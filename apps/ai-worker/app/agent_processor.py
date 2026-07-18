@@ -16,7 +16,6 @@ from app.agent_tool_retrieval import (
     ToolCapabilityCatalog,
     ToolRetrievalResult,
     parse_tool_capability_catalog,
-    select_read_only_tool_shortlist,
     select_tool_shortlist,
 )
 from app.meeting_report_processor import InfrastructureError
@@ -42,11 +41,9 @@ PLANNER_STATUSES = {
 TOOL_RISK_LEVELS = {"low", "medium", "high"}
 TOOL_EXECUTION_MODES = {"auto", "confirmation_required", "contextual"}
 TOOL_RETRIEVAL_MODE_SHADOW = "shadow"
-TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST = "read_only_shortlist"
 TOOL_RETRIEVAL_MODE_SHORTLIST = "shortlist"
 TOOL_RETRIEVAL_MODES = {
     TOOL_RETRIEVAL_MODE_SHADOW,
-    TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
     TOOL_RETRIEVAL_MODE_SHORTLIST,
 }
 DEFAULT_TOOL_RETRIEVAL_TOP_K = 8
@@ -157,6 +154,16 @@ def select_agent_planner_tool_selection(
     if mode == TOOL_RETRIEVAL_MODE_SHADOW:
         return AgentPlannerToolSelection(job.tools, None, False)
     if job.tool_capability_catalog is None:
+        if job.tool_capability_catalog_error == "missing_catalog":
+            return AgentPlannerToolSelection(
+                tools=job.tools,
+                retrieval=ToolRetrievalResult(
+                    tool_names=tuple(),
+                    low_confidence=False,
+                    fallback_reason="missing_catalog",
+                ),
+                used_shortlist=False,
+            )
         return AgentPlannerToolSelection(
             tools=tuple(),
             retrieval=ToolRetrievalResult(
@@ -167,23 +174,19 @@ def select_agent_planner_tool_selection(
             used_shortlist=False,
         )
     eligible_tool_schemas = {tool.name: tool.input_schema for tool in job.tools}
-    selection = (
-        select_read_only_tool_shortlist(
-            prompt,
-            job.tool_capability_catalog,
-            eligible_tool_schemas,
-            top_k=top_k,
-            schema_token_budget=schema_token_budget,
-        )
-        if mode == TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST
-        else select_tool_shortlist(
-            prompt,
-            job.tool_capability_catalog,
-            eligible_tool_schemas,
-            top_k=top_k,
-            schema_token_budget=schema_token_budget,
-        )
+    selection = select_tool_shortlist(
+        prompt,
+        job.tool_capability_catalog,
+        eligible_tool_schemas,
+        top_k=top_k,
+        schema_token_budget=schema_token_budget,
     )
+    if selection.retrieval.low_confidence:
+        return AgentPlannerToolSelection(
+            tools=job.tools,
+            retrieval=selection.retrieval,
+            used_shortlist=False,
+        )
     selected_tool_names = set(selection.tool_names)
     shortlist = tuple(tool for tool in job.tools if tool.name in selected_tool_names)
     return AgentPlannerToolSelection(
@@ -419,8 +422,10 @@ def _parse_tool_capability_catalog_for_job(
             value,
             {tool.name: tool.input_schema for tool in tools},
         )
-    except ValueError:
-        return None, "invalid_catalog"
+    except ValueError as error:
+        if str(error) == "Invalid toolCapabilityCatalog SHA":
+            return None, "catalog_sha_mismatch"
+        return None, "catalog_schema_mismatch"
     return catalog, None
 
 
@@ -1583,6 +1588,7 @@ def _tool_retrieval_observation(
         "catalogVersion": catalog.version if catalog else None,
         "catalogSha256": catalog.sha256 if catalog else None,
         "eligibleSnapshotSha256": _eligible_snapshot_sha256(job.tools),
+        "shortlistSha256": _eligible_snapshot_sha256(selection.tools),
     }
 
 
