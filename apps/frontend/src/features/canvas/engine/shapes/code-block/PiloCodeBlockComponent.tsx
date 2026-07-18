@@ -25,7 +25,7 @@ import {
   getCodePreview,
   getPiloCodeBlockExpandedSize,
   isPiloCodeBlockCollapsed,
-} from "../frame/canvas-frame-collapse";
+} from "../canvas-shape-metadata";
 import { isPiloCodeBlockShape } from "../PiloCanvasShapeGuards";
 
 const PILO_COLLAPSED_CODE_BLOCK_SIZE = {

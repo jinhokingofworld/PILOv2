@@ -1,7 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { normalizeCanvasFreeformShapes } from "@/features/canvas/persistence/canvas-storage";
-import { isPiloFrameCollapsed } from "@/features/canvas/engine/shapes/frame/canvas-frame-collapse";
 import type {
   PiloCanvasFreeformShape,
   PiloCanvasViewportBounds,
@@ -66,13 +65,12 @@ type UseCanvasViewportQueriesOptions = {
   viewportShapeLoadTimerRef: RuntimeRef<ReturnType<typeof setTimeout> | null>;
 };
 
-function shouldLoadExpandedFrameChildren(
+function shouldLoadFrameChildren(
   shape: PiloCanvasFreeformShape,
 ): shape is PiloCanvasFreeformShape & { id: string; type: "frame" } {
   return (
     shape.type === "frame" &&
-    typeof shape.id === "string" &&
-    !isPiloFrameCollapsed(shape)
+    typeof shape.id === "string"
   );
 }
 
@@ -266,7 +264,7 @@ export function useCanvasViewportQueries({
         });
         mergeLoadedFreeformShapes(nextLoadedShapes);
         nextLoadedShapes.forEach((shape) => {
-          if (shouldLoadExpandedFrameChildren(shape)) {
+          if (shouldLoadFrameChildren(shape)) {
             loadFrameChildren(shape.id, nextVisitedFrameIds);
           }
         });
@@ -667,7 +665,7 @@ export function useCanvasViewportQueries({
 
             mergeLoadedFreeformShapes(nextLoadedShapes);
             nextLoadedShapes.forEach((shape) => {
-              if (shouldLoadExpandedFrameChildren(shape)) {
+              if (shouldLoadFrameChildren(shape)) {
                 loadFrameChildren(shape.id);
               }
             });

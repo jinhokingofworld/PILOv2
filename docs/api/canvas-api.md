@@ -313,14 +313,13 @@ Frame이 아닌 shape에서는 `0` 또는 생략할 수 있다.
 클라이언트는 tldraw page parent id(`page:*`)를 `parentShapeId`로 보내지 않고
 최상위 shape처럼 `null`로 정규화한다.
 
-Frame과 Code Block 접힘 상태는 별도 컬럼이 아니라 `rawShape.meta`에 저장한다.
-Frame은 `piloFrameCollapsed`, Code Block은 `piloCodeBlockCollapsed`를 사용한다.
+Code Block 접힘 상태는 별도 컬럼이 아니라 `rawShape.meta`의
+`piloCodeBlockCollapsed`에 저장한다.
 
 ```json
 {
   "rawShape": {
     "meta": {
-      "piloFrameCollapsed": true,
       "piloCodeBlockCollapsed": true
     }
   }
