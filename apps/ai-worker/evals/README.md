@@ -37,6 +37,7 @@ canonical과 held-out은 같은 tool snapshot, 기준일, timezone, model, repet
 cd apps/ai-worker
 OPENAI_API_KEY=... PYTHONPATH=. .venv/bin/python scripts/evaluate_agent_planner.py \
   --suite evals/agent_planner_korean_v1.json \
+  --tool-capability-catalog /tmp/app-server-tool-capability-catalog.json \
   --meeting-catalog evals/meeting_agent_capability_catalog_v1.json \
   --meeting-variant canonical \
   --current-date 2026-07-18 --timezone Asia/Seoul --repetitions 5 \
@@ -52,3 +53,20 @@ OPENAI_API_KEY=... PYTHONPATH=. .venv/bin/python scripts/evaluate_agent_planner.
 
 두 결과에는 model, current date, timezone, suite SHA, source revision과 case별 정확도가 포함된다.
 실제 API key가 필요한 실행 결과는 repository에 commit하지 않고 #1371에 첨부한다.
+
+## Tool retrieval shadow 비교
+
+App Server가 생성한 `toolCapabilityCatalog` snapshot이 포함된 suite에서는 같은 model·기준일·timezone·
+repetition으로 legacy 전체 schema와 shortlist schema를 연속 비교할 수 있다.
+
+```bash
+OPENAI_API_KEY=... PYTHONPATH=. .venv/bin/python scripts/evaluate_agent_planner.py \
+  --suite evals/agent_planner_korean_v1.json \
+  --current-date 2026-07-18 --timezone Asia/Seoul --repetitions 3 \
+  --compare-shadow-retrieval --retrieval-top-k 8 \
+  > agent-tool-retrieval-comparison.json
+```
+
+결과는 legacy와 shadow 각각의 tool 정확도, retrieval recall, adjacent-negative routing,
+shortlist 크기, fallback taxonomy, planner/retrieval latency와 tool schema token 추정치를 기록한다.
+원문 prompt와 input 값은 report에 포함하지 않으며 case ID·field 이름·안전한 tool 이름만 남긴다.
