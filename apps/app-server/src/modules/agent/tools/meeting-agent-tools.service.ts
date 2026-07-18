@@ -30,11 +30,21 @@ import type {
   AgentToolExecutionResult
 } from "../types/agent-tool.types";
 
-type MeetingReportStatus = "PROCESSING" | "COMPLETED" | "FAILED";
+type MeetingReportStatus =
+  | "QUEUED"
+  | "TRANSCRIBING"
+  | "SUMMARIZING"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "FAILED";
 
 interface ListMeetingReportsInput {
   status?: MeetingReportStatus;
-  limit?: number;
+  from?: string;
+  to?: string;
+  /** Agent-only filter. The Meeting REST API deliberately does not expose it. */
+  roomName?: string;
+  limit: number;
 }
 
 interface ReportIdInput {
@@ -45,13 +55,31 @@ interface MeetingIdInput {
   meetingId: string;
 }
 
+interface MeetingSelectorInput {
+  current?: true;
+  roomName?: string;
+  useSelectedMeetingCandidate?: true;
+}
+
+interface MeetingReportSelectorInput {
+  from?: string;
+  to?: string;
+  status?: MeetingReportStatus;
+  roomName?: string;
+  useSelectedMeetingReportCandidate?: true;
+}
+
+interface LegacyPersistedReportReferenceInput extends ReportIdInput {
+  legacyPersistedPlannerInput: true;
+}
+
 interface RecordingConsentInput {
   accepted: true;
   policyVersion: string;
 }
 
 interface StartMeetingInput {
-  meetingRoomId?: string;
+  roomName?: string;
   useSelectedMeetingRoomCandidate?: true;
   recordingConsent?: RecordingConsentInput;
 }
@@ -61,7 +89,11 @@ interface ResolvedStartMeetingInput {
   recordingConsent?: RecordingConsentInput;
 }
 
-interface JoinMeetingInput extends MeetingIdInput {
+interface JoinMeetingInput extends MeetingSelectorInput {
+  recordingConsent?: RecordingConsentInput;
+}
+
+interface ResolvedJoinMeetingInput extends MeetingIdInput {
   recordingConsent?: RecordingConsentInput;
 }
 
@@ -103,21 +135,39 @@ interface ProjectionOptions {
 }
 
 const MEETING_REPORT_STATUSES: readonly MeetingReportStatus[] = [
+  "QUEUED",
+  "TRANSCRIBING",
+  "SUMMARIZING",
   "PROCESSING",
   "COMPLETED",
   "FAILED"
 ];
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const LIST_INPUT_FIELDS = ["status", "limit"];
+const LIST_INPUT_FIELDS = ["status", "from", "to", "roomName", "limit"];
 const REPORT_ID_INPUT_FIELDS = ["reportId"];
 const MEETING_ID_INPUT_FIELDS = ["meetingId"];
+const MEETING_SELECTOR_INPUT_FIELDS = [
+  "current",
+  "roomName",
+  "useSelectedMeetingCandidate"
+];
+const REPORT_SELECTOR_INPUT_FIELDS = [
+  "from",
+  "to",
+  "status",
+  "roomName",
+  "useSelectedMeetingReportCandidate"
+];
 const START_MEETING_INPUT_FIELDS = [
-  "meetingRoomId",
+  "roomName",
   "useSelectedMeetingRoomCandidate",
   "recordingConsent"
 ];
-const JOIN_MEETING_INPUT_FIELDS = ["meetingId", "recordingConsent"];
+const JOIN_MEETING_INPUT_FIELDS = [
+  ...MEETING_SELECTOR_INPUT_FIELDS,
+  "recordingConsent"
+];
 const SEARCH_TRANSCRIPT_INPUT_FIELDS = ["query", "reportId"];
 const ACTION_ITEM_INPUT_FIELDS = ["reportId", "actionItemId"];
 const UPDATE_ACTION_ITEM_INPUT_FIELDS = [
@@ -246,32 +296,33 @@ export class MeetingAgentToolsService {
       inputSchema: {
         type: "object",
         anyOf: [
-          { required: ["meetingRoomId"] },
+          { required: ["roomName"] },
           { required: ["useSelectedMeetingRoomCandidate"] }
         ],
         additionalProperties: false,
         properties: {
-          meetingRoomId: { type: "string", format: "uuid" },
+          roomName: { type: "string", minLength: 1, maxLength: 100 },
           useSelectedMeetingRoomCandidate: { type: "boolean", const: true },
           recordingConsent: this.recordingConsentSchema()
         }
       },
       validateInput: (input) => this.validateStartMeetingInput(input),
-      buildConfirmation: async (context, input) =>
-        this.buildStartMeetingConfirmation(
+      buildConfirmation: async (context, input) => {
+        const resolved = await this.resolveStartMeetingInput(
           context,
-          await this.resolveSelectedMeetingRoom(
-            context,
-            this.validateStartMeetingInput(input)
-          )
-        ),
+          this.validateStartMeetingInput(input)
+        );
+        return "kind" in resolved
+          ? resolved
+          : this.buildStartMeetingConfirmation(context, resolved);
+      },
+      buildConfirmationInput: (plan) => this.confirmationPlanInput(plan),
+      validateConfirmationInput: (input) =>
+        this.validateResolvedStartMeetingInput(input),
       execute: async (context, input) =>
         this.executeStartMeeting(
           context,
-          await this.resolveSelectedMeetingRoom(
-            context,
-            this.validateStartMeetingInput(input)
-          )
+          this.validateResolvedStartMeetingInput(input)
         )
     };
   }
@@ -285,21 +336,30 @@ export class MeetingAgentToolsService {
       executionMode: "confirmation_required",
       inputSchema: {
         type: "object",
-        required: ["meetingId"],
         additionalProperties: false,
         properties: {
-          meetingId: { type: "string", format: "uuid" },
+          ...this.meetingSelectorSchema(),
           recordingConsent: this.recordingConsentSchema()
         }
       },
       validateInput: (input) => this.validateJoinMeetingInput(input),
-      buildConfirmation: (context, input) =>
-        this.buildJoinMeetingConfirmation(
+      buildConfirmation: async (context, input) => {
+        const resolved = await this.resolveJoinMeetingInput(
           context,
           this.validateJoinMeetingInput(input)
-        ),
+        );
+        return "kind" in resolved
+          ? resolved
+          : this.buildJoinMeetingConfirmation(context, resolved);
+      },
+      buildConfirmationInput: (plan) => this.confirmationPlanInput(plan),
+      validateConfirmationInput: (input) =>
+        this.validateResolvedJoinMeetingInput(input),
       execute: (context, input) =>
-        this.executeJoinMeeting(context, this.validateJoinMeetingInput(input))
+        this.executeJoinMeeting(
+          context,
+          this.validateResolvedJoinMeetingInput(input)
+        )
     };
   }
 
@@ -309,11 +369,21 @@ export class MeetingAgentToolsService {
       description:
         "현재 참여 중인 Meeting에서 나갑니다. 마지막 참여자면 기존 Meeting 규칙에 따라 녹음·회의가 종료될 수 있습니다.",
       riskLevel: "low",
-      executionMode: "auto",
-      inputSchema: this.meetingIdSchema(),
-      validateInput: (input) => this.validateMeetingIdInput(input),
-      execute: (context, input) =>
-        this.executeLeaveMeeting(context, this.validateMeetingIdInput(input))
+      executionMode: "contextual",
+      inputSchema: this.meetingSelectorInputSchema(),
+      validateInput: (input) => this.validateMeetingSelectorInput(input),
+      prepareExecution: async (context, input) =>
+        this.prepareMeetingSelectorExecution(
+          context,
+          this.validateMeetingSelectorInput(input)
+        ),
+      execute: async (context, input) => {
+        const resolved = await this.requireResolvedMeeting(
+          context,
+          this.validateMeetingSelectorInput(input)
+        );
+        return this.executeLeaveMeeting(context, { meetingId: resolved.resourceId });
+      }
     };
   }
 
@@ -324,14 +394,23 @@ export class MeetingAgentToolsService {
         "현재 active participant인 Meeting의 녹음을 시작합니다. 모든 active participant의 동의를 서버가 재검증합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
-      inputSchema: this.meetingIdSchema(),
-      validateInput: (input) => this.validateMeetingIdInput(input),
-      buildConfirmation: (context, input) =>
-        this.buildRecordingConfirmation(
+      inputSchema: this.meetingSelectorInputSchema(),
+      validateInput: (input) => this.validateMeetingSelectorInput(input),
+      buildConfirmation: async (context, input) => {
+        const resolved = await this.resolveMeetingIdInput(
           context,
-          "start_meeting_recording",
-          this.validateMeetingIdInput(input)
-        ),
+          this.validateMeetingSelectorInput(input)
+        );
+        return "kind" in resolved
+          ? resolved
+          : this.buildRecordingConfirmation(
+              context,
+              "start_meeting_recording",
+              resolved
+            );
+      },
+      buildConfirmationInput: (plan) => this.confirmationPlanInput(plan),
+      validateConfirmationInput: (input) => this.validateMeetingIdInput(input),
       execute: (context, input) =>
         this.executeStartRecording(context, this.validateMeetingIdInput(input))
     };
@@ -344,14 +423,23 @@ export class MeetingAgentToolsService {
         "Meeting의 current recording을 종료하고 조건을 충족하면 MeetingReport 생성을 요청합니다. recordingId를 입력받지 않습니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
-      inputSchema: this.meetingIdSchema(),
-      validateInput: (input) => this.validateMeetingIdInput(input),
-      buildConfirmation: (context, input) =>
-        this.buildRecordingConfirmation(
+      inputSchema: this.meetingSelectorInputSchema(),
+      validateInput: (input) => this.validateMeetingSelectorInput(input),
+      buildConfirmation: async (context, input) => {
+        const resolved = await this.resolveMeetingIdInput(
           context,
-          "end_meeting_recording",
-          this.validateMeetingIdInput(input)
-        ),
+          this.validateMeetingSelectorInput(input)
+        );
+        return "kind" in resolved
+          ? resolved
+          : this.buildRecordingConfirmation(
+              context,
+              "end_meeting_recording",
+              resolved
+            );
+      },
+      buildConfirmationInput: (plan) => this.confirmationPlanInput(plan),
+      validateConfirmationInput: (input) => this.validateMeetingIdInput(input),
       execute: (context, input) =>
         this.executeEndRecording(context, this.validateMeetingIdInput(input))
     };
@@ -488,24 +576,23 @@ export class MeetingAgentToolsService {
       description:
         "특정 Meeting의 현재·과거 참여자 요약을 조회합니다. LiveKit 연결 상태는 반환하지 않습니다.",
       riskLevel: "low",
-      executionMode: "auto",
-      inputSchema: {
-        type: "object",
-        required: ["meetingId"],
-        additionalProperties: false,
-        properties: {
-          meetingId: {
-            type: "string",
-            format: "uuid"
-          }
-        }
-      },
-      validateInput: (input) => this.validateMeetingIdInput(input),
-      execute: (context, input) =>
-        this.executeGetMeetingParticipants(
+      executionMode: "contextual",
+      inputSchema: this.meetingSelectorInputSchema(),
+      validateInput: (input) => this.validateMeetingSelectorInput(input),
+      prepareExecution: async (context, input) =>
+        this.prepareMeetingSelectorExecution(
           context,
-          this.validateMeetingIdInput(input)
-        )
+          this.validateMeetingSelectorInput(input)
+        ),
+      execute: async (context, input) => {
+        const resolved = await this.requireResolvedMeeting(
+          context,
+          this.validateMeetingSelectorInput(input)
+        );
+        return this.executeGetMeetingParticipants(context, {
+          meetingId: resolved.resourceId
+        });
+      }
     };
   }
 
@@ -529,7 +616,7 @@ export class MeetingAgentToolsService {
     return {
       name: "list_meeting_reports",
       description:
-        "Workspace MeetingReport 목록을 최신 생성 시각 순으로 조회합니다. 최신 회의록 결과가 필요하면 limit을 1로 설정합니다.",
+        "Workspace MeetingReport 목록을 createdAt 내림차순으로 조회합니다. 기간과 개수를 생략하면 최신 회의록 1개를 반환합니다.",
       riskLevel: "low",
       executionMode: "auto",
       inputSchema: {
@@ -540,6 +627,9 @@ export class MeetingAgentToolsService {
             type: "string",
             enum: [...MEETING_REPORT_STATUSES]
           },
+          from: { type: "string", format: "date-time" },
+          to: { type: "string", format: "date-time" },
+          roomName: { type: "string", minLength: 1, maxLength: 100 },
           limit: {
             type: "integer",
             minimum: 1,
@@ -558,21 +648,33 @@ export class MeetingAgentToolsService {
       name: "get_meeting_report",
       description: "MeetingReport 상세를 Agent용 보고서 projection으로 조회합니다.",
       riskLevel: "low",
-      executionMode: "auto",
+      executionMode: "contextual",
       inputSchema: {
         type: "object",
-        required: ["reportId"],
         additionalProperties: false,
-        properties: {
-          reportId: {
-            type: "string",
-            format: "uuid"
-          }
-        }
+        properties: this.meetingReportSelectorSchema()
       },
-      validateInput: (input) => this.validateReportIdInput(input),
-      execute: (context, input) =>
-        this.executeGetMeetingReport(context, this.validateReportIdInput(input))
+      validateInput: (input) => this.validateMeetingReportSelectorInput(input),
+      adaptLegacyPlannerInput: (input) => this.adaptLegacyReportReferenceInput(input),
+      prepareExecution: async (context, input) =>
+        this.prepareMeetingReportSelectorExecution(
+          context,
+          this.validateMeetingReportSelectorInput(input)
+        ),
+      execute: async (context, input) => {
+        if (this.isLegacyPersistedReportReferenceInput(input)) {
+          return this.executeGetMeetingReport(context, {
+            reportId: input.reportId
+          });
+        }
+        const resolved = await this.requireResolvedReport(
+          context,
+          this.validateMeetingReportSelectorInput(input)
+        );
+        return this.executeGetMeetingReport(context, {
+          reportId: resolved.resourceId
+        });
+      }
     };
   }
 
@@ -582,24 +684,33 @@ export class MeetingAgentToolsService {
       description:
         "MeetingReport를 Agent가 소비할 수 있는 sections/actionItems projection으로 요약합니다.",
       riskLevel: "low",
-      executionMode: "auto",
+      executionMode: "contextual",
       inputSchema: {
         type: "object",
-        required: ["reportId"],
         additionalProperties: false,
-        properties: {
-          reportId: {
-            type: "string",
-            format: "uuid"
-          }
-        }
+        properties: this.meetingReportSelectorSchema()
       },
-      validateInput: (input) => this.validateReportIdInput(input),
-      execute: (context, input) =>
-        this.executeSummarizeMeetingReport(
+      validateInput: (input) => this.validateMeetingReportSelectorInput(input),
+      adaptLegacyPlannerInput: (input) => this.adaptLegacyReportReferenceInput(input),
+      prepareExecution: async (context, input) =>
+        this.prepareMeetingReportSelectorExecution(
           context,
-          this.validateReportIdInput(input)
-        )
+          this.validateMeetingReportSelectorInput(input)
+        ),
+      execute: async (context, input) => {
+        if (this.isLegacyPersistedReportReferenceInput(input)) {
+          return this.executeSummarizeMeetingReport(context, {
+            reportId: input.reportId
+          });
+        }
+        const resolved = await this.requireResolvedReport(
+          context,
+          this.validateMeetingReportSelectorInput(input)
+        );
+        return this.executeSummarizeMeetingReport(context, {
+          reportId: resolved.resourceId
+        });
+      }
     };
   }
 
@@ -607,13 +718,12 @@ export class MeetingAgentToolsService {
     context: AgentToolContext,
     input: ListMeetingReportsInput
   ): Promise<AgentToolExecutionResult> {
-    const result = await this.meetingService.listReports(
+    const result = await this.meetingService.listReportsForAgent(
       context.currentUserId,
       context.workspaceId,
       input
     );
-    const selectedReports =
-      input.limit === undefined ? result.reports : result.reports.slice(0, input.limit);
+    const selectedReports = result.reports.slice(0, input.limit);
     const reports = selectedReports.map((report) =>
       this.normalizeMeetingReportForAgent(report, {
         sectionTextLimit: LIST_SECTION_TEXT_LIMIT
@@ -883,7 +993,7 @@ export class MeetingAgentToolsService {
 
   private async buildJoinMeetingConfirmation(
     context: AgentToolContext,
-    input: JoinMeetingInput
+    input: ResolvedJoinMeetingInput
   ): Promise<AgentConfirmationPlan | AgentToolClarificationResult> {
     const detail = await this.meetingService.getMeeting(
       context.currentUserId,
@@ -1172,7 +1282,7 @@ export class MeetingAgentToolsService {
 
   private async executeJoinMeeting(
     context: AgentToolContext,
-    input: JoinMeetingInput
+    input: ResolvedJoinMeetingInput
   ): Promise<AgentToolExecutionResult> {
     const active = await this.meetingService.getCurrentUserActiveMeeting(
       context.currentUserId
@@ -1575,26 +1685,169 @@ export class MeetingAgentToolsService {
         });
   }
 
-  private async resolveSelectedMeetingRoom(
+  private async resolveStartMeetingInput(
     context: AgentToolContext,
     input: StartMeetingInput
-  ): Promise<ResolvedStartMeetingInput> {
-    if (input.meetingRoomId) {
-      return {
-        meetingRoomId: input.meetingRoomId,
-        ...(input.recordingConsent ? { recordingConsent: input.recordingConsent } : {})
-      };
-    }
-    const reference = await this.requireAgentCandidateSelectionService().getLatestConsumedMeetingReference(
-      context,
-      "meeting_room"
-    );
-    if (!reference || reference.resourceType !== "meeting_room") {
-      throw badRequest("A selected meeting room candidate is required");
+  ): Promise<ResolvedStartMeetingInput | AgentToolClarificationResult> {
+    const resolved = await this.resolveMeetingRoomSelector(context, input);
+    if (resolved.kind !== "selected") {
+      return this.toResourceClarification(context, resolved);
     }
     return {
-      meetingRoomId: reference.resourceId,
+      meetingRoomId: resolved.reference.resourceId,
       ...(input.recordingConsent ? { recordingConsent: input.recordingConsent } : {})
+    };
+  }
+
+  private async resolveJoinMeetingInput(
+    context: AgentToolContext,
+    input: JoinMeetingInput
+  ): Promise<ResolvedJoinMeetingInput | AgentToolClarificationResult> {
+    const resolved = await this.resolveMeetingSelector(context, input);
+    if (resolved.kind !== "selected") {
+      return this.toResourceClarification(context, resolved);
+    }
+    return {
+      meetingId: resolved.reference.resourceId,
+      ...(input.recordingConsent ? { recordingConsent: input.recordingConsent } : {})
+    };
+  }
+
+  private async resolveMeetingIdInput(
+    context: AgentToolContext,
+    input: MeetingSelectorInput
+  ): Promise<MeetingIdInput | AgentToolClarificationResult> {
+    const resolved = await this.resolveMeetingSelector(context, input);
+    if (resolved.kind !== "selected") {
+      return this.toResourceClarification(context, resolved);
+    }
+    return { meetingId: resolved.reference.resourceId };
+  }
+
+  private async prepareMeetingSelectorExecution(
+    context: AgentToolContext,
+    input: MeetingSelectorInput
+  ): Promise<{ kind: "execute" } | AgentToolClarificationResult> {
+    const resolved = await this.resolveMeetingSelector(context, input);
+    return resolved.kind === "selected"
+      ? { kind: "execute" }
+      : this.toResourceClarification(context, resolved);
+  }
+
+  private async prepareMeetingReportSelectorExecution(
+    context: AgentToolContext,
+    input: MeetingReportSelectorInput
+  ): Promise<{ kind: "execute" } | AgentToolClarificationResult> {
+    const resolved = await this.resolveMeetingReportSelector(context, input);
+    return resolved.kind === "selected"
+      ? { kind: "execute" }
+      : this.toResourceClarification(context, resolved);
+  }
+
+  private async requireResolvedMeeting(
+    context: AgentToolContext,
+    input: MeetingSelectorInput
+  ): Promise<MeetingAgentResourceReference> {
+    const resolved = await this.resolveMeetingSelector(context, input);
+    if (resolved.kind !== "selected") {
+      throw badRequest("Meeting selector requires a candidate selection");
+    }
+    return resolved.reference;
+  }
+
+  private async requireResolvedReport(
+    context: AgentToolContext,
+    input: MeetingReportSelectorInput
+  ): Promise<MeetingAgentResourceReference> {
+    const resolved = await this.resolveMeetingReportSelector(context, input);
+    if (resolved.kind !== "selected") {
+      throw badRequest("Meeting report selector requires a candidate selection");
+    }
+    return resolved.reference;
+  }
+
+  private async resolveMeetingRoomSelector(
+    context: AgentToolContext,
+    input: StartMeetingInput
+  ): Promise<MeetingAgentResourceResolution> {
+    if (input.useSelectedMeetingRoomCandidate) {
+      return this.resolveLatestCandidateReference(context, "meeting_room");
+    }
+    return this.requireMeetingResourceResolver().resolveMeetingRoom(
+      context,
+      input.roomName ?? ""
+    );
+  }
+
+  private async resolveMeetingSelector(
+    context: AgentToolContext,
+    input: MeetingSelectorInput
+  ): Promise<MeetingAgentResourceResolution> {
+    if (input.useSelectedMeetingCandidate) {
+      return this.resolveLatestCandidateReference(context, "meeting");
+    }
+    if (input.roomName) {
+      return this.requireMeetingResourceResolver().resolveMeeting(context, {
+        roomName: input.roomName
+      });
+    }
+    return this.requireMeetingResourceResolver().resolveCurrentMeeting(context);
+  }
+
+  private async resolveMeetingReportSelector(
+    context: AgentToolContext,
+    input: MeetingReportSelectorInput
+  ): Promise<MeetingAgentResourceResolution> {
+    if (input.useSelectedMeetingReportCandidate) {
+      return this.resolveLatestCandidateReference(context, "meeting_report");
+    }
+    const resolver = this.requireMeetingResourceResolver();
+    const selector = {
+      ...(input.from ? { from: input.from } : {}),
+      ...(input.to ? { to: input.to } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.roomName ? { roomName: input.roomName } : {})
+    };
+    return Object.keys(selector).length === 0
+      ? resolver.resolveLatestReport(context)
+      : resolver.resolveReport(context, selector);
+  }
+
+  private async resolveLatestCandidateReference(
+    context: AgentToolContext,
+    resourceType: MeetingAgentResourceType
+  ): Promise<MeetingAgentResourceResolution> {
+    const reference = await this.requireAgentCandidateSelectionService().getLatestConsumedMeetingReference(
+      context,
+      resourceType
+    );
+    if (!reference || reference.resourceType !== resourceType) {
+      return this.notFoundResourceResolution();
+    }
+    const revalidated = await this.requireMeetingResourceResolver().revalidateReference(
+      context,
+      reference
+    );
+    if (!revalidated) return this.notFoundResourceResolution();
+    return {
+      kind: "selected",
+      reference: revalidated,
+      candidate: {
+        resourceType,
+        label: "선택한 후보",
+        description: null,
+        status: null
+      },
+      selectionToken: ""
+    };
+  }
+
+  private notFoundResourceResolution(): MeetingAgentResourceResolution {
+    return {
+      kind: "needs_clarification",
+      reason: "not_found",
+      candidates: [],
+      totalCandidates: 0
     };
   }
 
@@ -1685,10 +1938,142 @@ export class MeetingAgentToolsService {
       "Meeting report list input"
     );
 
+    const from = this.readOptionalDateTime(object.from, "from");
+    const to = this.readOptionalDateTime(object.to, "to");
+    if (from && to && from >= to) {
+      throw badRequest("from must be before to");
+    }
     return {
-      status: this.readOptionalStatus(object.status),
-      limit: this.readOptionalLimit(object.limit)
+      ...(object.status === undefined
+        ? {}
+        : { status: this.readOptionalStatus(object.status) }),
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+      ...(object.roomName === undefined
+        ? {}
+        : { roomName: this.requireBoundedString(object.roomName, "roomName", 100) }),
+      limit: this.readOptionalLimit(object.limit) ?? 1
     };
+  }
+
+  private validateMeetingSelectorInput(input: unknown): MeetingSelectorInput {
+    const draft = input ?? {};
+    const object = this.requirePlainObject(draft, "Meeting selector input");
+    this.rejectForbiddenMeetingToolFields(object);
+    this.assertOnlyAllowedFields(
+      object,
+      MEETING_SELECTOR_INPUT_FIELDS,
+      "Meeting selector input"
+    );
+    const current =
+      object.current === undefined
+        ? undefined
+        : this.requireBoolean(object.current, "current");
+    const roomName =
+      object.roomName === undefined
+        ? undefined
+        : this.requireBoundedString(object.roomName, "roomName", 100);
+    const useSelectedMeetingCandidate =
+      object.useSelectedMeetingCandidate === undefined
+        ? undefined
+        : this.requireBoolean(
+            object.useSelectedMeetingCandidate,
+            "useSelectedMeetingCandidate"
+          );
+    if (current === false || useSelectedMeetingCandidate === false) {
+      throw badRequest("Meeting selector booleans may only be true when provided");
+    }
+    if (
+      [current === true, roomName !== undefined, useSelectedMeetingCandidate === true]
+        .filter(Boolean).length > 1
+    ) {
+      throw badRequest("Meeting selector may contain only one target");
+    }
+    return {
+      ...(current ? { current: true } : {}),
+      ...(roomName ? { roomName } : {}),
+      ...(useSelectedMeetingCandidate
+        ? { useSelectedMeetingCandidate: true }
+        : {})
+    };
+  }
+
+  private validateMeetingReportSelectorInput(
+    input: unknown
+  ): MeetingReportSelectorInput {
+    const draft = input ?? {};
+    const object = this.requirePlainObject(draft, "Meeting report selector input");
+    this.rejectForbiddenMeetingToolFields(object);
+    this.assertOnlyAllowedFields(
+      object,
+      REPORT_SELECTOR_INPUT_FIELDS,
+      "Meeting report selector input"
+    );
+    const from = this.readOptionalDateTime(object.from, "from");
+    const to = this.readOptionalDateTime(object.to, "to");
+    if (from && to && from >= to) {
+      throw badRequest("from must be before to");
+    }
+    const useSelectedMeetingReportCandidate =
+      object.useSelectedMeetingReportCandidate === undefined
+        ? undefined
+        : this.requireBoolean(
+            object.useSelectedMeetingReportCandidate,
+            "useSelectedMeetingReportCandidate"
+          );
+    if (useSelectedMeetingReportCandidate === false) {
+      throw badRequest(
+        "useSelectedMeetingReportCandidate may only be true when provided"
+      );
+    }
+    if (
+      useSelectedMeetingReportCandidate &&
+      (from || to || object.status !== undefined || object.roomName !== undefined)
+    ) {
+      throw badRequest(
+        "useSelectedMeetingReportCandidate may not be combined with a report filter"
+      );
+    }
+    return {
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+      ...(object.status === undefined
+        ? {}
+        : { status: this.readOptionalStatus(object.status) }),
+      ...(object.roomName === undefined
+        ? {}
+        : { roomName: this.requireBoundedString(object.roomName, "roomName", 100) }),
+      ...(useSelectedMeetingReportCandidate
+        ? { useSelectedMeetingReportCandidate: true }
+        : {})
+    };
+  }
+
+  private adaptLegacyReportReferenceInput(
+    input: unknown
+  ): LegacyPersistedReportReferenceInput | null {
+    try {
+      const report = this.validateReportIdInput(input);
+      return {
+        legacyPersistedPlannerInput: true,
+        reportId: report.reportId
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private isLegacyPersistedReportReferenceInput(
+    input: unknown
+  ): input is LegacyPersistedReportReferenceInput {
+    if (!this.isPlainObject(input) || input.legacyPersistedPlannerInput !== true) {
+      return false;
+    }
+    try {
+      return this.requireReportId(input.reportId) === input.reportId;
+    } catch {
+      return false;
+    }
   }
 
   private validateReportIdInput(input: unknown): ReportIdInput {
@@ -1727,10 +2112,10 @@ export class MeetingAgentToolsService {
       START_MEETING_INPUT_FIELDS,
       "Meeting start input"
     );
-    const meetingRoomId =
-      object.meetingRoomId === undefined
+    const roomName =
+      object.roomName === undefined
         ? undefined
-        : this.requireMeetingId(object.meetingRoomId);
+        : this.requireBoundedString(object.roomName, "roomName", 100);
     const useSelectedMeetingRoomCandidate =
       object.useSelectedMeetingRoomCandidate === undefined
         ? undefined
@@ -1741,18 +2126,18 @@ export class MeetingAgentToolsService {
     if (useSelectedMeetingRoomCandidate === false) {
       throw badRequest("useSelectedMeetingRoomCandidate may only be true when provided");
     }
-    if (!meetingRoomId && !useSelectedMeetingRoomCandidate) {
+    if (!roomName && !useSelectedMeetingRoomCandidate) {
       throw badRequest(
-        "Meeting start input requires meetingRoomId or useSelectedMeetingRoomCandidate"
+        "Meeting start input requires roomName or useSelectedMeetingRoomCandidate"
       );
     }
-    if (meetingRoomId && useSelectedMeetingRoomCandidate) {
+    if (roomName && useSelectedMeetingRoomCandidate) {
       throw badRequest(
-        "Meeting start input may not combine meetingRoomId and useSelectedMeetingRoomCandidate"
+        "Meeting start input may not combine roomName and useSelectedMeetingRoomCandidate"
       );
     }
     return {
-      ...(meetingRoomId ? { meetingRoomId } : {}),
+      ...(roomName ? { roomName } : {}),
       ...(useSelectedMeetingRoomCandidate
         ? { useSelectedMeetingRoomCandidate: true }
         : {}),
@@ -1770,8 +2155,13 @@ export class MeetingAgentToolsService {
     const object = this.requirePlainObject(input, "Meeting join input");
     this.rejectForbiddenMeetingToolFields(object);
     this.assertOnlyAllowedFields(object, JOIN_MEETING_INPUT_FIELDS, "Meeting join input");
+    const selector = this.validateMeetingSelectorInput({
+      current: object.current,
+      roomName: object.roomName,
+      useSelectedMeetingCandidate: object.useSelectedMeetingCandidate
+    });
     return {
-      meetingId: this.requireMeetingId(object.meetingId),
+      ...selector,
       ...(object.recordingConsent === undefined
         ? {}
         : {
@@ -1779,6 +2169,40 @@ export class MeetingAgentToolsService {
               object.recordingConsent
             )
           })
+    };
+  }
+
+  private validateResolvedStartMeetingInput(
+    input: unknown
+  ): ResolvedStartMeetingInput {
+    const object = this.requirePlainObject(input, "Resolved meeting start input");
+    this.rejectForbiddenMeetingToolFields(object);
+    this.assertOnlyAllowedFields(
+      object,
+      ["meetingRoomId", "recordingConsent"],
+      "Resolved meeting start input"
+    );
+    return {
+      meetingRoomId: this.requireMeetingId(object.meetingRoomId),
+      ...(object.recordingConsent === undefined
+        ? {}
+        : { recordingConsent: this.validateRecordingConsent(object.recordingConsent) })
+    };
+  }
+
+  private validateResolvedJoinMeetingInput(input: unknown): ResolvedJoinMeetingInput {
+    const object = this.requirePlainObject(input, "Resolved meeting join input");
+    this.rejectForbiddenMeetingToolFields(object);
+    this.assertOnlyAllowedFields(
+      object,
+      ["meetingId", "recordingConsent"],
+      "Resolved meeting join input"
+    );
+    return {
+      meetingId: this.requireMeetingId(object.meetingId),
+      ...(object.recordingConsent === undefined
+        ? {}
+        : { recordingConsent: this.validateRecordingConsent(object.recordingConsent) })
     };
   }
 
@@ -1804,6 +2228,32 @@ export class MeetingAgentToolsService {
       required: ["meetingId"],
       additionalProperties: false,
       properties: { meetingId: { type: "string", format: "uuid" } }
+    };
+  }
+
+  private meetingSelectorSchema(): AgentJsonObject {
+    return {
+      current: { type: "boolean", const: true },
+      roomName: { type: "string", minLength: 1, maxLength: 100 },
+      useSelectedMeetingCandidate: { type: "boolean", const: true }
+    };
+  }
+
+  private meetingSelectorInputSchema(): AgentJsonObject {
+    return {
+      type: "object",
+      additionalProperties: false,
+      properties: this.meetingSelectorSchema()
+    };
+  }
+
+  private meetingReportSelectorSchema(): AgentJsonObject {
+    return {
+      from: { type: "string", format: "date-time" },
+      to: { type: "string", format: "date-time" },
+      status: { type: "string", enum: [...MEETING_REPORT_STATUSES] },
+      roomName: { type: "string", minLength: 1, maxLength: 100 },
+      useSelectedMeetingReportCandidate: { type: "boolean", const: true }
     };
   }
 
@@ -1977,6 +2427,30 @@ export class MeetingAgentToolsService {
     }
 
     return parsed;
+  }
+
+  private readOptionalDateTime(
+    value: unknown,
+    field: "from" | "to"
+  ): string | undefined {
+    if (value === undefined || value === null || value === "") {
+      return undefined;
+    }
+    if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+      throw badRequest(`${field} must be an ISO 8601 date-time`);
+    }
+    return value;
+  }
+
+  private confirmationPlanInput(plan: AgentConfirmationPlan): AgentJsonObject {
+    if ("kind" in plan && plan.kind === "choice") {
+      throw badRequest("Meeting confirmation plan must be an approval plan");
+    }
+    const input = plan.call.input;
+    if (!this.isPlainObject(input)) {
+      throw badRequest("Meeting confirmation plan input is invalid");
+    }
+    return input;
   }
 
   private requireReportId(value: unknown): string {

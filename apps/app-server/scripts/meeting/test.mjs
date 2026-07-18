@@ -2297,6 +2297,33 @@ async function assertError(action, messagePattern) {
 }
 
 {
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
+          assert.match(text, /LEFT JOIN meeting_rooms/);
+          assert.match(text, /ORDER BY meeting_reports\.created_at DESC/);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, 2]);
+          return [
+            meetingReportRow({ id: reportId }),
+            meetingReportRow({ id: "88888888-8888-4888-8888-888888888888" })
+          ];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReportsForAgent(currentUserId, workspaceId, {
+    limit: 1
+  });
+
+  assert.equal(database.queries.length, 1);
+  assert.equal(result.reports.length, 1);
+  assert.equal(result.reports[0].id, reportId);
+}
+
+{
   const { service } = createSubject(
     new FakeDatabase({
       queryRows: [
