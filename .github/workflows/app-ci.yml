@@ -189,10 +189,10 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Format check
-        run: black --check app tests
+        run: black --check app tests scripts
 
       - name: Lint
-        run: ruff check app tests
+        run: ruff check app tests scripts
 
       - name: Test
         run: pytest
@@ -203,11 +203,23 @@ jobs:
           --registry-snapshot "$RUNNER_TEMP/agent-tool-registry-snapshot.json"
           --output "$RUNNER_TEMP/agent-tool-retrieval-quality-gate.json"
 
+      - name: Prompt injection security gate
+        run: >-
+          python scripts/check_prompt_injection_security_gate.py
+          --output "$RUNNER_TEMP/agent-prompt-injection-security-gate.json"
+
       - name: Upload tool retrieval quality baseline
         uses: actions/upload-artifact@v4
         with:
           name: agent-tool-retrieval-quality-baseline
           path: ${{ runner.temp }}/agent-tool-retrieval-quality-gate.json
+          if-no-files-found: error
+
+      - name: Upload prompt injection security baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-prompt-injection-security-baseline
+          path: ${{ runner.temp }}/agent-prompt-injection-security-gate.json
           if-no-files-found: error
 
       - name: Compile

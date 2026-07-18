@@ -105,3 +105,24 @@ PYTHONPATH=. .venv/bin/python scripts/check_tool_retrieval_quality_gate.py \
 `deterministic:no-provider` model version, topK, schema budget, case 유형, failure taxonomy만 남긴다. App CI는 이 파일을
 `agent-tool-retrieval-quality-baseline` artifact로 업로드한다. provider model/SHA는 실제 provider baseline의
 metadata에 별도로 남기며, deterministic CI gate에는 provider model을 고정하거나 호출하지 않는다.
+
+## Prompt injection security gate
+
+CI는 provider를 호출하기 전에 `prompt_injection_security_gate_v1.json`의 사용자 발화, bounded thread
+resource, 실제 직렬화 형태의 tool result, 선택 후보 label/description과 grounded evidence fixture를 실행한다.
+runtime context 생성 시 이 값들을 구조화된 source kind로 분리하므로 detector가 문자열 prefix를 추측하지
+않는다. 명시적인 system instruction override, system prompt·credential 추출,
+shortlist·registry·ECS flag 변경, confirmation·권한 우회 신호는 `prompt_injection_suspected`로 차단한다.
+보안 주제를 정상적으로 논의하거나 기존 confirmation을 요청하는 인접 반례, 부정형 결정·회고·인용 문장은
+차단하지 않는다.
+
+```bash
+cd apps/ai-worker
+PYTHONPATH=. .venv/bin/python scripts/check_prompt_injection_security_gate.py \
+  --output /tmp/agent-prompt-injection-security-gate.json
+```
+
+출력 artifact에는 fixture SHA, detector version, 전체·차단·허용 case 수와 실패 case ID·signal taxonomy만
+기록한다. 공격 원문, 사용자 발화, Meeting evidence, tool payload, resource ID, token·secret은 기록하지
+않는다. runtime에서도 같은 detector를 retrieval·planner보다 먼저 실행하며, 탐지되면 full-tool fallback이나
+write/confirmation 후보를 만들지 않고 안전한 clarification으로 종료한다.
