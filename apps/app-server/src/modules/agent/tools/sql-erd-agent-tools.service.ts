@@ -577,9 +577,7 @@ export class SqlErdAgentToolsService {
     );
     const modelFingerprint = createSqlErdModelFingerprint(session.modelJson);
     if (modelFingerprint !== input.modelFingerprint) {
-      throw conflict(
-        "SQLtoERD session revision changed; inspect the schema again"
-      );
+      throw conflict("SQLtoERD model changed; inspect the schema again");
     }
     const resolved = resolveSqlErdAgentTableFocus(session.modelJson, input);
     const reasonByRef = new Map(

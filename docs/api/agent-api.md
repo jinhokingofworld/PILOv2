@@ -895,7 +895,8 @@ Status code: `200 OK`
   허용한다. 기본 2-hop 확장은 하지 않는다.
 - App Server는 현재 model fingerprint와 compact ref, primary/related 중복, primary-related 직접 FK를
   다시 검증한다. layout/annotation 변경으로 revision만 증가한 경우에는 focus를 허용하고, 실제
-  modelJson 변경으로 fingerprint가 달라진 경우에만 `409 CONFLICT`로 거부해 inspect부터 다시 수행한다.
+  modelJson 변경으로 fingerprint가 달라진 경우에만 `409 CONFLICT`와
+  `SQLtoERD model changed; inspect the schema again` 메시지로 거부해 inspect부터 다시 수행한다.
 - 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`, `modelFingerprint`,
   `featureLabel`, `primaryTableIds`, `relatedTableIds`, `relationIds`, `confidence`를 가진 resource ref다.
   Frontend는 핵심·관련 table과 그 사이 relation만 선명하게 표시하고 나머지 table/relation을 흐리게

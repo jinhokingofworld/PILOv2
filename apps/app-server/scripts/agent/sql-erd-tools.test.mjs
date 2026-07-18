@@ -855,7 +855,8 @@ await assert.rejects(
   () => focusDefinition.execute(context, focusInput),
   (error) =>
     error.getStatus() === 409 &&
-    /revision|inspect/i.test(error.getResponse().error.message)
+    /model changed; inspect/i.test(error.getResponse().error.message) &&
+    !/revision/i.test(error.getResponse().error.message)
 );
 
 const registry = new AgentToolRegistryService(
