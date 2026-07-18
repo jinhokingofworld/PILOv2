@@ -84,6 +84,8 @@ import type {
 import type { CanvasRealtimeIdentity } from "@/shared/canvas-realtime/canvas-realtime-types";
 import { usePrReviewGithubSourceInvalidation } from "@/features/pr-review/realtime/usePrReviewGithubSourceInvalidation";
 import { createPrReviewPullRequestRefreshCoordinator } from "@/features/pr-review/realtime/pr-review-pull-request-refresh";
+import type { PrReviewFollowSurfaceKey } from "@/features/pr-review/pr-review-follow-location";
+import { useWorkspacePresence } from "@/shared/workspace-presence/workspace-presence-provider";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
@@ -340,6 +342,9 @@ export function PrReviewCanvasShell({
   const [openedReviewFileId, setOpenedReviewFileId] = useState<
     string | null
   >(null);
+  const [activeFollowSurface, setActiveFollowSurface] =
+    useState<PrReviewFollowSurfaceKey>("pr-review-diff");
+  const { reportManualInteraction } = useWorkspacePresence();
   const [latestDecisionUpdate, setLatestDecisionUpdate] =
     useState<PrReviewDecisionUpdatedEvent | null>(null);
   const [isSubmitReviewModalOpen, setIsSubmitReviewModalOpen] = useState(false);
@@ -386,6 +391,24 @@ export function PrReviewCanvasShell({
   const refreshPullRequest = useCallback(
     () => refreshPullRequestRef.current(),
     []
+  );
+
+  const handleOpenedReviewFileChange = useCallback(
+    (reviewFileId: string | null) => {
+      if (reviewFileId && reviewFileId !== openedReviewFileId) {
+        setActiveFollowSurface("pr-review-diff");
+      }
+      setOpenedReviewFileId(reviewFileId);
+    },
+    [openedReviewFileId]
+  );
+
+  const handleFollowSurfaceInteraction = useCallback(
+    (surface: PrReviewFollowSurfaceKey) => {
+      setActiveFollowSurface(surface);
+      reportManualInteraction();
+    },
+    [reportManualInteraction]
   );
 
   usePrReviewGithubSourceInvalidation({
@@ -1267,14 +1290,18 @@ export function PrReviewCanvasShell({
                 status={conflictAnalysisStatus}
               />
               <PrReviewCanvasSurface
+                activeFollowSurface={activeFollowSurface}
                 apiClient={apiClient}
                 canvas={canvas}
                 className="h-full w-full"
                 conflictAnalysis={conflictAnalysis}
                 onDecisionUpdated={handleRealtimeDecisionUpdated}
-                onFileOpen={setOpenedReviewFileId}
+                onFileOpen={handleOpenedReviewFileChange}
+                onFollowSurfaceChange={setActiveFollowSurface}
+                onOpenedReviewFileChange={handleOpenedReviewFileChange}
                 onRealtimeRoomJoined={handleRealtimeRoomJoined}
                 onRealtimeRoomDeleted={onReviewRoomDeleted}
+                openedReviewFileId={openedReviewFileId}
                 preparedConflictFileIds={preparedConflictFileIds}
                 readOnly={isReviewReadOnly}
                 realtimeIdentity={realtimeIdentity}
@@ -1304,12 +1331,13 @@ export function PrReviewCanvasShell({
               isReviewRoomCompleted={isPullRequestClosed}
               isReviewVersionStale={isReviewVersionStale}
               isReviewSessionConflicted={conflictStatus === "conflicted"}
-              onClose={() => setOpenedReviewFileId(null)}
+              onClose={() => handleOpenedReviewFileChange(null)}
               onOpenConflictApply={openConflictApplyConfirm}
               onConflictDraftChange={handleConflictDraftChange}
               onRemoteConflictDraftUpdated={handleRemoteConflictDraftUpdated}
               onRemoteConflictDraftInvalidated={handleRemoteConflictDraftInvalidated}
               onDecisionSaved={handleDecisionSaved}
+              onFollowSurfaceInteraction={handleFollowSurfaceInteraction}
               remoteDecisionUpdate={latestDecisionUpdate}
               realtimeIdentity={realtimeIdentity}
               reviewFileId={openedReviewFileId}

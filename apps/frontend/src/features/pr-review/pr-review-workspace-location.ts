@@ -16,7 +16,7 @@ function ratio(offset: number, size: number, clientSize: number) {
 
 export function createPrReviewDocumentWorkspaceLocation(metrics: ScrollMetrics) {
   return {
-    context: { reviewSessionId: null },
+    context: { reviewFileId: null, reviewSessionId: null },
     page: "pr-review" as const,
     route: { pathname: "/pr-review", search: "" },
     viewport: {
@@ -42,7 +42,7 @@ export function createPrReviewWorkspaceLocation(
   camera: Camera,
 ) {
   return {
-    context: { reviewSessionId },
+    context: { reviewFileId: null, reviewSessionId },
     page: "pr-review" as const,
     route: {
       pathname: "/pr-review",
@@ -62,6 +62,7 @@ export function readPrReviewCamera(
   const { viewport } = location;
   if (
     location.context.reviewSessionId !== reviewSessionId ||
+    location.context.reviewFileId !== null ||
     viewport.kind !== "camera" ||
     !Number.isFinite(viewport.x) ||
     !Number.isFinite(viewport.y) ||

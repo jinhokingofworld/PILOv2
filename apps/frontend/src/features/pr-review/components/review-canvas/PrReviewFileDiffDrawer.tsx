@@ -75,6 +75,7 @@ import type {
   PrReviewUnsupportedConflictFile
 } from "@/features/pr-review/types";
 import type { CanvasRealtimeIdentity } from "@/shared/canvas-realtime/canvas-realtime-types";
+import type { PrReviewFollowSurfaceKey } from "@/features/pr-review/pr-review-follow-location";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
@@ -128,6 +129,7 @@ type PrReviewFileDiffDrawerProps = {
     file: PrReviewFile,
     previousStatus: PrReviewFileReviewStatus
   ) => void;
+  onFollowSurfaceInteraction: (surface: PrReviewFollowSurfaceKey) => void;
   remoteDecisionUpdate: PrReviewDecisionUpdatedEvent | null;
   realtimeIdentity: CanvasRealtimeIdentity;
   reviewFileId: string;
@@ -363,6 +365,7 @@ export function PrReviewFileDiffDrawer({
   onRemoteConflictDraftUpdated,
   onRemoteConflictDraftInvalidated,
   onDecisionSaved,
+  onFollowSurfaceInteraction,
   remoteDecisionUpdate,
   realtimeIdentity,
   reviewFileId,
@@ -1097,6 +1100,7 @@ export function PrReviewFileDiffDrawer({
                       handleResolutionChoiceReset(selectedConflictHunk.id)
                     }
                     onHunkIndexChange={setSelectedConflictHunkIndex}
+                    onFollowSurfaceInteraction={onFollowSurfaceInteraction}
                     onManualResolvedTextChange={value =>
                       handleManualResolutionChange(selectedConflictHunk.id, value)
                     }
@@ -1104,6 +1108,7 @@ export function PrReviewFileDiffDrawer({
                     onToggleBaseComparison={() =>
                       setIsBaseComparisonOpen(open => !open)
                     }
+                    reviewFileId={reviewFileId}
                   />
                 ) : (
                   <ResolvedDraftWorkspace
@@ -1134,20 +1139,46 @@ export function PrReviewFileDiffDrawer({
                       });
                     }}
                     onFinishEditing={releaseConflictDraftEdit}
+                    onFollowSurfaceInteraction={onFollowSurfaceInteraction}
                     onHunkIndexChange={setSelectedConflictHunkIndex}
                     onStartEditing={startConflictDraftEdit}
+                    reviewFileId={reviewFileId}
                     value={resolvedContentDraft}
                   />
                 )}
               </>
             ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto">
+              <div
+                className="min-h-0 flex-1 overflow-y-auto"
+                data-workspace-follow-review-file-id={reviewFileId}
+                data-workspace-follow-surface="pr-review-diff"
+                onPointerDown={() =>
+                  onFollowSurfaceInteraction("pr-review-diff")
+                }
+                onTouchStart={() =>
+                  onFollowSurfaceInteraction("pr-review-diff")
+                }
+                onWheel={() => onFollowSurfaceInteraction("pr-review-diff")}
+              >
                 <DiffView diff={diff} />
               </div>
             )}
           </section>
 
-          <aside className="min-h-0 w-full shrink-0 overflow-y-auto border-t border-slate-200 bg-white lg:w-[400px] lg:border-l lg:border-t-0">
+          <aside
+            className="min-h-0 w-full shrink-0 overflow-y-auto border-t border-slate-200 bg-white lg:w-[400px] lg:border-l lg:border-t-0"
+            data-workspace-follow-review-file-id={reviewFileId}
+            data-workspace-follow-surface="pr-review-inspector"
+            onPointerDown={() =>
+              onFollowSurfaceInteraction("pr-review-inspector")
+            }
+            onTouchStart={() =>
+              onFollowSurfaceInteraction("pr-review-inspector")
+            }
+            onWheel={() =>
+              onFollowSurfaceInteraction("pr-review-inspector")
+            }
+          >
             <ReviewNodePanel
               comment={comment}
               conflictFile={conflictFile}
@@ -1871,8 +1902,10 @@ function ResolvedDraftWorkspace({
   isReviewReadOnly,
   onChange,
   onFinishEditing,
+  onFollowSurfaceInteraction,
   onHunkIndexChange,
   onStartEditing,
+  reviewFileId,
   value
 }: {
   activeHunkIndex: number;
@@ -1888,12 +1921,21 @@ function ResolvedDraftWorkspace({
   isReviewReadOnly: boolean;
   onChange: (value: string) => void;
   onFinishEditing: () => void;
+  onFollowSurfaceInteraction: (surface: PrReviewFollowSurfaceKey) => void;
   onHunkIndexChange: (index: number) => void;
   onStartEditing: () => void;
+  reviewFileId: string;
   value: string;
 }) {
   return (
-    <section className="flex min-h-0 flex-1 flex-col bg-white">
+    <section
+      className="flex min-h-0 flex-1 flex-col bg-white"
+      data-workspace-follow-review-file-id={reviewFileId}
+      data-workspace-follow-surface="pr-review-diff"
+      onPointerDown={() => onFollowSurfaceInteraction("pr-review-diff")}
+      onTouchStart={() => onFollowSurfaceInteraction("pr-review-diff")}
+      onWheel={() => onFollowSurfaceInteraction("pr-review-diff")}
+    >
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-3">
         <div>
           <p className="text-sm font-semibold text-slate-950">{filePath}</p>
@@ -2013,10 +2055,12 @@ function ConflictHunkComparison({
   manualResolvedText,
   onChoiceChange,
   onChoiceReset,
+  onFollowSurfaceInteraction,
   onHunkIndexChange,
   onManualResolvedTextChange,
   onResetCustomizedDraft,
-  onToggleBaseComparison
+  onToggleBaseComparison,
+  reviewFileId
 }: {
   aiResolvedText: string | null;
   baseBranch: string | null;
@@ -2031,10 +2075,12 @@ function ConflictHunkComparison({
   manualResolvedText: string;
   onChoiceChange: (choice: PrReviewConflictResolutionChoice) => void;
   onChoiceReset: () => void;
+  onFollowSurfaceInteraction: (surface: PrReviewFollowSurfaceKey) => void;
   onHunkIndexChange: (index: number) => void;
   onManualResolvedTextChange: (value: string) => void;
   onResetCustomizedDraft: () => void;
   onToggleBaseComparison: () => void;
+  reviewFileId: string;
 }) {
   const targetBranchLabel = baseBranch ?? "대상 브랜치";
   const headBranchLabel = headBranch ?? "PR 브랜치";
@@ -2054,7 +2100,14 @@ function ConflictHunkComparison({
   ];
 
   return (
-    <section className="min-h-0 flex-1 overflow-y-auto p-5">
+    <section
+      className="min-h-0 flex-1 overflow-y-auto p-5"
+      data-workspace-follow-review-file-id={reviewFileId}
+      data-workspace-follow-surface="pr-review-diff"
+      onPointerDown={() => onFollowSurfaceInteraction("pr-review-diff")}
+      onTouchStart={() => onFollowSurfaceInteraction("pr-review-diff")}
+      onWheel={() => onFollowSurfaceInteraction("pr-review-diff")}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase text-amber-700">
