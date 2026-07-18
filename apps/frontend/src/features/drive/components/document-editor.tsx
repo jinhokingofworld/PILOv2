@@ -514,7 +514,10 @@ function DocumentEditorSurface({
   const editorError = saveError ?? realtimeError;
 
   return (
-    <section className={styles.documentPage}>
+    <section
+      className={styles.documentPage}
+      data-workspace-follow-drive-document-id={bootstrap.document.id}
+    >
       <div className={styles.documentHeader}>
         <Button type="button" variant="ghost" size="sm" onClick={() => void closeDocument()}>
           <ArrowLeft />

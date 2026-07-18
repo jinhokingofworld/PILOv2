@@ -931,6 +931,7 @@ export function DrivePanel() {
   const [moveError, setMoveError] = useState<string | null>(null);
   const [isMoving, setIsMoving] = useState(false);
   const [previewFile, setPreviewFile] = useState<DriveItem | null>(null);
+  const [previewPageNumber, setPreviewPageNumber] = useState(1);
   const [deleteItem, setDeleteItem] = useState<DriveItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -1317,6 +1318,39 @@ export function DrivePanel() {
     }
   }
 
+  function openPdfPreview(item: DriveItem) {
+    setPreviewPageNumber(1);
+    setPreviewFile(item);
+  }
+
+  const openWorkspaceLocationPdf = useCallback(
+    async (fileId: string, folderId: string | null) => {
+      if (!canUseDrive) return false;
+      try {
+        const nextDriveData = await driveClient.listItems(workspaceId, {
+          parentId: folderId
+        });
+        const pdf = nextDriveData.items.find(
+          (item) =>
+            item.id === fileId &&
+            item.itemType === "file" &&
+            item.mimeType === "application/pdf"
+        );
+        if (!pdf) return false;
+        loadedDriveParentIdRef.current = { folderId, workspaceId };
+        setCurrentParentId(folderId);
+        setDriveData(nextDriveData);
+        setStatus("success");
+        setError(null);
+        setPreviewFile(pdf);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [canUseDrive, driveClient, workspaceId]
+  );
+
   function openMoveSheet(item: DriveItem) {
     setMoveItem(item);
     setMoveDestinationParentId(item.parentId);
@@ -1485,12 +1519,29 @@ export function DrivePanel() {
     }
   }
 
+  const workspaceLocationAdapter = (
+    <DriveWorkspaceLocationAdapter
+      documentId={documentId}
+      folderId={currentParentId}
+      listRef={driveListRef}
+      loadFolder={loadWorkspaceLocationFolder}
+      openPdf={openWorkspaceLocationPdf}
+      pdfFileId={previewFile?.id ?? null}
+      pdfPageNumber={previewPageNumber}
+      setPdfPageNumber={setPreviewPageNumber}
+      workspaceId={workspaceId}
+    />
+  );
+
   if (documentId) {
     return (
-      <DriveDocumentEditor
-        documentId={documentId}
-        onClose={() => updateDocumentLocation(null)}
-      />
+      <>
+        {workspaceLocationAdapter}
+        <DriveDocumentEditor
+          documentId={documentId}
+          onClose={() => updateDocumentLocation(null)}
+        />
+      </>
     );
   }
 
@@ -1499,12 +1550,7 @@ export function DrivePanel() {
 
   return (
     <div className="flex min-h-[calc(100vh-6.5rem)] flex-col gap-4">
-      <DriveWorkspaceLocationAdapter
-        folderId={currentParentId}
-        listRef={driveListRef}
-        loadFolder={loadWorkspaceLocationFolder}
-        workspaceId={workspaceId}
-      />
+      {workspaceLocationAdapter}
       <section className="flex flex-col gap-4">
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="min-w-0">
@@ -1696,7 +1742,7 @@ export function DrivePanel() {
                         onOpenDocument={(document) => updateDocumentLocation(document.id)}
                         onOpenFolder={(folder) => setCurrentParentId(folder.id)}
                         onOpenMove={openMoveSheet}
-                        onOpenPdf={setPreviewFile}
+                        onOpenPdf={openPdfPreview}
                         onOpenRename={openRenameSheet}
                       />
                     ))}
@@ -1757,7 +1803,9 @@ export function DrivePanel() {
       <PdfPreviewDialog
         fileId={previewFile?.id ?? ""}
         fileName={previewFile?.name ?? ""}
+        pageNumber={previewPageNumber}
         open={previewFile !== null}
+        onPageNumberChange={setPreviewPageNumber}
         onOpenChange={(open) => {
           if (!open) {
             setPreviewFile(null);

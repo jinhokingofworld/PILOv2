@@ -51,11 +51,15 @@ export function PdfPreviewDialog({
   fileId,
   fileName,
   open,
+  onPageNumberChange,
+  pageNumber,
   onOpenChange
 }: {
   fileId: string;
   fileName: string;
   open: boolean;
+  onPageNumberChange: (pageNumber: number) => void;
+  pageNumber: number;
   onOpenChange: (open: boolean) => void;
 }) {
   const authSession = useAuthSession();
@@ -135,6 +139,8 @@ export function PdfPreviewDialog({
           ) : (
             <PdfCollaborationSurface
               fileId={fileId}
+              onPageNumberChange={onPageNumberChange}
+              pageNumber={pageNumber}
               previewUrl={previewState.previewUrl}
               workspaceId={workspaceId}
             />

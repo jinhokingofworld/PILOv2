@@ -63,6 +63,7 @@ function DocumentFileAttachmentView({ node, deleteNode, editor }: NodeViewProps)
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewPageNumber, setPreviewPageNumber] = useState(1);
 
   const loadAttachment = useCallback(async () => {
     if (!workspaceId || !accessToken) {
@@ -105,6 +106,11 @@ function DocumentFileAttachmentView({ node, deleteNode, editor }: NodeViewProps)
   const file = attachmentState.status === "ready" ? attachmentState.file : null;
   const isPdf = file?.mimeType === "application/pdf";
 
+  function openPdfPreview() {
+    setPreviewPageNumber(1);
+    setIsPreviewOpen(true);
+  }
+
   return (
     <NodeViewWrapper className={styles.fileAttachment} data-drive-file-attachment="true">
       <FileText className={styles.fileAttachmentIcon} />
@@ -141,7 +147,7 @@ function DocumentFileAttachmentView({ node, deleteNode, editor }: NodeViewProps)
           </Button>
         ) : null}
         {isPdf ? (
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="PDF 열기" title="PDF 열기" onClick={() => setIsPreviewOpen(true)}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="PDF 열기" title="PDF 열기" onClick={openPdfPreview}>
             <Eye />
           </Button>
         ) : null}
@@ -161,7 +167,9 @@ function DocumentFileAttachmentView({ node, deleteNode, editor }: NodeViewProps)
           fileId={driveItemId}
           fileName={file.name}
           open={isPreviewOpen}
+          onPageNumberChange={setPreviewPageNumber}
           onOpenChange={setIsPreviewOpen}
+          pageNumber={previewPageNumber}
         />
       ) : null}
     </NodeViewWrapper>

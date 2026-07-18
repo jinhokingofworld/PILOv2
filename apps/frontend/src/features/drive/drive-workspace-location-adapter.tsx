@@ -4,22 +4,92 @@ import { useMemo, type RefObject } from "react";
 
 import { useWorkspaceLocationAdapter } from "@/shared/workspace-presence/use-workspace-location-adapter";
 import type { WorkspacePresenceLocation } from "@/shared/workspace-presence/workspace-presence-types";
-import { createDriveWorkspaceLocation, getDriveScrollOffset, readDriveFolderId } from "./drive-workspace-location";
+import {
+  createDriveDocumentWorkspaceLocation,
+  createDrivePdfWorkspaceLocation,
+  createDriveWorkspaceLocation,
+  getDriveScrollOffset,
+  readDriveWorkspaceTarget,
+  waitForDriveSurfaceTarget,
+} from "./drive-workspace-location";
+
+function getDocumentScroller() {
+  return document.scrollingElement ?? document.documentElement;
+}
+
+function findDriveDocumentSurface(documentId: string) {
+  return Array.from(
+    document.querySelectorAll<HTMLElement>(
+      "[data-workspace-follow-drive-document-id]",
+    ),
+  ).find(
+    (element) => element.dataset.workspaceFollowDriveDocumentId === documentId,
+  ) ?? null;
+}
+
+function findDrivePdfScroller(fileId: string) {
+  return Array.from(
+    document.querySelectorAll<HTMLElement>(
+      "[data-workspace-follow-drive-pdf-file-id]",
+    ),
+  ).find(
+    (element) => element.dataset.workspaceFollowDrivePdfFileId === fileId,
+  ) ?? null;
+}
 
 export function DriveWorkspaceLocationAdapter({
+  documentId,
   folderId,
   listRef,
   loadFolder,
+  openPdf,
+  pdfFileId,
+  pdfPageNumber,
+  setPdfPageNumber,
   workspaceId,
 }: {
+  documentId: string | null;
   folderId: string | null;
   listRef: RefObject<HTMLDivElement | null>;
   loadFolder: (folderId: string | null) => Promise<boolean>;
+  openPdf: (fileId: string, folderId: string | null) => Promise<boolean>;
+  pdfFileId: string | null;
+  pdfPageNumber: number;
+  setPdfPageNumber: (pageNumber: number) => void;
   workspaceId: string;
 }) {
   const adapter = useMemo(
     () => ({
       capture() {
+        if (documentId && findDriveDocumentSurface(documentId)) {
+          const scroller = getDocumentScroller();
+          return createDriveDocumentWorkspaceLocation(documentId, {
+            clientHeight: scroller.clientHeight,
+            clientWidth: scroller.clientWidth,
+            scrollHeight: scroller.scrollHeight,
+            scrollLeft: scroller.scrollLeft,
+            scrollTop: scroller.scrollTop,
+            scrollWidth: scroller.scrollWidth,
+          });
+        }
+        if (pdfFileId) {
+          const pdf = findDrivePdfScroller(pdfFileId);
+          if (pdf) {
+            return createDrivePdfWorkspaceLocation({
+              fileId: pdfFileId,
+              folderId,
+              metrics: {
+                clientHeight: pdf.clientHeight,
+                clientWidth: pdf.clientWidth,
+                scrollHeight: pdf.scrollHeight,
+                scrollLeft: pdf.scrollLeft,
+                scrollTop: pdf.scrollTop,
+                scrollWidth: pdf.scrollWidth,
+              },
+              pageNumber: pdfPageNumber,
+            }) as WorkspacePresenceLocation;
+          }
+        }
         const list = listRef.current;
         if (!list) return null;
         return createDriveWorkspaceLocation(folderId, {
@@ -33,23 +103,59 @@ export function DriveWorkspaceLocationAdapter({
       },
       page: "drive" as const,
       ready: Boolean(workspaceId),
-      async restore(location: WorkspacePresenceLocation) {
-        if (
-          location.page !== "drive" ||
-          location.viewport.kind !== "element" ||
-          location.viewport.key !== "drive-list"
-        ) {
-          return false;
+      async restore(
+        location: WorkspacePresenceLocation,
+        { signal }: { signal: AbortSignal },
+      ) {
+        if (signal.aborted) return false;
+        const target = readDriveWorkspaceTarget(location);
+        if (!target) return false;
+        if (target.surface === "document") {
+          const surface = await waitForDriveSurfaceTarget({
+            findTarget: () => findDriveDocumentSurface(target.documentId),
+            signal,
+            timeoutMs: 5_000,
+          });
+          if (!surface || signal.aborted) return false;
+          const scroller = getDocumentScroller();
+          window.scrollTo(
+            getDriveScrollOffset(target.viewport, {
+              clientHeight: scroller.clientHeight,
+              clientWidth: scroller.clientWidth,
+              scrollHeight: scroller.scrollHeight,
+              scrollWidth: scroller.scrollWidth,
+            }),
+          );
+          return true;
         }
-        const targetFolderId = readDriveFolderId(location);
-        if (!(await loadFolder(targetFolderId))) {
-          return false;
+        if (target.surface === "pdf") {
+          if (!(await openPdf(target.fileId, target.folderId)) || signal.aborted) {
+            return false;
+          }
+          setPdfPageNumber(target.pageNumber);
+          const pdf = await waitForDriveSurfaceTarget({
+            findTarget: () => findDrivePdfScroller(target.fileId),
+            signal,
+            timeoutMs: 5_000,
+          });
+          if (!pdf || signal.aborted) return false;
+          pdf.scrollTo(
+            getDriveScrollOffset(target.viewport, {
+              clientHeight: pdf.clientHeight,
+              clientWidth: pdf.clientWidth,
+              scrollHeight: pdf.scrollHeight,
+              scrollWidth: pdf.scrollWidth,
+            }),
+          );
+          return true;
         }
+
+        if (!(await loadFolder(target.folderId)) || signal.aborted) return false;
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         const list = listRef.current;
-        if (!list) return false;
+        if (!list || signal.aborted) return false;
         list.scrollTo(
-          getDriveScrollOffset(location.viewport, {
+          getDriveScrollOffset(target.viewport, {
             clientHeight: list.clientHeight,
             clientWidth: list.clientWidth,
             scrollHeight: list.scrollHeight,
@@ -59,7 +165,17 @@ export function DriveWorkspaceLocationAdapter({
         return true;
       },
     }),
-    [folderId, listRef, loadFolder, workspaceId],
+    [
+      documentId,
+      folderId,
+      listRef,
+      loadFolder,
+      openPdf,
+      pdfFileId,
+      pdfPageNumber,
+      setPdfPageNumber,
+      workspaceId,
+    ],
   );
   useWorkspaceLocationAdapter(adapter);
   return null;

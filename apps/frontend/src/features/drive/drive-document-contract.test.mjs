@@ -127,7 +127,12 @@ assert.match(
   /const isPdf = item\.itemType === "file" && item\.mimeType === "application\/pdf"/
 );
 assert.match(panel, /onOpenPdf: \(item: DriveItem\) => void/);
-assert.match(panel, /onOpenPdf=\{setPreviewFile\}/);
+assert.match(panel, /function openPdfPreview\(item: DriveItem\)/);
+assert.match(panel, /onOpenPdf=\{openPdfPreview\}/);
+assert.match(
+  attachment,
+  /setPreviewPageNumber\(1\)[\s\S]*setIsPreviewOpen\(true\)/
+);
 assert.match(panel, /function MoveItemSheet\(/);
 assert.match(panel, /onOpenMove/);
 assert.match(
