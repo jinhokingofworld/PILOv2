@@ -335,7 +335,12 @@ bookmark, embed, pilo-code-block, file_node, pr_review_file_node,
 pr_review_relation_edge, group
 ```
 
-`file_node`는 일반 자유형 shape type이다. `pr_review_file_node`와
+`file_node`는 일반 자유형 shape type이다. Drive 연결 파일은 `rawShape.props`에
+`fileId`, `fileName`, `mimeType`만 저장하며 presigned URL, S3 object key, 파일 원문은
+저장하지 않는다. 각 사용자의 frontend가 `fileId`로 현재 권한을 확인하고 임시 preview
+URL을 별도로 발급받아 표시한다.
+
+`pr_review_file_node`와
 `pr_review_relation_edge`는 Review Canvas 전용 시스템 shape다. 일반 Canvas mutation
 API로 두 시스템 shape를 생성하거나 삭제할 수 없으며, PR Review materialization만 생성과
 도메인 metadata 갱신을 담당한다. 새 분석 버전을 materialize할 때 기존 file node의

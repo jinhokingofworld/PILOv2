@@ -14,7 +14,7 @@ from app.agent_tool_retrieval import (
     DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
     ToolCapabilityCatalog,
     parse_tool_capability_catalog,
-    retrieve_tool_shortlist,
+    select_read_only_tool_shortlist,
 )
 from app.meeting_report_processor import InfrastructureError
 
@@ -119,53 +119,16 @@ def select_agent_planner_tools(
     if mode not in TOOL_RETRIEVAL_MODES or job.tool_capability_catalog is None:
         return job.tools
 
-    try:
-        retrieval = retrieve_tool_shortlist(
-            prompt,
-            job.tool_capability_catalog,
-            top_k=top_k,
-            tool_schema_bytes={
-                tool.name: len(
-                    json.dumps(
-                        tool.input_schema,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ).encode()
-                )
-                for tool in job.tools
-            },
-            schema_token_budget=schema_token_budget,
-        )
-    except Exception:
+    if mode == TOOL_RETRIEVAL_MODE_SHADOW:
         return job.tools
-
-    if mode == TOOL_RETRIEVAL_MODE_SHADOW or retrieval.low_confidence:
-        return job.tools
-
-    descriptors = {
-        descriptor.tool_name: descriptor for descriptor in job.tool_capability_catalog.descriptors
-    }
-    capabilities = {
-        capability.capability_id: capability
-        for capability in job.tool_capability_catalog.capabilities
-    }
-    selected_capabilities = [
-        capabilities.get(capability_id) for capability_id in retrieval.selected_capability_ids
-    ]
-    if not selected_capabilities or any(capability is None for capability in selected_capabilities):
-        return job.tools
-    selected_tool_names = {
-        tool_name
-        for capability in selected_capabilities
-        if capability is not None
-        for tool_name in capability.tool_names
-    }
-    if any(
-        descriptors.get(tool_name) is None or descriptors[tool_name].operation != "read"
-        for tool_name in selected_tool_names
-    ):
-        return job.tools
-
+    selection = select_read_only_tool_shortlist(
+        prompt,
+        job.tool_capability_catalog,
+        {tool.name: tool.input_schema for tool in job.tools},
+        top_k=top_k,
+        schema_token_budget=schema_token_budget,
+    )
+    selected_tool_names = set(selection.tool_names)
     shortlist = tuple(tool for tool in job.tools if tool.name in selected_tool_names)
     return shortlist or job.tools
 
@@ -180,6 +143,9 @@ class AgentPlannerDecision:
     requires_confirmation: bool | None
     missing_fields: tuple[str, ...]
     unsupported_reason: str | None
+    provider_input_tokens: int | None = None
+    provider_output_tokens: int | None = None
+    provider_total_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1195,7 +1161,19 @@ class OpenAiAgentPlannerClient:
         if not isinstance(output_text, str) or not output_text.strip():
             output_text = _extract_response_text(response)
 
-        return parse_agent_planner_output(output_text)
+        decision = parse_agent_planner_output(output_text)
+        usage = getattr(response, "usage", None)
+        return replace(
+            decision,
+            provider_input_tokens=_optional_nonnegative_int_attribute(usage, "input_tokens"),
+            provider_output_tokens=_optional_nonnegative_int_attribute(usage, "output_tokens"),
+            provider_total_tokens=_optional_nonnegative_int_attribute(usage, "total_tokens"),
+        )
+
+
+def _optional_nonnegative_int_attribute(value: object, key: str) -> int | None:
+    item = getattr(value, key, None)
+    return item if isinstance(item, int) and item >= 0 else None
 
 
 def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:

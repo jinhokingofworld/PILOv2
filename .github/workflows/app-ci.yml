@@ -107,6 +107,18 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Export agent tool registry snapshot
+        run: >-
+          node scripts/agent/export-tool-retrieval-snapshot.mjs
+          --output "$RUNNER_TEMP/agent-tool-registry-snapshot.json"
+
+      - name: Upload agent tool registry snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-tool-registry-snapshot
+          path: ${{ runner.temp }}/agent-tool-registry-snapshot.json
+          if-no-files-found: error
+
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
@@ -147,6 +159,7 @@ jobs:
 
   ai-worker:
     name: ai-worker
+    needs: app-server
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: .
@@ -156,6 +169,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download agent tool registry snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-tool-registry-snapshot
+          path: ${{ runner.temp }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -177,6 +196,19 @@ jobs:
 
       - name: Test
         run: pytest
+
+      - name: Tool retrieval quality gate
+        run: >-
+          python scripts/check_tool_retrieval_quality_gate.py
+          --registry-snapshot "$RUNNER_TEMP/agent-tool-registry-snapshot.json"
+          --output "$RUNNER_TEMP/agent-tool-retrieval-quality-gate.json"
+
+      - name: Upload tool retrieval quality baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-tool-retrieval-quality-baseline
+          path: ${{ runner.temp }}/agent-tool-retrieval-quality-gate.json
+          if-no-files-found: error
 
       - name: Compile
         run: python -m compileall app

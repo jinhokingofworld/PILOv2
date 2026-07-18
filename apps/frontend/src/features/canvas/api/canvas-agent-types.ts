@@ -52,6 +52,15 @@ export type CanvasAgentHtmlArtifact = {
   sourceShapeIds: string[];
 };
 
+export type CanvasAgentClientAction = {
+  type: "insert_drive_file";
+  file: {
+    fileId: string;
+    fileName: string;
+    mimeType: string;
+  };
+};
+
 export type CanvasAgentPresentationMode = "interactive" | "background";
 
 export type CanvasAgentConversationMessage = {
@@ -98,6 +107,7 @@ export type CanvasAgentRun = {
   canvasRevision: number | null;
   progress: CanvasAgentProgress | null;
   artifact: CanvasAgentHtmlArtifact | null;
+  clientAction: CanvasAgentClientAction | null;
   createdAt: string;
   completedAt: string | null;
   expiresAt: string;

@@ -69,7 +69,7 @@ import type { DriveItem, DriveListPayload } from "@/features/drive/types";
 import { cn } from "@/lib/utils";
 
 import { DriveDocumentEditor } from "./document-editor";
-import { PdfPreviewDialog } from "./pdf-preview-dialog";
+import { getPreviewFileKind, PdfPreviewDialog } from "./pdf-preview-dialog";
 
 type DriveStatus = "idle" | "loading" | "success" | "error";
 
@@ -282,7 +282,7 @@ function DriveItemRow({
   onOpenDocument,
   onOpenFolder,
   onOpenMove,
-  onOpenPdf,
+  onOpenPreview,
   onOpenRename
 }: {
   activeActionItemId: string | null;
@@ -292,13 +292,13 @@ function DriveItemRow({
   onOpenDocument: (item: DriveItem) => void;
   onOpenFolder: (item: DriveItem) => void;
   onOpenMove: (item: DriveItem) => void;
-  onOpenPdf: (item: DriveItem) => void;
+  onOpenPreview: (item: DriveItem) => void;
   onOpenRename: (item: DriveItem) => void;
 }) {
   const isFolder = item.itemType === "folder";
   const isDocument = item.itemType === "document";
-  const isPdf = item.itemType === "file" && item.mimeType === "application/pdf";
-  const isOpenable = isFolder || isDocument || isPdf;
+  const isPreviewableFile = item.itemType === "file" && getPreviewFileKind(item.mimeType) !== null;
+  const isOpenable = isFolder || isDocument || isPreviewableFile;
   const isBusy = activeActionItemId === item.id;
 
   return (
@@ -323,7 +323,7 @@ function DriveItemRow({
               return;
             }
 
-            onOpenPdf(item);
+            onOpenPreview(item);
           }}
         >
           <DriveItemName item={item} />
@@ -1318,7 +1318,7 @@ export function DrivePanel() {
     }
   }
 
-  function openPdfPreview(item: DriveItem) {
+  function openPreview(item: DriveItem) {
     setPreviewPageNumber(1);
     setPreviewFile(item);
   }
@@ -1742,7 +1742,7 @@ export function DrivePanel() {
                         onOpenDocument={(document) => updateDocumentLocation(document.id)}
                         onOpenFolder={(folder) => setCurrentParentId(folder.id)}
                         onOpenMove={openMoveSheet}
-                        onOpenPdf={openPdfPreview}
+                        onOpenPreview={openPreview}
                         onOpenRename={openRenameSheet}
                       />
                     ))}
@@ -1803,9 +1803,10 @@ export function DrivePanel() {
       <PdfPreviewDialog
         fileId={previewFile?.id ?? ""}
         fileName={previewFile?.name ?? ""}
-        pageNumber={previewPageNumber}
+        mimeType={previewFile?.mimeType ?? null}
         open={previewFile !== null}
         onPageNumberChange={setPreviewPageNumber}
+        pageNumber={previewPageNumber}
         onOpenChange={(open) => {
           if (!open) {
             setPreviewFile(null);

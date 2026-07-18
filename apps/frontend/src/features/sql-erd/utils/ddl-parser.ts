@@ -1040,23 +1040,43 @@ function formatDefaultValue(defaultDefinition: SqlParserAstNode | null) {
     return null;
   }
 
-  if (typeof value.value === "number") {
+  const valueType = readString(value.type)?.toLowerCase();
+
+  if (
+    valueType === "number" &&
+    (typeof value.value === "number" || typeof value.value === "string")
+  ) {
     return String(value.value);
   }
 
-  if (readString(value.type)?.toLowerCase() === "single_quote_string") {
+  if (valueType === "single_quote_string") {
     const stringValue = readString(value.value);
 
     return stringValue === null ? null : `'${stringValue.replaceAll("'", "''")}'`;
   }
 
-  if (readString(value.type)?.toLowerCase() === "function") {
-    const name = readFirstObject(value.name)?.name;
-    const functionName = Array.isArray(name)
-      ? name.map((part) => readString(part)).filter(Boolean).join(".")
-      : null;
+  if (valueType === "bool" && typeof value.value === "boolean") {
+    return value.value ? "TRUE" : "FALSE";
+  }
 
-    return functionName ? `${functionName}()` : null;
+  if (valueType === "null") {
+    return "NULL";
+  }
+
+  if (valueType === "function") {
+    const functionName = readArray(readObject(value.name)?.name)
+      .map((part) => readString(readObject(part)?.value))
+      .filter((part): part is string => Boolean(part))
+      .join(".")
+      .toUpperCase();
+
+    if (!functionName) {
+      return null;
+    }
+
+    return ["CURRENT_DATE", "CURRENT_TIMESTAMP"].includes(functionName)
+      ? functionName
+      : `${functionName}()`;
   }
 
   return readString(value.value);

@@ -19,6 +19,7 @@ export type CanvasAgentDelegationAdapter = {
 
 let activeAdapter: CanvasAgentDelegationAdapter | null = null;
 const listeners = new Set<() => void>();
+const presentedRunKeys = new Set<string>();
 
 export function registerCanvasAgentDelegationAdapter(
   adapter: CanvasAgentDelegationAdapter,
@@ -35,6 +36,36 @@ export function registerCanvasAgentDelegationAdapter(
 
 export function getCanvasAgentDelegationAdapter() {
   return activeAdapter;
+}
+
+export function presentCanvasAgentDelegationRunOnce({
+  canvasId,
+  run,
+  selectedScene,
+}: {
+  canvasId: string;
+  run: CanvasAgentRun;
+  selectedScene: CanvasAgentSelectedScene | null;
+}) {
+  const adapter = activeAdapter;
+  const runKey = `${canvasId}:${run.id}`;
+
+  if (
+    !adapter ||
+    adapter.canvasId !== canvasId ||
+    presentedRunKeys.has(runKey)
+  ) {
+    return false;
+  }
+
+  presentedRunKeys.add(runKey);
+  try {
+    adapter.presentRun(run, selectedScene);
+    return true;
+  } catch (error) {
+    presentedRunKeys.delete(runKey);
+    throw error;
+  }
 }
 
 export function subscribeCanvasAgentDelegationAdapter(listener: () => void) {

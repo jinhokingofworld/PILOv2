@@ -393,6 +393,13 @@
   height: auto !important;
 }
 
+.pdfPreviewImage {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+}
+
 .pdfAnnotationLayer {
   position: absolute;
   inset: 0;

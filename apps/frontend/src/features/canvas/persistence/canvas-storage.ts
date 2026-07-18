@@ -26,8 +26,7 @@ const persistableShapeTypes = new Set([
   "embed",
   "group",
   "pilo-code-block",
-  // TODO(file_node): add PILO_FILE_NODE_SHAPE_TYPE after the ShapeUtil is
-  // registered and the local/mock restore path can render it safely.
+  "file_node",
 ]);
 
 function createEmptyRichText() {

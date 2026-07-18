@@ -16,7 +16,7 @@ import type { DriveItem } from "@/features/drive/types";
 
 import { driveAttachedPdfFollowCoordinator } from "../drive-attached-pdf-follow";
 import styles from "./document-editor.module.css";
-import { PdfPreviewDialog } from "./pdf-preview-dialog";
+import { getPreviewFileKind, PdfPreviewDialog } from "./pdf-preview-dialog";
 
 type AttachmentState =
   | { status: "loading" }
@@ -105,7 +105,7 @@ function DocumentFileAttachmentView({ node, deleteNode, editor }: NodeViewProps)
   }, [accessToken, driveClient, driveItemId, workspaceId]);
 
   const file = attachmentState.status === "ready" ? attachmentState.file : null;
-  const isPdf = file?.mimeType === "application/pdf";
+  const previewFileKind = getPreviewFileKind(file?.mimeType ?? null);
   const openPdfPreviewAtPage = useCallback((pageNumber: number) => {
     setPreviewPageNumber(pageNumber);
     setIsPreviewOpen(true);
@@ -119,7 +119,7 @@ function DocumentFileAttachmentView({ node, deleteNode, editor }: NodeViewProps)
     [driveItemId, openPdfPreviewAtPage],
   );
 
-  function openPdfPreview() {
+  function openPreview() {
     setPreviewPageNumber(1);
     setIsPreviewOpen(true);
   }
@@ -159,8 +159,8 @@ function DocumentFileAttachmentView({ node, deleteNode, editor }: NodeViewProps)
             <RefreshCw />
           </Button>
         ) : null}
-        {isPdf ? (
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="PDF 열기" title="PDF 열기" onClick={openPdfPreview}>
+        {previewFileKind ? (
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="파일 열기" title="파일 열기" onClick={openPreview}>
             <Eye />
           </Button>
         ) : null}
@@ -175,10 +175,11 @@ function DocumentFileAttachmentView({ node, deleteNode, editor }: NodeViewProps)
           </Button>
         ) : null}
       </div>
-      {file && isPdf ? (
+      {file && previewFileKind ? (
         <PdfPreviewDialog
           fileId={driveItemId}
           fileName={file.name}
+          mimeType={file.mimeType}
           open={isPreviewOpen}
           onPageNumberChange={setPreviewPageNumber}
           onOpenChange={setIsPreviewOpen}

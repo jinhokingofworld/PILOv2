@@ -155,6 +155,8 @@ def test_metadata_retrieval_prefers_matching_domain_and_returns_low_confidence_f
     calendar = retrieve_tool_shortlist("이번 주 일정 알려줘", catalog, top_k=1)
     assert calendar.tool_names == ("list_calendar_events",)
     assert not calendar.low_confidence
+    assert calendar.candidate_count > 0
+    assert calendar.confidence_bucket in {"low", "medium", "high"}
 
     meeting = retrieve_tool_shortlist("최근 회의록 보여줘", catalog, top_k=1)
     assert meeting.tool_names == ("list_meeting_reports",)
@@ -163,6 +165,8 @@ def test_metadata_retrieval_prefers_matching_domain_and_returns_low_confidence_f
     assert unknown.tool_names == ()
     assert unknown.low_confidence
     assert unknown.fallback_reason == "no_metadata_match"
+    assert unknown.candidate_count == 0
+    assert unknown.confidence_bucket == "none"
 
 
 def test_catalog_rejects_descriptor_digest_that_does_not_match_the_tool_schema() -> None:
