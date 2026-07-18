@@ -1821,6 +1821,71 @@ def test_normalizer_uses_single_opaque_meeting_report_context_reference() -> Non
     assert normalized.output_summary["input"] == {"contextRef": context_ref}
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "tool_input", "requires_confirmation"),
+    [
+        ("find_action_items", {}, False),
+        ("get_meeting_decision_evidence", {"decisionIndex": 0}, False),
+        ("regenerate_meeting_report", {}, True),
+    ],
+)
+def test_normalizer_uses_context_ref_for_meeting_report_follow_up_tools(
+    tool_name: str,
+    tool_input: dict[str, object],
+    requires_confirmation: bool,
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name=tool_name,
+                    description="MeetingReport 후속 작업",
+                    riskLevel="medium" if requires_confirmation else "low",
+                    executionMode=(
+                        "confirmation_required" if requires_confirmation else "contextual"
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "contextRef": {"type": "string"},
+                            **(
+                                {"decisionIndex": {"type": "integer"}}
+                                if tool_name == "get_meeting_decision_evidence"
+                                else {}
+                            ),
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    context_ref = "ctx_0123456789abcdef01234567"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name=tool_name,
+            tool_input={"reportId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", **tool_input},
+            requires_confirmation=requires_confirmation,
+        ),
+        job,
+        prompt="그 회의록의 후속 작업 보여줘",
+        planning_context=(
+            'previous resource: {"turn":1,"contextRef":"'
+            + context_ref
+            + '","resourceType":"meeting_report","ordinal":1}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        **tool_input,
+        "contextRef": context_ref,
+    }
+    assert normalized.output_summary["requiresConfirmation"] is (
+        True if requires_confirmation else None
+    )
+
+
 def test_normalizer_uses_single_opaque_meeting_context_reference() -> None:
     job = parse_agent_run_job_payload(
         agent_payload(

@@ -571,17 +571,42 @@
       "name": "find_action_items",
       "description": "특정 MeetingReport에 저장된 후속작업의 상태와 담당자를 조회합니다.",
       "riskLevel": "low",
-      "executionMode": "auto",
+      "executionMode": "contextual",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "reportId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "reportId": {
+          "contextRef": {
             "type": "string",
-            "format": "uuid"
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "TRANSCRIBING",
+              "SUMMARIZING",
+              "PROCESSING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingReportCandidate": {
+            "type": "boolean",
+            "const": true
           }
         }
       }
@@ -590,17 +615,42 @@
       "name": "get_meeting_decision_evidence",
       "description": "MeetingReport 결정사항에 직접 연결된 transcript와 Activity evidence만 조회합니다.",
       "riskLevel": "low",
-      "executionMode": "auto",
+      "executionMode": "contextual",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "reportId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "reportId": {
+          "contextRef": {
             "type": "string",
-            "format": "uuid"
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "TRANSCRIBING",
+              "SUMMARIZING",
+              "PROCESSING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingReportCandidate": {
+            "type": "boolean",
+            "const": true
           },
           "decisionIndex": {
             "type": "integer",
@@ -722,14 +772,39 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "reportId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "reportId": {
+          "contextRef": {
             "type": "string",
-            "format": "uuid"
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "TRANSCRIBING",
+              "SUMMARIZING",
+              "PROCESSING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingReportCandidate": {
+            "type": "boolean",
+            "const": true
           }
         }
       }

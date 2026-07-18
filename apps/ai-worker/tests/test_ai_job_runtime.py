@@ -1141,6 +1141,7 @@ def test_agent_repository_adds_only_bounded_same_thread_memory() -> None:
     thread_query, thread_values = connection.executed[1]
     assert "workspace_id = %s" in thread_query
     assert "requested_by_user_id = %s" in thread_query
+    assert "ORDER BY created_at DESC, id DESC" in thread_query
     assert "LIMIT %s" in thread_query
     assert thread_values == (
         "thread-1",
@@ -1203,6 +1204,53 @@ def test_agent_repository_redacts_ids_and_limits_thread_resource_refs() -> None:
     assert exposed_uuid not in context.planning_context
     assert "report-0" not in context.planning_context
     assert "[resource]" in context.planning_context
+
+
+def test_agent_repository_redacts_credentials_from_prior_thread_text() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    sensitive_values = [
+        "sk-" + "proj-private-value",
+        "ghp_" + "privatevalue123",
+        ".".join(("eyJhbGciOiJIUzI1NiJ9", "payload", "signature")),
+        "private-assignment-value",
+    ]
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-4333-8333-333333333333",
+            "workspace_id": "22222222-2222-4222-8222-222222222222",
+            "requested_by_user_id": "11111111-1111-4111-8111-111111111111",
+            "status": "planning",
+            "prompt": "그 회의록",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 0,
+            "thread_id": "thread-1",
+        },
+        thread_runs=[
+            {
+                "id": "run-1",
+                "prompt": " ".join(sensitive_values[:3]),
+                "final_answer": f"API_KEY={sensitive_values[3]}",
+            }
+        ],
+        resource_refs_by_run={"run-1": []},
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-4333-8333-333333333333",
+            "workspaceId": "22222222-2222-4222-8222-222222222222",
+            "requestedByUserId": "11111111-1111-4111-8111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    assert "[secret]" in context.planning_context
+    assert all(value not in context.planning_context for value in sensitive_values)
 
 
 def test_agent_repository_exposes_only_safe_selected_candidate_context() -> None:

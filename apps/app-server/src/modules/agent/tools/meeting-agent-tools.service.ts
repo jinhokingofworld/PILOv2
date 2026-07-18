@@ -142,6 +142,10 @@ interface ApproveActionItemContextInput extends ActionItemContextInput {
 
 interface DecisionEvidenceInput extends ReportIdInput { decisionIndex?: number }
 
+interface DecisionEvidenceSelectorInput extends MeetingReportSelectorInput {
+  decisionIndex?: number;
+}
+
 interface ResolveMeetingResourceInput {
   resourceType: "meeting_room" | "workspace_member";
   roomName?: string;
@@ -223,7 +227,10 @@ const LEGACY_APPROVE_ACTION_ITEM_INPUT_FIELDS = [
   ...ACTION_ITEM_INPUT_FIELDS,
   "delivery"
 ];
-const DECISION_EVIDENCE_INPUT_FIELDS = ["reportId", "decisionIndex"];
+const DECISION_EVIDENCE_SELECTOR_INPUT_FIELDS = [
+  ...REPORT_SELECTOR_INPUT_FIELDS,
+  "decisionIndex"
+];
 const RESOLVE_RESOURCE_INPUT_FIELDS = [
   "resourceType",
   "roomName",
@@ -493,10 +500,27 @@ export class MeetingAgentToolsService {
       name: "find_action_items",
       description: "특정 MeetingReport에 저장된 후속작업의 상태와 담당자를 조회합니다.",
       riskLevel: "low",
-      executionMode: "auto",
-      inputSchema: { type: "object", required: ["reportId"], additionalProperties: false, properties: { reportId: { type: "string", format: "uuid" } } },
-      validateInput: (input) => this.validateReportIdInput(input),
-      execute: (context, input) => this.executeFindActionItems(context, this.validateReportIdInput(input))
+      executionMode: "contextual",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: this.meetingReportSelectorSchema()
+      },
+      validateInput: (input) => this.validateMeetingReportSelectorInput(input),
+      prepareExecution: async (context, input) =>
+        this.prepareMeetingReportSelectorExecution(
+          context,
+          this.validateMeetingReportSelectorInput(input)
+        ),
+      execute: async (context, input) => {
+        const resolved = await this.requireResolvedReport(
+          context,
+          this.validateMeetingReportSelectorInput(input)
+        );
+        return this.executeFindActionItems(context, {
+          reportId: resolved.resourceId
+        });
+      }
     };
   }
 
@@ -505,10 +529,31 @@ export class MeetingAgentToolsService {
       name: "get_meeting_decision_evidence",
       description: "MeetingReport 결정사항에 직접 연결된 transcript와 Activity evidence만 조회합니다.",
       riskLevel: "low",
-      executionMode: "auto",
-      inputSchema: { type: "object", required: ["reportId"], additionalProperties: false, properties: { reportId: { type: "string", format: "uuid" }, decisionIndex: { type: "integer", minimum: 0 } } },
-      validateInput: (input) => this.validateDecisionEvidenceInput(input),
-      execute: (context, input) => this.executeDecisionEvidence(context, this.validateDecisionEvidenceInput(input))
+      executionMode: "contextual",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ...this.meetingReportSelectorSchema(),
+          decisionIndex: { type: "integer", minimum: 0 }
+        }
+      },
+      validateInput: (input) => this.validateDecisionEvidenceSelectorInput(input),
+      prepareExecution: async (context, input) =>
+        this.prepareMeetingReportSelectorExecution(
+          context,
+          this.validateDecisionEvidenceSelectorInput(input)
+        ),
+      execute: async (context, input) => {
+        const draft = this.validateDecisionEvidenceSelectorInput(input);
+        const resolved = await this.requireResolvedReport(context, draft);
+        return this.executeDecisionEvidence(context, {
+          reportId: resolved.resourceId,
+          ...(draft.decisionIndex === undefined
+            ? {}
+            : { decisionIndex: draft.decisionIndex })
+        });
+      }
     };
   }
 
@@ -574,10 +619,24 @@ export class MeetingAgentToolsService {
       description: "원본 audio가 남아 있는 실패 MeetingReport의 재생성을 요청합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
-      inputSchema: { type: "object", required: ["reportId"], additionalProperties: false, properties: { reportId: { type: "string", format: "uuid" } } },
-      validateInput: (input) => this.validateReportIdInput(input),
-      buildConfirmation: (context, input) => this.buildRegenerateConfirmation(context, this.validateReportIdInput(input)),
-      execute: (context, input) => this.executeRegenerateMeetingReport(context, this.validateReportIdInput(input))
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: this.meetingReportSelectorSchema()
+      },
+      validateInput: (input) => this.validateMeetingReportSelectorInput(input),
+      buildConfirmation: async (context, input) =>
+        this.buildRegenerateContextConfirmation(
+          context,
+          this.validateMeetingReportSelectorInput(input)
+        ),
+      buildConfirmationInput: (plan) => this.confirmationPlanInput(plan),
+      validateConfirmationInput: (input) => this.validateReportIdInput(input),
+      execute: (context, input) =>
+        this.executeRegenerateMeetingReport(
+          context,
+          this.validateReportIdInput(input)
+        )
     };
   }
 
@@ -1081,6 +1140,19 @@ export class MeetingAgentToolsService {
       after: { status: "QUEUED" },
       call: { input: input as unknown as AgentJsonObject }
     };
+  }
+
+  private async buildRegenerateContextConfirmation(
+    context: AgentToolContext,
+    input: MeetingReportSelectorInput
+  ): Promise<AgentConfirmationPlan | AgentToolClarificationResult> {
+    const resolved = await this.resolveMeetingReportSelector(context, input);
+    if (resolved.kind === "needs_clarification") {
+      return this.toResourceClarification(context, resolved);
+    }
+    return this.buildRegenerateConfirmation(context, {
+      reportId: resolved.reference.resourceId
+    });
   }
 
   private async buildStartMeetingConfirmation(
@@ -2637,15 +2709,27 @@ export class MeetingAgentToolsService {
     throw badRequest("delivery.deliveryType must be calendar_event or pilo_issue");
   }
 
-  private validateDecisionEvidenceInput(input: unknown): DecisionEvidenceInput {
+  private validateDecisionEvidenceSelectorInput(
+    input: unknown
+  ): DecisionEvidenceSelectorInput {
     const object = this.requirePlainObject(input, "Meeting decision evidence input");
     this.rejectForbiddenMeetingToolFields(object);
-    this.assertOnlyAllowedFields(object, DECISION_EVIDENCE_INPUT_FIELDS, "Meeting decision evidence input");
+    this.assertOnlyAllowedFields(
+      object,
+      DECISION_EVIDENCE_SELECTOR_INPUT_FIELDS,
+      "Meeting decision evidence input"
+    );
     const decisionIndex = object.decisionIndex;
     if (decisionIndex !== undefined && (!Number.isInteger(decisionIndex) || (decisionIndex as number) < 0)) {
       throw badRequest("decisionIndex must be a non-negative integer");
     }
-    return { reportId: this.requireReportId(object.reportId), ...(decisionIndex === undefined ? {} : { decisionIndex: decisionIndex as number }) };
+    const { decisionIndex: _decisionIndex, ...selector } = object;
+    return {
+      ...this.validateMeetingReportSelectorInput(selector),
+      ...(decisionIndex === undefined
+        ? {}
+        : { decisionIndex: decisionIndex as number })
+    };
   }
 
   private actionItemPatch(

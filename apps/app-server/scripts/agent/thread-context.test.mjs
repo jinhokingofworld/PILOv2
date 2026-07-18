@@ -72,6 +72,12 @@ class FakeDatabase {
   ]);
   assert.match(database.calls[0].text, /prior_run\.workspace_id = \$2/);
   assert.match(database.calls[0].text, /prior_run\.requested_by_user_id = \$3/);
+  assert.match(
+    database.calls[0].text,
+    /ORDER BY prior_run\.created_at DESC, prior_run\.id DESC/
+  );
+  assert.match(database.calls[0].text, /recent_run\.id DESC/);
+  assert.match(database.calls[0].text, /step\.id ASC/);
   assert.match(database.calls[0].text, /LIMIT \$4/);
 }
 

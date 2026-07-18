@@ -199,6 +199,23 @@ UUID_TEXT_PATTERN = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
     re.IGNORECASE,
 )
+SENSITIVE_TEXT_PATTERNS = (
+    re.compile(
+        r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?" r"-----END [A-Z0-9 ]*PRIVATE KEY-----",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{6,}\b"),
+    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_-]{6,}|github_pat_[A-Za-z0-9_-]{6,})\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{6,}\b", re.IGNORECASE),
+    re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b"),
+    re.compile(r"\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
+    re.compile(
+        r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|credential)"
+        r"\s*[:=]\s*[\"']?[^\s\"',;]{4,}",
+        re.IGNORECASE,
+    ),
+)
 
 
 def _utf8_size(value: str) -> int:
@@ -206,7 +223,10 @@ def _utf8_size(value: str) -> int:
 
 
 def _truncate_utf8(value: str, max_bytes: int) -> str:
-    sanitized = UUID_TEXT_PATTERN.sub("[resource]", value).replace("\x00", "")
+    sanitized = value.replace("\x00", "")
+    for pattern in SENSITIVE_TEXT_PATTERNS:
+        sanitized = pattern.sub("[secret]", sanitized)
+    sanitized = UUID_TEXT_PATTERN.sub("[resource]", sanitized)
     if _utf8_size(sanitized) <= max_bytes:
         return sanitized
     suffix = "…"
@@ -1560,7 +1580,7 @@ class PgAgentRunRepository:
                   AND requested_by_user_id = %s
                   AND status = 'completed'
                   AND final_answer IS NOT NULL
-                ORDER BY created_at DESC
+                ORDER BY created_at DESC, id DESC
                 LIMIT %s
                 """,
                 (
@@ -1590,7 +1610,7 @@ class PgAgentRunRepository:
                     WHERE run_id = %s
                       AND step_type = 'tool'
                       AND status = 'completed'
-                    ORDER BY step_order ASC
+                    ORDER BY step_order ASC, id ASC
                     """,
                     (thread_run["id"],),
                 ).fetchall()

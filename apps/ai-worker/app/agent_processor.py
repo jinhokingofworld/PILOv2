@@ -1366,12 +1366,7 @@ def _normalize_meeting_thread_context_reference(
         tool_input.pop("reportId", None)
         for field in ("from", "to", "status", "roomName", "useSelectedMeetingReportCandidate"):
             tool_input.pop(field, None)
-        field_name = (
-            "contextRef"
-            if tool_name in {"get_meeting_report", "summarize_meeting_report"}
-            else "reportContextRef"
-        )
-        tool_input[field_name] = report_refs[0]["contextRef"]
+        tool_input["contextRef"] = report_refs[0]["contextRef"]
 
     return AgentPlannerDecision(
         status="tool_candidate",

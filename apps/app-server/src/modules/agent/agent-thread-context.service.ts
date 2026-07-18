@@ -59,7 +59,7 @@ export class AgentThreadContextService {
             AND prior_run.requested_by_user_id = $3
             AND prior_run.status = 'completed'
             AND prior_run.final_answer IS NOT NULL
-          ORDER BY prior_run.created_at DESC
+          ORDER BY prior_run.created_at DESC, prior_run.id DESC
           LIMIT $4
         )
         SELECT
@@ -72,7 +72,11 @@ export class AgentThreadContextService {
           ON step.run_id = recent_run.id
          AND step.step_type = 'tool'
          AND step.status = 'completed'
-        ORDER BY recent_run.created_at DESC, step.step_order ASC
+        ORDER BY
+          recent_run.created_at DESC,
+          recent_run.id DESC,
+          step.step_order ASC,
+          step.id ASC
       `,
       [
         context.runId,

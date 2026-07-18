@@ -785,6 +785,42 @@ class FakeCandidateSelectionDatabase {
     );
     assert.equal(reportResult.outputSummary.report.reportId, REPORT_ID);
 
+    for (const toolName of [
+      "find_action_items",
+      "get_meeting_decision_evidence",
+      "regenerate_meeting_report"
+    ]) {
+      const contextualTool = contextTools
+        .listDefinitions()
+        .find((tool) => tool.name === toolName);
+      assert.throws(
+        () => contextualTool.validateInput({ reportId: REPORT_ID }),
+        (error) =>
+          error.getStatus?.() === 400 &&
+          error.response?.error?.message?.includes("reportId is not supported"),
+        `${toolName} must not accept a raw planner-facing reportId`
+      );
+      const contextualInput = contextualTool.validateInput({
+        contextRef: "ctx_0123456789abcdef01234567",
+        ...(toolName === "get_meeting_decision_evidence"
+          ? { decisionIndex: 0 }
+          : {})
+      });
+      if (contextualTool.prepareExecution) {
+        assert.deepEqual(
+          await contextualTool.prepareExecution(context, contextualInput),
+          { kind: "execute" }
+        );
+      }
+      if (toolName === "regenerate_meeting_report") {
+        const plan = await contextualTool.buildConfirmation(
+          context,
+          contextualInput
+        );
+        assert.equal(plan.call.input.reportId, REPORT_ID);
+      }
+    }
+
     const leaveTool = contextTools
       .listDefinitions()
       .find((tool) => tool.name === "leave_meeting");
