@@ -920,10 +920,11 @@ def test_agent_repository_preserves_large_sql_erd_inspection_as_valid_json() -> 
     projection_tables = [
         {
             "ref": f"t{index}",
-            "name": f"meeting_domain_table_{index:03d}",
+            "name": f"회의_관련_도메인_테이블_{index:03d}",
+            "comment": "회의 관련 기능 설명을 다음 Planner turn까지 온전히 보존합니다.",
             "columns": [
                 {"name": "workspace_id", "foreignKey": True},
-                {"name": f"meeting_attribute_{index:03d}"},
+                {"name": f"회의_속성_{index:03d}"},
             ],
         }
         for index in range(1, 51)
@@ -938,7 +939,9 @@ def test_agent_repository_preserves_large_sql_erd_inspection_as_valid_json() -> 
             "truncated": False,
         },
     }
-    assert len(json.dumps(inspection_output, ensure_ascii=False)) > 3_000
+    serialized_inspection = json.dumps(inspection_output, ensure_ascii=False)
+    assert 3_000 < len(serialized_inspection) < 12_000
+    assert len(serialized_inspection.encode("utf-8")) > 12_000
     connection = FakeAgentContextConnection(
         run_row={
             "id": "33333333-3333-3333-3333-333333333333",
@@ -951,6 +954,16 @@ def test_agent_repository_preserves_large_sql_erd_inspection_as_valid_json() -> 
             "thread_id": None,
         },
         timeline_rows=[
+            *[
+                {
+                    "item_kind": "message",
+                    "role": "user",
+                    "content": f"old context {index} " + "x" * 980,
+                    "tool_name": None,
+                    "output_json": None,
+                }
+                for index in range(1, 9)
+            ],
             {
                 "item_kind": "tool_step",
                 "role": "tool",
@@ -983,7 +996,7 @@ def test_agent_repository_preserves_large_sql_erd_inspection_as_valid_json() -> 
     restored_output = json.loads(inspection_line[len(prefix) :])
     assert restored_output == inspection_output
     assert restored_output["projection"]["tables"][-1]["ref"] == "t50"
-    assert len(context.planning_context.encode("utf-8")) <= 12_000
+    assert len(context.planning_context) <= 12_000
 
 
 def test_agent_repository_adds_only_bounded_same_thread_memory() -> None:

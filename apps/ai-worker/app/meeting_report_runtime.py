@@ -96,8 +96,8 @@ AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE = "요청을 분석하지 못했습니다. �
 AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE = (
     "회의록 근거 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요."
 )
-AGENT_PLANNING_CONTEXT_MAX_BYTES = 12_000
-AGENT_TOOL_OUTPUT_MAX_BYTES = 3_000
+AGENT_PLANNING_CONTEXT_MAX_CHARACTERS = 12_000
+AGENT_TOOL_OUTPUT_MAX_CHARACTERS = 3_000
 SQL_ERD_INSPECTION_TOOL_NAME = "inspect_sql_erd_schema"
 LOCAL_APP_ENVS = {"local", "test", "development"}
 MEETING_REPORT_FAILURE_STEPS = {
@@ -112,19 +112,21 @@ MEETING_REPORT_FAILURE_STEPS = {
 
 def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
     serialized = json.dumps(output_json, ensure_ascii=False)
-    prefix_size = len(f"tool {tool_name}: ".encode("utf-8"))
+    prefix_size = len(f"tool {tool_name}: ")
     max_size = (
-        AGENT_PLANNING_CONTEXT_MAX_BYTES - prefix_size
+        AGENT_PLANNING_CONTEXT_MAX_CHARACTERS - prefix_size
         if tool_name == SQL_ERD_INSPECTION_TOOL_NAME
-        else AGENT_TOOL_OUTPUT_MAX_BYTES
+        else AGENT_TOOL_OUTPUT_MAX_CHARACTERS
     )
-    if len(serialized.encode("utf-8")) <= max_size:
+    if len(serialized) <= max_size:
         return serialized
 
     summary: dict[str, object] = {"truncated": True}
     if isinstance(output_json, dict):
         for key in ("status", "action", "message", "title"):
-            value = output_json.get(key)
+            if key not in output_json:
+                continue
+            value = output_json[key]
             if isinstance(value, (str, int, float, bool)) or value is None:
                 summary[key] = value
         summary["topLevelKeys"] = sorted(str(key) for key in output_json)[:50]
@@ -135,16 +137,22 @@ def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
 
 def _build_bounded_agent_planning_context(lines: list[str]) -> str:
     selected_reversed: list[str] = []
-    total_bytes = 0
+    total_characters = 0
     for line in reversed(lines):
-        line_bytes = len(line.encode("utf-8"))
-        separator_bytes = 1 if selected_reversed else 0
-        if line_bytes + separator_bytes > AGENT_PLANNING_CONTEXT_MAX_BYTES:
+        line_characters = len(line)
+        separator_characters = 1 if selected_reversed else 0
+        if (
+            line_characters + separator_characters
+            > AGENT_PLANNING_CONTEXT_MAX_CHARACTERS
+        ):
             continue
-        if total_bytes + line_bytes + separator_bytes > AGENT_PLANNING_CONTEXT_MAX_BYTES:
+        if (
+            total_characters + line_characters + separator_characters
+            > AGENT_PLANNING_CONTEXT_MAX_CHARACTERS
+        ):
             continue
         selected_reversed.append(line)
-        total_bytes += line_bytes + separator_bytes
+        total_characters += line_characters + separator_characters
     return "\n".join(reversed(selected_reversed))
 
 
