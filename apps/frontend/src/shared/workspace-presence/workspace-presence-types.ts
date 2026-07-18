@@ -34,6 +34,11 @@ export type WorkspacePresenceLocation = {
   viewport: WorkspacePresenceViewport;
 };
 
+export type WorkspaceLocationRestoreContext = {
+  signal: AbortSignal;
+  source: "jump" | "follow";
+};
+
 export type WorkspacePresenceState = {
   displayName: string;
   focused: boolean;
@@ -65,5 +70,8 @@ export type WorkspaceLocationAdapter = {
   capture: () => WorkspacePresenceLocation | null;
   page: WorkspacePresencePage;
   ready: boolean;
-  restore: (location: WorkspacePresenceLocation) => boolean | Promise<boolean>;
+  restore: (
+    location: WorkspacePresenceLocation,
+    context: WorkspaceLocationRestoreContext,
+  ) => boolean | Promise<boolean>;
 };

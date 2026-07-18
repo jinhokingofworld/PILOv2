@@ -1,5 +1,6 @@
 import type {
   WorkspaceLocationAdapter,
+  WorkspaceLocationRestoreContext,
   WorkspacePresenceLocation,
   WorkspacePresencePage,
 } from "./workspace-presence-types";
@@ -13,10 +14,21 @@ export type WorkspacePendingJump = {
   expiresAt: number;
   phase: "rollback" | "target";
   requestId: number;
+  source: "jump";
   sourceHref: string;
   sourceLocation: WorkspacePresenceLocation | null;
   targetLocation: WorkspacePresenceLocation;
 };
+
+export type WorkspacePendingFollow = {
+  expiresAt: number;
+  phase: "target";
+  requestId: number;
+  source: "follow";
+  targetLocation: WorkspacePresenceLocation;
+};
+
+type WorkspacePendingLocation = WorkspacePendingFollow | WorkspacePendingJump;
 
 export function toWorkspaceLocationHref(location: WorkspacePresenceLocation) {
   return `${location.route.pathname}${location.route.search}`;
@@ -64,10 +76,13 @@ export function createWorkspaceLocationRegistry() {
         }
       };
     },
-    async restore(location: WorkspacePresenceLocation) {
+    async restore(
+      location: WorkspacePresenceLocation,
+      context: WorkspaceLocationRestoreContext,
+    ) {
       const adapter = adapters.get(location.page);
       if (!adapter?.ready) return false;
-      return adapter.restore(location);
+      return adapter.restore(location, context);
     },
   };
 }
@@ -82,6 +97,7 @@ export function createWorkspaceJumpCoordinator({
   navigate,
   now = () => Date.now(),
   onError,
+  onFollowError = () => {},
   registry,
   rollback,
   setTimer = (callback, timeoutMs) => globalThis.setTimeout(callback, timeoutMs),
@@ -91,6 +107,7 @@ export function createWorkspaceJumpCoordinator({
   navigate: (href: string) => void | Promise<void>;
   now?: () => number;
   onError: (message: string) => void;
+  onFollowError?: () => void;
   registry: WorkspaceLocationRegistry;
   rollback: (href: string) => void | Promise<void>;
   setTimer?: (
@@ -98,7 +115,8 @@ export function createWorkspaceJumpCoordinator({
     timeoutMs: number,
   ) => WorkspaceJumpTimer;
 }) {
-  let pending: WorkspacePendingJump | null = null;
+  let pending: WorkspacePendingLocation | null = null;
+  let restoreController: AbortController | null = null;
   let timeout: WorkspaceJumpTimer | null = null;
   let requestSequence = 0;
   const restoresInFlight = new Set<string>();
@@ -107,6 +125,16 @@ export function createWorkspaceJumpCoordinator({
     if (timeout !== null) clearTimer(timeout);
     timeout = null;
     pending = null;
+  }
+
+  function abortRestore() {
+    restoreController?.abort();
+    restoreController = null;
+  }
+
+  function replacePending() {
+    abortRestore();
+    clearPending();
   }
 
   function isCurrentRequest(
@@ -120,14 +148,29 @@ export function createWorkspaceJumpCoordinator({
   }
 
   function finishWithError(requestId: number) {
-    if (!isCurrentRequest(requestId)) return;
+    if (!isCurrentRequest(requestId) || pending?.source !== "jump") return;
+    abortRestore();
     clearPending();
     onError(WORKSPACE_JUMP_ERROR_MESSAGE);
   }
 
-  function scheduleTimeout(requestId: number, phase: WorkspacePendingJump["phase"]) {
+  function finishFollowWithError(requestId: number) {
+    if (!isCurrentRequest(requestId) || pending?.source !== "follow") return;
+    abortRestore();
+    clearPending();
+    onFollowError();
+  }
+
+  function scheduleTimeout(
+    requestId: number,
+    phase: WorkspacePendingJump["phase"],
+  ) {
     if (timeout !== null) clearTimer(timeout);
     timeout = setTimer(() => {
+      if (pending?.source === "follow") {
+        finishFollowWithError(requestId);
+        return;
+      }
       if (phase === "target") {
         return beginRollback(requestId);
       }
@@ -136,7 +179,15 @@ export function createWorkspaceJumpCoordinator({
   }
 
   async function beginRollback(requestId: number) {
-    if (!isCurrentRequest(requestId, "target") || !pending) return false;
+    if (
+      !isCurrentRequest(requestId, "target") ||
+      !pending ||
+      pending.source !== "jump"
+    ) {
+      return false;
+    }
+    abortRestore();
+    restoreController = new AbortController();
     pending = {
       ...pending,
       expiresAt: now() + WORKSPACE_JUMP_TIMEOUT_MS,
@@ -163,11 +214,18 @@ export function createWorkspaceJumpCoordinator({
   ) {
     const restoreKey = `${requestId}:${phase}`;
     if (restoresInFlight.has(restoreKey)) return false;
+
+    const current = pending;
+    const controller = restoreController;
+    if (!current || current.requestId !== requestId || !controller) return false;
     restoresInFlight.add(restoreKey);
 
     let restored = false;
     try {
-      restored = await registry.restore(location);
+      restored = await registry.restore(location, {
+        signal: controller.signal,
+        source: current.source,
+      });
     } catch {
       restored = false;
     } finally {
@@ -180,10 +238,15 @@ export function createWorkspaceJumpCoordinator({
       return false;
     }
     if (!restored) {
+      if (current.source === "follow") {
+        finishFollowWithError(requestId);
+        return false;
+      }
       await beginRollback(requestId);
       return false;
     }
 
+    restoreController = null;
     clearPending();
     return true;
   }
@@ -225,21 +288,57 @@ export function createWorkspaceJumpCoordinator({
   }
 
   return {
+    cancelFollow() {
+      if (pending?.source !== "follow") return;
+      requestSequence += 1;
+      replacePending();
+    },
     destinationReady,
     getPending() {
       return pending;
     },
+    async follow(targetLocation: WorkspacePresenceLocation) {
+      replacePending();
+      const requestId = ++requestSequence;
+      const targetHref = toWorkspaceLocationHref(targetLocation);
+      restoreController = new AbortController();
+      pending = {
+        expiresAt: now() + WORKSPACE_JUMP_TIMEOUT_MS,
+        phase: "target",
+        requestId,
+        source: "follow",
+        targetLocation,
+      };
+      scheduleTimeout(requestId, "target");
+
+      if (areWorkspaceLocationHrefsEqual(getCurrentHref(), targetHref)) {
+        return destinationReady();
+      }
+
+      try {
+        await navigate(targetHref);
+      } catch {
+        finishFollowWithError(requestId);
+        return false;
+      }
+
+      if (!isCurrentRequest(requestId)) return false;
+      const restored = await destinationReady();
+      return restored || isCurrentRequest(requestId);
+    },
     async jump(targetLocation: WorkspacePresenceLocation) {
-      clearPending();
+      replacePending();
       const requestId = ++requestSequence;
       const sourceHref = getCurrentHref();
       const sourceLocation = registry.capture();
       const targetHref = toWorkspaceLocationHref(targetLocation);
 
+      restoreController = new AbortController();
       pending = {
         expiresAt: now() + WORKSPACE_JUMP_TIMEOUT_MS,
         phase: "target",
         requestId,
+        source: "jump",
         sourceHref,
         sourceLocation,
         targetLocation,

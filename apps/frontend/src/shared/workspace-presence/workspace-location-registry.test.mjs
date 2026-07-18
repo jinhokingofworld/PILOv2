@@ -26,20 +26,32 @@ function deferred() {
 
 test("registry는 mounted adapter의 capture와 restore를 사용한다", async () => {
   const restored = [];
+  const restoreContexts = [];
   const registry = createWorkspaceLocationRegistry();
   const unregister = registry.register({
     capture: () => location("home"),
     page: "home",
     ready: true,
-    restore: async (target) => {
+    restore: async (target, context) => {
       restored.push(target);
+      restoreContexts.push(context);
       return true;
     },
   });
+  const controller = new AbortController();
 
   assert.equal(registry.capture()?.page, "home");
-  assert.equal(await registry.restore(location("home")), true);
+  assert.equal(
+    await registry.restore(location("home"), {
+      signal: controller.signal,
+      source: "jump",
+    }),
+    true,
+  );
   assert.equal(restored.length, 1);
+  assert.deepEqual(restoreContexts, [
+    { signal: controller.signal, source: "jump" },
+  ]);
   unregister();
   assert.equal(registry.capture(), null);
 });
@@ -48,13 +60,15 @@ test("같은 route는 즉시 한 번 restore하고 cross route는 ready까지 �
   let currentHref = "/home";
   const navigated = [];
   const restored = [];
+  const restoreContexts = [];
   const registry = createWorkspaceLocationRegistry();
   registry.register({
     capture: () => location("home"),
     page: "home",
     ready: true,
-    restore: async (target) => {
+    restore: async (target, context) => {
       restored.push(target.page);
+      restoreContexts.push(context);
       return true;
     },
   });
@@ -71,6 +85,8 @@ test("같은 route는 즉시 한 번 restore하고 cross route는 ready까지 �
 
   await coordinator.jump(location("home"));
   assert.deepEqual(restored, ["home"]);
+  assert.equal(restoreContexts[0].source, "jump");
+  assert.equal(restoreContexts[0].signal.aborted, false);
   assert.deepEqual(navigated, []);
 
   await coordinator.jump(location("calendar"));
@@ -83,13 +99,16 @@ test("같은 route는 즉시 한 번 restore하고 cross route는 ready까지 �
     capture: () => location("calendar"),
     page: "calendar",
     ready: true,
-    restore: async (target) => {
+    restore: async (target, context) => {
       restored.push(target.page);
+      restoreContexts.push(context);
       return true;
     },
   });
   await coordinator.destinationReady();
   assert.deepEqual(restored, ["home", "calendar"]);
+  assert.equal(restoreContexts[1].source, "jump");
+  assert.equal(restoreContexts[1].signal.aborted, false);
   assert.equal(coordinator.getPending(), null);
 });
 
@@ -175,6 +194,277 @@ test("async restore 도중 재클릭하면 stale completion이 새 pending을 �
 
   restores[1].pendingRestore.resolve(true);
   await secondJump;
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("새 Follow 위치는 이전 restore를 abort하고 stale completion을 무시한다", async () => {
+  let currentHref = "/home";
+  const restores = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: (target, context) => {
+      const pendingRestore = deferred();
+      restores.push({ context, pendingRestore, target });
+      return pendingRestore.promise;
+    },
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {},
+    getCurrentHref: () => currentHref,
+    navigate: (href) => {
+      currentHref = href;
+    },
+    onError: () => {},
+    onFollowError: () => {},
+    registry,
+    rollback: () => {},
+    setTimer: () => 1,
+  });
+  const firstFollow = coordinator.follow({
+    ...location("home"),
+    route: { pathname: "/home", search: "?version=1" },
+  });
+  await Promise.resolve();
+  const secondFollow = coordinator.follow({
+    ...location("home"),
+    route: { pathname: "/home", search: "?version=2" },
+  });
+  await Promise.resolve();
+
+  assert.equal(restores.length, 2);
+  assert.equal(restores[0].context.source, "follow");
+  assert.equal(restores[0].context.signal.aborted, true);
+  assert.equal(restores[1].context.signal.aborted, false);
+
+  restores[0].pendingRestore.resolve(true);
+  await firstFollow;
+  assert.equal(
+    coordinator.getPending()?.targetLocation.route.search,
+    "?version=2",
+  );
+
+  restores[1].pendingRestore.resolve(true);
+  await secondFollow;
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("cancelFollow는 진행 중인 restore를 abort하고 stale 오류를 무시한다", async () => {
+  const restore = deferred();
+  const contexts = [];
+  const followErrors = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: (_target, context) => {
+      contexts.push(context);
+      return restore.promise;
+    },
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {},
+    getCurrentHref: () => "/home",
+    navigate: () => {},
+    onError: () => {},
+    onFollowError: () => followErrors.push("failed"),
+    registry,
+    rollback: () => {},
+    setTimer: () => 1,
+  });
+
+  const pendingFollow = coordinator.follow(location("home"));
+  await Promise.resolve();
+  coordinator.cancelFollow();
+
+  assert.equal(contexts[0].signal.aborted, true);
+  assert.equal(coordinator.getPending(), null);
+  restore.resolve(false);
+  assert.equal(await pendingFollow, false);
+  assert.deepEqual(followErrors, []);
+});
+
+test("cancelFollow는 진행 중인 jump를 취소하지 않는다", async () => {
+  const restore = deferred();
+  const contexts = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: (_target, context) => {
+      contexts.push(context);
+      return restore.promise;
+    },
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {},
+    getCurrentHref: () => "/home",
+    navigate: () => {},
+    onError: () => {},
+    registry,
+    rollback: () => {},
+    setTimer: () => 1,
+  });
+
+  const pendingJump = coordinator.jump(location("home"));
+  await Promise.resolve();
+  coordinator.cancelFollow();
+
+  assert.equal(contexts[0].signal.aborted, false);
+  assert.equal(coordinator.getPending()?.source, "jump");
+  restore.resolve(true);
+  assert.equal(await pendingJump, true);
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("Follow restore가 false를 반환하면 rollback 없이 오류 처리한다", async () => {
+  const followErrors = [];
+  const rolledBack = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: () => false,
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    getCurrentHref: () => "/home",
+    navigate: () => {},
+    onError: () => {},
+    onFollowError: () => followErrors.push("failed"),
+    registry,
+    rollback: (href) => rolledBack.push(href),
+  });
+
+  assert.equal(await coordinator.follow(location("home")), false);
+  assert.deepEqual(rolledBack, []);
+  assert.deepEqual(followErrors, ["failed"]);
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("Follow restore가 throw하면 rollback 없이 오류 처리한다", async () => {
+  const followErrors = [];
+  const rolledBack = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: () => {
+      throw new Error("restore failed");
+    },
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    getCurrentHref: () => "/home",
+    navigate: () => {},
+    onError: () => {},
+    onFollowError: () => followErrors.push("failed"),
+    registry,
+    rollback: (href) => rolledBack.push(href),
+  });
+
+  assert.equal(await coordinator.follow(location("home")), false);
+  assert.deepEqual(rolledBack, []);
+  assert.deepEqual(followErrors, ["failed"]);
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("Follow timeout은 rollback 없이 오류 처리하고 pending을 비운다", async () => {
+  let currentHref = "/home";
+  let timerCallback = null;
+  const followErrors = [];
+  const rolledBack = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: () => true,
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {
+      timerCallback = null;
+    },
+    getCurrentHref: () => currentHref,
+    navigate: (href) => {
+      currentHref = href;
+    },
+    onError: () => {},
+    onFollowError: () => followErrors.push("failed"),
+    registry,
+    rollback: (href) => rolledBack.push(href),
+    setTimer: (callback) => {
+      timerCallback = callback;
+      return 1;
+    },
+  });
+
+  await coordinator.follow(location("calendar"));
+  assert.equal(coordinator.getPending()?.targetLocation.page, "calendar");
+  await timerCallback();
+
+  assert.deepEqual(rolledBack, []);
+  assert.deepEqual(followErrors, ["failed"]);
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("jump rollback restore timeout은 진행 중인 restore를 abort한다", async () => {
+  let currentHref = "/home";
+  let timerCallback = null;
+  const errors = [];
+  const rollbackRestore = deferred();
+  const rollbackContexts = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: (_target, context) => {
+      rollbackContexts.push(context);
+      return rollbackRestore.promise;
+    },
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {
+      timerCallback = null;
+    },
+    getCurrentHref: () => currentHref,
+    navigate: (href) => {
+      currentHref = href;
+    },
+    onError: (message) => errors.push(message),
+    registry,
+    rollback: (href) => {
+      currentHref = href;
+    },
+    setTimer: (callback) => {
+      timerCallback = callback;
+      return 1;
+    },
+  });
+
+  await coordinator.jump(location("calendar"));
+  registry.register({
+    capture: () => location("calendar"),
+    page: "calendar",
+    ready: true,
+    restore: () => false,
+  });
+  const failedJump = coordinator.destinationReady();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(rollbackContexts.length, 1);
+  assert.equal(rollbackContexts[0].signal.aborted, false);
+  timerCallback();
+  assert.equal(rollbackContexts[0].signal.aborted, true);
+  assert.deepEqual(errors, [WORKSPACE_JUMP_ERROR_MESSAGE]);
+
+  rollbackRestore.resolve(true);
+  assert.equal(await failedJump, false);
   assert.equal(coordinator.getPending(), null);
 });
 
