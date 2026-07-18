@@ -40,7 +40,7 @@ export class SqlErdFrameShapeUtil extends ShapeUtil<SqlErdFrameShape> {
   static override type = SQLTOERD_FRAME_SHAPE_TYPE;
   static override props = { w: T.number, h: T.number, frameId: T.string, title: T.string, color: T.string, isLocked: T.boolean };
   override canBind() { return false; }
-  override canRotate() { return false; }
+  override hideRotateHandle() { return true; }
   override canResize(shape: SqlErdFrameShape) { return !shape.props.isLocked; }
   override onResize(shape: SqlErdFrameShape, info: TLResizeInfo<SqlErdFrameShape>) {
     return resizeBox(shape, info, { minWidth: 200, minHeight: 120 });

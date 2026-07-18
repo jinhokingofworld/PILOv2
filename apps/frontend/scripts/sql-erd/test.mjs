@@ -8200,7 +8200,7 @@ for (const shapeSource of [
   tableShape,
   textShape
 ]) {
-  assert.match(shapeSource, /override canRotate\(\) \{ return false; \}/);
+  assert.match(shapeSource, /override hideRotateHandle\(\) \{ return true; \}/);
 }
 assert.match(annotationToolbar, /export function SqlErdCanvasToolbar/);
 assert.match(annotationToolbar, /aria-label="선택\/드래그"/);
