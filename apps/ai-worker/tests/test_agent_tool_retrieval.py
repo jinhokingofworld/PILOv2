@@ -99,6 +99,23 @@ def catalog_payload() -> dict[str, object]:
     return payload
 
 
+def legacy_catalog_payload(version: str = "agent-tool-capabilities:v1") -> dict[str, object]:
+    payload = catalog_payload()
+    payload["version"] = version
+    for capability in payload["capabilities"]:
+        capability.pop("examples")
+        capability.pop("selectorKinds")
+        capability.pop("requiresConfirmation")
+        capability.pop("availability")
+    for descriptor in payload["descriptors"]:
+        descriptor.pop("selectorKinds")
+        descriptor.pop("requiresConfirmation")
+    payload["sha256"] = compute_tool_capability_catalog_sha(
+        payload["version"], payload["capabilities"], payload["descriptors"]
+    )
+    return payload
+
+
 def test_catalog_requires_exactly_the_hard_eligible_tools() -> None:
     catalog = parse_tool_capability_catalog(catalog_payload(), TOOL_SCHEMAS)
 
@@ -109,6 +126,16 @@ def test_catalog_requires_exactly_the_hard_eligible_tools() -> None:
     invalid["descriptors"] = invalid["descriptors"][:1]
     with pytest.raises(ValueError, match="toolCapabilityCatalog"):
         parse_tool_capability_catalog(invalid, TOOL_SCHEMAS)
+
+
+def test_catalog_accepts_v1_compatibility_payload_and_rejects_unknown_version() -> None:
+    legacy = parse_tool_capability_catalog(legacy_catalog_payload(), TOOL_SCHEMAS)
+    assert legacy is not None
+    assert legacy.version == "agent-tool-capabilities:v1"
+
+    unknown = legacy_catalog_payload("agent-tool-capabilities:v3")
+    with pytest.raises(ValueError, match="Unsupported toolCapabilityCatalog version"):
+        parse_tool_capability_catalog(unknown, TOOL_SCHEMAS)
 
 
 def test_catalog_rejects_a_sha_that_does_not_match_the_canonical_content() -> None:

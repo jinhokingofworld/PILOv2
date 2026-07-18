@@ -9,6 +9,9 @@ from typing import Protocol
 
 _SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 _TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣_]+")
+_SUPPORTED_CATALOG_VERSIONS = frozenset(
+    {"agent-tool-capabilities:v1", "agent-tool-capabilities:v2"}
+)
 _KOREAN_PARTICLES = (
     "으로",
     "에서",
@@ -103,6 +106,8 @@ def parse_tool_capability_catalog(
         raise ValueError("Invalid toolCapabilityCatalog")
 
     version = _required_string(value, "version")
+    if version not in _SUPPORTED_CATALOG_VERSIONS:
+        raise ValueError("Unsupported toolCapabilityCatalog version")
     sha256 = _required_string(value, "sha256").lower()
     raw_capabilities = value.get("capabilities")
     raw_descriptors = value.get("descriptors")
