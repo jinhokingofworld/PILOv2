@@ -1467,6 +1467,36 @@ class PgAgentRunRepository:
                             f"previous resource {domain}:{resource_type} id={resource_id}{suffix}"
                         )
 
+        selected_candidate = self.connection.execute(
+            """
+            SELECT resource_type, label, description, status
+            FROM agent_candidate_selections
+            WHERE run_id = %s
+              AND workspace_id = %s
+              AND requested_by_user_id = %s
+              AND consumed_at IS NOT NULL
+              AND expires_at > now()
+            ORDER BY consumed_at DESC
+            LIMIT 1
+            """,
+            (job.run_id, job.workspace_id, job.requested_by_user_id),
+        ).fetchone()
+        if selected_candidate is not None:
+            resource_type = str(selected_candidate["resource_type"]).strip()
+            label = str(selected_candidate["label"]).strip()[:300]
+            description = selected_candidate["description"]
+            status = selected_candidate["status"]
+            if resource_type and label:
+                details = [
+                    f"selected meeting resource type={resource_type}",
+                    f"label={label}",
+                ]
+                if isinstance(description, str) and description.strip():
+                    details.append(f"description={description.strip()[:300]}")
+                if isinstance(status, str) and status.strip():
+                    details.append(f"status={status.strip()[:100]}")
+                memory.append(" ".join(details))
+
         timeline_rows = self.connection.execute(
             """
             WITH timeline AS (

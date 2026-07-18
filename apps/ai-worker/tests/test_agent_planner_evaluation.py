@@ -261,6 +261,7 @@ def test_fixed_korean_suite_loads() -> None:
         "start_meeting_recording",
         "end_meeting_recording",
         "list_meeting_rooms",
+        "resolve_meeting_resource",
         "get_active_meeting",
         "get_meeting_participants",
         "list_meeting_reports",

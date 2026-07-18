@@ -17,6 +17,7 @@ const CANDIDATE_TTL_MINUTES = 15;
 
 interface CandidateRow extends QueryResultRow {
   id: string;
+  tool_step_id: string;
   resource_type: MeetingAgentResourceType;
   resource_id: string;
   report_id: string | null;
@@ -42,6 +43,7 @@ export class AgentCandidateSelectionService {
 
   async createMeetingCandidates(
     context: AgentToolContext,
+    toolStepId: string,
     candidates: Array<{
       reference: MeetingAgentResourceReference;
       candidate: MeetingAgentResourceCandidate;
@@ -53,15 +55,17 @@ export class AgentCandidateSelectionService {
           `
             INSERT INTO agent_candidate_selections (
               workspace_id, requested_by_user_id, run_id,
+              tool_step_id,
               resource_type, resource_id, report_id,
               label, description, status, expires_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now() + INTERVAL '${CANDIDATE_TTL_MINUTES} minutes')
-            RETURNING id, resource_type, resource_id, report_id, label, description, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now() + INTERVAL '${CANDIDATE_TTL_MINUTES} minutes')
+            RETURNING id, tool_step_id, resource_type, resource_id, report_id, label, description, status
           `,
           [
             context.workspaceId,
             context.currentUserId,
             context.runId,
+            toolStepId,
             reference.resourceType,
             reference.resourceId,
             reference.reportId ?? null,
@@ -96,12 +100,21 @@ export class AgentCandidateSelectionService {
   ): Promise<{ label: string; reference: MeetingAgentResourceReference }> {
       const candidate = await transaction.queryOne<CandidateRow>(
         `
-          SELECT id, resource_type, resource_id, report_id, label, description, status
+          SELECT id, tool_step_id, resource_type, resource_id, report_id, label, description, status
           FROM agent_candidate_selections
           WHERE id = $1
             AND workspace_id = $2
             AND requested_by_user_id = $3
             AND run_id = $4
+            AND tool_step_id = (
+              SELECT step.id
+              FROM agent_steps AS step
+              WHERE step.run_id = $4
+                AND step.step_type = 'tool'
+                AND step.status = 'completed'
+              ORDER BY step.step_order DESC
+              LIMIT 1
+            )
             AND consumed_at IS NULL
             AND expires_at > now()
           FOR UPDATE
@@ -125,6 +138,32 @@ export class AgentCandidateSelectionService {
       );
       if (!consumed) throw badRequest("Meeting candidate selection was already used");
       return { label: candidate.label, reference: revalidated };
+  }
+
+  async getLatestConsumedMeetingReference(
+    context: AgentToolContext,
+    resourceType: MeetingAgentResourceType
+  ): Promise<MeetingAgentResourceReference | null> {
+    const row = await this.database.queryOne<CandidateRow>(
+      `
+        SELECT id, tool_step_id, resource_type, resource_id, report_id, label, description, status
+        FROM agent_candidate_selections
+        WHERE workspace_id = $1
+          AND requested_by_user_id = $2
+          AND run_id = $3
+          AND resource_type = $4
+          AND consumed_at IS NOT NULL
+          AND expires_at > now()
+        ORDER BY consumed_at DESC
+        LIMIT 1
+      `,
+      [context.workspaceId, context.currentUserId, context.runId, resourceType]
+    );
+    if (!row) return null;
+    return this.meetingAgentResourceResolver.revalidateReference(
+      context,
+      this.toReference(row)
+    );
   }
 
   private toPublicCandidate(row: CandidateRow): AgentCandidateSelection {

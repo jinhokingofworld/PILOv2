@@ -202,7 +202,7 @@ export class MeetingAgentResourceResolver {
       candidate: {
         resourceType: "workspace_member",
         label: member.user.name ?? "PILO 사용자",
-        description: member.role,
+        description: this.memberDescription(member.role, member.user.email),
         status: null
       }
     }));
@@ -499,5 +499,18 @@ export class MeetingAgentResourceResolver {
 
   private normalize(value: string): string {
     return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ko-KR");
+  }
+
+  private memberDescription(role: string, email: string | null): string {
+    const maskedEmail = this.maskEmail(email);
+    return maskedEmail ? `${role} · ${maskedEmail}` : role;
+  }
+
+  private maskEmail(email: string | null): string | null {
+    if (!email) return null;
+    const [local, domain] = email.trim().split("@");
+    if (!local || !domain) return null;
+    const prefix = [...local].slice(0, 2).join("");
+    return `${prefix}${"*".repeat(Math.max(1, [...local].length - prefix.length))}@${domain}`;
   }
 }

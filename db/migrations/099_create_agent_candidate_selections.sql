@@ -5,6 +5,7 @@ CREATE TABLE public.agent_candidate_selections (
   workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   requested_by_user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   run_id UUID NOT NULL REFERENCES public.agent_runs(id) ON DELETE CASCADE,
+  tool_step_id UUID NOT NULL REFERENCES public.agent_steps(id) ON DELETE CASCADE,
   resource_type TEXT NOT NULL,
   resource_id UUID NOT NULL,
   report_id UUID,
@@ -48,12 +49,16 @@ CREATE INDEX idx_agent_candidate_selections_claim
     workspace_id,
     requested_by_user_id,
     run_id,
+    tool_step_id,
     expires_at
   )
   WHERE consumed_at IS NULL;
 
 CREATE INDEX idx_agent_candidate_selections_run_created_at
   ON public.agent_candidate_selections(run_id, created_at DESC);
+
+CREATE INDEX idx_agent_candidate_selections_tool_step_id
+  ON public.agent_candidate_selections(tool_step_id);
 
 CREATE INDEX idx_agent_candidate_selections_requested_by_user_id
   ON public.agent_candidate_selections(requested_by_user_id);
