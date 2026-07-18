@@ -614,6 +614,35 @@
   color: #92400e;
 }
 
+.canvas-frame-lazy-loading-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 32;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.canvas-frame-lazy-loading-indicator {
+  position: absolute;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  color: #2563eb;
+  font-size: 27px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 2px 8px rgba(37, 99, 235, 0.24);
+  animation: canvas-frame-lazy-loading-spin 900ms linear infinite;
+}
+
+@keyframes canvas-frame-lazy-loading-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
 .pilo-tldraw-canvas {
   position: absolute;
   inset: 0;

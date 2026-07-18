@@ -188,6 +188,7 @@ type SqlErdCanvasProps = {
     patch: SqltoerdLayoutPatch,
     context?: SqlErdLayoutPatchContext
   ) => boolean | void;
+  onDeleteForeignKey?: (relationId: string) => void;
   onSchemaDelete?: (
     selection: Extract<SqlErdSelection, { type: "table" | "column" }>
   ) => void;
@@ -1315,22 +1316,26 @@ function SqlErdSelectionSync({
 }
 
 function SqlErdSchemaDeleteBridge({
+  onDeleteForeignKey,
   onSchemaDelete,
   selectedSqlErdObject
 }: {
+  onDeleteForeignKey?: (relationId: string) => void;
   onSchemaDelete: (
     selection: Extract<SqlErdSelection, { type: "table" | "column" }>
   ) => void;
   selectedSqlErdObject: SqlErdSelection;
 }) {
   const editor = useEditor();
+  const onDeleteForeignKeyRef = useRef(onDeleteForeignKey);
   const onSchemaDeleteRef = useRef(onSchemaDelete);
   const selectedSqlErdObjectRef = useRef(selectedSqlErdObject);
 
   useEffect(() => {
+    onDeleteForeignKeyRef.current = onDeleteForeignKey;
     onSchemaDeleteRef.current = onSchemaDelete;
     selectedSqlErdObjectRef.current = selectedSqlErdObject;
-  }, [onSchemaDelete, selectedSqlErdObject]);
+  }, [onDeleteForeignKey, onSchemaDelete, selectedSqlErdObject]);
 
   useEffect(() => {
     function isEditableTarget(target: EventTarget | null) {
@@ -1343,21 +1348,33 @@ function SqlErdSchemaDeleteBridge({
       );
     }
 
-    function getSelectedSchemaTableShape() {
+    function hasMatchingSelectedSchemaShape() {
       const selection = selectedSqlErdObjectRef.current;
       const selectedShape = editor.getOnlySelectedShape();
 
-      return (
+      if (
         (selection.type === "table" || selection.type === "column") &&
         isSqlErdTableShape(selectedShape) &&
         selectedShape.props.tableId === selection.tableId
+      ) {
+        return true;
+      }
+
+      return (
+        selection.type === "relation" &&
+        isSqlErdRelationShape(selectedShape) &&
+        selectedShape.props.relationId === selection.relationId
       );
     }
 
     function handleKeyDown(event: globalThis.KeyboardEvent) {
       const selection = selectedSqlErdObjectRef.current;
 
-      if (selection.type !== "table" && selection.type !== "column") {
+      if (
+        selection.type !== "table" &&
+        selection.type !== "column" &&
+        selection.type !== "relation"
+      ) {
         return;
       }
 
@@ -1367,14 +1384,22 @@ function SqlErdSchemaDeleteBridge({
           key: event.key,
           selection
         }) ||
-        !getSelectedSchemaTableShape()
+        !hasMatchingSelectedSchemaShape()
       ) {
+        return;
+      }
+
+      if (selection.type === "relation" && !onDeleteForeignKeyRef.current) {
         return;
       }
 
       event.preventDefault();
       event.stopImmediatePropagation();
-      onSchemaDeleteRef.current(selection);
+      if (selection.type === "relation") {
+        onDeleteForeignKeyRef.current?.(selection.relationId);
+      } else {
+        onSchemaDeleteRef.current(selection);
+      }
     }
 
     const removeBeforeDeleteHandler =
@@ -1383,8 +1408,10 @@ function SqlErdSchemaDeleteBridge({
         (shape, source) => {
           if (
             source === "user" &&
-            isSqlErdTableShape(shape) &&
-            getSelectedSchemaTableShape()
+            (isSqlErdTableShape(shape) ||
+              (isSqlErdRelationShape(shape) &&
+                Boolean(onDeleteForeignKeyRef.current))) &&
+            hasMatchingSelectedSchemaShape()
           ) {
             return false;
           }
@@ -2959,6 +2986,7 @@ export function SqlErdCanvas({
   layoutJson = commerceSqltoerdFixture.layoutJson,
   modelJson = commerceSqltoerdFixture.modelJson,
   onLayoutPatch: onLayoutPatchProp,
+  onDeleteForeignKey,
   onSchemaDelete,
   onSelectionChange,
   pinNavigationRequestId = 0,
@@ -3627,6 +3655,7 @@ export function SqlErdCanvas({
         <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
         {onSchemaDelete ? (
           <SqlErdSchemaDeleteBridge
+            onDeleteForeignKey={onDeleteForeignKey}
             onSchemaDelete={onSchemaDelete}
             selectedSqlErdObject={selectedSqlErdObject}
           />

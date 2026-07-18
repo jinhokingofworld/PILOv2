@@ -1,3 +1,5 @@
+import { diffLines } from "diff";
+
 import type {
   SqltoerdLayoutJsonV1,
   SqltoerdModelJsonV1,
@@ -80,6 +82,17 @@ export type SqlErdSqlDiffLine = {
   value: string;
 };
 
+export type SqlErdSplitDiffCell = {
+  kind: "added" | "empty" | "removed" | "unchanged";
+  lineNumber: number | null;
+  value: string;
+};
+
+export type SqlErdSplitDiffRow = {
+  after: SqlErdSplitDiffCell;
+  before: SqlErdSplitDiffCell;
+};
+
 export function createSqlErdNormalizedSqlPreview({
   layoutJson,
   modelJson,
@@ -105,11 +118,11 @@ export function createSqlErdNormalizedSqlPreview({
       generatedSourceText: generated.sql,
       hasChanges: generated.sql !== session.sourceText,
       layoutJson: layoutJson ?? session.layoutJson,
-      modelJson,
+      modelJson: generated.modelJson,
       resolvedDialect,
       settingsJson: retainSqltoerdRelationNotesForModel(
         settingsJson ?? session.settingsJson,
-        modelJson
+        generated.modelJson
       ),
       warnings: generated.warnings
     };
@@ -179,6 +192,90 @@ export function createSqlErdSqlLineDiff(
   ];
 }
 
+export function createSqlErdSplitDiffRows(
+  beforeSourceText: string,
+  afterSourceText: string
+): SqlErdSplitDiffRow[] {
+  const rows: SqlErdSplitDiffRow[] = [];
+  let beforeLineNumber = 1;
+  let afterLineNumber = 1;
+  let removedCells: SqlErdSplitDiffCell[] = [];
+  let addedCells: SqlErdSplitDiffCell[] = [];
+
+  const flushChangedRows = () => {
+    const rowCount = Math.max(removedCells.length, addedCells.length);
+
+    for (let index = 0; index < rowCount; index += 1) {
+      rows.push({
+        before: removedCells[index] ?? createEmptyDiffCell(),
+        after: addedCells[index] ?? createEmptyDiffCell()
+      });
+    }
+
+    removedCells = [];
+    addedCells = [];
+  };
+
+  for (const change of diffLines(beforeSourceText, afterSourceText)) {
+    const lines = splitSqlDiffLines(change.value);
+
+    if (change.removed) {
+      removedCells.push(
+        ...lines.map((value) => ({
+          kind: "removed" as const,
+          lineNumber: beforeLineNumber++,
+          value
+        }))
+      );
+      continue;
+    }
+
+    if (change.added) {
+      addedCells.push(
+        ...lines.map((value) => ({
+          kind: "added" as const,
+          lineNumber: afterLineNumber++,
+          value
+        }))
+      );
+      continue;
+    }
+
+    flushChangedRows();
+    for (const value of lines) {
+      rows.push({
+        before: {
+          kind: "unchanged",
+          lineNumber: beforeLineNumber++,
+          value
+        },
+        after: {
+          kind: "unchanged",
+          lineNumber: afterLineNumber++,
+          value
+        }
+      });
+    }
+  }
+
+  flushChangedRows();
+  return rows;
+}
+
+function splitSqlDiffLines(value: string) {
+  const lines = value.split("\n");
+
+  if (value.endsWith("\n")) {
+    lines.pop();
+  }
+
+  return lines;
+}
+
+function createEmptyDiffCell(): SqlErdSplitDiffCell {
+  return { kind: "empty", lineNumber: null, value: "" };
+}
+
 export function applySqlErdNormalizedSqlPreview(
   preview: SqlErdNormalizedSqlPreview
 ): SqlErdModelSqlApplyResult {
@@ -199,7 +296,7 @@ export function applySqlErdNormalizedSqlPreview(
 
   if (!parseResult.ok) {
     return {
-      error: parseResult.error.message,
+      error: createSqlErdGeneratedSqlParseError(preview, parseResult.error.message),
       ok: false
     };
   }
@@ -215,6 +312,39 @@ export function applySqlErdNormalizedSqlPreview(
       sourceText: preview.generatedSourceText
     }
   });
+}
+
+function createSqlErdGeneratedSqlParseError(
+  preview: SqlErdNormalizedSqlPreview,
+  parserMessage: string
+) {
+  const dialectLabel =
+    preview.resolvedDialect === "postgresql"
+      ? "PostgreSQL"
+      : preview.resolvedDialect === "mysql"
+        ? "MySQL"
+        : "SQLite";
+  const unexpectedToken = /but\s+"([^"]+)"\s+found/iu.exec(parserMessage)?.[1]
+    ?.trim()
+    .toUpperCase();
+  const candidates = preview.modelJson.schema.tables
+    .flatMap((table) =>
+      table.columns.map((column) => ({
+        label: `${table.schemaName ? `${table.schemaName}.` : ""}${table.name}.${column.name} (${column.dataType})`,
+        type: column.dataType.trim().toUpperCase()
+      }))
+    )
+    .filter(
+      (column) =>
+        unexpectedToken && column.type.startsWith(unexpectedToken)
+    )
+    .slice(0, 3)
+    .map((column) => column.label);
+  const candidateMessage = candidates.length
+    ? ` 확인할 컬럼: ${candidates.join(", ")}.`
+    : "";
+
+  return `생성된 ${dialectLabel} SQL을 검증하지 못했습니다. 선택한 dialect에서 지원되지 않는 컬럼 타입 또는 기본값이 있는지 확인하세요.${candidateMessage}`;
 }
 
 export function createSqlErdSchemaSemanticSignature(

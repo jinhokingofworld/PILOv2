@@ -23,7 +23,9 @@ export function shouldHandleSqlErdSchemaDeleteShortcut({
   return (
     !isEditableTarget &&
     (key === "Delete" || key === "Backspace") &&
-    (selection.type === "table" || selection.type === "column")
+    (selection.type === "table" ||
+      selection.type === "column" ||
+      selection.type === "relation")
   );
 }
 

@@ -17,12 +17,10 @@ type UseCanvasRuntimeHydrationOptions = {
   board: CanvasBoardDetail;
   freeformShapesRef: RuntimeRef<PiloCanvasFreeformShape[]>;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
-  pendingShapeDetailRef: RuntimeRef<string | null>;
   setCameraResetVersion: (updater: (version: number) => number) => void;
   setCanvasHydrationVersion: (updater: (version: number) => number) => void;
   setFreeformShapes: (shapes: PiloCanvasFreeformShape[]) => void;
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
-  shapeDetailRequestSeqRef: RuntimeRef<number>;
   storageMode: CanvasRuntimeStorageMode;
   viewportShapeLoadRequestSeqRef: RuntimeRef<number>;
 };
@@ -31,12 +29,10 @@ export function useCanvasRuntimeHydration({
   board,
   freeformShapesRef,
   pendingLocalShapeVersionsRef,
-  pendingShapeDetailRef,
   setCameraResetVersion,
   setCanvasHydrationVersion,
   setFreeformShapes,
   shapeDetailCacheRef,
-  shapeDetailRequestSeqRef,
   storageMode,
   viewportShapeLoadRequestSeqRef,
 }: UseCanvasRuntimeHydrationOptions) {
@@ -55,8 +51,6 @@ export function useCanvasRuntimeHydration({
       if (cancelled) return;
 
       shapeDetailCacheRef.current.clear();
-      pendingShapeDetailRef.current = null;
-      shapeDetailRequestSeqRef.current += 1;
       viewportShapeLoadRequestSeqRef.current += 1;
       pendingLocalShapeVersionsRef.current.clear();
       freeformShapesRef.current = storedFreeformShapes;
@@ -74,12 +68,10 @@ export function useCanvasRuntimeHydration({
     board.shapes,
     freeformShapesRef,
     pendingLocalShapeVersionsRef,
-    pendingShapeDetailRef,
     setCameraResetVersion,
     setCanvasHydrationVersion,
     setFreeformShapes,
     shapeDetailCacheRef,
-    shapeDetailRequestSeqRef,
     storageMode,
     viewportShapeLoadRequestSeqRef,
   ]);

@@ -1,0 +1,317 @@
+{
+  "version": "agent-tool-retrieval-quality-gate:v1",
+  "suiteVersion": "tool-retrieval-quality-suite:v1",
+  "topK": 8,
+  "schemaTokenBudget": 8000,
+  "registrySnapshot": {
+    "inventorySha256": "44967e7f36a86bf51a915713466a1b09818b6514d563d9f03887c39f8f432cdc",
+    "catalogSha256": "b90e6edb73580f88b65bbecd87b9f2548ee20eaffea0a65b32c4b4e338eea78f",
+    "eligibleSnapshotSha256": "eec92a6f77c988e71eea37f7125f3dd4b039765a785a3a221f01edc7987dd928"
+  },
+  "privacySensitiveValues": [
+    "11111111-1111-4111-8111-111111111111",
+    "quality-gate-private-value"
+  ],
+  "eligibleToolSchemas": {
+    "list_calendar_events": {
+      "type": "object",
+      "required": ["start", "end"],
+      "properties": {
+        "start": {"type": "string"},
+        "end": {"type": "string"}
+      }
+    },
+    "list_meeting_reports": {
+      "type": "object",
+      "properties": {
+        "limit": {"type": "integer"}
+      }
+    },
+    "list_board_issues": {
+      "type": "object",
+      "properties": {
+        "query": {"type": "string"}
+      }
+    },
+    "create_calendar_event": {
+      "type": "object",
+      "required": ["title"],
+      "properties": {
+        "title": {"type": "string"}
+      }
+    }
+  },
+  "toolCapabilityCatalog": {
+    "version": "agent-tool-capabilities:v2",
+    "sha256": "b899a2d48324699a8e0cc4ba601961c7c6db7c20663debc4e06ba7d1b450f1d7",
+    "capabilities": [
+      {
+        "id": "calendar.list",
+        "domain": "calendar",
+        "toolNames": ["list_calendar_events"],
+        "whenToUse": "일정을 조회할 때",
+        "mustNotUseFor": ["회의록 요청", "일정 삭제"],
+        "positiveExamples": ["이번 주 일정 조회", "이번 주 일정 보여줘", "이번주일정조회", "이번 주 일정 조회 부탁드려요", "일정 조회"],
+        "examples": [
+          {"kind": "canonical", "utterance": "이번 주 일정 조회"},
+          {"kind": "paraphrase", "utterance": "이번 주 일정 보여줘"},
+          {"kind": "typo", "utterance": "이번주일정조회"},
+          {"kind": "honorific", "utterance": "이번 주 일정 조회 부탁드려요"},
+          {"kind": "abbreviation", "utterance": "일정 조회"}
+        ],
+        "selectorKinds": ["date_range"],
+        "requiresConfirmation": false,
+        "availability": "supported"
+      },
+      {
+        "id": "meeting.reports.list",
+        "domain": "meeting",
+        "toolNames": ["list_meeting_reports"],
+        "whenToUse": "회의록을 조회할 때",
+        "mustNotUseFor": ["일정 요청"],
+        "positiveExamples": ["최근 회의록 조회", "최근 회의록 보여줘", "최근회의록조회", "최근 회의록 조회 부탁드려요", "회의록 조회"],
+        "examples": [
+          {"kind": "canonical", "utterance": "최근 회의록 조회"},
+          {"kind": "paraphrase", "utterance": "최근 회의록 보여줘"},
+          {"kind": "typo", "utterance": "최근회의록조회"},
+          {"kind": "honorific", "utterance": "최근 회의록 조회 부탁드려요"},
+          {"kind": "abbreviation", "utterance": "회의록 조회"}
+        ],
+        "selectorKinds": ["meeting_report"],
+        "requiresConfirmation": false,
+        "availability": "supported"
+      },
+      {
+        "id": "board.issues.list",
+        "domain": "board",
+        "toolNames": ["list_board_issues"],
+        "whenToUse": "보드 이슈를 조회할 때",
+        "mustNotUseFor": ["회의록 요청"],
+        "positiveExamples": ["보드 이슈 조회", "보드 이슈 보여줘", "보드이슈조회", "보드 이슈 조회 부탁드려요", "이슈 조회"],
+        "examples": [
+          {"kind": "canonical", "utterance": "보드 이슈 조회"},
+          {"kind": "paraphrase", "utterance": "보드 이슈 보여줘"},
+          {"kind": "typo", "utterance": "보드이슈조회"},
+          {"kind": "honorific", "utterance": "보드 이슈 조회 부탁드려요"},
+          {"kind": "abbreviation", "utterance": "이슈 조회"}
+        ],
+        "selectorKinds": ["board_filter"],
+        "requiresConfirmation": false,
+        "availability": "supported"
+      },
+      {
+        "id": "calendar.create",
+        "domain": "calendar",
+        "toolNames": ["create_calendar_event"],
+        "whenToUse": "새 event를 생성할 때",
+        "mustNotUseFor": ["일정 조회"],
+        "positiveExamples": ["새 이벤트 생성", "새 event 만들어줘", "새이벤트생성", "새 이벤트 생성 부탁드려요", "이벤트 생성"],
+        "examples": [
+          {"kind": "canonical", "utterance": "새 이벤트 생성"},
+          {"kind": "paraphrase", "utterance": "새 event 만들어줘"},
+          {"kind": "typo", "utterance": "새이벤트생성"},
+          {"kind": "honorific", "utterance": "새 이벤트 생성 부탁드려요"},
+          {"kind": "abbreviation", "utterance": "이벤트 생성"}
+        ],
+        "selectorKinds": ["calendar_event"],
+        "requiresConfirmation": true,
+        "availability": "supported"
+      },
+      {
+        "id": "calendar.delete",
+        "domain": "calendar",
+        "toolNames": [],
+        "whenToUse": "기존 일정을 삭제할 때",
+        "mustNotUseFor": ["현재 registry에 실행 tool이 없는 요청"],
+        "positiveExamples": ["일정 삭제", "일정 지워줘", "일정삭제", "일정 삭제 부탁드려요", "일정 삭제 요청"],
+        "examples": [
+          {"kind": "canonical", "utterance": "일정 삭제"},
+          {"kind": "paraphrase", "utterance": "일정 지워줘"},
+          {"kind": "typo", "utterance": "일정삭제"},
+          {"kind": "honorific", "utterance": "일정 삭제 부탁드려요"},
+          {"kind": "abbreviation", "utterance": "일정 삭제 요청"}
+        ],
+        "selectorKinds": ["calendar_event"],
+        "requiresConfirmation": false,
+        "availability": "unsupported"
+      }
+    ],
+    "descriptors": [
+      {
+        "toolName": "list_calendar_events",
+        "domain": "calendar",
+        "action": "list_calendar_events",
+        "operation": "read",
+        "capabilityIds": ["calendar.list"],
+        "whenToUse": "Calendar 일정을 조회합니다.",
+        "mustNotUseFor": ["회의록 요청", "일정 삭제"],
+        "acceptedSelectorFields": ["start", "end"],
+        "selectorKinds": ["date_range"],
+        "prerequisiteToolNames": [],
+        "followUpToolNames": [],
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "requiresConfirmation": false,
+        "contextSurface": null,
+        "inputSchemaSha256": "51b53c49c955342f726ad1fc2a44bdb7ff36f261cb54e3a266d690a5bfaf3db2"
+      },
+      {
+        "toolName": "list_meeting_reports",
+        "domain": "meeting",
+        "action": "list_meeting_reports",
+        "operation": "read",
+        "capabilityIds": ["meeting.reports.list"],
+        "whenToUse": "회의록 목록을 조회합니다.",
+        "mustNotUseFor": ["일정 요청"],
+        "acceptedSelectorFields": ["limit"],
+        "selectorKinds": ["meeting_report"],
+        "prerequisiteToolNames": [],
+        "followUpToolNames": [],
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "requiresConfirmation": false,
+        "contextSurface": null,
+        "inputSchemaSha256": "791ba91f68c5ed7585d0dc77e5301d323f41900ea2d0fa58be6982b808c85566"
+      },
+      {
+        "toolName": "list_board_issues",
+        "domain": "board",
+        "action": "list_board_issues",
+        "operation": "read",
+        "capabilityIds": ["board.issues.list"],
+        "whenToUse": "보드 이슈를 조회합니다.",
+        "mustNotUseFor": ["회의록 요청"],
+        "acceptedSelectorFields": ["query"],
+        "selectorKinds": ["board_filter"],
+        "prerequisiteToolNames": [],
+        "followUpToolNames": [],
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "requiresConfirmation": false,
+        "contextSurface": null,
+        "inputSchemaSha256": "094ec29d007cce150c65abf0756d79ad5b62a1acfdb6e0841f69f1377ef41761"
+      },
+      {
+        "toolName": "create_calendar_event",
+        "domain": "calendar",
+        "action": "create_calendar_event",
+        "operation": "write",
+        "capabilityIds": ["calendar.create"],
+        "whenToUse": "Calendar event를 생성합니다.",
+        "mustNotUseFor": ["일정 조회"],
+        "acceptedSelectorFields": ["title"],
+        "selectorKinds": ["calendar_event"],
+        "prerequisiteToolNames": [],
+        "followUpToolNames": [],
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "requiresConfirmation": true,
+        "contextSurface": null,
+        "inputSchemaSha256": "2a669efc62a24ebfe5b8c6ae180eb995e22baaaebf98793f36890b0aacb07ebc"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "canonical_calendar_list",
+      "kind": "canonical",
+      "prompt": "이번 주 일정 조회",
+      "domain": "calendar",
+      "capabilityId": "calendar.list",
+      "requiredToolNames": ["list_calendar_events"],
+      "expectedFallbackReason": null,
+      "expectedPlannerToolNames": ["list_calendar_events"]
+    },
+    {
+      "id": "canonical_meeting_list",
+      "kind": "canonical",
+      "prompt": "최근 회의록 조회",
+      "domain": "meeting",
+      "capabilityId": "meeting.reports.list",
+      "requiredToolNames": ["list_meeting_reports"],
+      "expectedFallbackReason": null,
+      "expectedPlannerToolNames": ["list_meeting_reports"]
+    },
+    {
+      "id": "canonical_board_list",
+      "kind": "canonical",
+      "prompt": "보드 이슈 조회",
+      "domain": "board",
+      "capabilityId": "board.issues.list",
+      "requiredToolNames": ["list_board_issues"],
+      "expectedFallbackReason": null,
+      "expectedPlannerToolNames": ["list_board_issues"]
+    },
+    {
+      "id": "held_out_calendar",
+      "kind": "held_out",
+      "prompt": "이번 주 일정 보여줘",
+      "domain": "calendar",
+      "capabilityId": "calendar.list",
+      "requiredToolNames": ["list_calendar_events"],
+      "expectedFallbackReason": null,
+      "expectedPlannerToolNames": ["list_calendar_events"]
+    },
+    {
+      "id": "held_out_meeting",
+      "kind": "held_out",
+      "prompt": "최근 회의록 보여줘",
+      "domain": "meeting",
+      "capabilityId": "meeting.reports.list",
+      "requiredToolNames": ["list_meeting_reports"],
+      "expectedFallbackReason": null,
+      "expectedPlannerToolNames": ["list_meeting_reports"]
+    },
+    {
+      "id": "held_out_board",
+      "kind": "held_out",
+      "prompt": "보드 이슈 보여줘",
+      "domain": "board",
+      "capabilityId": "board.issues.list",
+      "requiredToolNames": ["list_board_issues"],
+      "expectedFallbackReason": null,
+      "expectedPlannerToolNames": ["list_board_issues"]
+    },
+    {
+      "id": "adjacent_unsupported_delete",
+      "kind": "counterexample",
+      "prompt": "일정 삭제",
+      "domain": null,
+      "capabilityId": null,
+      "requiredToolNames": [],
+      "expectedFallbackReason": "unsupported_capability",
+      "expectedPlannerToolNames": ["list_calendar_events", "list_meeting_reports", "list_board_issues", "create_calendar_event"]
+    },
+    {
+      "id": "write_capability_legacy_fallback",
+      "kind": "fallback",
+      "prompt": "새 이벤트 생성",
+      "domain": "calendar",
+      "capabilityId": "calendar.create",
+      "requiredToolNames": ["create_calendar_event"],
+      "expectedFallbackReason": "write_capability",
+      "expectedPlannerToolNames": ["list_calendar_events", "list_meeting_reports", "list_board_issues", "create_calendar_event"]
+    },
+    {
+      "id": "low_confidence_mutation_safe",
+      "kind": "fallback",
+      "prompt": "quality-gate-private-value 11111111-1111-4111-8111-111111111111",
+      "domain": null,
+      "capabilityId": null,
+      "requiredToolNames": [],
+      "expectedFallbackReason": "no_metadata_match",
+      "expectedPlannerToolNames": ["list_calendar_events", "list_meeting_reports", "list_board_issues", "create_calendar_event"]
+    },
+    {
+      "id": "schema_budget_legacy_fallback",
+      "kind": "fallback",
+      "prompt": "이번 주 일정 조회",
+      "domain": null,
+      "capabilityId": null,
+      "requiredToolNames": [],
+      "schemaTokenBudget": 1,
+      "expectedFallbackReason": "tool_schema_budget_exceeded",
+      "expectedPlannerToolNames": ["list_calendar_events", "list_meeting_reports", "list_board_issues", "create_calendar_event"]
+    }
+  ]
+}

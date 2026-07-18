@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from app.agent_tool_retrieval import ToolCapabilityCatalog, parse_tool_capability_catalog
+from app.agent_tool_retrieval import (
+    DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
+    ToolCapabilityCatalog,
+    parse_tool_capability_catalog,
+    select_read_only_tool_shortlist,
+)
 from app.meeting_report_processor import InfrastructureError
 
 AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
@@ -28,6 +34,13 @@ PLANNER_STATUSES = {
 }
 TOOL_RISK_LEVELS = {"low", "medium", "high"}
 TOOL_EXECUTION_MODES = {"auto", "confirmation_required", "contextual"}
+TOOL_RETRIEVAL_MODE_SHADOW = "shadow"
+TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST = "read_only_shortlist"
+TOOL_RETRIEVAL_MODES = {
+    TOOL_RETRIEVAL_MODE_SHADOW,
+    TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+}
+DEFAULT_TOOL_RETRIEVAL_TOP_K = 8
 MEETING_REPORT_ID_TOOLS = {"get_meeting_report", "summarize_meeting_report"}
 USER_VISIBLE_UUID_PATTERN = re.compile(
     r"(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![0-9a-f])",
@@ -94,6 +107,32 @@ class AgentPlanningRequest:
     context_surface: str | None = None
 
 
+def select_agent_planner_tools(
+    job: AgentRunJob,
+    prompt: str,
+    *,
+    mode: str,
+    top_k: int = DEFAULT_TOOL_RETRIEVAL_TOP_K,
+    schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
+) -> tuple[AgentToolSchema, ...]:
+    """Returns the execution-safe planner tool set, falling back to legacy tools."""
+    if mode not in TOOL_RETRIEVAL_MODES or job.tool_capability_catalog is None:
+        return job.tools
+
+    if mode == TOOL_RETRIEVAL_MODE_SHADOW:
+        return job.tools
+    selection = select_read_only_tool_shortlist(
+        prompt,
+        job.tool_capability_catalog,
+        {tool.name: tool.input_schema for tool in job.tools},
+        top_k=top_k,
+        schema_token_budget=schema_token_budget,
+    )
+    selected_tool_names = set(selection.tool_names)
+    shortlist = tuple(tool for tool in job.tools if tool.name in selected_tool_names)
+    return shortlist or job.tools
+
+
 @dataclass(frozen=True)
 class AgentPlannerDecision:
     status: str
@@ -104,6 +143,9 @@ class AgentPlannerDecision:
     requires_confirmation: bool | None
     missing_fields: tuple[str, ...]
     unsupported_reason: str | None
+    provider_input_tokens: int | None = None
+    provider_output_tokens: int | None = None
+    provider_total_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -311,11 +353,19 @@ class AgentRunProcessor:
         planner_client: AgentPlannerClient,
         execution_handoff_client: AgentExecutionHandoffClient,
         current_date_provider: Callable[[str], date] | None = None,
+        tool_retrieval_mode: str | None = None,
+        tool_retrieval_top_k: int = DEFAULT_TOOL_RETRIEVAL_TOP_K,
+        tool_retrieval_schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
     ) -> None:
         self.repository = repository
         self.planner_client = planner_client
         self.execution_handoff_client = execution_handoff_client
         self.current_date_provider = current_date_provider or _current_date_for_timezone
+        self.tool_retrieval_mode = _tool_retrieval_mode(
+            tool_retrieval_mode or os.environ.get("AGENT_TOOL_RETRIEVAL_MODE", "")
+        )
+        self.tool_retrieval_top_k = tool_retrieval_top_k
+        self.tool_retrieval_schema_token_budget = tool_retrieval_schema_token_budget
 
     def process_payload(self, payload: dict[str, object]) -> AgentProcessResult:
         try:
@@ -404,6 +454,14 @@ class AgentRunProcessor:
         try:
             step_id = self.repository.start_planner_step(job, context)
             current_date = self.current_date_provider(context.timezone).isoformat()
+            planner_tools = select_agent_planner_tools(
+                job,
+                context.prompt,
+                mode=self.tool_retrieval_mode,
+                top_k=self.tool_retrieval_top_k,
+                schema_token_budget=self.tool_retrieval_schema_token_budget,
+            )
+            planner_job = replace(job, tools=planner_tools)
             decision = self.planner_client.plan(
                 AgentPlanningRequest(
                     run_id=job.run_id,
@@ -411,7 +469,7 @@ class AgentRunProcessor:
                     timezone=context.timezone,
                     current_date=current_date,
                     tool_schema_version=job.tool_schema_version,
-                    tools=job.tools,
+                    tools=planner_tools,
                     planning_context=context.planning_context,
                     context_surface=(
                         job.request_context["surface"] if job.request_context is not None else None
@@ -420,10 +478,11 @@ class AgentRunProcessor:
             )
             normalized = normalize_agent_planner_decision(
                 decision,
-                job,
+                planner_job,
                 prompt=context.prompt,
                 current_date=current_date,
                 planning_context=context.planning_context,
+                strict_tool_selection=len(planner_tools) < len(job.tools),
             )
             planner_step_completed = self.repository.complete_planner_step(
                 job.run_id,
@@ -647,6 +706,7 @@ def normalize_agent_planner_decision(
     prompt: str = "",
     current_date: str | None = None,
     planning_context: str = "",
+    strict_tool_selection: bool = False,
 ) -> NormalizedPlannerDecision:
     decision = _normalize_calendar_relative_date_query(
         decision,
@@ -666,6 +726,8 @@ def normalize_agent_planner_decision(
     unsupported_reason = decision.unsupported_reason
 
     if status == "tool_candidate" and tool is None:
+        if strict_tool_selection:
+            raise AgentPlannerOutputError("Agent planner selected a tool outside the shortlist")
         status = "unsupported"
         final_answer = "현재 사용할 수 없는 Agent 도구가 필요한 요청입니다."
         message = "지원하지 않는 Agent 도구 요청입니다."
@@ -1099,7 +1161,19 @@ class OpenAiAgentPlannerClient:
         if not isinstance(output_text, str) or not output_text.strip():
             output_text = _extract_response_text(response)
 
-        return parse_agent_planner_output(output_text)
+        decision = parse_agent_planner_output(output_text)
+        usage = getattr(response, "usage", None)
+        return replace(
+            decision,
+            provider_input_tokens=_optional_nonnegative_int_attribute(usage, "input_tokens"),
+            provider_output_tokens=_optional_nonnegative_int_attribute(usage, "output_tokens"),
+            provider_total_tokens=_optional_nonnegative_int_attribute(usage, "total_tokens"),
+        )
+
+
+def _optional_nonnegative_int_attribute(value: object, key: str) -> int | None:
+    item = getattr(value, key, None)
+    return item if isinstance(item, int) and item >= 0 else None
 
 
 def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
@@ -1347,6 +1421,11 @@ def _sanitize_json_value(value: object) -> dict[str, object]:
     if isinstance(sanitized, dict):
         return sanitized
     return {}
+
+
+def _tool_retrieval_mode(value: str) -> str:
+    normalized = value.strip().lower()
+    return normalized if normalized in TOOL_RETRIEVAL_MODES else TOOL_RETRIEVAL_MODE_SHADOW
 
 
 def _current_date_for_timezone(timezone: str) -> date:
