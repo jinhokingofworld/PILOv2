@@ -3021,7 +3021,7 @@ assert.equal(
       relationId: "relation.orders.user_id.users.id"
     }
   }),
-  false
+  true
 );
 assert.deepEqual(
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
@@ -5828,6 +5828,34 @@ assert.equal(
   }).ok,
   true
 );
+const uuidModel = structuredClone(mysqlParseResult.modelJson);
+uuidModel.schema.tables[0].columns[0].dataType = "UUID";
+const normalizedUuidMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "mysql",
+  modelJson: uuidModel
+});
+assert.equal(
+  normalizedUuidMySql.modelJson.schema.tables[0].columns[0].dataType,
+  "CHAR(36)"
+);
+assert.match(normalizedUuidMySql.sql, /`id` CHAR\(36\) NOT NULL/);
+assert.match(normalizedUuidMySql.warnings.join(" "), /UUID.*CHAR\(36\)/);
+const normalizedUuidSqlite = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "sqlite",
+  modelJson: uuidModel
+});
+assert.equal(
+  normalizedUuidSqlite.modelJson.schema.tables[0].columns[0].dataType,
+  "TEXT"
+);
+assert.match(normalizedUuidSqlite.sql, /"id" TEXT NOT NULL/);
+assert.equal(
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "sqlite",
+    sourceText: normalizedUuidSqlite.sql
+  }).ok,
+  true
+);
 const modelSqlPreviewSession = {
   id: "session.model-sql-preview",
   revision: 7,
@@ -5858,6 +5886,34 @@ assert.match(
   modelSqlPreview.warnings.join(" "),
   /정규화된 CREATE TABLE 및 FOREIGN KEY 구문으로 SQL을 재생성합니다/
 );
+const uuidModelSqlPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: uuidModel,
+    resolvedDialect: "mysql",
+    session: { ...modelSqlPreviewSession, modelJson: uuidModel }
+  });
+assert.equal(
+  uuidModelSqlPreview.modelJson.schema.tables[0].columns[0].dataType,
+  "CHAR(36)"
+);
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(uuidModelSqlPreview).ok,
+  true
+);
+const unsupportedTypeModel = structuredClone(mysqlParseResult.modelJson);
+unsupportedTypeModel.schema.tables[0].columns[0].dataType = "USER_ROLE";
+const unsupportedTypeApplyResult =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+      modelJson: unsupportedTypeModel,
+      resolvedDialect: "mysql",
+      session: { ...modelSqlPreviewSession, modelJson: unsupportedTypeModel }
+    })
+  );
+assert.equal(unsupportedTypeApplyResult.ok, false);
+assert.match(unsupportedTypeApplyResult.error, /생성된 MySQL SQL을 검증하지 못했습니다/);
+assert.match(unsupportedTypeApplyResult.error, /users\.id \(USER_ROLE\)/);
+assert.doesNotMatch(unsupportedTypeApplyResult.error, /Expected/);
 assert.deepEqual(
   sqlDiffApplyRuntime.createSqlErdSqlLineDiff(
     "CREATE TABLE users (\n  id BIGINT\n);",
@@ -5868,6 +5924,30 @@ assert.deepEqual(
     { kind: "removed", value: "  id BIGINT" },
     { kind: "added", value: "  id BIGINT NOT NULL" },
     { kind: "unchanged", value: ");" }
+  ]
+);
+assert.deepEqual(
+  sqlDiffApplyRuntime.createSqlErdSplitDiffRows(
+    "same\nold one\nold two\ntail",
+    "same\nnew one\ntail"
+  ),
+  [
+    {
+      before: { kind: "unchanged", lineNumber: 1, value: "same" },
+      after: { kind: "unchanged", lineNumber: 1, value: "same" }
+    },
+    {
+      before: { kind: "removed", lineNumber: 2, value: "old one" },
+      after: { kind: "added", lineNumber: 2, value: "new one" }
+    },
+    {
+      before: { kind: "removed", lineNumber: 3, value: "old two" },
+      after: { kind: "empty", lineNumber: null, value: "" }
+    },
+    {
+      before: { kind: "unchanged", lineNumber: 4, value: "tail" },
+      after: { kind: "unchanged", lineNumber: 3, value: "tail" }
+    }
   ]
 );
 const appliedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
@@ -6118,6 +6198,10 @@ assert.equal(
   true
 );
 const semanticRoundTripModel = structuredClone(mysqlParseResult.modelJson);
+semanticRoundTripModel.schema.tables[0].columns[1].defaultValue = "TRUE";
+semanticRoundTripModel.schema.tables[1].columns[0].defaultValue =
+  "CURRENT_TIMESTAMP";
+semanticRoundTripModel.schema.tables[1].columns[1].defaultValue = "NULL";
 semanticRoundTripModel.schema.tables[1].columns[2].defaultValue = "'new'";
 semanticRoundTripModel.schema.tables[1].constraints.push({
   id: "constraint.orders.id_status.unique",
@@ -7240,7 +7324,9 @@ assert.match(page, /SqlErdSessionList/);
 assert.doesNotMatch(page, /SqlErdPanel/);
 assert.match(sessionPage, /SqlErdPanel/);
 assert.match(sessionPage, /readSqlErdSessionId/);
-assert.match(sessionPage, /window\.location\.search/);
+assert.match(sessionPage, /useSearchParams/);
+assert.match(sessionPage, /key=\{sessionId\}/);
+assert.doesNotMatch(sessionPage, /window\.location\.search/);
 assert.match(sessionPage, /sql-erd-full-bleed/);
 assert.match(sessionPage, /h-screen/);
 assert.match(sessionRouteBridge, /SqlErdSessionPage as default/);
@@ -7992,13 +8078,19 @@ assert.doesNotMatch(
 assert.doesNotMatch(annotationShape, /Cardinality/);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
 assert.match(frameShape, /editor\.select\(shape\.id\)/);
+assert.match(frameShape, /resizeBox/);
+assert.match(frameShape, /onResize/);
 assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
 assert.match(noteShape, /useEditor/);
 assert.match(noteShape, /data-sqltoerd-note-id/);
+assert.match(noteShape, /resizeBox/);
+assert.match(noteShape, /onResize/);
 assert.match(textShape, /SQLTOERD_TEXT_SHAPE_TYPE/);
 assert.match(textShape, /SQLTOERD_TEXT_CHANGE_EVENT/);
 assert.match(textShape, /maxLength=\{2000\}/);
 assert.match(textShape, /useEditor/);
+assert.match(textShape, /resizeBox/);
+assert.match(textShape, /onResize/);
 assert.match(strokeShape, /SQLTOERD_STROKE_SHAPE_TYPE/);
 assert.match(strokeShape, /stroke-linecap="round"/);
 assert.match(strokeShape, /canResize\(\)/);
@@ -8093,6 +8185,19 @@ assert.match(canvasSurface, /endCardinality: cardinality\?\.to \?\? null/);
 assert.match(panel, /참조 컬럼/);
 assert.match(panel, /대상 컬럼/);
 assert.match(panel, /관계 의미/);
+assert.doesNotMatch(panel, /Workspace source operation/);
+assert.doesNotMatch(panel, /Workspace operation/);
+assert.match(panel, /Workspace에 저장되었습니다/);
+assert.match(panel, /변경 전/);
+assert.match(panel, /변경 후/);
+assert.match(panel, /SQL 편집 잠금을 확인하는 중입니다/);
+assert.match(canvasSurface, /onDeleteForeignKey/);
+assert.match(
+  canvasSurface,
+  /selection\.type === "relation"[\s\S]*?onDeleteForeignKeyRef\.current/
+);
+assert.match(sessionPage, /useSearchParams/);
+assert.doesNotMatch(sessionPage, /window\.location\.search/);
 
 assert.match(packageJson, /"node-sql-parser"/);
 assert.match(ddlParserUtils, /parseSqlDdlToErdModel/);

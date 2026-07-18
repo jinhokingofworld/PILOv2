@@ -5,10 +5,12 @@ import { useEffect, useState, type PointerEvent } from "react";
 import {
   HTMLContainer,
   Rectangle2d,
+  resizeBox,
   ShapeUtil,
   T,
   useEditor,
   type TLBaseShape,
+  type TLResizeInfo,
   type TLShape
 } from "tldraw";
 
@@ -39,6 +41,9 @@ export class SqlErdFrameShapeUtil extends ShapeUtil<SqlErdFrameShape> {
   static override props = { w: T.number, h: T.number, frameId: T.string, title: T.string, color: T.string, isLocked: T.boolean };
   override canBind() { return false; }
   override canResize(shape: SqlErdFrameShape) { return !shape.props.isLocked; }
+  override onResize(shape: SqlErdFrameShape, info: TLResizeInfo<SqlErdFrameShape>) {
+    return resizeBox(shape, info, { minWidth: 200, minHeight: 120 });
+  }
   override onBeforeUpdate(prev: SqlErdFrameShape, next: SqlErdFrameShape) {
     if (!prev.props.isLocked) return;
     return { ...next, x: prev.x, y: prev.y, props: { ...next.props, w: prev.props.w, h: prev.props.h } };
