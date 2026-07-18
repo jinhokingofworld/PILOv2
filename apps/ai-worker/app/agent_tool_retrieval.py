@@ -108,6 +108,13 @@ class ReadOnlyToolSelection:
     used_shortlist: bool
 
 
+@dataclass(frozen=True)
+class ToolShortlistSelection:
+    tool_names: tuple[str, ...]
+    retrieval: ToolRetrievalResult
+    used_shortlist: bool
+
+
 class SemanticReranker(Protocol):
     def score(self, prompt: str, descriptor: ToolCapabilityDescriptor) -> float: ...
 
@@ -369,6 +376,60 @@ def select_read_only_tool_shortlist(
     return ReadOnlyToolSelection(
         tool_names=tuple(
             tool_name for tool_name in legacy_tool_names if tool_name in retrieved_tool_names
+        ),
+        retrieval=retrieval,
+        used_shortlist=True,
+    )
+
+
+def select_tool_shortlist(
+    prompt: str,
+    catalog: ToolCapabilityCatalog,
+    eligible_tool_schemas: dict[str, dict[str, object]],
+    *,
+    top_k: int = 8,
+    schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
+) -> ToolShortlistSelection:
+    """Selects a bounded capability chain without falling back to all tools."""
+    try:
+        retrieval = retrieve_tool_shortlist(
+            prompt,
+            catalog,
+            top_k=top_k,
+            tool_schema_bytes={
+                tool_name: len(
+                    json.dumps(
+                        schema,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode()
+                )
+                for tool_name, schema in eligible_tool_schemas.items()
+            },
+            schema_token_budget=schema_token_budget,
+        )
+    except Exception:
+        return ToolShortlistSelection(
+            tool_names=tuple(),
+            retrieval=ToolRetrievalResult(
+                tool_names=tuple(),
+                low_confidence=True,
+                fallback_reason="retriever_error",
+            ),
+            used_shortlist=False,
+        )
+
+    if retrieval.low_confidence or not retrieval.selected_capability_ids:
+        return ToolShortlistSelection(
+            tool_names=tuple(),
+            retrieval=retrieval,
+            used_shortlist=False,
+        )
+
+    retrieved_tool_names = set(retrieval.tool_names)
+    return ToolShortlistSelection(
+        tool_names=tuple(
+            tool_name for tool_name in eligible_tool_schemas if tool_name in retrieved_tool_names
         ),
         retrieval=retrieval,
         used_shortlist=True,

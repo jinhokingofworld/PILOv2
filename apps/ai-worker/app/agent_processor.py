@@ -13,8 +13,10 @@ from zoneinfo import ZoneInfo
 from app.agent_tool_retrieval import (
     DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
     ToolCapabilityCatalog,
+    ToolRetrievalResult,
     parse_tool_capability_catalog,
     select_read_only_tool_shortlist,
+    select_tool_shortlist,
 )
 from app.meeting_report_processor import InfrastructureError
 
@@ -24,6 +26,10 @@ AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v6"
 AGENT_PLANNER_TURN_LIMIT_MESSAGE = (
     "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. "
     "다음 요청에서 계속 진행할 내용을 알려주세요."
+)
+AGENT_TOOL_RETRIEVAL_CLARIFICATION_MESSAGE = (
+    "요청에 맞는 도구를 안전하게 선택하지 못했습니다. "
+    "대상이나 원하는 작업을 조금 더 구체적으로 알려주세요."
 )
 TERMINAL_AGENT_RUN_STATUSES = {"completed", "failed", "cancelled"}
 PLANNER_STATUSES = {
@@ -36,9 +42,11 @@ TOOL_RISK_LEVELS = {"low", "medium", "high"}
 TOOL_EXECUTION_MODES = {"auto", "confirmation_required", "contextual"}
 TOOL_RETRIEVAL_MODE_SHADOW = "shadow"
 TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST = "read_only_shortlist"
+TOOL_RETRIEVAL_MODE_SHORTLIST = "shortlist"
 TOOL_RETRIEVAL_MODES = {
     TOOL_RETRIEVAL_MODE_SHADOW,
     TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+    TOOL_RETRIEVAL_MODE_SHORTLIST,
 }
 DEFAULT_TOOL_RETRIEVAL_TOP_K = 8
 MEETING_REPORT_ID_TOOLS = {"get_meeting_report", "summarize_meeting_report"}
@@ -107,6 +115,13 @@ class AgentPlanningRequest:
     context_surface: str | None = None
 
 
+@dataclass(frozen=True)
+class AgentPlannerToolSelection:
+    tools: tuple[AgentToolSchema, ...]
+    retrieval: ToolRetrievalResult | None
+    used_shortlist: bool
+
+
 def select_agent_planner_tools(
     job: AgentRunJob,
     prompt: str,
@@ -116,21 +131,54 @@ def select_agent_planner_tools(
     schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
 ) -> tuple[AgentToolSchema, ...]:
     """Returns the execution-safe planner tool set, falling back to legacy tools."""
-    if mode not in TOOL_RETRIEVAL_MODES or job.tool_capability_catalog is None:
-        return job.tools
-
-    if mode == TOOL_RETRIEVAL_MODE_SHADOW:
-        return job.tools
-    selection = select_read_only_tool_shortlist(
+    return select_agent_planner_tool_selection(
+        job,
         prompt,
-        job.tool_capability_catalog,
-        {tool.name: tool.input_schema for tool in job.tools},
+        mode=mode,
         top_k=top_k,
         schema_token_budget=schema_token_budget,
+    ).tools
+
+
+def select_agent_planner_tool_selection(
+    job: AgentRunJob,
+    prompt: str,
+    *,
+    mode: str,
+    top_k: int = DEFAULT_TOOL_RETRIEVAL_TOP_K,
+    schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
+) -> AgentPlannerToolSelection:
+    """Returns the planner schema subset and its privacy-safe routing outcome."""
+    if mode not in TOOL_RETRIEVAL_MODES or job.tool_capability_catalog is None:
+        return AgentPlannerToolSelection(job.tools, None, False)
+
+    if mode == TOOL_RETRIEVAL_MODE_SHADOW:
+        return AgentPlannerToolSelection(job.tools, None, False)
+    eligible_tool_schemas = {tool.name: tool.input_schema for tool in job.tools}
+    selection = (
+        select_read_only_tool_shortlist(
+            prompt,
+            job.tool_capability_catalog,
+            eligible_tool_schemas,
+            top_k=top_k,
+            schema_token_budget=schema_token_budget,
+        )
+        if mode == TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST
+        else select_tool_shortlist(
+            prompt,
+            job.tool_capability_catalog,
+            eligible_tool_schemas,
+            top_k=top_k,
+            schema_token_budget=schema_token_budget,
+        )
     )
     selected_tool_names = set(selection.tool_names)
     shortlist = tuple(tool for tool in job.tools if tool.name in selected_tool_names)
-    return shortlist or job.tools
+    return AgentPlannerToolSelection(
+        tools=shortlist,
+        retrieval=selection.retrieval,
+        used_shortlist=selection.used_shortlist,
+    )
 
 
 @dataclass(frozen=True)
@@ -454,13 +502,44 @@ class AgentRunProcessor:
         try:
             step_id = self.repository.start_planner_step(job, context)
             current_date = self.current_date_provider(context.timezone).isoformat()
-            planner_tools = select_agent_planner_tools(
+            planner_selection = select_agent_planner_tool_selection(
                 job,
                 context.prompt,
                 mode=self.tool_retrieval_mode,
                 top_k=self.tool_retrieval_top_k,
                 schema_token_budget=self.tool_retrieval_schema_token_budget,
             )
+            planner_tools = planner_selection.tools
+            if not planner_tools:
+                output_summary = _retrieval_clarification_summary(
+                    job,
+                    self.tool_retrieval_mode,
+                    planner_selection,
+                )
+                planner_step_completed = self.repository.complete_planner_step(
+                    job.run_id,
+                    step_id,
+                    output_summary,
+                )
+                if not planner_step_completed:
+                    return self._result(
+                        job,
+                        delete_message=True,
+                        reason="agent_planner_step_no_longer_running",
+                    )
+                waiting = self.repository.wait_for_user_input(
+                    job.run_id,
+                    AGENT_TOOL_RETRIEVAL_CLARIFICATION_MESSAGE,
+                )
+                return self._result(
+                    job,
+                    delete_message=True,
+                    reason=(
+                        "agent_tool_retrieval_needs_clarification"
+                        if waiting
+                        else "agent_run_no_longer_planning"
+                    ),
+                )
             planner_job = replace(job, tools=planner_tools)
             decision = self.planner_client.plan(
                 AgentPlanningRequest(
@@ -484,10 +563,16 @@ class AgentRunProcessor:
                 planning_context=context.planning_context,
                 strict_tool_selection=len(planner_tools) < len(job.tools),
             )
+            output_summary = dict(normalized.output_summary)
+            output_summary["toolRetrieval"] = _tool_retrieval_observation(
+                self.tool_retrieval_mode,
+                planner_selection,
+                job.tool_capability_catalog.sha256 if job.tool_capability_catalog else None,
+            )
             planner_step_completed = self.repository.complete_planner_step(
                 job.run_id,
                 step_id,
-                normalized.output_summary,
+                output_summary,
             )
             if not planner_step_completed:
                 return self._result(
@@ -1430,6 +1515,42 @@ def _sanitize_json_value(value: object) -> dict[str, object]:
 def _tool_retrieval_mode(value: str) -> str:
     normalized = value.strip().lower()
     return normalized if normalized in TOOL_RETRIEVAL_MODES else TOOL_RETRIEVAL_MODE_SHADOW
+
+
+def _retrieval_clarification_summary(
+    job: AgentRunJob,
+    mode: str,
+    selection: AgentPlannerToolSelection,
+) -> dict[str, object]:
+    return {
+        "status": "needs_clarification",
+        "message": "Agent tool retrieval requires clarification.",
+        "finalAnswerDraft": AGENT_TOOL_RETRIEVAL_CLARIFICATION_MESSAGE,
+        "toolSchemaVersion": job.tool_schema_version,
+        "missingFields": ["tool_selection"],
+        "toolRetrieval": _tool_retrieval_observation(
+            mode,
+            selection,
+            job.tool_capability_catalog.sha256 if job.tool_capability_catalog else None,
+        ),
+    }
+
+
+def _tool_retrieval_observation(
+    mode: str,
+    selection: AgentPlannerToolSelection,
+    catalog_sha256: str | None,
+) -> dict[str, object]:
+    retrieval = selection.retrieval
+    return {
+        "mode": mode,
+        "usedShortlist": selection.used_shortlist,
+        "shortlistSize": len(selection.tools),
+        "fallbackReason": retrieval.fallback_reason if retrieval else None,
+        "candidateCount": retrieval.candidate_count if retrieval else 0,
+        "confidenceBucket": retrieval.confidence_bucket if retrieval else "none",
+        "catalogSha256": catalog_sha256,
+    }
 
 
 def _current_date_for_timezone(timezone: str) -> date:
