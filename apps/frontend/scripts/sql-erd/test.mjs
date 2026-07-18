@@ -7201,6 +7201,48 @@ assert.equal(
     sourceText: customPostgreSqlTypePreview.generatedSourceText
   })
 );
+const schemaQualifiedPostgreSqlTypeSource = `CREATE TYPE auth.order_status AS ENUM ('pending');
+
+CREATE TABLE orders (
+  id BIGSERIAL PRIMARY KEY,
+  status auth.order_status NOT NULL
+);`;
+const schemaQualifiedPostgreSqlTypeParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: schemaQualifiedPostgreSqlTypeSource
+  });
+assert.equal(schemaQualifiedPostgreSqlTypeParseResult.ok, true);
+assert.equal(
+  schemaQualifiedPostgreSqlTypeParseResult.modelJson.schema.tables[0]
+    .columns[1].dataType,
+  "auth.order_status"
+);
+const schemaQualifiedPostgreSqlTypePreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: schemaQualifiedPostgreSqlTypeParseResult.modelJson,
+    resolvedDialect: "postgresql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: schemaQualifiedPostgreSqlTypeParseResult.modelJson,
+      sourceText: schemaQualifiedPostgreSqlTypeSource
+    }
+  });
+assert.match(
+  schemaQualifiedPostgreSqlTypePreview.generatedSourceText,
+  /CREATE TYPE auth\.order_status AS ENUM \('pending'\);/
+);
+assert.match(
+  schemaQualifiedPostgreSqlTypePreview.generatedSourceText,
+  /"status" auth\.order_status NOT NULL/
+);
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    schemaQualifiedPostgreSqlTypePreview
+  ).ok,
+  true
+);
 const customPostgreSqlTypeMySqlPreview =
   sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
     modelJson: customPostgreSqlTypeParseResult.modelJson,
