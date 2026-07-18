@@ -272,6 +272,11 @@ interface MeetingReportListQuery {
   limit?: unknown;
 }
 
+/** Internal Agent query. Keep roomName out of the public Meeting REST contract. */
+interface MeetingAgentReportListQuery extends MeetingReportListQuery {
+  roomName?: unknown;
+}
+
 interface MeetingReportCursor {
   createdAt: string;
   id: string;
@@ -1688,6 +1693,36 @@ export class MeetingService {
       { cursor, from, searchQuery, to }
     );
 
+    return {
+      nextCursor: page.nextCursor,
+      reports: page.reports.map((report) => this.mapMeetingReportSummary(report))
+    };
+  }
+
+  async listReportsForAgent(
+    currentUserId: string,
+    workspaceId: string,
+    query: MeetingAgentReportListQuery
+  ): Promise<MeetingReportListPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const cursor = this.normalizeMeetingReportCursor(query.cursor);
+    const from = this.normalizeMeetingReportDate(query.from, "from");
+    const to = this.normalizeMeetingReportDate(query.to, "to");
+    const status = this.normalizeMeetingReportStatus(query.status);
+    const limit = this.normalizeMeetingReportLimit(query.limit);
+    const roomName = query.roomName === undefined
+      ? null
+      : this.normalizeAgentResolutionText(String(query.roomName));
+    if (from !== null && to !== null && from >= to) {
+      throw badRequest("from must be before to");
+    }
+    const page = await this.listWorkspaceMeetingReportRows(
+      workspaceId,
+      currentUserId,
+      status,
+      limit,
+      { cursor, from, searchQuery: null, to, roomName }
+    );
     return {
       nextCursor: page.nextCursor,
       reports: page.reports.map((report) => this.mapMeetingReportSummary(report))
@@ -3643,6 +3678,7 @@ export class MeetingService {
       from: string | null;
       searchQuery: string | null;
       to: string | null;
+      roomName?: string | null;
     }
   ): Promise<{ nextCursor: string | null; reports: MeetingReportRow[] }> {
     const values: unknown[] = [workspaceId, currentUserId];
@@ -3662,6 +3698,10 @@ export class MeetingService {
       filters.to === null
         ? ""
         : `AND meeting_reports.created_at < $${values.push(filters.to)}::timestamptz`;
+    const roomNameCondition =
+      filters.roomName === null || filters.roomName === undefined
+        ? ""
+        : `AND lower(regexp_replace(BTRIM(meeting_rooms.name), '\\s+', ' ', 'g')) = $${values.push(filters.roomName)}`;
     const cursorCondition =
       filters.cursor === null
         ? ""
@@ -3730,6 +3770,9 @@ export class MeetingService {
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
+        LEFT JOIN meeting_rooms
+          ON meeting_rooms.workspace_id = meetings.workspace_id
+          AND meeting_rooms.room_key = meetings.room_key
         LEFT JOIN meeting_report_action_item_extractions AS extraction
           ON extraction.meeting_report_id = meeting_reports.id
         LEFT JOIN LATERAL (
@@ -3743,6 +3786,7 @@ export class MeetingService {
           ${searchCondition}
           ${fromCondition}
           ${toCondition}
+          ${roomNameCondition}
           ${cursorCondition}
         ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
         LIMIT ${limitParameter}

@@ -829,14 +829,14 @@ Phase 3 작업으로 남긴다.
 - [ ] **4. ambiguity 선택 전달 방식을 확정·구현한다.** 후보 선택을 browser가 단순 token echo로 처리하지
   않으며, 0/N 후보·동명이인·만료 후보·다른 Workspace/run 선택은 기존 tool을 실행하지 않고 clarification으로
   끝낸다. 필요한 API/DB/Frontend 계약은 이 항목과 같은 PR에서 문서화한다.
-- [ ] **5. read/control tool adapter를 연결한다.** Meeting room/현재 Meeting/Meeting control과
+- [x] **5. read/control tool adapter를 연결한다.** Meeting room/현재 Meeting/Meeting control과
   report 조회 tool이 selector → resolver → revalidated internal reference → 기존 domain service 경로를
   사용하도록 만든다.
 - [ ] **6. report/action item 조회를 확장한다.** `list_meeting_reports`, `find_action_items`가
   Workspace-scoped selector를 받고, 직전 목록 순번은 같은 필터·정렬의 1-based 위치에서만 해소한다.
 - [ ] **7. action item write를 연결한다.** action item/member selector를 confirmation 전과 승인 직전에
   모두 재검증하며, 실패·모호·만료 상황은 write 후보/confirmation을 만들지 않는다.
-- [ ] **8. planner·formatter·UI 경계를 맞춘다.** AI Worker structured planner contract와 App Server tool
+- [x] **8. planner·formatter·UI 경계를 맞춘다.** AI Worker structured planner contract와 App Server tool
   snapshot을 동기화하고, formatter/Frontend는 사람이 읽을 수 있는 후보와 질문만 표시한다.
 - [ ] **9. 보안·회귀·E2E를 고정한다.** 0/1/N·동명이인·cross-workspace, token binding/만료/변조/stale,
   UUID/token 비노출, confirmation write 재검증을 App Server·AI Worker·Frontend에서 검증한다.
@@ -851,40 +851,40 @@ Phase 3 작업으로 남긴다.
 
 ##### 공통 착수 기준
 
-- [ ] #1385가 만든 `POST .../inputs`의 `meeting_candidate` 선택 계약, 15분 TTL, run/user/Workspace
+- [x] #1385가 만든 `POST .../inputs`의 `meeting_candidate` 선택 계약, 15분 TTL, run/user/Workspace
   binding, single-use 및 재검증 회귀를 확인한다. browser·SQS·provider에는 candidate ID 외 selection token과
   raw UUID가 전달되지 않는지 확인한다.
-- [ ] 각 Meeting tool의 planner schema, `validateInput`, `prepareExecution`/`execute`, resolver,
+- [x] 각 Meeting tool의 planner schema, `validateInput`, `prepareExecution`/`execute`, resolver,
   `MeetingService` 호출을 표로 inventory하고, raw UUID가 planner-facing schema에 남은 위치를 목록화한다.
-- [ ] #1386은 기존 Agent input API와 Meeting public API를 우선 재사용한다. 새 endpoint, request/response,
+- [x] #1386은 기존 Agent input API와 Meeting public API를 우선 재사용한다. 새 endpoint, request/response,
   DB schema가 필요해지면 구현을 멈추고 `docs/api/agent-api.md`·`docs/api/meeting-api.md` 및 Meeting·DB
   Schema owner와 계약을 먼저 확정한다.
-- [ ] candidate 선택은 free-text ordinal이 아닌 기존 후보 버튼 계약만 사용한다. 0/N 후보, 만료·재사용·다른
+- [x] candidate 선택은 free-text ordinal이 아닌 기존 후보 버튼 계약만 사용한다. 0/N 후보, 만료·재사용·다른
   run/user/Workspace의 선택은 tool 실행 없이 clarification으로 끝낸다.
 
 ##### PR 1 — #1386 read/control·report selector
 
-- [ ] `list_meeting_rooms`, `get_active_meeting`, `get_meeting_participants`, Meeting control tool,
+- [x] `list_meeting_rooms`, `get_active_meeting`, `get_meeting_participants`, Meeting control tool,
   `list_meeting_reports`, `get_meeting_report`, `summarize_meeting_report`의 UUID·selector 입력을 tool별로
   분류한다. transcript/action item mutation은 #1387 이후 범위로 남긴다.
-- [ ] planner와 runtime이 공유하는 selector schema를 추가한다. room은 `current` 또는 normalized
+- [x] planner와 runtime이 공유하는 selector schema를 추가한다. room은 `current` 또는 normalized
   `roomName`, Meeting/report는 검증된 server-owned selection reference 또는 명시 selector만 허용하고,
   UUID field는 internal compatibility adapter에서만 받는다.
-- [ ] 회의 제어 요청에 `current`·`roomName`·후보 선택이 모두 없으면 현재 사용자의 active Meeting을
+- [x] 회의 제어 요청에 `current`·`roomName`·후보 선택이 모두 없으면 현재 사용자의 active Meeting을
   먼저 해소한다. 한 사용자는 동시에 하나의 Meeting에만 참여하므로 “회의 나가줘”는 이 active Meeting의
   leave로 처리하며, active Meeting이 없을 때만 tool 실행 없이 안내 또는 clarification으로 끝낸다.
-- [ ] `from`/`to`는 사용자 timezone의 자연어 날짜를 ISO UTC 범위 `[from, to)`로 정규화하고,
+- [x] `from`/`to`는 Worker가 사용자 timezone의 자연어 날짜를 ISO UTC 범위 `[from, to)`로 정규화해 전달하고,
   `status`는 MeetingReport 공개 API의 허용 enum만 받게 한다. `roomName`과 기간·상태가 함께 있을 때는
   같은 Workspace 범위에서 resolver가 후보를 만들도록 한다. 기간·개수 selector가 모두 없으면
   `createdAt` 내림차순의 최신 1개를 기본값으로 사용한다.
-- [ ] resolver 결과를 revalidated internal reference로 변환한 뒤 기존 `MeetingService` query/control
+- [x] resolver 결과를 revalidated internal reference로 변환한 뒤 기존 `MeetingService` query/control
   경로로 호출한다. resolver·candidate selection·domain service 어느 단계에서든 실패하면 UUID fallback이나
   추측 실행을 하지 않는다.
-- [ ] App Server tool snapshot·capability catalog·AI Worker planner contract를 같은 selector field로
+- [x] App Server tool snapshot·capability catalog·AI Worker planner contract를 같은 selector field로
   갱신한다. Worker에는 raw UUID, selection token plaintext, candidate record를 넣지 않는다.
 - [ ] formatter는 사람이 읽을 수 있는 room/report label과 다음 질문만 저장·표시하고, internal reference,
   candidate ID, UUID, token은 사용자 메시지·Agent step/log·provider input에 내보내지 않는다.
-- [ ] 0/1/N·동명이인 room·invalid date/status·다른 Workspace·만료/소비 candidate·stale meeting/report와
+- [x] 0/1/N·동명이인 room·invalid date/status·다른 Workspace·만료/소비 candidate·stale meeting/report와
   UUID/token 비노출을 App Server/AI Worker 회귀로 고정한다.
 
 ##### PR 2 — #1387 action item selector·mutation

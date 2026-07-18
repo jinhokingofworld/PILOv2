@@ -204,18 +204,14 @@
       "name": "get_meeting_participants",
       "description": "특정 Meeting의 현재·과거 참여자 요약을 조회합니다. LiveKit 연결 상태는 반환하지 않습니다.",
       "riskLevel": "low",
-      "executionMode": "auto",
+      "executionMode": "contextual",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "meetingId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "meetingId": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "current": { "type": "boolean", "const": true },
+          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "useSelectedMeetingCandidate": { "type": "boolean", "const": true }
         }
       }
     },
@@ -229,7 +225,7 @@
         "anyOf": [
           {
             "required": [
-              "meetingRoomId"
+              "roomName"
             ]
           },
           {
@@ -240,10 +236,7 @@
         ],
         "additionalProperties": false,
         "properties": {
-          "meetingRoomId": {
-            "type": "string",
-            "format": "uuid"
-          },
+          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
           "useSelectedMeetingRoomCandidate": {
             "type": "boolean",
             "const": true
@@ -276,15 +269,11 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "meetingId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "meetingId": {
-            "type": "string",
-            "format": "uuid"
-          },
+          "current": { "type": "boolean", "const": true },
+          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "useSelectedMeetingCandidate": { "type": "boolean", "const": true },
           "recordingConsent": {
             "type": "object",
             "additionalProperties": false,
@@ -310,18 +299,14 @@
       "name": "leave_meeting",
       "description": "현재 참여 중인 Meeting에서 나갑니다. 마지막 참여자면 기존 Meeting 규칙에 따라 녹음·회의가 종료될 수 있습니다.",
       "riskLevel": "low",
-      "executionMode": "auto",
+      "executionMode": "contextual",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "meetingId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "meetingId": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "current": { "type": "boolean", "const": true },
+          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "useSelectedMeetingCandidate": { "type": "boolean", "const": true }
         }
       }
     },
@@ -332,15 +317,11 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "meetingId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "meetingId": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "current": { "type": "boolean", "const": true },
+          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "useSelectedMeetingCandidate": { "type": "boolean", "const": true }
         }
       }
     },
@@ -351,21 +332,17 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "meetingId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "meetingId": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "current": { "type": "boolean", "const": true },
+          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "useSelectedMeetingCandidate": { "type": "boolean", "const": true }
         }
       }
     },
     {
       "name": "list_meeting_reports",
-      "description": "Workspace MeetingReport 목록을 최신 생성 시각 순으로 조회합니다. 최신 회의록 결과가 필요하면 limit을 1로 설정합니다.",
+      "description": "Workspace MeetingReport 목록을 createdAt 내림차순으로 조회합니다. 기간과 개수를 생략하면 최신 회의록 1개를 반환합니다.",
       "riskLevel": "low",
       "executionMode": "auto",
       "inputSchema": {
@@ -375,11 +352,17 @@
           "status": {
             "type": "string",
             "enum": [
+              "QUEUED",
+              "TRANSCRIBING",
+              "SUMMARIZING",
               "PROCESSING",
               "COMPLETED",
               "FAILED"
             ]
           },
+          "from": { "type": "string", "format": "date-time" },
+          "to": { "type": "string", "format": "date-time" },
+          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
           "limit": {
             "type": "integer",
             "minimum": 1,
@@ -392,18 +375,16 @@
       "name": "get_meeting_report",
       "description": "MeetingReport 상세를 Agent용 보고서 projection으로 조회합니다.",
       "riskLevel": "low",
-      "executionMode": "auto",
+      "executionMode": "contextual",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "reportId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "reportId": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "from": { "type": "string", "format": "date-time" },
+          "to": { "type": "string", "format": "date-time" },
+          "status": { "type": "string", "enum": ["QUEUED", "TRANSCRIBING", "SUMMARIZING", "PROCESSING", "COMPLETED", "FAILED"] },
+          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "useSelectedMeetingReportCandidate": { "type": "boolean", "const": true }
         }
       }
     },
@@ -411,18 +392,16 @@
       "name": "summarize_meeting_report",
       "description": "MeetingReport를 Agent가 소비할 수 있는 sections/actionItems projection으로 요약합니다.",
       "riskLevel": "low",
-      "executionMode": "auto",
+      "executionMode": "contextual",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "reportId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "reportId": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "from": { "type": "string", "format": "date-time" },
+          "to": { "type": "string", "format": "date-time" },
+          "status": { "type": "string", "enum": ["QUEUED", "TRANSCRIBING", "SUMMARIZING", "PROCESSING", "COMPLETED", "FAILED"] },
+          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "useSelectedMeetingReportCandidate": { "type": "boolean", "const": true }
         }
       }
     },
@@ -1599,12 +1578,12 @@
     },
     {
       "id": "meeting_participants",
-      "prompt": "회의 123e4567-e89b-12d3-a456-426614174000 참여자 보여줘",
+      "prompt": "현재 회의 참여자 보여줘",
       "expected": {
         "status": "tool_candidate",
         "toolName": "get_meeting_participants",
         "inputContains": {
-          "meetingId": "123e4567-e89b-12d3-a456-426614174000"
+          "current": true
         },
         "requiresConfirmation": false
       }
@@ -1670,36 +1649,40 @@
       "id": "meeting_detail_without_id",
       "prompt": "지난 회의록 상세를 보여줘",
       "expected": {
-        "status": "unsupported"
+        "status": "tool_candidate",
+        "toolName": "get_meeting_report",
+        "requiresConfirmation": false
       }
     },
     {
       "id": "meeting_summary_without_id",
       "prompt": "지난 회의록 요약해줘",
       "expected": {
-        "status": "unsupported"
+        "status": "tool_candidate",
+        "toolName": "summarize_meeting_report",
+        "requiresConfirmation": false
       }
     },
     {
       "id": "meeting_detail_with_id",
-      "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 상세 보여줘",
+      "prompt": "완료된 회의록 상세 보여줘",
       "expected": {
         "status": "tool_candidate",
         "toolName": "get_meeting_report",
         "inputContains": {
-          "reportId": "123e4567-e89b-12d3-a456-426614174000"
+          "status": "COMPLETED"
         },
         "requiresConfirmation": false
       }
     },
     {
       "id": "meeting_summary_with_id",
-      "prompt": "회의록 123e4567-e89b-12d3-a456-426614174000 요약해줘",
+      "prompt": "완료된 회의록 요약해줘",
       "expected": {
         "status": "tool_candidate",
         "toolName": "summarize_meeting_report",
         "inputContains": {
-          "reportId": "123e4567-e89b-12d3-a456-426614174000"
+          "status": "COMPLETED"
         },
         "requiresConfirmation": false
       }
@@ -1811,10 +1794,9 @@
       "id": "meeting_recording_missing_id",
       "prompt": "회의 녹음을 시작해줘",
       "expected": {
-        "status": "needs_clarification",
-        "missingFields": [
-          "meetingId"
-        ]
+        "status": "tool_candidate",
+        "toolName": "start_meeting_recording",
+        "requiresConfirmation": true
       }
     },
     {

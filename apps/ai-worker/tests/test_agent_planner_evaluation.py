@@ -590,9 +590,10 @@ def test_fixed_korean_suite_loads() -> None:
     assert expectations["meeting_rooms"].tool_name == "list_meeting_rooms"
     assert expectations["meeting_active"].tool_name == "get_active_meeting"
     assert expectations["meeting_participants"].input_contains == {
-        "meetingId": "123e4567-e89b-12d3-a456-426614174000",
+        "current": True,
     }
-    assert expectations["meeting_recording_missing_id"].missing_fields == ("meetingId",)
+    assert expectations["meeting_recording_missing_id"].tool_name == "start_meeting_recording"
+    assert expectations["meeting_recording_missing_id"].requires_confirmation is True
     assert expectations["sql_erd_generate"].tool_name == "generate_sql_erd"
     assert expectations["sql_erd_generate"].requires_confirmation is None
     assert expectations["sql_erd_focus_payment_tables"].tool_name == "inspect_sql_erd_schema"
