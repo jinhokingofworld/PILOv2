@@ -356,14 +356,14 @@ function isViewportAllowed(
     case "chat":
       return viewport.kind === "element" && viewport.key === "chat-messages";
     case "drive": {
-      const { documentId, pdfFileId, pdfPage } = context;
+      const { documentId, folderId, pdfFileId, pdfPage } = context;
       if (viewport.kind === "document") {
         return pdfFileId === null && pdfPage === null;
       }
       if (viewport.kind !== "element") return false;
       if (viewport.key === "drive-pdf") {
         return (
-          documentId === null &&
+          (documentId === null || folderId === null) &&
           pdfFileId !== null &&
           pdfPage !== null &&
           /^[1-9]\d*$/.test(pdfPage)

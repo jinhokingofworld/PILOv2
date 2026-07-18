@@ -164,7 +164,8 @@ type DrivePresenceContext = {
 | `canvas` | `/canvas?canvasId=...` | `canvasId: string` | camera와 optional `selectedShapeIds` |
 | `drive` list | `/files?folderId=...` | `folderId: string \| null`, 나머지 Drive ID는 null | drive-list |
 | `drive` document | `/files?documentId=...` | `documentId: string`, PDF ID/page는 null | document |
-| `drive` PDF | `/files?folderId=...` | `pdfFileId: string`, `pdfPage: positive-integer string`, `documentId: null` | drive-pdf |
+| `drive` PDF | `/files?folderId=...` | `folderId: string \| null`, `documentId: null`, `pdfFileId: string`, `pdfPage: positive-integer string` | drive-pdf |
+| `drive` document-attached PDF | `/files?documentId=...` | `documentId: string`, `folderId: null`, `pdfFileId: string`, `pdfPage: positive-integer string` | drive-pdf |
 
 location에는 입력값, 미저장 draft, comment, conflict draft, raw diff/content와
 AI chat, popover, 편집 중인 shape 같은 transient state를 넣지 않는다. 단, PR Review
