@@ -46,6 +46,14 @@ output "rds_endpoint" {
   value = module.rds.endpoint
 }
 
+output "db_migration_task_definition_arn" {
+  value = module.db_migrations.task_definition_arn
+}
+
+output "db_migration_log_group_name" {
+  value = module.db_migrations.log_group_name
+}
+
 output "redis_endpoint" {
   value = module.redis.endpoint
 }
