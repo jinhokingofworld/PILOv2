@@ -512,6 +512,22 @@
             "type": "string",
             "pattern": "^ctx_[0-9a-f]{24}$"
           },
+          "sections": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "summary",
+                "discussionPoints",
+                "decisions",
+                "actionItems"
+              ]
+            },
+            "description": "반환할 회의록 영역. 생략하면 요약·논의사항·결정사항·후속 작업을 반환합니다."
+          },
           "from": {
             "type": "string",
             "format": "date-time"

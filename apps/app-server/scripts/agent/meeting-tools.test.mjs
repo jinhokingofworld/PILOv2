@@ -1556,6 +1556,39 @@ function errorCode(error) {
 
 {
   const { registry } = createRegistry();
+  const tool = registry.getDefinition("summarize_meeting_report");
+  const result = await tool.execute(
+    context,
+    tool.validateInput({ sections: ["decisions", "actionItems"] })
+  );
+  const report = result.outputSummary.report;
+
+  assert.deepEqual(result.outputSummary.sections, ["decisions", "actionItems"]);
+  assert.deepEqual(report.sections.map((section) => section.key), ["decisions"]);
+  assert.equal(Array.isArray(report.actionItems), true);
+  assert.equal(report.transcript, undefined);
+  assert.equal(JSON.stringify(report).includes("논의사항"), false);
+  assert.equal(JSON.stringify(report).includes("요약"), false);
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("summarize_meeting_report");
+
+  for (const input of [
+    { sections: [] },
+    { sections: ["decisions", "decisions"] },
+    { sections: ["transcript"] }
+  ]) {
+    assert.throws(
+      () => tool.validateInput(input),
+      (error) => error.getStatus() === 400
+    );
+  }
+}
+
+{
+  const { registry } = createRegistry();
   const tool = registry.getDefinition("get_meeting_report");
   const result = await tool.execute(context, tool.validateInput({}));
 

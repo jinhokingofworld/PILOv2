@@ -71,6 +71,16 @@ interface MeetingReportSelectorInput {
   useSelectedMeetingReportCandidate?: true;
 }
 
+type MeetingReportSummarySection =
+  | "summary"
+  | "discussionPoints"
+  | "decisions"
+  | "actionItems";
+
+interface SummarizeMeetingReportInput extends MeetingReportSelectorInput {
+  sections?: MeetingReportSummarySection[];
+}
+
 interface LegacyPersistedReportReferenceInput extends ReportIdInput {
   legacyPersistedPlannerInput: true;
 }
@@ -164,6 +174,8 @@ interface ResolveMeetingResourceInput {
 
 interface ProjectionOptions {
   sectionTextLimit: number;
+  sections?: readonly MeetingReportSummarySection[];
+  includeTranscript?: boolean;
 }
 
 const MEETING_REPORT_STATUSES: readonly MeetingReportStatus[] = [
@@ -192,6 +204,13 @@ const REPORT_SELECTOR_INPUT_FIELDS = [
   "status",
   "roomName",
   "useSelectedMeetingReportCandidate"
+];
+const REPORT_SUMMARY_INPUT_FIELDS = [...REPORT_SELECTOR_INPUT_FIELDS, "sections"];
+const MEETING_REPORT_SUMMARY_SECTIONS: readonly MeetingReportSummarySection[] = [
+  "summary",
+  "discussionPoints",
+  "decisions",
+  "actionItems"
 ];
 const START_MEETING_INPUT_FIELDS = [
   "roomName",
@@ -846,14 +865,25 @@ export class MeetingAgentToolsService {
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        properties: this.meetingReportSelectorSchema()
+        properties: {
+          ...this.meetingReportSelectorSchema(),
+          sections: {
+            type: "array",
+            minItems: 1,
+            maxItems: MEETING_REPORT_SUMMARY_SECTIONS.length,
+            uniqueItems: true,
+            items: { type: "string", enum: [...MEETING_REPORT_SUMMARY_SECTIONS] },
+            description:
+              "반환할 회의록 영역. 생략하면 요약·논의사항·결정사항·후속 작업을 반환합니다."
+          }
+        }
       },
-      validateInput: (input) => this.validateMeetingReportSelectorInput(input),
+      validateInput: (input) => this.validateSummarizeMeetingReportInput(input),
       adaptLegacyPlannerInput: (input) => this.adaptLegacyReportReferenceInput(input),
       prepareExecution: async (context, input) =>
         this.prepareMeetingReportSelectorExecution(
           context,
-          this.validateMeetingReportSelectorInput(input)
+          this.validateSummarizeMeetingReportInput(input)
         ),
       execute: async (context, input) => {
         if (this.isLegacyPersistedReportReferenceInput(input)) {
@@ -863,10 +893,11 @@ export class MeetingAgentToolsService {
         }
         const resolved = await this.requireResolvedReport(
           context,
-          this.validateMeetingReportSelectorInput(input)
+          this.validateSummarizeMeetingReportInput(input)
         );
         return this.executeSummarizeMeetingReport(context, {
-          reportId: resolved.resourceId
+          reportId: resolved.resourceId,
+          sections: this.validateSummarizeMeetingReportInput(input).sections
         });
       }
     };
@@ -1428,7 +1459,7 @@ export class MeetingAgentToolsService {
 
   private async executeSummarizeMeetingReport(
     context: AgentToolContext,
-    input: ReportIdInput
+    input: ReportIdInput & Pick<SummarizeMeetingReportInput, "sections">
   ): Promise<AgentToolExecutionResult> {
     const result = await this.meetingService.getReport(
       context.currentUserId,
@@ -1436,12 +1467,15 @@ export class MeetingAgentToolsService {
       input.reportId
     );
     const report = this.normalizeMeetingReportForAgent(result.report, {
-      sectionTextLimit: DETAIL_SECTION_TEXT_LIMIT
+      sectionTextLimit: DETAIL_SECTION_TEXT_LIMIT,
+      sections: input.sections,
+      includeTranscript: input.sections === undefined
     });
 
     return {
       outputSummary: {
-        report
+        report,
+        sections: input.sections ?? [...MEETING_REPORT_SUMMARY_SECTIONS]
       },
       resourceRefs: [this.toResourceRef(result.report)],
       status: "summarized"
@@ -1777,8 +1811,12 @@ export class MeetingAgentToolsService {
       createdAt: report.createdAt,
       retryCount: report.retryCount,
       sections: this.buildSections(report, options),
-      actionItems: this.buildActionItems(report.actionItemCandidates),
-      transcript: this.buildTranscriptSummary(report)
+      ...(options.sections?.includes("actionItems") === false
+        ? {}
+        : { actionItems: this.buildActionItems(report.actionItemCandidates) }),
+      ...(options.includeTranscript === false
+        ? {}
+        : { transcript: this.buildTranscriptSummary(report) })
     };
 
     if (report.status === "FAILED") {
@@ -1794,11 +1832,15 @@ export class MeetingAgentToolsService {
     report: MeetingReportSummaryPayload,
     options: ProjectionOptions
   ): AgentJsonValue[] {
-    return [
+    const sections = [
       this.toSection("summary", "요약", report.summary, options),
       this.toSection("discussionPoints", "논의사항", report.discussionPoints, options),
       this.toSection("decisions", "결정사항", report.decisions, options)
     ].filter((section): section is AgentJsonObject => section !== null);
+    if (!options.sections) return sections;
+    return sections.filter((section) =>
+      options.sections?.includes(section.key as MeetingReportSummarySection)
+    );
   }
 
   private toSection(
@@ -2386,6 +2428,53 @@ export class MeetingAgentToolsService {
       ...(useSelectedMeetingReportCandidate
         ? { useSelectedMeetingReportCandidate: true }
         : {})
+    };
+  }
+
+  private validateSummarizeMeetingReportInput(
+    input: unknown
+  ): SummarizeMeetingReportInput {
+    const draft = input ?? {};
+    const object = this.requirePlainObject(draft, "Meeting report summary input");
+    this.rejectForbiddenMeetingToolFields(object);
+    this.assertOnlyAllowedFields(
+      object,
+      REPORT_SUMMARY_INPUT_FIELDS,
+      "Meeting report summary input"
+    );
+    const sections = object.sections;
+    if (sections !== undefined && !Array.isArray(sections)) {
+      throw badRequest("sections must be an array");
+    }
+    const normalizedSections =
+      sections === undefined
+        ? undefined
+        : sections.map((section) => {
+            if (
+              typeof section !== "string" ||
+              !MEETING_REPORT_SUMMARY_SECTIONS.includes(
+                section as MeetingReportSummarySection
+              )
+            ) {
+              throw badRequest("sections contains an unsupported Meeting report section");
+            }
+            return section as MeetingReportSummarySection;
+          });
+    if (normalizedSections !== undefined) {
+      if (normalizedSections.length === 0) {
+        throw badRequest("sections must include at least one Meeting report section");
+      }
+      if (
+        normalizedSections.length > MEETING_REPORT_SUMMARY_SECTIONS.length ||
+        new Set(normalizedSections).size !== normalizedSections.length
+      ) {
+        throw badRequest("sections must not contain duplicate Meeting report sections");
+      }
+    }
+    const { sections: _sections, ...selector } = object;
+    return {
+      ...this.validateMeetingReportSelectorInput(selector),
+      ...(normalizedSections ? { sections: normalizedSections } : {})
     };
   }
 

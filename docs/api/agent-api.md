@@ -878,7 +878,7 @@ Status code: `200 OK`
 | `get_meeting_participants` | `low` | 조건부 | 현재 참여 Meeting 또는 `roomName` selector로 내부 해소 후 참여자를 조회한다. |
 | `list_meeting_reports` | `low` | 가능 | `GET /workspaces/{workspaceId}/meeting-reports` |
 | `get_meeting_report` | `low` | 가능 | `GET /workspaces/{workspaceId}/meeting-reports/{reportId}` |
-| `summarize_meeting_report` | `low` | 가능 | MeetingReport 조회 결과를 요약한다. transcript 전문은 저장하지 않는다. |
+| `summarize_meeting_report` | `low` | 가능 | `sections` selector로 요청한 요약·논의사항·결정사항·후속 작업만 bounded projection으로 반환한다. transcript 전문은 저장하지 않는다. |
 | `search_meeting_transcript` | `low` | 가능 | 권한 있는 transcript source를 검색하고 grounded-answer 경로를 시작한다. |
 | `search_board_issues` | `low` | 가능 | `GET /workspaces/{workspaceId}/boards/{boardId}/issues` |
 | `move_board_issue_status` | `medium` | 불가 | `PATCH /workspaces/{workspaceId}/boards/{boardId}/issues/{issueId}/status` |

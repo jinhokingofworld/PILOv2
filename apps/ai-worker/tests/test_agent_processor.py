@@ -2528,6 +2528,85 @@ def test_normalizer_maps_action_item_ordinal_to_report_context() -> None:
 
 
 @pytest.mark.parametrize(
+    ("prompt", "expected_sections"),
+    [
+        ("회의록 요약해줘", ["summary"]),
+        ("회의록의 논의사항과 결정사항만 보여줘", ["discussionPoints", "decisions"]),
+        ("회의록에서 결정사항은 빼고 보여줘", ["summary", "discussionPoints", "actionItems"]),
+        ("그 회의록의 후속 작업 알려줘", ["actionItems"]),
+    ],
+)
+def test_normalizer_projects_only_requested_meeting_report_summary_sections(
+    prompt: str,
+    expected_sections: list[str],
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {"sections": {"type": "array"}},
+                    },
+                )
+            ]
+        )
+    )
+    context_ref = "ctx_0123456789abcdef01234567"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(tool_name="summarize_meeting_report", tool_input={}),
+        job,
+        prompt=prompt,
+        planning_context=(
+            'previous resource: {"turn":2,"contextRef":"'
+            + context_ref
+            + '","resourceType":"meeting_report","ordinal":1}'
+            if prompt.startswith("그 ")
+            else ""
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"]["sections"] == expected_sections
+    if prompt.startswith("그 "):
+        assert normalized.output_summary["input"]["contextRef"] == context_ref
+
+
+def test_normalizer_uses_summary_tool_for_explicit_meeting_report_sections() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="get_meeting_report",
+                    executionMode="contextual",
+                    inputSchema={"type": "object", "properties": {}},
+                ),
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {"sections": {"type": "array"}},
+                    },
+                ),
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(tool_name="get_meeting_report", tool_input={}),
+        job,
+        prompt="회의록 결정사항만 보여줘",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "summarize_meeting_report"
+    assert normalized.output_summary["input"] == {"sections": ["decisions"]}
+
+
+@pytest.mark.parametrize(
     ("prompt", "current_date", "decision", "expected_input"),
     [
         (
