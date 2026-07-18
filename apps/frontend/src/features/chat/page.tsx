@@ -21,6 +21,7 @@ import {
 } from "@/features/auth/api/client";
 import { ChatComposer } from "@/features/chat/components/chat-composer";
 import { ChatMessageList } from "@/features/chat/components/chat-message-list";
+import { ChatWorkspaceLocationAdapter } from "@/features/chat/chat-workspace-location-adapter";
 import { useChatRuntime } from "@/features/chat/realtime/chat-runtime-provider";
 import type { ChatMentionMember } from "@/features/chat/utils/chat-message-text";
 
@@ -110,7 +111,9 @@ export function ChatPage() {
   const showEmptyState = state.messages.length === 0 && !messageId;
 
   return (
-    <section className="flex h-[calc(100svh-6.5rem)] min-h-[30rem] flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
+    <>
+      <ChatWorkspaceLocationAdapter selectedMessageId={messageId} />
+      <section className="flex h-[calc(100svh-6.5rem)] min-h-[30rem] flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
       <header className="flex min-h-16 items-center justify-between gap-3 border-b px-4 sm:px-5">
         <div className="min-w-0">
           <h1 className="truncate font-heading text-base font-semibold">
@@ -172,7 +175,8 @@ export function ChatPage() {
         members={mentionMembers}
         onSend={sendMessage}
       />
-    </section>
+      </section>
+    </>
   );
 }
 
@@ -253,7 +257,10 @@ function ChatErrorState({
 
 function ChatEmptyState() {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+    <div
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center"
+      data-workspace-follow-surface="chat-messages"
+    >
       <div className="rounded-full bg-primary/10 p-4 text-primary">
         <MessageCircle />
       </div>
