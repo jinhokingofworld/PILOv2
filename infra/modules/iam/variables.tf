@@ -20,6 +20,12 @@ variable "ecr_repository_arns" {
   type = list(string)
 }
 
+variable "db_migration_publisher_repository_arn" {
+  description = "ECR repository ARN that the dev-only DB migration publisher may push to."
+  type        = string
+  default     = ""
+}
+
 variable "s3_bucket_arns" {
   type = list(string)
 }

@@ -1,0 +1,86 @@
+name: Publish DB Migration Runner
+
+on:
+  pull_request:
+    paths:
+      - "db/migrations/**"
+      - "infra/db-migrations/**"
+      - "infra/tests/db-migration-*.test.mjs"
+      - ".github/workflows/publish-db-migrations.yml"
+  push:
+    branches: ["dev"]
+    paths:
+      - "db/migrations/**"
+      - "infra/db-migrations/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: pilo-db-migrations
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      MIGRATION_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate migration changes
+        run: node infra/tests/db-migration-change.test.mjs
+
+      - name: Validate migration runner
+        run: node infra/tests/db-migration-runner.test.mjs
+
+      - name: Validate migration delivery configuration
+        run: node infra/tests/db-migration-delivery.test.mjs
+
+  publish:
+    if: ${{ github.ref == 'refs/heads/dev' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_DB_MIGRATION_PUBLISH_ROLE_ARN: ${{ vars.AWS_DB_MIGRATION_PUBLISH_ROLE_ARN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check publisher role configuration
+        run: test -n "$AWS_DB_MIGRATION_PUBLISH_ROLE_ARN"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DB_MIGRATION_PUBLISH_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push migration runner
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/db-migrations/Dockerfile
+          push: true
+          cache-from: type=gha,scope=db-migrations
+          cache-to: type=gha,mode=max,scope=db-migrations
+          build-args: SOURCE_REVISION=${{ github.sha }}
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest

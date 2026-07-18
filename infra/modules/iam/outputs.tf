@@ -38,6 +38,10 @@ output "github_actions_role_arn" {
   value = try(aws_iam_role.github_actions[0].arn, "")
 }
 
+output "github_actions_db_migration_publisher_role_arn" {
+  value = try(aws_iam_role.github_actions_db_migration_publisher[0].arn, "")
+}
+
 output "github_actions_terraform_plan_role_arn" {
   value = try(aws_iam_role.github_actions_terraform_plan[0].arn, "")
 }

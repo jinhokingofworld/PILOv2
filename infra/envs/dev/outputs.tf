@@ -62,6 +62,10 @@ output "github_actions_role_arn" {
   value = module.iam.github_actions_role_arn
 }
 
+output "db_migration_publisher_role_arn" {
+  value = module.iam.github_actions_db_migration_publisher_role_arn
+}
+
 output "terraform_plan_role_arn" {
   value = module.iam.github_actions_terraform_plan_role_arn
 }
