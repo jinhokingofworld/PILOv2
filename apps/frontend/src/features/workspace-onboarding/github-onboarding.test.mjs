@@ -21,7 +21,8 @@ assert.deepEqual(
     step: null,
     installationId: null,
     repositoryId: null,
-    callbackError: null
+    callbackError: null,
+    recovery: false
   }
 );
 
@@ -36,12 +37,17 @@ assert.deepEqual(
     step: "installation",
     installationId: "installation-7",
     repositoryId: null,
-    callbackError: "authorization_cancelled"
+    callbackError: "authorization_cancelled",
+    recovery: false
   }
 );
 assert.equal(
   onboarding.createGithubOnboardingReturnUrl("workspace-1", "project-oauth"),
   "/workspace/new?workspaceId=workspace-1&github_onboarding_step=project-oauth"
+);
+assert.equal(
+  onboarding.createGithubOnboardingReturnUrl("workspace-1", "oauth", null, null, true),
+  "/workspace/new?workspaceId=workspace-1&github_onboarding_step=oauth&github_oauth_recovery=1"
 );
 assert.equal(
   onboarding.createGithubOnboardingReturnUrl("workspace-1", "projects", "installation-7", "repository-9"),
@@ -88,9 +94,9 @@ assert.match(pageSource, /router\.replace\("\/home"\)/);
 assert.match(pageSource, /router\.replace\(createGithubOnboardingReturnUrl\(workspace\.id, "oauth"\)\)/);
 assert.match(
   pageSource,
-  /if \(!callback\.workspaceId \|\| callback\.callbackError \|\| callback\.step !== "oauth"\) return;/
+  /if \(!callback\.workspaceId \|\| callback\.step !== "oauth"\) return;/
 );
-assert.match(pageSource, /void resumeGithub\(callback\.workspaceId\);/);
+assert.match(pageSource, /void resumeGithub\(callback\.workspaceId, false, callback\.recovery\);/);
 assert.match(
   pageSource,
   /if \(workspaceId\) \{\s*if \(!connect\) \{ router\.replace\("\/home"\); return; \}\s*await resumeGithub\(workspaceId\); return;\s*\}/
@@ -105,7 +111,12 @@ assert.match(
 assert.match(pageSource, /repositoryPage > 1/);
 assert.match(pageSource, /repositoriesTotal > repositoryPage \* REPOSITORIES_PER_PAGE/);
 assert.match(pageSource, /createRepositoryPageRequestGate/);
+assert.match(pageSource, /createGithubRecoveryAttemptGate/);
+assert.match(pageSource, /error instanceof GithubIntegrationApiError/);
+assert.match(pageSource, /error\.code === "GITHUB_OAUTH_RECONNECT_REQUIRED"/);
+assert.match(pageSource, /catch \(recoveryError\)[\s\S]*setMessage/);
 assert.match(pageSource, /requestGate\.isCurrent\(requestGeneration\)/);
 
 await import("./source-sync-polling.test.mjs");
 await import("./repository-page-request-gate.test.mjs");
+await import("./github-recovery-gate.test.mjs");

@@ -1,4 +1,5 @@
 import { Injectable, Optional } from "@nestjs/common";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { QueryResultRow } from "pg";
 import { badRequest, unauthorized } from "../../common/api-error";
 import { DatabaseService, type DatabaseTransaction } from "../../database/database.service";
@@ -31,6 +32,7 @@ interface GithubOAuthConnectionRow extends QueryResultRow {
 }
 
 export interface ActiveGithubOAuthConnection {
+  connectionId: string;
   githubUserId: number;
   githubLogin: string;
   accessToken: string;
@@ -97,6 +99,16 @@ export class GithubOAuthConnectionService {
     return this.getOptionalConnectionRow(userId, purpose);
   }
 
+  async getConnectionGeneration(userId: string, purpose: GithubOAuthPurpose, secret: string): Promise<string> {
+    const row = await this.getOptionalConnectionRow(userId, purpose);
+    return this.createConnectionGeneration(
+      userId,
+      purpose,
+      row && row.access_token_encrypted && !row.revoked_at ? row.id : null,
+      secret
+    );
+  }
+
   async saveConnection(input: {
     userId: string;
     purpose: GithubOAuthPurpose;
@@ -107,9 +119,29 @@ export class GithubOAuthConnectionService {
     tokenScope: string | null;
     accessTokenExpiresAt: string | null;
     refreshTokenExpiresAt: string | null;
+    expectedConnectionGeneration?: string;
+    generationSecret?: string;
   }): Promise<GithubOAuthConnectionRow> {
     try {
       const row = await this.database.transaction(async (transaction) => {
+        if (input.expectedConnectionGeneration !== undefined) {
+          if (!input.generationSecret) throw badRequest("GitHub OAuth callback failed");
+          await transaction.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+            [`github-oauth-connection:${input.userId}:${input.purpose}`]
+          );
+          const current = await this.getOptionalConnectionRow(input.userId, input.purpose, transaction, true);
+          const currentId = current && current.access_token_encrypted && !current.revoked_at ? current.id : null;
+          const actualGeneration = this.createConnectionGeneration(
+            input.userId,
+            input.purpose,
+            currentId,
+            input.generationSecret
+          );
+          if (!this.equalGeneration(actualGeneration, input.expectedConnectionGeneration)) {
+            throw badRequest("GitHub OAuth callback is stale");
+          }
+        }
         await transaction.query(
           `UPDATE github_oauth_connections
            SET access_token_encrypted = NULL, refresh_token_encrypted = NULL,
@@ -254,6 +286,7 @@ export class GithubOAuthConnectionService {
     );
 
     return {
+      connectionId: row.id,
       ...row,
       access_token_encrypted: accessTokenEncrypted,
       refresh_token_encrypted: refreshTokenEncrypted,
@@ -280,6 +313,7 @@ export class GithubOAuthConnectionService {
 
   private mapActive(row: GithubOAuthConnectionRow, config: GithubOAuthRuntimeConfig): ActiveGithubOAuthConnection {
     return {
+      connectionId: row.id,
       githubUserId: Number(row.github_user_id), githubLogin: row.github_login,
       accessToken: this.tokenEncryptionService.decryptToken(row.access_token_encrypted!, config),
       tokenScope: row.token_scope,
@@ -290,5 +324,22 @@ export class GithubOAuthConnectionService {
   private isActiveAccountUniqueViolation(error: unknown): boolean {
     return typeof error === "object" && error !== null &&
       (error as { code?: unknown }).code === "23505";
+  }
+
+  private createConnectionGeneration(
+    userId: string,
+    purpose: GithubOAuthPurpose,
+    connectionId: string | null,
+    secret: string
+  ): string {
+    return createHmac("sha256", secret)
+      .update(`${userId}:${purpose}:${connectionId ?? "empty"}`, "utf8")
+      .digest("base64url");
+  }
+
+  private equalGeneration(actual: string, expected: string): boolean {
+    const actualBuffer = Buffer.from(actual, "utf8");
+    const expectedBuffer = Buffer.from(expected, "utf8");
+    return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
   }
 }
