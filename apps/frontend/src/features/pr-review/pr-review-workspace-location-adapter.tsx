@@ -6,6 +6,7 @@ import { useEditor } from "tldraw";
 import { useWorkspaceLocationAdapter } from "@/shared/workspace-presence/use-workspace-location-adapter";
 import type { WorkspacePresenceLocation } from "@/shared/workspace-presence/workspace-presence-types";
 import {
+  createPrReviewReadyLocationReporter,
   createPrReviewDiffLocation,
   getPrReviewScrollOffset,
   readPrReviewDiffTarget,
@@ -105,6 +106,10 @@ export function PrReviewWorkspaceLocationAdapter({
   reviewSessionId: string;
 }) {
   const editor = useEditor();
+  const readyLocationReporter = useMemo(
+    () => createPrReviewReadyLocationReporter(),
+    [],
+  );
   const adapter = useMemo(
     () => ({
       capture() {
@@ -185,7 +190,30 @@ export function PrReviewWorkspaceLocationAdapter({
       reviewSessionId,
     ],
   );
-  const { reportInteraction } = useWorkspaceLocationAdapter(adapter);
+  const { reportInteraction, reportLocationChange } =
+    useWorkspaceLocationAdapter(adapter);
+  useEffect(() => {
+    const reviewFileId = openedReviewFileId;
+    if (!reviewFileId) {
+      readyLocationReporter.cancel();
+      return;
+    }
+
+    void readyLocationReporter.reportWhenReady({
+      findTarget: () =>
+        findPrReviewScrollTarget(reviewFileId, activeFollowSurface),
+      reportLocationChange,
+      reviewFileId,
+      surface: activeFollowSurface,
+      timeoutMs: 5_000,
+    });
+    return () => readyLocationReporter.cancel();
+  }, [
+    activeFollowSurface,
+    openedReviewFileId,
+    readyLocationReporter,
+    reportLocationChange,
+  ]);
   useEffect(() => {
     window.addEventListener("pointerup", reportInteraction);
     window.addEventListener("wheel", reportInteraction, { passive: true });

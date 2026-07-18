@@ -184,3 +184,59 @@ export async function waitForPrReviewScrollTarget<T>(input: {
 
   return null;
 }
+
+export async function reportPrReviewLocationWhenTargetReady<T>(input: {
+  findTarget: () => PrReviewScrollTarget<T> | null;
+  intervalMs?: number;
+  reportLocationChange: () => void;
+  reviewFileId: string;
+  signal: AbortSignal;
+  surface: PrReviewFollowSurfaceKey;
+  timeoutMs?: number;
+}) {
+  const target = await waitForPrReviewScrollTarget({
+    findTarget: input.findTarget,
+    intervalMs: input.intervalMs,
+    reviewFileId: input.reviewFileId,
+    signal: input.signal,
+    surface: input.surface,
+    timeoutMs: input.timeoutMs,
+  });
+  if (!target || input.signal.aborted) return false;
+
+  input.reportLocationChange();
+  return true;
+}
+
+export function createPrReviewReadyLocationReporter() {
+  let activeController: AbortController | null = null;
+
+  return {
+    cancel() {
+      const controller = activeController;
+      activeController = null;
+      controller?.abort();
+    },
+    async reportWhenReady<T>(input: {
+      findTarget: () => PrReviewScrollTarget<T> | null;
+      intervalMs?: number;
+      reportLocationChange: () => void;
+      reviewFileId: string;
+      surface: PrReviewFollowSurfaceKey;
+      timeoutMs?: number;
+    }) {
+      activeController?.abort();
+      const controller = new AbortController();
+      activeController = controller;
+
+      const reported = await reportPrReviewLocationWhenTargetReady({
+        ...input,
+        signal: controller.signal,
+      });
+      if (activeController === controller) {
+        activeController = null;
+      }
+      return reported;
+    },
+  };
+}
