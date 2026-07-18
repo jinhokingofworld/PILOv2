@@ -79,7 +79,7 @@ class SemanticReranker(Protocol):
 
 def parse_tool_capability_catalog(
     value: object,
-    eligible_tool_names: set[str],
+    eligible_tool_schemas: dict[str, dict[str, object]],
 ) -> ToolCapabilityCatalog | None:
     if value is None:
         return None
@@ -106,6 +106,7 @@ def parse_tool_capability_catalog(
     capabilities = tuple(_parse_capability(item) for item in raw_capabilities)
     descriptors = tuple(_parse_descriptor(item) for item in raw_descriptors)
     tool_names = {descriptor.tool_name for descriptor in descriptors}
+    eligible_tool_names = set(eligible_tool_schemas)
     capability_ids = {capability.capability_id for capability in capabilities}
     if (
         len(tool_names) != len(descriptors)
@@ -113,6 +114,13 @@ def parse_tool_capability_catalog(
         or len(capability_ids) != len(capabilities)
         or any(not set(capability.tool_names) <= eligible_tool_names for capability in capabilities)
         or any(not set(descriptor.capability_ids) <= capability_ids for descriptor in descriptors)
+        or any(
+            not hmac.compare_digest(
+                descriptor.input_schema_sha256,
+                compute_input_schema_sha256(eligible_tool_schemas[descriptor.tool_name]),
+            )
+            for descriptor in descriptors
+        )
     ):
         raise ValueError("Invalid toolCapabilityCatalog")
 
@@ -241,6 +249,16 @@ def compute_tool_capability_catalog_sha(
             "capabilities": capabilities,
             "descriptors": descriptors,
         },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def compute_input_schema_sha256(input_schema: dict[str, object]) -> str:
+    canonical = json.dumps(
+        input_schema,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,

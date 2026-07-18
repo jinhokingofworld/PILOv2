@@ -298,7 +298,8 @@ def parse_agent_run_job_payload(payload: dict[str, object]) -> AgentRunJob:
         tools=tools,
         request_context=_parse_request_context(payload.get("requestContext")),
         tool_capability_catalog=parse_tool_capability_catalog(
-            payload.get("toolCapabilityCatalog"), {tool.name for tool in tools}
+            payload.get("toolCapabilityCatalog"),
+            {tool.name: tool.input_schema for tool in tools},
         ),
     )
 

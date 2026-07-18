@@ -11,7 +11,10 @@ from app.agent_planner_evaluation import (
     select_shadow_planner_tools,
 )
 from app.agent_processor import AgentPlannerDecision
-from app.agent_tool_retrieval import compute_tool_capability_catalog_sha
+from app.agent_tool_retrieval import (
+    compute_input_schema_sha256,
+    compute_tool_capability_catalog_sha,
+)
 
 
 class FakePlanner:
@@ -165,6 +168,11 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
         ],
     }
     tool_catalog = raw["toolCapabilityCatalog"]
+    schemas_by_tool_name = {tool["name"]: tool["inputSchema"] for tool in raw["tools"]}
+    for descriptor in tool_catalog["descriptors"]:
+        descriptor["inputSchemaSha256"] = compute_input_schema_sha256(
+            schemas_by_tool_name[descriptor["toolName"]]
+        )
     tool_catalog["sha256"] = compute_tool_capability_catalog_sha(
         tool_catalog["version"],
         tool_catalog["capabilities"],

@@ -1,10 +1,16 @@
 import pytest
 
 from app.agent_tool_retrieval import (
+    compute_input_schema_sha256,
     compute_tool_capability_catalog_sha,
     parse_tool_capability_catalog,
     retrieve_tool_shortlist,
 )
+
+TOOL_SCHEMAS = {
+    "list_calendar_events": {"type": "object", "required": ["start", "end"]},
+    "list_meeting_reports": {"type": "object", "properties": {"status": {"type": "string"}}},
+}
 
 
 def catalog_payload() -> dict[str, object]:
@@ -42,7 +48,9 @@ def catalog_payload() -> dict[str, object]:
                 "riskLevel": "low",
                 "executionMode": "auto",
                 "contextSurface": None,
-                "inputSchemaSha256": "b" * 64,
+                "inputSchemaSha256": compute_input_schema_sha256(
+                    TOOL_SCHEMAS["list_calendar_events"]
+                ),
             },
             {
                 "toolName": "list_meeting_reports",
@@ -57,7 +65,9 @@ def catalog_payload() -> dict[str, object]:
                 "riskLevel": "low",
                 "executionMode": "auto",
                 "contextSurface": None,
-                "inputSchemaSha256": "c" * 64,
+                "inputSchemaSha256": compute_input_schema_sha256(
+                    TOOL_SCHEMAS["list_meeting_reports"]
+                ),
             },
         ],
     }
@@ -68,9 +78,7 @@ def catalog_payload() -> dict[str, object]:
 
 
 def test_catalog_requires_exactly_the_hard_eligible_tools() -> None:
-    catalog = parse_tool_capability_catalog(
-        catalog_payload(), {"list_calendar_events", "list_meeting_reports"}
-    )
+    catalog = parse_tool_capability_catalog(catalog_payload(), TOOL_SCHEMAS)
 
     assert catalog is not None
     assert catalog.version == "agent-tool-capabilities:v1"
@@ -78,7 +86,7 @@ def test_catalog_requires_exactly_the_hard_eligible_tools() -> None:
     invalid = catalog_payload()
     invalid["descriptors"] = invalid["descriptors"][:1]
     with pytest.raises(ValueError, match="toolCapabilityCatalog"):
-        parse_tool_capability_catalog(invalid, {"list_calendar_events", "list_meeting_reports"})
+        parse_tool_capability_catalog(invalid, TOOL_SCHEMAS)
 
 
 def test_catalog_rejects_a_sha_that_does_not_match_the_canonical_content() -> None:
@@ -86,13 +94,11 @@ def test_catalog_rejects_a_sha_that_does_not_match_the_canonical_content() -> No
     invalid["descriptors"][0]["whenToUse"] = "변조된 설명"
 
     with pytest.raises(ValueError, match="toolCapabilityCatalog SHA"):
-        parse_tool_capability_catalog(invalid, {"list_calendar_events", "list_meeting_reports"})
+        parse_tool_capability_catalog(invalid, TOOL_SCHEMAS)
 
 
 def test_metadata_retrieval_prefers_matching_domain_and_returns_low_confidence_fallback() -> None:
-    catalog = parse_tool_capability_catalog(
-        catalog_payload(), {"list_calendar_events", "list_meeting_reports"}
-    )
+    catalog = parse_tool_capability_catalog(catalog_payload(), TOOL_SCHEMAS)
     assert catalog is not None
 
     calendar = retrieve_tool_shortlist("이번 주 일정 알려줘", catalog, top_k=1)
@@ -106,3 +112,14 @@ def test_metadata_retrieval_prefers_matching_domain_and_returns_low_confidence_f
     assert unknown.tool_names == ()
     assert unknown.low_confidence
     assert unknown.fallback_reason == "no_metadata_match"
+
+
+def test_catalog_rejects_descriptor_digest_that_does_not_match_the_tool_schema() -> None:
+    invalid = catalog_payload()
+    invalid["descriptors"][0]["inputSchemaSha256"] = "0" * 64
+    invalid["sha256"] = compute_tool_capability_catalog_sha(
+        invalid["version"], invalid["capabilities"], invalid["descriptors"]
+    )
+
+    with pytest.raises(ValueError, match="Invalid toolCapabilityCatalog"):
+        parse_tool_capability_catalog(invalid, TOOL_SCHEMAS)

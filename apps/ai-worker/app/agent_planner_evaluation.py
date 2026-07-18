@@ -99,7 +99,9 @@ def attach_tool_capability_catalog(suite: EvaluationSuite, catalog_path: Path) -
         raw = json.loads(catalog_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         raise ValueError(f"Invalid tool capability catalog JSON: {catalog_path}") from error
-    catalog = parse_tool_capability_catalog(raw, {tool.name for tool in suite.job.tools})
+    catalog = parse_tool_capability_catalog(
+        raw, {tool.name: tool.input_schema for tool in suite.job.tools}
+    )
     if catalog is None:
         raise ValueError("Tool capability catalog is required")
     return replace(suite, job=replace(suite.job, tool_capability_catalog=catalog))
