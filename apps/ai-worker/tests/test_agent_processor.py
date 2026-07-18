@@ -377,6 +377,74 @@ def test_meeting_candidate_selection_resumes_terminal_goal_without_repeating_loo
     assert normalized.output_summary["input"] == {"useSelectedMeetingRoomCandidate": True}
 
 
+def test_meeting_candidate_selection_recovers_compatible_goal_when_catalog_was_missing() -> None:
+    tools = [
+        tool_snapshot(
+            name="resolve_meeting_resource",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        tool_snapshot(
+            name="start_meeting_in_room",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+    job = parse_agent_run_job_payload(agent_payload(tools=tools))
+    planning_context = (
+        'selected meeting candidate resume: {"clarificationToolName":"resolve_meeting_resource",'
+        '"goalToolName":"","resourceType":"meeting_room",'
+        '"toolInput":{"roomName":"개발 회의실"}}'
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="start_meeting_in_room",
+            tool_input={"roomName": "개발 회의실"},
+            requires_confirmation=True,
+        ),
+        job,
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "start_meeting_in_room"
+    assert normalized.output_summary["input"] == {"useSelectedMeetingRoomCandidate": True}
+    assert normalized.risk_level == "medium"
+
+
+def test_meeting_candidate_selection_does_not_repeat_lookup_without_stored_goal() -> None:
+    tools = [
+        tool_snapshot(
+            name="resolve_meeting_resource",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        tool_snapshot(
+            name="start_meeting_in_room",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+    job = parse_agent_run_job_payload(agent_payload(tools=tools))
+    planning_context = (
+        'selected meeting candidate resume: {"clarificationToolName":"resolve_meeting_resource",'
+        '"goalToolName":"","resourceType":"meeting_room","toolInput":{}}'
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="resolve_meeting_resource",
+            tool_input={"resourceType": "meeting_room"},
+        ),
+        job,
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["meeting_candidate_goal"]
+
+
 def test_meeting_candidate_selection_resumes_one_ambiguous_selector_at_a_time() -> None:
     tool = tool_snapshot(
         name="update_meeting_report_action_item",
@@ -737,7 +805,7 @@ def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_and_wri
         agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
     )
 
-    shadow = select_agent_planner_tools(
+    shadow_selection = select_agent_planner_tool_selection(
         job,
         "이번 주 일정 조회해줘",
         mode=TOOL_RETRIEVAL_MODE_SHADOW,
@@ -766,10 +834,13 @@ def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_and_wri
         schema_token_budget=1,
     )
 
-    assert [tool.name for tool in shadow] == [
+    assert [tool.name for tool in shadow_selection.tools] == [
         "list_calendar_events",
         "create_calendar_event",
     ]
+    assert shadow_selection.used_shortlist is False
+    assert shadow_selection.retrieval is not None
+    assert shadow_selection.retrieval.primary_tool_name == "list_calendar_events"
     assert [tool.name for tool in shortlist] == ["list_calendar_events"]
     assert [tool.name for tool in mutation] == ["create_calendar_event"]
     assert [tool.name for tool in low_confidence] == [
@@ -932,8 +1003,9 @@ def test_environment_flag_switches_between_shortlist_and_shadow(monkeypatch) -> 
 
     monkeypatch.setenv("AGENT_TOOL_RETRIEVAL_MODE", "shadow")
     shadow_planner = FakePlannerClient()
+    shadow_repository = FakeAgentRunRepository(context=run_context(prompt="일정 조회"))
     shadow_processor = AgentRunProcessor(
-        FakeAgentRunRepository(context=run_context(prompt="일정 조회")),
+        shadow_repository,
         shadow_planner,
         FakeExecutionHandoffClient(),
         current_date_provider=lambda _timezone: date(2026, 7, 9),
@@ -949,6 +1021,10 @@ def test_environment_flag_switches_between_shortlist_and_shadow(monkeypatch) -> 
     assert retrieval["catalogSha256"] == tool_capability_catalog(tools)["sha256"]
     assert retrieval["eligibleSnapshotSha256"] != retrieval["shortlistSha256"]
     assert len(retrieval["shortlistSha256"]) == 64
+    shadow_retrieval = shadow_repository.completed_steps[0][2]["toolRetrieval"]
+    assert shadow_retrieval["mode"] == "shadow"
+    assert shadow_retrieval["usedShortlist"] is False
+    assert shadow_retrieval["primaryToolName"] == "list_calendar_events"
 
 
 def test_unknown_environment_mode_falls_back_to_shadow(monkeypatch) -> None:

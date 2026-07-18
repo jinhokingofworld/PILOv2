@@ -156,16 +156,15 @@ def select_agent_planner_tool_selection(
     if mode not in TOOL_RETRIEVAL_MODES:
         return AgentPlannerToolSelection(job.tools, None, False)
 
-    if mode == TOOL_RETRIEVAL_MODE_SHADOW:
-        return AgentPlannerToolSelection(job.tools, None, False)
     if job.tool_capability_catalog is None:
-        if job.tool_capability_catalog_error == "missing_catalog":
+        fallback_reason = job.tool_capability_catalog_error or "missing_catalog"
+        if mode == TOOL_RETRIEVAL_MODE_SHADOW or fallback_reason == "missing_catalog":
             return AgentPlannerToolSelection(
                 tools=job.tools,
                 retrieval=ToolRetrievalResult(
                     tool_names=tuple(),
-                    low_confidence=False,
-                    fallback_reason="missing_catalog",
+                    low_confidence=fallback_reason != "missing_catalog",
+                    fallback_reason=fallback_reason,
                 ),
                 used_shortlist=False,
             )
@@ -186,6 +185,12 @@ def select_agent_planner_tool_selection(
         top_k=top_k,
         schema_token_budget=schema_token_budget,
     )
+    if mode == TOOL_RETRIEVAL_MODE_SHADOW:
+        return AgentPlannerToolSelection(
+            tools=job.tools,
+            retrieval=selection.retrieval,
+            used_shortlist=False,
+        )
     if selection.retrieval.low_confidence:
         return AgentPlannerToolSelection(
             tools=job.tools,
@@ -1474,6 +1479,29 @@ MEETING_SELECTION_SELECTOR_FIELDS = {
         "ordinal",
     ),
 }
+MEETING_GOAL_TOOLS_BY_RESOURCE_TYPE = {
+    "meeting_room": {"start_meeting_in_room"},
+    "meeting": {
+        "join_meeting",
+        "leave_meeting",
+        "start_meeting_recording",
+        "end_meeting_recording",
+        "get_meeting_participants",
+    },
+    "meeting_report": {
+        "get_meeting_report",
+        "summarize_meeting_report",
+        "find_action_items",
+        "get_meeting_decision_evidence",
+        "regenerate_meeting_report",
+    },
+    "workspace_member": {"update_meeting_report_action_item"},
+    "meeting_report_action_item": {
+        "update_meeting_report_action_item",
+        "dismiss_meeting_report_action_item",
+        "approve_meeting_report_action_item",
+    },
+}
 
 
 def _normalize_meeting_candidate_goal_resume(
@@ -1489,8 +1517,22 @@ def _normalize_meeting_candidate_goal_resume(
     resource_type = resume.get("resourceType")
     goal_tool_name = resume.get("goalToolName")
     clarification_tool_name = resume.get("clarificationToolName")
-    if not isinstance(resource_type, str) or not isinstance(goal_tool_name, str):
+    if (
+        not isinstance(resource_type, str)
+        or not isinstance(goal_tool_name, str)
+        or not isinstance(clarification_tool_name, str)
+    ):
         return decision
+
+    compatible_goal_tools = MEETING_GOAL_TOOLS_BY_RESOURCE_TYPE.get(resource_type, set())
+    if goal_tool_name not in compatible_goal_tools:
+        goal_tool_name = _meeting_candidate_fallback_goal(
+            decision,
+            clarification_tool_name=clarification_tool_name,
+            compatible_goal_tools=compatible_goal_tools,
+        )
+    if goal_tool_name is None:
+        return _meeting_candidate_resume_clarification("meeting_candidate_goal")
 
     available_tool_names = {tool.name for tool in job.tools}
     if goal_tool_name not in available_tool_names:
@@ -1499,18 +1541,6 @@ def _normalize_meeting_candidate_goal_resume(
     selection_field = MEETING_SELECTION_FIELD_BY_RESOURCE_TYPE.get(resource_type)
     if selection_field is None:
         return _meeting_candidate_resume_clarification("meeting_candidate_type")
-
-    if goal_tool_name == "resolve_meeting_resource":
-        return AgentPlannerDecision(
-            status="completed",
-            message="선택한 Meeting 대상을 확인했습니다.",
-            final_answer_draft="선택한 대상을 확인했습니다.",
-            tool_name=None,
-            tool_input={},
-            requires_confirmation=False,
-            missing_fields=(),
-            unsupported_reason=None,
-        )
 
     original_input = resume.get("toolInput")
     tool_input = (
@@ -1562,6 +1592,19 @@ def _latest_meeting_candidate_resume(planning_context: str) -> dict[str, object]
             continue
         if isinstance(value, dict):
             return value
+    return None
+
+
+def _meeting_candidate_fallback_goal(
+    decision: AgentPlannerDecision,
+    *,
+    clarification_tool_name: str,
+    compatible_goal_tools: set[str],
+) -> str | None:
+    if clarification_tool_name in compatible_goal_tools:
+        return clarification_tool_name
+    if decision.status == "tool_candidate" and decision.tool_name in compatible_goal_tools:
+        return decision.tool_name
     return None
 
 
