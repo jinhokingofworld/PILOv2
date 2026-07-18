@@ -25,18 +25,15 @@ export type CurrentWorkspaceScreenSharePayload = {
   session: PublicWorkspaceScreenShareSession | null;
 };
 
-export type StartWorkspaceScreenSharePayload = {
-  session: {
-    id: string;
-    status: "starting";
-    sharer: {
-      userId: string;
-      displayName: string;
-      avatarUrl: string | null;
-    };
-    startedAt: null;
+export type StartWorkspaceScreenSharePayload = ScreenShareTokenPayload & {
+  id: string;
+  status: "starting";
+  sharer: {
+    userId: string;
+    displayName: string;
+    avatarUrl: string | null;
   };
-  livekit: ScreenShareTokenPayload;
+  startedAt: null;
 };
 
 export type EndWorkspaceScreenSharePayload = {
@@ -234,17 +231,15 @@ export class ScreenShareService {
       participantName: session.sharerDisplayName
     });
     const payload: StartWorkspaceScreenSharePayload = {
-      session: {
-        id: session.sessionId,
-        status: "starting",
-        sharer: {
-          userId: session.sharerUserId,
-          displayName: session.sharerDisplayName,
-          avatarUrl: session.sharerAvatarUrl
-        },
-        startedAt: null
+      id: session.sessionId,
+      status: "starting",
+      sharer: {
+        userId: session.sharerUserId,
+        displayName: session.sharerDisplayName,
+        avatarUrl: session.sharerAvatarUrl
       },
-      livekit
+      startedAt: null,
+      ...livekit
     };
     this.startHttpStatuses.set(payload, status);
     return payload;

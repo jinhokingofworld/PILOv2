@@ -261,25 +261,21 @@ const createHarness = ({
 const startHarness = createHarness({ uuids: [sessionId, nextSessionId] });
 const started = await startHarness.service.start(userId, workspaceId);
 assert.deepEqual(started, {
-  session: {
-    id: sessionId,
-    status: "starting",
-    sharer: {
-      userId,
-      displayName: "민준",
-      avatarUrl: null
-    },
-    startedAt: null
+  id: sessionId,
+  status: "starting",
+  sharer: {
+    userId,
+    displayName: "민준",
+    avatarUrl: null
   },
-  livekit: {
-    livekitUrl: "wss://screen-share.test",
-    livekitToken: "publisher-token-1",
-    expiresAt: "2026-07-18T01:00:00.000Z"
-  }
+  startedAt: null,
+  livekitUrl: "wss://screen-share.test",
+  livekitToken: "publisher-token-1",
+  expiresAt: "2026-07-18T01:00:00.000Z"
 });
-assert.equal(started.session.status, "starting");
-assert.equal(started.session.startedAt, null);
-assert.equal(started.livekit.livekitRoomName, undefined);
+assert.equal(started.status, "starting");
+assert.equal(started.startedAt, null);
+assert.equal(started.livekitRoomName, undefined);
 assert.deepEqual(startHarness.state.current, startingSession());
 assert.deepEqual(startHarness.tokens.publisherCalls, [
   {
@@ -292,8 +288,8 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
 
 {
   const recovered = await startHarness.service.start(userId, workspaceId);
-  assert.equal(recovered.session.id, sessionId);
-  assert.equal(recovered.livekit.livekitToken, "publisher-token-2");
+  assert.equal(recovered.id, sessionId);
+  assert.equal(recovered.livekitToken, "publisher-token-2");
   assert.equal(startHarness.state.reserveCalls.length, 2);
   assert.equal(startHarness.service.getStartHttpStatus(recovered), 200);
 }
@@ -304,7 +300,7 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     uuids: [sessionId]
   });
   const result = await harness.service.start(userId, workspaceId);
-  assert.equal(result.session.sharer.displayName, "member@example.com");
+  assert.equal(result.sharer.displayName, "member@example.com");
 }
 
 {
@@ -313,7 +309,7 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     uuids: [sessionId]
   });
   const result = await harness.service.start(userId, workspaceId);
-  assert.equal(result.session.sharer.displayName, "PILO");
+  assert.equal(result.sharer.displayName, "PILO");
 }
 
 {
@@ -346,7 +342,7 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
   });
   harness.rooms.active = false;
   const result = await harness.service.start(userId, workspaceId);
-  assert.equal(result.session.id, nextSessionId);
+  assert.equal(result.id, nextSessionId);
   assert.equal(harness.state.reserveCalls.length, 2);
   assert.equal(harness.state.endCalls.length, 1);
   assert.equal(harness.tokens.publisherCalls.length, 1);
@@ -603,18 +599,17 @@ try {
 }
 
 {
+  const controllerTokenPayload = {
+    livekitUrl: "wss://screen-share.test",
+    livekitToken: "publisher-token",
+    expiresAt: "2026-07-18T01:00:00.000Z"
+  };
   const controllerPayload = {
-    session: {
-      id: sessionId,
-      status: "starting",
-      sharer: { userId, displayName: "민준", avatarUrl: null },
-      startedAt: null
-    },
-    livekit: {
-      livekitUrl: "wss://screen-share.test",
-      livekitToken: "publisher-token",
-      expiresAt: "2026-07-18T01:00:00.000Z"
-    }
+    id: sessionId,
+    status: "starting",
+    sharer: { userId, displayName: "민준", avatarUrl: null },
+    startedAt: null,
+    ...controllerTokenPayload
   };
   const fakeService = {
     async getCurrent() {
@@ -624,7 +619,7 @@ try {
       return controllerPayload;
     },
     async createViewerToken() {
-      return controllerPayload.livekit;
+      return controllerTokenPayload;
     },
     async end() {
       return { sessionId, ended: true };
@@ -653,7 +648,7 @@ try {
   assert.equal(response.statusCode, 200);
   assert.deepEqual(
     await controller.viewerToken(userId, workspaceId, sessionId),
-    { success: true, data: controllerPayload.livekit }
+    { success: true, data: controllerTokenPayload }
   );
   assert.deepEqual(await controller.end(userId, workspaceId, sessionId), {
     success: true,
