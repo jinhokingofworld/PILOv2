@@ -127,7 +127,7 @@ def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
             if key not in output_json:
                 continue
             value = output_json[key]
-            if isinstance(value, (str, int, float, bool)) or value is None:
+            if isinstance(value, str | int | float | bool) or value is None:
                 summary[key] = value
         summary["topLevelKeys"] = sorted(str(key) for key in output_json)[:50]
     else:
@@ -141,10 +141,7 @@ def _build_bounded_agent_planning_context(lines: list[str]) -> str:
     for line in reversed(lines):
         line_characters = len(line)
         separator_characters = 1 if selected_reversed else 0
-        if (
-            line_characters + separator_characters
-            > AGENT_PLANNING_CONTEXT_MAX_CHARACTERS
-        ):
+        if line_characters + separator_characters > AGENT_PLANNING_CONTEXT_MAX_CHARACTERS:
             continue
         if (
             total_characters + line_characters + separator_characters
@@ -1590,9 +1587,7 @@ class PgAgentRunRepository:
         ).fetchall()
         for item in timeline_rows:
             if item["item_kind"] == "tool_step":
-                output = _serialize_agent_tool_output(
-                    str(item["tool_name"]), item["output_json"]
-                )
+                output = _serialize_agent_tool_output(str(item["tool_name"]), item["output_json"])
                 memory.append(f"tool {item['tool_name']}: {output}")
                 continue
 

@@ -1339,9 +1339,7 @@ def test_sql_erd_table_focus_accepts_unique_compact_primary_refs() -> None:
     )
 
     assert normalized.status == "tool_candidate"
-    assert normalized.output_summary["input"] == {
-        "primaryTableRefs": ["t1", "t20"]
-    }
+    assert normalized.output_summary["input"] == {"primaryTableRefs": ["t1", "t20"]}
 
 
 def test_sql_erd_nullable_requested_dialect_is_not_missing() -> None:

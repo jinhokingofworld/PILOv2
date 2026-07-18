@@ -970,7 +970,7 @@ def test_agent_repository_preserves_large_sql_erd_inspection_as_valid_json() -> 
                 "content": None,
                 "tool_name": "inspect_sql_erd_schema",
                 "output_json": inspection_output,
-            }
+            },
         ],
     )
     repository.connection = connection
