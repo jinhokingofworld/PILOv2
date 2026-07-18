@@ -141,11 +141,11 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("meeting.rooms.list", "meeting", ["list_meeting_rooms"], "회의방 또는 진행 중인 회의를 조회할 때", ["회의에 참여하거나 시작하는 요청"]),
   capability("meeting.control.start", "meeting", ["list_meeting_rooms", "start_meeting_in_room"], "특정 회의방에서 새 회의를 시작할 때", ["기존 회의 참여 또는 퇴장 요청"]),
   capability("meeting.control.join", "meeting", ["resolve_meeting_resource", "join_meeting"], "진행 중인 회의에 참여하거나 재입장할 때", ["회의 시작 또는 현재 회의 퇴장 요청"]),
-  capability("meeting.control.leave", "meeting", ["get_active_meeting", "leave_meeting"], "현재 참여 중인 회의에서 나갈 때", ["다른 회의 참여 또는 회의 시작 요청"]),
+  capability("meeting.control.leave", "meeting", ["get_active_meeting", "leave_meeting"], "현재 참여 중인 회의에서 나갈 때", ["다른 회의 참여 또는 회의 시작 요청"], ["현재 회의에서 나가줘", "회의 나가줘"]),
   capability("meeting.recording.start", "meeting", ["get_active_meeting", "start_meeting_recording"], "현재 회의의 녹음을 시작할 때", ["녹음 종료 또는 회의록 조회 요청"]),
   capability("meeting.recording.end", "meeting", ["get_active_meeting", "end_meeting_recording"], "현재 회의의 녹음을 종료하고 회의록 생성을 요청할 때", ["녹음 시작 또는 회의 퇴장 요청"]),
   capability("meeting.participants.list", "meeting", ["resolve_meeting_resource", "get_meeting_participants"], "특정 회의의 현재 또는 과거 참여자를 조회할 때", ["회의록 또는 후속 작업 조회 요청"]),
-  capability("meeting.reports.list", "meeting", ["list_meeting_reports"], "최근, 상태별 회의록 목록을 조회할 때", ["단일 회의록 상세 또는 요약 요청"]),
+  capability("meeting.reports.list", "meeting", ["list_meeting_reports"], "최근, 상태별 회의록 목록을 조회할 때", ["단일 회의록 상세 또는 요약 요청"], ["최근 회의록 목록", "최근 3건 회의록"]),
   capability("meeting.report.detail", "meeting", ["list_meeting_reports", "get_meeting_report"], "특정 회의록의 상태나 상세를 확인할 때", ["회의록 목록만 필요한 요청"]),
   capability("meeting.report.summary", "meeting", ["list_meeting_reports", "summarize_meeting_report"], "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때", ["원문 근거 검색 요청"]),
   capability("meeting.evidence.search", "meeting", ["search_meeting_transcript"], "회의 발언 또는 Activity 근거를 검색할 때", ["결정 item에 직접 연결된 근거만 요청할 때"]),
@@ -278,9 +278,10 @@ function capability(
   domain: string,
   toolNames: string[],
   whenToUse: string,
-  mustNotUseFor: string[]
+  mustNotUseFor: string[],
+  positiveExamples: string[] = []
 ): AgentCapabilityDefinition {
-  const examples = capabilityExamples(id, domain, whenToUse);
+  const examples = capabilityExamples(id, domain, whenToUse, positiveExamples);
   return {
     id,
     domain,

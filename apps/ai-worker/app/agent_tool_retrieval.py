@@ -108,6 +108,13 @@ class ReadOnlyToolSelection:
     used_shortlist: bool
 
 
+@dataclass(frozen=True)
+class ToolShortlistSelection:
+    tool_names: tuple[str, ...]
+    retrieval: ToolRetrievalResult
+    used_shortlist: bool
+
+
 class SemanticReranker(Protocol):
     def score(self, prompt: str, descriptor: ToolCapabilityDescriptor) -> float: ...
 
@@ -254,7 +261,11 @@ def retrieve_tool_shortlist(
     selected: list[str] = []
     selected_set: set[str] = set()
     remaining_schema_bytes = schema_token_budget * 4 if schema_token_budget is not None else None
-    minimum_candidate_score = max(1.0, best_score / 2)
+    # Scores are discrete token overlaps. Preserve a closely matched second
+    # capability only for compound requests, while excluding one-token
+    # adjacent Meeting actions from an otherwise unambiguous shortlist.
+    compound_request = _is_compound_request(prompt)
+    minimum_candidate_score = max(1.0, best_score - 1.0) if compound_request else best_score
 
     selected_capability_ids: list[str] = []
     for rank, (score, capability_id) in enumerate(ranked[:top_k]):
@@ -369,6 +380,60 @@ def select_read_only_tool_shortlist(
     return ReadOnlyToolSelection(
         tool_names=tuple(
             tool_name for tool_name in legacy_tool_names if tool_name in retrieved_tool_names
+        ),
+        retrieval=retrieval,
+        used_shortlist=True,
+    )
+
+
+def select_tool_shortlist(
+    prompt: str,
+    catalog: ToolCapabilityCatalog,
+    eligible_tool_schemas: dict[str, dict[str, object]],
+    *,
+    top_k: int = 8,
+    schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
+) -> ToolShortlistSelection:
+    """Selects a bounded capability chain without falling back to all tools."""
+    try:
+        retrieval = retrieve_tool_shortlist(
+            prompt,
+            catalog,
+            top_k=top_k,
+            tool_schema_bytes={
+                tool_name: len(
+                    json.dumps(
+                        schema,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode()
+                )
+                for tool_name, schema in eligible_tool_schemas.items()
+            },
+            schema_token_budget=schema_token_budget,
+        )
+    except Exception:
+        return ToolShortlistSelection(
+            tool_names=tuple(),
+            retrieval=ToolRetrievalResult(
+                tool_names=tuple(),
+                low_confidence=True,
+                fallback_reason="retriever_error",
+            ),
+            used_shortlist=False,
+        )
+
+    if retrieval.low_confidence or not retrieval.selected_capability_ids:
+        return ToolShortlistSelection(
+            tool_names=tuple(),
+            retrieval=retrieval,
+            used_shortlist=False,
+        )
+
+    retrieved_tool_names = set(retrieval.tool_names)
+    return ToolShortlistSelection(
+        tool_names=tuple(
+            tool_name for tool_name in eligible_tool_schemas if tool_name in retrieved_tool_names
         ),
         retrieval=retrieval,
         used_shortlist=True,
@@ -642,3 +707,10 @@ def _tokens(value: str) -> tuple[str, ...]:
                 tokens.append(token[: -len(particle)])
                 break
     return tuple(tokens)
+
+
+def _is_compound_request(prompt: str) -> bool:
+    raw_tokens = _TOKEN_PATTERN.findall(prompt.lower())
+    return any(token in {"및", "그리고"} for token in raw_tokens) or any(
+        len(token) > 1 and token.endswith(("와", "과")) for token in raw_tokens
+    )

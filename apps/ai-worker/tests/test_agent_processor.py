@@ -9,6 +9,7 @@ from app.agent_processor import (
     AGENT_TOOL_SCHEMA_VERSION,
     TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
     TOOL_RETRIEVAL_MODE_SHADOW,
+    TOOL_RETRIEVAL_MODE_SHORTLIST,
     AgentPlannerDecision,
     AgentPlanningRequest,
     AgentRunContext,
@@ -20,6 +21,7 @@ from app.agent_processor import (
     normalize_agent_planner_decision,
     parse_agent_planner_output,
     parse_agent_run_job_payload,
+    select_agent_planner_tool_selection,
     select_agent_planner_tools,
 )
 from app.agent_tool_retrieval import (
@@ -640,6 +642,136 @@ def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_only_to
         "create_calendar_event",
     ]
     assert [tool.name for tool in budget_fallback] == [
+        "list_calendar_events",
+        "create_calendar_event",
+    ]
+
+
+def test_shortlist_mode_keeps_supported_write_chain_and_clarifies_retrieval_failure() -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="create_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
+    ]
+    payload = agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    job = parse_agent_run_job_payload(payload)
+
+    supported = select_agent_planner_tool_selection(
+        job,
+        "새 일정 생성",
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
+        top_k=1,
+    )
+    unknown = select_agent_planner_tool_selection(
+        job,
+        "점심 메뉴 추천",
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
+    )
+
+    assert [tool.name for tool in supported.tools] == ["create_calendar_event"]
+    assert supported.used_shortlist is True
+    assert unknown.tools == ()
+    assert unknown.retrieval is not None
+    assert unknown.retrieval.fallback_reason == "no_metadata_match"
+
+    repository = FakeAgentRunRepository(context=run_context(prompt="점심 메뉴 추천"))
+    planner_client = FakePlannerClient()
+    processor = AgentRunProcessor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+        tool_retrieval_mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
+    )
+
+    result = processor.process_payload(payload)
+
+    assert result.reason == "agent_tool_retrieval_needs_clarification"
+    assert planner_client.requests == []
+    assert repository.waiting_user_input_updates
+    summary = repository.completed_steps[0][2]
+    assert summary["status"] == "needs_clarification"
+    assert summary["toolRetrieval"] == {
+        "mode": "shortlist",
+        "usedShortlist": False,
+        "shortlistSize": 0,
+        "fallbackReason": "no_metadata_match",
+        "candidateCount": 0,
+        "confidenceBucket": "none",
+        "catalogVersion": "agent-tool-capabilities:v2",
+        "catalogSha256": job.tool_capability_catalog.sha256,
+        "eligibleSnapshotSha256": (
+            "d5a810ef126f10a54e783f5799ae3bf726a9226f9e8885926538598b7cdd4fc3"
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    ("catalog", "expected_reason"),
+    [
+        (None, "missing_catalog"),
+        ({"version": "agent-tool-capabilities:v3"}, "invalid_catalog"),
+    ],
+)
+def test_shortlist_mode_clarifies_missing_or_invalid_catalog(catalog, expected_reason) -> None:
+    payload = agent_payload()
+    if catalog is not None:
+        payload["toolCapabilityCatalog"] = catalog
+
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient()
+    processor = AgentRunProcessor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+        tool_retrieval_mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
+    )
+
+    result = processor.process_payload(payload)
+
+    assert result.reason == "agent_tool_retrieval_needs_clarification"
+    assert planner_client.requests == []
+    assert repository.waiting_user_input_updates
+    assert repository.completed_steps[0][2]["toolRetrieval"]["fallbackReason"] == expected_reason
+
+
+def test_environment_flag_switches_between_shortlist_and_shadow(monkeypatch) -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="create_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
+    ]
+    payload = agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+
+    monkeypatch.setenv("AGENT_TOOL_RETRIEVAL_MODE", "shortlist")
+    shortlist_planner = FakePlannerClient()
+    shortlist_processor = AgentRunProcessor(
+        FakeAgentRunRepository(context=run_context(prompt="일정 조회")),
+        shortlist_planner,
+        FakeExecutionHandoffClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+    )
+    shortlist_processor.process_payload(payload)
+
+    monkeypatch.setenv("AGENT_TOOL_RETRIEVAL_MODE", "shadow")
+    shadow_planner = FakePlannerClient()
+    shadow_processor = AgentRunProcessor(
+        FakeAgentRunRepository(context=run_context(prompt="일정 조회")),
+        shadow_planner,
+        FakeExecutionHandoffClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+    )
+    shadow_processor.process_payload(payload)
+
+    assert [tool.name for tool in shortlist_planner.requests[0].tools] == ["list_calendar_events"]
+    assert [tool.name for tool in shadow_planner.requests[0].tools] == [
         "list_calendar_events",
         "create_calendar_event",
     ]
