@@ -4,6 +4,14 @@ Owner: 주형
 
 API contract: `docs/api/github-integration-api.md`
 
+## Safe app-user OAuth recovery
+
+App-user credentials are capability-validated against GitHub user-installation lookup
+before persistence. Failed validation leaves the current credential intact. OAuth callback
+state includes the expected active connection identity; conditional replacement rejects
+stale callbacks. Reconnect-required failures are distinct from rate-limit and transient
+lookup failures so callers can retry without destructive credential mutation.
+
 경계 보강:
 
 - GitHub Review 제출 공개 API는 PR Review가 소유한다.

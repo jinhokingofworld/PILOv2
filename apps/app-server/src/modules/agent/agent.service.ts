@@ -4,6 +4,7 @@ import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { agentStorageUnavailable } from "./agent-api-error";
+import { AgentCanvasDelegationCompletionService } from "./agent-canvas-delegation-completion.service";
 import {
   CreateAgentRunResult as StoredCreateAgentRunResult,
   AgentLoggingService,
@@ -12,6 +13,12 @@ import {
   AgentStepPayload as StoredAgentStepPayload
 } from "./agent-logging.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
+import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
+import {
+  buildStoredMeetingCandidateSelectionMessage,
+  MEETING_CANDIDATE_SELECTION_KIND,
+  toPublicMeetingCandidateSelectionMessage
+} from "./meeting-candidate-selection";
 import {
   buildStoredSqlErdSelectionMessage,
   containsReservedAgentSelectionMarker,
@@ -44,10 +51,15 @@ export interface AgentRunCreateInput {
 
 export interface AgentRunInput {
   message: string;
-  selection?: {
-    kind: typeof SQL_ERD_SESSION_SELECTION_KIND;
-    token: string;
-  };
+  selection?:
+    | {
+        kind: typeof SQL_ERD_SESSION_SELECTION_KIND;
+        token: string;
+      }
+    | {
+        kind: typeof MEETING_CANDIDATE_SELECTION_KIND;
+        candidateSelectionId: string;
+      };
 }
 
 export interface AgentRunApiPayload {
@@ -274,7 +286,10 @@ export class AgentService {
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
     private readonly agentLoggingService: AgentLoggingService,
-    private readonly agentOutboxPublisherService: AgentOutboxPublisherService
+    private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
+    private readonly canvasDelegationCompletionService:
+      AgentCanvasDelegationCompletionService,
+    private readonly agentCandidateSelectionService: AgentCandidateSelectionService
   ) {}
 
   async createRun(
@@ -341,7 +356,8 @@ export class AgentService {
         return "expired" as const;
       }
       let storedMessage = input.message;
-      if (input.selection) {
+      if (input.selection?.kind === SQL_ERD_SESSION_SELECTION_KIND) {
+        const selectionToken = input.selection.token;
         const latestToolStep = await transaction.queryOne<AgentLatestToolStepRow>(
           `
             SELECT tool_name, output_json
@@ -360,7 +376,7 @@ export class AgentService {
             ? parseSqlErdSessionCandidates(latestToolStep.output_json.candidates)
             : [];
         const selected = candidates.find(
-          (candidate) => candidate.selectionToken === input.selection?.token
+          (candidate) => candidate.selectionToken === selectionToken
         );
         if (!selected) {
           throw badRequest(
@@ -371,6 +387,20 @@ export class AgentService {
           selected.selectionToken,
           selected.title
         );
+      }
+      if (input.selection?.kind === MEETING_CANDIDATE_SELECTION_KIND) {
+        const selected =
+          await this.agentCandidateSelectionService.consumeMeetingCandidateInTransaction(
+            transaction,
+            {
+              currentUserId,
+              workspaceId,
+              runId,
+              requestContext: run.request_context_json
+            },
+            input.selection.candidateSelectionId
+          );
+        storedMessage = buildStoredMeetingCandidateSelectionMessage(selected.label);
       }
       const next = await transaction.queryOne<{ sequence: number | string }>(
         `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
@@ -571,7 +601,7 @@ export class AgentService {
   ): Promise<AgentRunDetailPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
     await this.applyRequestTimeLifecycle(currentUserId, workspaceId);
-    const run = await this.database.queryOne<AgentRunRow>(
+    let run = await this.database.queryOne<AgentRunRow>(
       `
         SELECT *
         FROM agent_runs
@@ -584,6 +614,24 @@ export class AgentService {
 
     if (!run) {
       throw notFound("Agent run not found");
+    }
+
+    if (run.status === "running" && this.canvasDelegationCompletionService) {
+      await this.canvasDelegationCompletionService.reconcileRun({
+        agentRunId: runId,
+        workspaceId,
+        requestedByUserId: currentUserId
+      });
+      run = await this.database.queryOne<AgentRunRow>(
+        `
+          SELECT *
+          FROM agent_runs
+          WHERE id = $1
+            AND workspace_id = $2
+            AND requested_by_user_id = $3
+        `,
+        [runId, workspaceId, currentUserId]
+      ) ?? run;
     }
 
     const [steps, messages, confirmation] = await Promise.all([
@@ -856,21 +904,39 @@ export class AgentService {
       throw badRequest("message contains a reserved Agent selection marker");
     }
     if (body.selection === undefined) return { message };
-    if (
-      !this.isPlainObject(body.selection) ||
-      Object.keys(body.selection).some((key) => !["kind", "token"].includes(key)) ||
-      body.selection.kind !== SQL_ERD_SESSION_SELECTION_KIND ||
-      !isSqlErdSelectionToken(body.selection.token)
-    ) {
-      throw badRequest("selection must be a valid SQLtoERD session selection");
+    if (!this.isPlainObject(body.selection)) {
+      throw badRequest("selection must be a valid Agent selection");
     }
-    return {
-      message,
-      selection: {
-        kind: SQL_ERD_SESSION_SELECTION_KIND,
-        token: body.selection.token
-      }
-    };
+    if (
+      body.selection.kind === SQL_ERD_SESSION_SELECTION_KIND &&
+      Object.keys(body.selection).every((key) => ["kind", "token"].includes(key)) &&
+      isSqlErdSelectionToken(body.selection.token)
+    ) {
+      return {
+        message,
+        selection: {
+          kind: SQL_ERD_SESSION_SELECTION_KIND,
+          token: body.selection.token
+        }
+      };
+    }
+    if (
+      body.selection.kind === MEETING_CANDIDATE_SELECTION_KIND &&
+      Object.keys(body.selection).every((key) =>
+        ["kind", "candidateSelectionId"].includes(key)
+      ) &&
+      typeof body.selection.candidateSelectionId === "string" &&
+      UUID_PATTERN.test(body.selection.candidateSelectionId)
+    ) {
+      return {
+        message,
+        selection: {
+          kind: MEETING_CANDIDATE_SELECTION_KIND,
+          candidateSelectionId: body.selection.candidateSelectionId
+        }
+      };
+    }
+    throw badRequest("selection must be a valid Agent selection");
   }
 
   private normalizePagination(query: AgentRunListQuery): NormalizedPagination {
@@ -1084,7 +1150,9 @@ export class AgentService {
       id: row.id,
       sequence: row.sequence,
       role: row.role,
-      content: toPublicAgentMessageContent(row.content),
+      content: toPublicMeetingCandidateSelectionMessage(
+        toPublicAgentMessageContent(row.content)
+      ),
       createdAt: this.toIso(row.created_at)
     };
   }

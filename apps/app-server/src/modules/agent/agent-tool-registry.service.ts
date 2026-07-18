@@ -6,6 +6,10 @@ import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
 import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service";
 import { CanvasAgentDelegationToolsService } from "./tools/canvas-agent-delegation-tools.service";
 import { DriveAgentToolsService } from "./tools/drive-agent-tools.service";
+import {
+  buildAgentToolCapabilityCatalog,
+  type AgentToolCapabilityCatalogSnapshot
+} from "./agent-tool-capability-catalog";
 import type {
   AgentRunRequestContext,
   AgentToolDefinition
@@ -62,6 +66,14 @@ export class AgentToolRegistryService {
   ): AgentToolDefinition<unknown>[] {
     return this.listDefinitions().filter((definition) =>
       this.isAvailableForContext(definition, requestContext)
+    );
+  }
+
+  listCapabilityCatalogForContext(
+    requestContext: AgentRunRequestContext
+  ): AgentToolCapabilityCatalogSnapshot {
+    return buildAgentToolCapabilityCatalog(
+      this.listDefinitionsForContext(requestContext)
     );
   }
 

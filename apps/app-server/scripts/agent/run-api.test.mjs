@@ -445,6 +445,7 @@ function createService({
     confirmationRows: []
   },
   agentOutboxPublisherService = new FakeAgentOutboxPublisherService(),
+  canvasDelegationCompletionService,
   loggingError = null
 } = {}) {
   const workspaceService = new FakeWorkspaceService();
@@ -459,7 +460,8 @@ function createService({
       database,
       workspaceService,
       agentLoggingService,
-      agentOutboxPublisherService
+      agentOutboxPublisherService,
+      canvasDelegationCompletionService
     ),
     workspaceService,
     database,
@@ -1290,6 +1292,39 @@ for (const requestContext of [
     "providerRawResponse" in result.run.confirmation.plan.after,
     false
   );
+}
+
+{
+  const state = {
+    listRows: [],
+    runRows: [createRunRow({ status: "running" })],
+    stepRows: [],
+    messageRows: [],
+    confirmationRows: []
+  };
+  const reconcileCalls = [];
+  const { service } = createService({
+    state,
+    canvasDelegationCompletionService: {
+      async reconcileRun(scope) {
+        reconcileCalls.push(scope);
+        state.runRows[0].status = "completed";
+        state.runRows[0].final_answer = "대시보드 프레임을 찾았습니다.";
+      }
+    }
+  });
+
+  const result = await service.getRun(USER_ID, WORKSPACE_ID, RUN_ID);
+
+  assert.deepEqual(reconcileCalls, [
+    {
+      agentRunId: RUN_ID,
+      workspaceId: WORKSPACE_ID,
+      requestedByUserId: USER_ID
+    }
+  ]);
+  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.finalAnswer, "대시보드 프레임을 찾았습니다.");
 }
 
 {

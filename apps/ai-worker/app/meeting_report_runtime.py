@@ -96,6 +96,9 @@ AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE = "요청을 분석하지 못했습니다. �
 AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE = (
     "회의록 근거 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요."
 )
+AGENT_PLANNING_CONTEXT_MAX_CHARACTERS = 12_000
+AGENT_TOOL_OUTPUT_MAX_CHARACTERS = 3_000
+SQL_ERD_INSPECTION_TOOL_NAME = "inspect_sql_erd_schema"
 LOCAL_APP_ENVS = {"local", "test", "development"}
 MEETING_REPORT_FAILURE_STEPS = {
     "recording_not_completed": "STT",
@@ -105,6 +108,98 @@ MEETING_REPORT_FAILURE_STEPS = {
     "stt_failed": "STT",
     "llm_failed": "LLM",
 }
+
+
+def _project_json_value(value: object, max_characters: int) -> object:
+    serialized = json.dumps(value, ensure_ascii=False)
+    if len(serialized) <= max_characters:
+        return value
+
+    if isinstance(value, dict):
+        projected: dict[str, object] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            candidate_with_null = {**projected, key_text: None}
+            value_overhead = len(json.dumps(candidate_with_null, ensure_ascii=False)) - len("null")
+            remaining = max_characters - value_overhead
+            if remaining <= 0:
+                break
+            candidate_value = _project_json_value(item, remaining)
+            candidate = {**projected, key_text: candidate_value}
+            if len(json.dumps(candidate, ensure_ascii=False)) > max_characters:
+                break
+            projected = candidate
+        return projected
+
+    if isinstance(value, list):
+        projected_items: list[object] = []
+        for item in value:
+            candidate = [*projected_items, item]
+            if len(json.dumps(candidate, ensure_ascii=False)) > max_characters:
+                break
+            projected_items = candidate
+        return projected_items
+
+    if isinstance(value, str):
+        low = 0
+        high = len(value)
+        while low < high:
+            midpoint = (low + high + 1) // 2
+            candidate = value[:midpoint] + "…"
+            if len(json.dumps(candidate, ensure_ascii=False)) <= max_characters:
+                low = midpoint
+            else:
+                high = midpoint - 1
+        return value[:low] + "…" if low else ""
+
+    return value
+
+
+def _serialize_bounded_agent_tool_output(output_json: object, max_characters: int) -> str:
+    marker = {"planningContextTruncated": True}
+    marker_size = len(json.dumps(marker, ensure_ascii=False))
+    projected = _project_json_value(
+        output_json,
+        max(2, max_characters - marker_size),
+    )
+    bounded = (
+        {**projected, **marker} if isinstance(projected, dict) else {"value": projected, **marker}
+    )
+    serialized = json.dumps(bounded, ensure_ascii=False)
+    if len(serialized) <= max_characters:
+        return serialized
+    return json.dumps(marker, ensure_ascii=False)
+
+
+def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
+    serialized = json.dumps(output_json, ensure_ascii=False)
+    prefix_size = len(f"tool {tool_name}: ")
+    max_size = (
+        AGENT_PLANNING_CONTEXT_MAX_CHARACTERS - prefix_size
+        if tool_name == SQL_ERD_INSPECTION_TOOL_NAME
+        else AGENT_TOOL_OUTPUT_MAX_CHARACTERS
+    )
+    if len(serialized) <= max_size:
+        return serialized
+    return _serialize_bounded_agent_tool_output(output_json, max_size)
+
+
+def _build_bounded_agent_planning_context(lines: list[str]) -> str:
+    selected_reversed: list[str] = []
+    total_characters = 0
+    for line in reversed(lines):
+        line_characters = len(line)
+        separator_characters = 1 if selected_reversed else 0
+        if line_characters + separator_characters > AGENT_PLANNING_CONTEXT_MAX_CHARACTERS:
+            continue
+        if (
+            total_characters + line_characters + separator_characters
+            > AGENT_PLANNING_CONTEXT_MAX_CHARACTERS
+        ):
+            continue
+        selected_reversed.append(line)
+        total_characters += line_characters + separator_characters
+    return "\n".join(reversed(selected_reversed))
 
 
 @dataclass(frozen=True)
@@ -1467,6 +1562,36 @@ class PgAgentRunRepository:
                             f"previous resource {domain}:{resource_type} id={resource_id}{suffix}"
                         )
 
+        selected_candidate = self.connection.execute(
+            """
+            SELECT resource_type, label, description, status
+            FROM agent_candidate_selections
+            WHERE run_id = %s
+              AND workspace_id = %s
+              AND requested_by_user_id = %s
+              AND consumed_at IS NOT NULL
+              AND expires_at > now()
+            ORDER BY consumed_at DESC
+            LIMIT 1
+            """,
+            (job.run_id, job.workspace_id, job.requested_by_user_id),
+        ).fetchone()
+        if selected_candidate is not None:
+            resource_type = str(selected_candidate["resource_type"]).strip()
+            label = str(selected_candidate["label"]).strip()[:300]
+            description = selected_candidate["description"]
+            status = selected_candidate["status"]
+            if resource_type and label:
+                details = [
+                    f"selected meeting resource type={resource_type}",
+                    f"label={label}",
+                ]
+                if isinstance(description, str) and description.strip():
+                    details.append(f"description={description.strip()[:300]}")
+                if isinstance(status, str) and status.strip():
+                    details.append(f"status={status.strip()[:100]}")
+                memory.append(" ".join(details))
+
         timeline_rows = self.connection.execute(
             """
             WITH timeline AS (
@@ -1511,7 +1636,7 @@ class PgAgentRunRepository:
         ).fetchall()
         for item in timeline_rows:
             if item["item_kind"] == "tool_step":
-                output = json.dumps(item["output_json"], ensure_ascii=False)[:3000]
+                output = _serialize_agent_tool_output(str(item["tool_name"]), item["output_json"])
                 memory.append(f"tool {item['tool_name']}: {output}")
                 continue
 
@@ -1527,7 +1652,7 @@ class PgAgentRunRepository:
             prompt=str(row["prompt"]),
             timezone=str(row["timezone"]),
             planner_turn_count=int(row["planner_turn_count"]),
-            planning_context="\n".join(memory)[:12000],
+            planning_context=_build_bounded_agent_planning_context(memory),
         )
 
     def start_planner_step(self, job: AgentRunJob, context: AgentRunContext) -> str:

@@ -7,6 +7,7 @@ import type {
   AgentToolInputSchema,
   AgentPlannerRequestContext
 } from "./types/agent-tool.types";
+import type { AgentToolCapabilityCatalogSnapshot } from "./agent-tool-capability-catalog";
 
 export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v6";
 
@@ -27,6 +28,7 @@ export interface AgentRunRequestedJobPayload {
   turnSequence: number;
   toolSchemaVersion: string;
   tools: AgentToolSchemaSnapshotItem[];
+  toolCapabilityCatalog?: AgentToolCapabilityCatalogSnapshot;
 }
 
 export interface AgentGroundedAnswerRequestedJobPayload {

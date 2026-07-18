@@ -243,7 +243,7 @@ export class CanvasAgentRepository {
     );
   }
 
-  async claimNextPendingStep(): Promise<{
+  async claimNextPendingStep(runId: string | null = null): Promise<{
     run: CanvasAgentRunRow;
     step: CanvasAgentStepRow;
   } | null> {
@@ -256,6 +256,7 @@ export class CanvasAgentRepository {
             INNER JOIN canvas_agent_runs r ON r.id = s.run_id
             WHERE s.status = 'pending'
               AND r.status = 'executing'
+              AND ($1::uuid IS NULL OR r.id = $1)
             ORDER BY s.created_at ASC
             FOR UPDATE OF s SKIP LOCKED
             LIMIT 1
@@ -265,7 +266,8 @@ export class CanvasAgentRepository {
           FROM candidate
           WHERE s.id = candidate.id
           RETURNING s.*
-        `
+        `,
+        [runId]
       );
       if (!step) return null;
 

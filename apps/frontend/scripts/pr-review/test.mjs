@@ -380,7 +380,10 @@ assert.match(prReviewCanvasShell, /updateReviewedCount/);
 assert.match(prReviewCanvasShell, /previousReviewStatus/);
 assert.match(prReviewCanvasShell, /setSummary/);
 assert.match(prReviewCanvasShell, /updatedFile\.riskLevel/);
-assert.match(prReviewCanvasShell, /onFileOpen=\{setOpenedReviewFileId\}/);
+assert.match(
+  prReviewCanvasShell,
+  /onFileOpen=\{handleOpenedReviewFileChange\}/
+);
 assert.match(prReviewCanvasShell, /conflictAnalysis=\{conflictAnalysis\}/);
 assert.match(prReviewCanvasShell, /conflictFile=\{selectedConflictFile\}/);
 assert.match(

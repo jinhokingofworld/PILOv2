@@ -3,12 +3,18 @@ import json
 from pathlib import Path
 
 from app.agent_planner_evaluation import (
+    attach_tool_capability_catalog,
     build_evaluation_input_hashes,
     build_evaluation_report,
     evaluate_suite,
     load_evaluation_suite,
+    select_shadow_planner_tools,
 )
 from app.agent_processor import AgentPlannerDecision
+from app.agent_tool_retrieval import (
+    compute_input_schema_sha256,
+    compute_tool_capability_catalog_sha,
+)
 
 
 class FakePlanner:
@@ -75,6 +81,147 @@ def write_suite(tmp_path, cases):
         encoding="utf-8",
     )
     return path
+
+
+def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unknown_prompt(
+    tmp_path,
+) -> None:
+    path = write_suite(
+        tmp_path,
+        [
+            {
+                "id": "calendar",
+                "prompt": "이번 주 일정 보여줘",
+                "expected": {
+                    "status": "tool_candidate",
+                    "toolName": "list_calendar_events",
+                },
+            },
+            {
+                "id": "unknown",
+                "prompt": "점심 메뉴 추천",
+                "expected": {"status": "unsupported"},
+            },
+        ],
+    )
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["tools"].append(
+        {
+            "name": "list_meeting_reports",
+            "description": "회의록 목록을 조회합니다.",
+            "riskLevel": "low",
+            "executionMode": "auto",
+            "inputSchema": {"type": "object"},
+        }
+    )
+    raw["toolCapabilityCatalog"] = {
+        "version": "agent-tool-capabilities:v1",
+        "capabilities": [
+            {
+                "id": "calendar.list",
+                "domain": "calendar",
+                "toolNames": ["list_calendar_events"],
+                "whenToUse": "일정을 조회할 때",
+                "mustNotUseFor": ["회의록 요청"],
+                "positiveExamples": ["이번 주 일정"],
+            },
+            {
+                "id": "meeting.reports.list",
+                "domain": "meeting",
+                "toolNames": ["list_meeting_reports"],
+                "whenToUse": "회의록을 조회할 때",
+                "mustNotUseFor": ["일정 요청"],
+                "positiveExamples": ["최근 회의록"],
+            },
+        ],
+        "descriptors": [
+            {
+                "toolName": "list_calendar_events",
+                "domain": "calendar",
+                "action": "list_calendar_events",
+                "capabilityIds": ["calendar.list"],
+                "whenToUse": "이번 주 일정과 Calendar event를 조회합니다.",
+                "mustNotUseFor": ["회의록 요청"],
+                "acceptedSelectorFields": ["start", "end"],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+                "riskLevel": "low",
+                "executionMode": "auto",
+                "contextSurface": None,
+                "inputSchemaSha256": "b" * 64,
+            },
+            {
+                "toolName": "list_meeting_reports",
+                "domain": "meeting",
+                "action": "list_meeting_reports",
+                "capabilityIds": ["meeting.reports.list"],
+                "whenToUse": "회의록 목록을 조회합니다.",
+                "mustNotUseFor": ["일정 요청"],
+                "acceptedSelectorFields": [],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+                "riskLevel": "low",
+                "executionMode": "auto",
+                "contextSurface": None,
+                "inputSchemaSha256": "c" * 64,
+            },
+        ],
+    }
+    tool_catalog = raw["toolCapabilityCatalog"]
+    schemas_by_tool_name = {tool["name"]: tool["inputSchema"] for tool in raw["tools"]}
+    for descriptor in tool_catalog["descriptors"]:
+        descriptor["inputSchemaSha256"] = compute_input_schema_sha256(
+            schemas_by_tool_name[descriptor["toolName"]]
+        )
+    tool_catalog["sha256"] = compute_tool_capability_catalog_sha(
+        tool_catalog["version"],
+        tool_catalog["capabilities"],
+        tool_catalog["descriptors"],
+    )
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    suite = load_evaluation_suite(path)
+    catalog_path = tmp_path / "tool-capability-catalog.json"
+    catalog_path.write_text(json.dumps(raw["toolCapabilityCatalog"]), encoding="utf-8")
+    suite_without_catalog_raw = dict(raw)
+    suite_without_catalog_raw.pop("toolCapabilityCatalog")
+    path.write_text(json.dumps(suite_without_catalog_raw), encoding="utf-8")
+    attached_suite = attach_tool_capability_catalog(load_evaluation_suite(path), catalog_path)
+    assert attached_suite.job.tool_capability_catalog == suite.job.tool_capability_catalog
+
+    selected, retrieval = select_shadow_planner_tools(suite.job, "이번 주 일정 보여줘", top_k=1)
+    assert [tool.name for tool in selected] == ["list_calendar_events"]
+    assert retrieval is not None and not retrieval.low_confidence
+
+    fallback, low_confidence = select_shadow_planner_tools(suite.job, "점심 메뉴 추천")
+    assert [tool.name for tool in fallback] == [
+        "list_calendar_events",
+        "list_meeting_reports",
+    ]
+    assert low_confidence is not None and low_confidence.low_confidence
+
+    results = evaluate_suite(
+        FakePlanner(
+            [
+                decision(tool_name="list_meeting_reports"),
+                decision(status="unsupported", tool_name=None, tool_input={}),
+            ]
+        ),
+        suite,
+        current_date="2026-07-11",
+        use_shadow_retrieval=True,
+        shadow_top_k=1,
+    )
+    result = results[0]
+    report = build_evaluation_report(results)
+
+    assert "shortlist_tool" in result.failure_reasons
+    assert report["retrieval"]["toolRecall"] == 1.0
+    assert report["retrieval"]["averageShortlistSize"] == 1.5
+    assert report["retrieval"]["shortlistViolations"] == 1
+    assert report["retrieval"]["fallbackTaxonomy"] == {"no_metadata_match": 1}
+    assert report["results"][0]["retrieval"]["fallbackReason"] is None
+    assert "이번 주 일정 보여줘" not in json.dumps(report, ensure_ascii=False)
+    assert "prompt" not in report["results"][0]
 
 
 def test_evaluate_suite_scores_normalized_planner_output(tmp_path) -> None:
@@ -261,6 +408,7 @@ def test_fixed_korean_suite_loads() -> None:
         "start_meeting_recording",
         "end_meeting_recording",
         "list_meeting_rooms",
+        "resolve_meeting_resource",
         "get_active_meeting",
         "get_meeting_participants",
         "list_meeting_reports",

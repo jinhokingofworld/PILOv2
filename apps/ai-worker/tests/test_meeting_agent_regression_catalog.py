@@ -146,11 +146,18 @@ def test_catalog_builds_separate_canonical_and_held_out_planner_suites() -> None
         PLANNER_SUITE_PATH,
         variant="held_out",
     )
+    counterexamples = load_meeting_regression_suite(
+        CATALOG_PATH,
+        PLANNER_SUITE_PATH,
+        variant="counterexample",
+    )
 
     assert canonical.version == "meeting-agent-regression:v1:canonical"
     assert held_out.version == "meeting-agent-regression:v1:held_out"
     assert len(canonical.cases) == 18 * 4 * 3
     assert len(held_out.cases) == 18 * 3
+    assert len(counterexamples.cases) == 18 * 4
+    assert {case.kind for case in counterexamples.cases} == {"counterexample"}
     assert {case.prompt for case in canonical.cases}.isdisjoint(
         {case.prompt for case in held_out.cases}
     )

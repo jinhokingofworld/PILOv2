@@ -22,6 +22,8 @@ async function compileSqlErdRuntimeModules() {
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
   const sqlSourceMapOutputPath = join(outputDir, "sql-source-map.mjs");
+  const sourceNavigationOutputPath = join(outputDir, "source-navigation.mjs");
+  const schemaMutationOutputPath = join(outputDir, "schema-mutation.mjs");
   const sqlSourceDecorationOutputPath = join(
     outputDir,
     "sql-source-decoration.mjs"
@@ -119,6 +121,14 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/sql-source-map.ts",
       sqlSourceMapOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/source-navigation.ts",
+      sourceNavigationOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/schema-mutation.ts",
+      schemaMutationOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/sql-source-decoration.ts",
@@ -225,6 +235,10 @@ async function compileSqlErdRuntimeModules() {
         ],
         [
           /from "@\/features\/sql-erd\/components\/sql-erd-table-focus-context"/g,
+          'from "./table-focus-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/components\/sql-erd-selection-context"/g,
           'from "./table-focus-stub.mjs"'
         ],
         [
@@ -368,6 +382,7 @@ async function compileSqlErdRuntimeModules() {
       join(outputDir, "table-focus-stub.mjs"),
       [
         "export function useSqlErdTableFocus() { return null; }",
+        "export function useSqlErdContextRelationIds() { return new Set(); }",
         "export function getSqlErdFocusedTableRole() { return 'dimmed'; }",
         "export function getSqlErdFocusedRelationRole() { return 'dimmed'; }"
       ].join("\n")
@@ -380,6 +395,8 @@ async function compileSqlErdRuntimeModules() {
       inspectorRuntime,
       ddlParserRuntime,
       sqlSourceMapRuntime,
+      sourceNavigationRuntime,
+      schemaMutationRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
       parseWorkerProtocolRuntime,
@@ -408,6 +425,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
       import(pathToFileHref(sqlSourceMapOutputPath)),
+      import(pathToFileHref(sourceNavigationOutputPath)),
+      import(pathToFileHref(schemaMutationOutputPath)),
       import(pathToFileHref(sqlSourceDecorationOutputPath)),
       import(pathToFileHref(generateSessionOutputPath)),
       import(pathToFileHref(parseWorkerProtocolOutputPath)),
@@ -436,6 +455,8 @@ async function compileSqlErdRuntimeModules() {
       canvasSelectionRuntime,
       ddlParserRuntime,
       sqlSourceMapRuntime,
+      sourceNavigationRuntime,
+      schemaMutationRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
       parseWorkerProtocolRuntime,
@@ -816,6 +837,8 @@ const {
   canvasSelectionRuntime,
   ddlParserRuntime,
   sqlSourceMapRuntime,
+  sourceNavigationRuntime,
+  schemaMutationRuntime,
   sqlSourceDecorationRuntime,
   generateSessionRuntime,
   parseWorkerProtocolRuntime,
@@ -1224,6 +1247,233 @@ assert.deepEqual(cameraAfterAnnotationAdd, cameraBeforeAnnotationAdd);
     ["camera", cameraBeforeAnnotationRemove]
   ]);
   const runtimeModel = createRuntimeTestModel();
+const deletedOrdersUserId = schemaMutationRuntime.deleteSqlErdColumn(
+  runtimeModel,
+  "table.orders",
+  "user_id"
+);
+assert.equal(deletedOrdersUserId.ok, true);
+assert.deepEqual(
+  schemaMutationRuntime.applySqlErdSchemaMutation(runtimeModel, {
+    type: "delete_column",
+    tableId: "table.orders",
+    columnId: "user_id"
+  }),
+  deletedOrdersUserId
+);
+assert.equal(deletedOrdersUserId.affectedRelationCount, 1);
+assert.equal(deletedOrdersUserId.affectedConstraintCount, 0);
+assert.deepEqual(
+  deletedOrdersUserId.modelJson.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.map((column) => column.id),
+  ["id"]
+);
+assert.deepEqual(
+  deletedOrdersUserId.modelJson.schema.relations.map((relation) => relation.id),
+  ["relation.users.manager_id.users.id"]
+);
+for (const dialect of ["postgresql", "mysql", "sqlite"]) {
+  const regeneratedAfterColumnDelete =
+    modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect,
+      modelJson: deletedOrdersUserId.modelJson
+    });
+
+  assert.doesNotMatch(regeneratedAfterColumnDelete.sql, /user_id/);
+  assert.equal(
+    ddlParserRuntime.parseSqlDdlToErdModel({
+      dialect,
+      sourceMapModelJson: deletedOrdersUserId.modelJson,
+      sourceText: regeneratedAfterColumnDelete.sql
+    }).ok,
+    true
+  );
+}
+assert.equal(
+  runtimeModel.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.length,
+  2
+);
+const deletedUsersId = schemaMutationRuntime.deleteSqlErdColumn(
+  runtimeModel,
+  "table.users",
+  "id"
+);
+assert.equal(deletedUsersId.ok, true);
+assert.equal(deletedUsersId.affectedRelationCount, 2);
+assert.equal(deletedUsersId.affectedConstraintCount, 1);
+assert.equal(
+  deletedUsersId.modelJson.schema.tables[0].columns[0].foreignKey,
+  false
+);
+assert.equal(
+  deletedUsersId.modelJson.schema.tables[1].columns[1].foreignKey,
+  false
+);
+const deletedUsersTable = schemaMutationRuntime.deleteSqlErdTable(
+  runtimeModel,
+  "table.users"
+);
+assert.equal(deletedUsersTable.ok, true);
+assert.equal(deletedUsersTable.affectedRelationCount, 2);
+assert.deepEqual(
+  deletedUsersTable.modelJson.schema.tables.map((table) => table.id),
+  ["table.orders"]
+);
+assert.equal(
+  deletedUsersTable.modelJson.schema.tables[0].columns[1].foreignKey,
+  false
+);
+for (const dialect of ["postgresql", "mysql", "sqlite"]) {
+  const regeneratedAfterTableDelete =
+    modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect,
+      modelJson: deletedUsersTable.modelJson
+    });
+
+  assert.doesNotMatch(regeneratedAfterTableDelete.sql, /CREATE TABLE [`"]users[`"]?/);
+  assert.equal(
+    ddlParserRuntime.parseSqlDdlToErdModel({
+      dialect,
+      sourceMapModelJson: deletedUsersTable.modelJson,
+      sourceText: regeneratedAfterTableDelete.sql
+    }).ok,
+    true
+  );
+}
+assert.deepEqual(
+  schemaMutationRuntime.deleteSqlErdTable(
+    {
+      ...runtimeModel,
+      schema: {
+        relations: [],
+        tables: [runtimeModel.schema.tables[0]]
+      }
+    },
+    "table.users"
+  ),
+  { ok: false, reason: "LAST_TABLE" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.renameSqlErdTable(
+    runtimeModel,
+    "table.users",
+    "orders"
+  ),
+  { ok: false, reason: "DUPLICATE_NAME" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.renameSqlErdColumn(
+    runtimeModel,
+    "table.orders",
+    "id",
+    "user_id"
+  ),
+  { ok: false, reason: "DUPLICATE_NAME" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.renameSqlErdTable(
+    runtimeModel,
+    "table.users",
+    " users "
+  ),
+  { ok: false, reason: "INVALID_NAME" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.changeSqlErdColumnType(
+    runtimeModel,
+    "table.orders",
+    "id",
+    "BIGINT; DROP TABLE users"
+  ),
+  { ok: false, reason: "INVALID_DATA_TYPE" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.deleteSqlErdColumn(
+    {
+      ...runtimeModel,
+      schema: {
+        relations: [],
+        tables: [
+          {
+            ...runtimeModel.schema.tables[0],
+            columns: [runtimeModel.schema.tables[0].columns[0]]
+          }
+        ]
+      }
+    },
+    "table.users",
+    "id"
+  ),
+  { ok: false, reason: "LAST_COLUMN" }
+);
+const renamedUsersTable = schemaMutationRuntime.renameSqlErdTable(
+  runtimeModel,
+  "table.users",
+  "accounts"
+);
+assert.equal(renamedUsersTable.ok, true);
+assert.equal(
+  renamedUsersTable.modelJson.schema.tables[0].id,
+  "table.users"
+);
+assert.equal(
+  renamedUsersTable.modelJson.schema.tables[0].name,
+  "accounts"
+);
+const renamedOrdersColumn = schemaMutationRuntime.renameSqlErdColumn(
+  renamedUsersTable.modelJson,
+  "table.orders",
+  "user_id",
+  "account_id"
+);
+assert.equal(renamedOrdersColumn.ok, true);
+const changedOrdersColumnType = schemaMutationRuntime.changeSqlErdColumnType(
+  renamedOrdersColumn.modelJson,
+  "table.orders",
+  "user_id",
+  "BIGINT"
+);
+assert.equal(changedOrdersColumnType.ok, true);
+const updatedOrdersColumn = schemaMutationRuntime.applySqlErdSchemaMutation(
+  runtimeModel,
+  {
+    type: "update_column",
+    tableId: "table.orders",
+    columnId: "user_id",
+    name: "account_id",
+    dataType: "INTEGER"
+  }
+);
+assert.equal(updatedOrdersColumn.ok, true);
+assert.equal(
+  updatedOrdersColumn.modelJson.schema.tables[1].columns[1].name,
+  "account_id"
+);
+assert.equal(
+  updatedOrdersColumn.modelJson.schema.tables[1].columns[1].dataType,
+  "INTEGER"
+);
+for (const dialect of ["postgresql", "mysql", "sqlite"]) {
+  const regenerated = modelToSqlRuntime.generateSqlDdlFromErdModel({
+    dialect,
+    modelJson: changedOrdersColumnType.modelJson
+  });
+  const reparsed = ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect,
+    sourceMapModelJson: changedOrdersColumnType.modelJson,
+    sourceText: regenerated.sql
+  });
+
+  assert.equal(reparsed.ok, true, `${dialect} mutation SQL should reparse`);
+  assert.equal(reparsed.modelJson.schema.tables[0].name, "accounts");
+  assert.equal(
+    reparsed.modelJson.schema.tables[1].columns[1].name,
+    "account_id"
+  );
+}
 const currentCanvasContentKey =
   canvasShapeSyncRuntime.createSqlErdCanvasContentKey({
     modelJson: runtimeModel,
@@ -2500,6 +2750,30 @@ assert.deepEqual(
   }
 );
 assert.equal(
+  tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({
+    isHighlighted: false,
+    isSelected: false,
+    selectedOpacityClassName: "opacity-45"
+  }),
+  "pointer-events-none opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100"
+);
+assert.equal(
+  tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({
+    isHighlighted: true,
+    isSelected: false,
+    selectedOpacityClassName: "opacity-100"
+  }),
+  "pointer-events-none opacity-0 [@media(hover:hover)_and_(pointer:fine)]:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:opacity-100"
+);
+assert.equal(
+  tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({
+    isHighlighted: false,
+    isSelected: true,
+    selectedOpacityClassName: "opacity-45"
+  }),
+  "pointer-events-auto opacity-45 hover:opacity-100"
+);
+assert.equal(
   tableShapeRuntime.isSqlErdColumnPointerDrag(
     { x: 10, y: 10 },
     { x: 13, y: 12 }
@@ -2663,6 +2937,33 @@ assert.equal(
   false
 );
 assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, []);
+runtimeInteractiveSelectionEditor.selectedShapeIds = [
+  "shape:sqltoerd-table-current"
+];
+assert.deepEqual(
+  tableShapeRuntime.primeSqlErdPointerSelection(
+    runtimeInteractiveSelectionEditor,
+    "shape:sqltoerd-table-next"
+  ),
+  ["shape:sqltoerd-table-current"]
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-table-next"
+]);
+runtimeInteractiveSelectionEditor.selectedShapeIds = [
+  "shape:sqltoerd-table-current"
+];
+assert.deepEqual(
+  tableShapeRuntime.primeSqlErdPointerSelection(
+    runtimeInteractiveSelectionEditor,
+    "shape:sqltoerd-table-next",
+    { toggle: true }
+  ),
+  ["shape:sqltoerd-table-current"]
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-table-current"
+]);
 assert.deepEqual(
   canvasSelectionRuntime.resolveSqlErdTableInteractionSelection({
     isShapeSelected: false,
@@ -2690,6 +2991,37 @@ assert.deepEqual(
     tableId: "table.users"
   }),
   { selectedColumnId: "email", selectedState: "column" }
+);
+assert.equal(
+  canvasSelectionRuntime.shouldHandleSqlErdSchemaDeleteShortcut({
+    isEditableTarget: false,
+    key: "Delete",
+    selection: { type: "table", tableId: "table.users" }
+  }),
+  true
+);
+assert.equal(
+  canvasSelectionRuntime.shouldHandleSqlErdSchemaDeleteShortcut({
+    isEditableTarget: true,
+    key: "Backspace",
+    selection: {
+      type: "column",
+      tableId: "table.users",
+      columnId: "id"
+    }
+  }),
+  false
+);
+assert.equal(
+  canvasSelectionRuntime.shouldHandleSqlErdSchemaDeleteShortcut({
+    isEditableTarget: false,
+    key: "Delete",
+    selection: {
+      type: "relation",
+      relationId: "relation.orders.user_id.users.id"
+    }
+  }),
+  false
 );
 assert.deepEqual(
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
@@ -4730,6 +5062,52 @@ assert.deepEqual(
     "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
   ]
 );
+assert.deepEqual(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.orders.user_id.users.id",
+    "constraint"
+  ),
+  postgresTableRelationRange.constraintRange
+);
+assert.deepEqual(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.orders.user_id.users.id",
+    "from"
+  ),
+  postgresTableRelationRange.fromColumnRanges[0]
+);
+assert.deepEqual(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.orders.user_id.users.id",
+    "to"
+  ),
+  postgresTableRelationRange.toColumnRanges[0]
+);
+assert.equal(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.missing",
+    "constraint"
+  ),
+  null
+);
+assert.deepEqual(
+  sourceNavigationRuntime.clampSqlErdSourceNavigationRange(
+    { from: 8, to: 30 },
+    12
+  ),
+  { from: 8, to: 12 }
+);
+assert.equal(
+  sourceNavigationRuntime.clampSqlErdSourceNavigationRange(
+    { from: 20, to: 30 },
+    12
+  ),
+  null
+);
 const postgresAlterTableSourceText = `CREATE TABLE users (
   id BIGSERIAL PRIMARY KEY
 );
@@ -5501,6 +5879,92 @@ assert.deepEqual(
   appliedModelSqlPreview.snapshot.layoutJson.tableLayouts,
   modelSqlPreviewSession.layoutJson.tableLayouts
 );
+const renamedTableMutation = schemaMutationRuntime.renameSqlErdTable(
+  modelSqlPreviewSession.modelJson,
+  "table.users",
+  "accounts"
+);
+assert.equal(renamedTableMutation.ok, true);
+const renamedTablePreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: renamedTableMutation.modelJson,
+    resolvedDialect: "mysql",
+    session: modelSqlPreviewSession
+  });
+const appliedRenamedTablePreview =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(renamedTablePreview);
+assert.equal(
+  appliedRenamedTablePreview.ok,
+  true,
+  "table rename preview must apply with stable IDs"
+);
+assert.equal(
+  appliedRenamedTablePreview.snapshot.modelJson.schema.tables[0].id,
+  "table.users"
+);
+assert.equal(
+  appliedRenamedTablePreview.snapshot.modelJson.schema.tables[0].name,
+  "accounts"
+);
+assert.deepEqual(
+  appliedRenamedTablePreview.snapshot.layoutJson.tableLayouts,
+  modelSqlPreviewSession.layoutJson.tableLayouts
+);
+assert.deepEqual(
+  appliedRenamedTablePreview.snapshot.modelJson.schema.relations[0],
+  renamedTableMutation.modelJson.schema.relations[0]
+);
+assert.match(
+  appliedRenamedTablePreview.snapshot.sourceText,
+  /REFERENCES `accounts` \(`id`\)/
+);
+
+const renamedColumnMutation = schemaMutationRuntime.renameSqlErdColumn(
+  modelSqlPreviewSession.modelJson,
+  "table.orders",
+  "column.orders.user_id",
+  "account_id"
+);
+assert.equal(renamedColumnMutation.ok, true);
+const renamedColumnPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: renamedColumnMutation.modelJson,
+    resolvedDialect: "mysql",
+    session: modelSqlPreviewSession
+  });
+const appliedRenamedColumnPreview =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(renamedColumnPreview);
+assert.equal(
+  appliedRenamedColumnPreview.ok,
+  true,
+  "column rename preview must apply with stable IDs"
+);
+assert.equal(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.tables[1].columns[1]
+    .id,
+  "column.orders.user_id"
+);
+assert.equal(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.tables[1].columns[1]
+    .name,
+  "account_id"
+);
+assert.deepEqual(
+  appliedRenamedColumnPreview.snapshot.layoutJson.tableLayouts,
+  modelSqlPreviewSession.layoutJson.tableLayouts
+);
+assert.deepEqual(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.tables[1].constraints,
+  renamedColumnMutation.modelJson.schema.tables[1].constraints
+);
+assert.deepEqual(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.relations[0],
+  renamedColumnMutation.modelJson.schema.relations[0]
+);
+assert.match(
+  appliedRenamedColumnPreview.snapshot.sourceText,
+  /FOREIGN KEY \(`account_id`\) REFERENCES `users` \(`id`\)/
+);
 assert.equal(
   sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(
     modelSqlPreview,
@@ -5567,6 +6031,20 @@ const modelSqlPreviewWithoutRelationNote =
     settingsJson: modelSqlPreviewTargetSettings
   });
 assert.deepEqual(modelSqlPreviewWithoutRelationNote.settingsJson, {});
+const semanticallyMismatchedPreviewModel = structuredClone(
+  modelSqlPreview.modelJson
+);
+semanticallyMismatchedPreviewModel.schema.tables[0].name = "renamed_users";
+const semanticallyMismatchedApplyResult =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview({
+    ...modelSqlPreview,
+    modelJson: semanticallyMismatchedPreviewModel
+  });
+assert.equal(semanticallyMismatchedApplyResult.ok, false);
+assert.match(
+  semanticallyMismatchedApplyResult.error,
+  /재생성된 SQL이 요청한 ERD 변경과 일치하지 않습니다/
+);
 const failedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview({
   ...modelSqlPreview,
   generatedSourceText: "CREATE TABLE users ("
@@ -6343,6 +6821,18 @@ assert.deepEqual(
 );
 assert.deepEqual(
   relationShapeRuntime.getSqlErdRelationVisualStyle({
+    isContextual: true,
+    isHovered: false,
+    isSelected: false
+  }),
+  {
+    stroke: "rgba(37, 99, 235, 0.74)",
+    strokeWidth: 3
+  }
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdRelationVisualStyle({
+    isContextual: true,
     isHovered: true,
     isSelected: true
   }),
@@ -6350,6 +6840,24 @@ assert.deepEqual(
     stroke: "rgba(37, 99, 235, 0.98)",
     strokeWidth: 4
   }
+);
+assert.deepEqual(
+  [...canvasSelectionRuntime.getSqlErdContextRelationIds(runtimeModel, {
+    type: "table",
+    tableId: "table.users"
+  })],
+  [
+    "relation.orders.user_id.users.id",
+    "relation.users.manager_id.users.id"
+  ]
+);
+assert.deepEqual(
+  [...canvasSelectionRuntime.getSqlErdContextRelationIds(runtimeModel, {
+    type: "column",
+    tableId: "table.users",
+    columnId: "column.users.id"
+  })],
+  []
 );
 const selectedRelationHighlight = {
   relationId: "relation.orders.user_id.users.id",
@@ -7028,11 +7536,11 @@ assert.match(
 );
 assert.match(
   panel,
-  /const handleUndoNormalizedSql = useCallback\(\(\) => \{\s*if \(isWriteProtocolMismatch \|\| isNormalizedSqlApplying\)/s
+  /const handleUndoNormalizedSql = useCallback\(\(\) => \{\s*if \([\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1" &&\s*!sourceLock\.canEdit/s
 );
 assert.match(
   panel,
-  /const handleRedoNormalizedSql = useCallback\(\(\) => \{\s*if \(isWriteProtocolMismatch \|\| isNormalizedSqlApplying\)/s
+  /const handleRedoNormalizedSql = useCallback\(\(\) => \{\s*if \([\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1" &&\s*!sourceLock\.canEdit/s
 );
 assert.match(
   panel,
@@ -7040,11 +7548,11 @@ assert.match(
 );
 assert.match(
   panel,
-  /canRedoNormalizedSql=\{[\s\S]*?!isWriteProtocolMismatch &&/s
+  /canRedoNormalizedSql=\{[\s\S]*?sqlErdViewSession\.writeProtocol !== "operations_v1" \|\|\s*sourceLock\.canEdit/s
 );
 assert.match(
   panel,
-  /canUndoNormalizedSql=\{[\s\S]*?!isWriteProtocolMismatch &&/s
+  /canUndoNormalizedSql=\{[\s\S]*?sqlErdViewSession\.writeProtocol !== "operations_v1" \|\|\s*sourceLock\.canEdit/s
 );
 assert.match(
   panel,
@@ -7052,8 +7560,18 @@ assert.match(
 );
 assert.match(
   panel,
-  /<NormalizedSqlPreviewDialog[\s\S]*?isReadOnly=\{isWriteProtocolMismatch\}/
+  /<NormalizedSqlPreviewDialog[\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1"[\s\S]*?!sourceLock\.canEdit/
 );
+assert.match(panel, /handlePreviewSchemaMutation/);
+assert.match(panel, /createSqltoerdLayoutForModel/);
+assert.match(panel, /createSqlErdVerifiedNormalizedSnapshot/);
+assert.match(panel, /테이블명 SQL diff 보기/);
+assert.match(panel, /테이블 삭제 SQL diff 보기/);
+assert.match(panel, /컬럼 변경 SQL diff 보기/);
+assert.match(panel, /컬럼 삭제 SQL diff 보기/);
+assert.match(canvasSurface, /function SqlErdSchemaDeleteBridge/);
+assert.match(canvasSurface, /registerBeforeDeleteHandler/);
+assert.match(canvasSurface, /shouldHandleSqlErdSchemaDeleteShortcut/);
 assert.match(
   panel,
   /disabled=\{isReadOnly \|\| !preview \|\| !preview\.hasChanges \|\| isApplying\}/
@@ -7145,7 +7663,14 @@ assert.match(panel, /function CollapsedSourcePanel/);
 assert.match(panel, /href="\/home"/);
 assert.match(panel, /aria-label="홈으로 이동"/);
 assert.match(panel, /<CollapsedSourcePanel onToggle=\{onToggle\} \/>/);
-assert.doesNotMatch(panel, /scrollIntoView/);
+assert.match(panel, /EditorView\.scrollIntoView/);
+assert.match(panel, /y: "center"/);
+assert.match(panel, /const transaction: TransactionSpec = \{ effects \}/);
+assert.match(panel, /transaction\.selection/);
+assert.match(panel, /참조하는 컬럼 SQL/);
+assert.match(panel, /참조되는 컬럼 SQL/);
+assert.match(canvasSurface, /SqlErdSelectionContextProvider/);
+assert.match(relationShape, /contextual/);
 assert.match(panel, /resolveSqlSourceEditorDialect/);
 assert.match(panel, /setLastResolvedDialect\(parseResult\.resolvedDialect\)/);
 assert.match(panel, /languageCompartmentRef/);
@@ -7368,6 +7893,7 @@ assert.match(tableShape, /isSqlErdColumnPointerDrag/);
 assert.match(tableShape, /columnPointerStartRef/);
 assert.doesNotMatch(tableShape, /suppressNextColumnClickRef/);
 assert.match(tableShape, /onPointerDownCapture/);
+assert.match(tableShape, /primeSqlErdPointerSelection/);
 assert.doesNotMatch(tableShape, /onPointerUpCapture/);
 assert.doesNotMatch(tableShape, /<article[\s\S]*?onClick=\{handleTableClick\}/);
 assert.doesNotMatch(tableShape, /isSelected \|\| column\.foreignKey\s*\?\s*"border-blue-400 opacity-100"/);
@@ -7384,6 +7910,12 @@ assert.doesNotMatch(tableShape, /const BADGE_COLUMN_WIDTH = 72/);
 assert.doesNotMatch(tableShape, /gridTemplateColumns: `\$\{BADGE_COLUMN_WIDTH\}px max-content max-content`/);
 assert.doesNotMatch(tableShape, /truncate/);
 assert.doesNotMatch(tableShape, /text-overflow/);
+
+assert.match(panel, /data-sqltoerd-inspector-toggle/);
+assert.match(
+  panel,
+  /className="absolute top-1\/2 -left-[\s\S]*?data-sqltoerd-inspector-toggle/
+);
 
 assert.match(relationShape, /SQLTOERD_RELATION_SHAPE_TYPE/);
 assert.match(relationShape, /SQLTOERD_RELATION_HOVER_EVENT/);

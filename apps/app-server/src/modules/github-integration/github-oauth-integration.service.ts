@@ -11,6 +11,7 @@ import {
 } from "./github-oauth-callback-error";
 import { GithubOAuthClient } from "./github-oauth.client";
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
+import { GithubOAuthInstallationLookupError } from "./github-oauth-installation-lookup.error";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
@@ -64,10 +65,16 @@ export class GithubOAuthIntegrationService {
       input?.returnUrl,
       config.frontendUrl
     );
+    const expectedConnectionGeneration = await this.connectionService.getConnectionGeneration(
+      currentUserId,
+      "app_user",
+      config.stateSecret
+    );
     const state = this.stateService.createState(
       {
         userId: currentUserId,
-        returnUrl
+        returnUrl,
+        expectedConnectionGeneration
       },
       config
     );
@@ -125,6 +132,14 @@ export class GithubOAuthIntegrationService {
       token.accessToken,
       storedState.returnUrl
     );
+    try {
+      await this.githubOAuthClient.assertUserInstallationLookupSupported({ accessToken: token.accessToken });
+    } catch (error) {
+      if (error instanceof GithubOAuthInstallationLookupError) {
+        throw githubCallbackBadRequest(error.message, storedState.returnUrl, "connection_failed");
+      }
+      throw githubCallbackBadRequest("GitHub OAuth installation lookup failed", storedState.returnUrl, "connection_failed");
+    }
     const encryptedToken = this.tokenEncryptionService.encryptToken(
       token.accessToken,
       config
@@ -142,7 +157,9 @@ export class GithubOAuthIntegrationService {
         encryptedRefreshToken,
         tokenScope: token.scope,
         accessTokenExpiresAt: token.accessTokenExpiresAt,
-        refreshTokenExpiresAt: token.refreshTokenExpiresAt
+        refreshTokenExpiresAt: token.refreshTokenExpiresAt,
+        expectedConnectionGeneration: statePayload.expectedConnectionGeneration,
+        generationSecret: config.stateSecret
       });
       const githubConnectedAt = this.toNullableIsoString(row.connected_at);
       if (!githubConnectedAt) throw new Error("missing connection time");
@@ -150,6 +167,13 @@ export class GithubOAuthIntegrationService {
     } catch (error) {
       if (isGithubOAuthAccountUniqueViolation(error) || this.isDuplicateAccountError(error)) {
         throw new GithubOAuthAccountAlreadyConnectedError(storedState.returnUrl);
+      }
+      if (this.getApiErrorMessage(error) === "GitHub OAuth callback is stale") {
+        throw githubCallbackBadRequest(
+          "GitHub OAuth callback is stale",
+          storedState.returnUrl,
+          "stale_callback"
+        );
       }
 
       throw githubCallbackBadRequest(
@@ -272,5 +296,11 @@ export class GithubOAuthIntegrationService {
     return typeof error === "object" && error !== null && "response" in error &&
       (error as { response?: { error?: { message?: string } } }).response?.error?.message ===
         "GitHub account is already connected to another PILO account";
+  }
+
+  private getApiErrorMessage(error: unknown): string | null {
+    if (typeof error !== "object" || error === null || !("response" in error)) return null;
+    const response = (error as { response?: { error?: { message?: unknown } } }).response;
+    return typeof response?.error?.message === "string" ? response.error.message : null;
   }
 }

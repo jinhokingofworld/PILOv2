@@ -6,7 +6,45 @@ import { isSqlErdNoteShape } from "@/features/sql-erd/shapes/sql-erd-note-shape"
 import { isSqlErdTextShape } from "@/features/sql-erd/shapes/sql-erd-text-shape";
 import { isSqlErdRelationShape } from "@/features/sql-erd/shapes/sql-erd-relation-shape";
 import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shape";
-import type { SqlErdSelection } from "@/features/sql-erd/types";
+import type {
+  SqlErdSelection,
+  SqltoerdModelJsonV1
+} from "@/features/sql-erd/types";
+
+export function shouldHandleSqlErdSchemaDeleteShortcut({
+  isEditableTarget,
+  key,
+  selection
+}: {
+  isEditableTarget: boolean;
+  key: string;
+  selection: SqlErdSelection;
+}) {
+  return (
+    !isEditableTarget &&
+    (key === "Delete" || key === "Backspace") &&
+    (selection.type === "table" || selection.type === "column")
+  );
+}
+
+export function getSqlErdContextRelationIds(
+  modelJson: SqltoerdModelJsonV1,
+  selection: SqlErdSelection
+) {
+  if (selection.type !== "table") {
+    return new Set<string>();
+  }
+
+  return new Set(
+    modelJson.schema.relations
+      .filter(
+        (relation) =>
+          relation.fromTableId === selection.tableId ||
+          relation.toTableId === selection.tableId
+      )
+      .map((relation) => relation.id)
+  );
+}
 
 export function areSqlErdSelectionsEqual(
   left: SqlErdSelection,

@@ -12,6 +12,12 @@ const { AgentOutboxPublisherService } = require(
 const { AgentToolRegistryService } = require(
   "../../dist/modules/agent/agent-tool-registry.service.js"
 );
+const {
+  buildAgentToolCapabilityCatalog,
+  validateAgentToolCapabilityCatalog
+} = require(
+  "../../dist/modules/agent/agent-tool-capability-catalog.js"
+);
 const { CalendarAgentToolsService } = require(
   "../../dist/modules/agent/tools/calendar-agent-tools.service.js"
 );
@@ -103,6 +109,96 @@ const payload = {
     "Drive document search must be registered for Agent planning"
   );
   assert.deepEqual(suite.tools, actualSnapshot);
+
+  const capabilityCatalog = registry.listCapabilityCatalogForContext(null);
+  assert.equal(capabilityCatalog.version, "agent-tool-capabilities:v1");
+  assert.match(capabilityCatalog.sha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(
+    capabilityCatalog.descriptors.map((descriptor) => descriptor.toolName),
+    [...actualSnapshot].map((tool) => tool.name).sort()
+  );
+  assert.equal(
+    capabilityCatalog.descriptors.find(
+      (descriptor) => descriptor.toolName === "list_calendar_events"
+    )?.domain,
+    "calendar"
+  );
+  assert.deepEqual(
+    capabilityCatalog.descriptors.find(
+      (descriptor) => descriptor.toolName === "list_calendar_events"
+    )?.acceptedSelectorFields,
+    ["end", "start"]
+  );
+  assert.ok(
+    capabilityCatalog.descriptors.every(
+      (descriptor) =>
+        descriptor.whenToUse &&
+        descriptor.mustNotUseFor.length > 0 &&
+        descriptor.capabilityIds.length > 0
+    )
+  );
+  assert.deepEqual(
+    registry.listCapabilityCatalogForContext(null),
+    capabilityCatalog,
+    "capability snapshot must be deterministic for the same eligible tools"
+  );
+  assert.deepEqual(
+    capabilityCatalog.capabilities.find(
+      (capability) => capability.id === "meeting.action_items.transfer_and_approve"
+    )?.toolNames,
+    [
+      "find_action_items",
+      "update_meeting_report_action_item",
+      "approve_meeting_report_action_item"
+    ]
+  );
+  const updateActionItem = capabilityCatalog.descriptors.find(
+    (descriptor) => descriptor.toolName === "update_meeting_report_action_item"
+  );
+  assert.ok(
+    updateActionItem?.capabilityIds.includes(
+      "meeting.action_items.transfer_and_approve"
+    )
+  );
+  assert.ok(updateActionItem?.prerequisiteToolNames.includes("find_action_items"));
+  assert.ok(
+    updateActionItem?.followUpToolNames.includes(
+      "approve_meeting_report_action_item"
+    )
+  );
+  assert.ok(updateActionItem?.mustNotUseFor.includes("후속 작업 승인 또는 반려 요청"));
+
+  const calendarDefinition = registry.getDefinition("list_calendar_events");
+  const changedSelectorSchema = buildAgentToolCapabilityCatalog([
+    {
+      ...calendarDefinition,
+      inputSchema: {
+        ...calendarDefinition.inputSchema,
+        required: ["start"]
+      }
+    }
+  ]);
+  assert.notEqual(
+    changedSelectorSchema.sha256,
+    buildAgentToolCapabilityCatalog([calendarDefinition]).sha256,
+    "selector schema constraints must affect the capability catalog SHA"
+  );
+  const oneToolCatalog = buildAgentToolCapabilityCatalog([calendarDefinition]);
+  assert.throws(
+    () =>
+      validateAgentToolCapabilityCatalog(
+        [
+          {
+            ...oneToolCatalog.capabilities[0],
+            toolNames: ["list_calendar_events", "list_calendar_events"]
+          }
+        ],
+        oneToolCatalog.descriptors,
+        [calendarDefinition]
+      ),
+    /invalid capability/,
+    "duplicate tool names in a capability chain must fail closed"
+  );
 }
 
 class FakeSqsClient {
@@ -223,6 +319,31 @@ class FakeOutboxToolRegistryService {
         !definition.contextRequirement ||
         definition.contextRequirement.surface === requestContext?.surface
     );
+  }
+
+  listCapabilityCatalogForContext(requestContext) {
+    this.calls.push({ method: "listCapabilityCatalogForContext", requestContext });
+    const descriptors = this.listDefinitionsForContext(requestContext).map(
+      (definition) => ({
+        toolName: definition.name,
+        domain: definition.name.includes("calendar") ? "calendar" : "pr_review",
+        action: definition.name,
+        capabilityIds: [definition.name],
+        whenToUse: definition.description,
+        mustNotUseFor: ["다른 도메인의 요청"],
+        acceptedSelectorFields: [],
+        prerequisiteToolNames: [],
+        followUpToolNames: [],
+        riskLevel: definition.riskLevel,
+        executionMode: definition.executionMode,
+        contextSurface: definition.contextRequirement?.surface ?? null
+      })
+    );
+    return {
+      version: "agent-tool-capabilities:v1",
+      sha256: "a".repeat(64),
+      descriptors
+    };
   }
 
   definitions() {
@@ -388,7 +509,29 @@ try {
         }
       }
     ]);
+    assert.deepEqual(jobService.calls[0].toolCapabilityCatalog, {
+      version: "agent-tool-capabilities:v1",
+      sha256: "a".repeat(64),
+      descriptors: [
+        {
+          toolName: "list_calendar_events",
+          domain: "calendar",
+          action: "list_calendar_events",
+          capabilityIds: ["list_calendar_events"],
+          whenToUse: "Calendar 일정 목록을 조회합니다.",
+          mustNotUseFor: ["다른 도메인의 요청"],
+          acceptedSelectorFields: [],
+          prerequisiteToolNames: [],
+          followUpToolNames: [],
+          riskLevel: "low",
+          executionMode: "auto",
+          contextSurface: null
+        }
+      ]
+    });
     assert.deepEqual(registry.calls, [
+      { method: "listDefinitionsForContext", requestContext: null },
+      { method: "listCapabilityCatalogForContext", requestContext: null },
       { method: "listDefinitionsForContext", requestContext: null }
     ]);
     assert.match(
@@ -440,6 +583,8 @@ try {
       ["list_calendar_events", "pr_review_fixture"]
     );
     assert.deepEqual(registry.calls, [
+      { method: "listDefinitionsForContext", requestContext },
+      { method: "listCapabilityCatalogForContext", requestContext },
       { method: "listDefinitionsForContext", requestContext }
     ]);
   }

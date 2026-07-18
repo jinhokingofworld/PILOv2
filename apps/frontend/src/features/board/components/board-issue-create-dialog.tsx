@@ -40,10 +40,10 @@ export function BoardIssueCreateDialog({
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/20 backdrop-blur-xs transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <DialogPrimitive.Popup className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(720px,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-[720px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl shadow-slate-950/20 outline-none transition duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
           <div className="border-b p-5 pr-14">
-            <DialogPrimitive.Title className="font-heading text-lg font-semibold">
+            <DialogPrimitive.Title className="font-heading text-[27px] font-semibold leading-9">
               새 이슈
             </DialogPrimitive.Title>
-            <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+            <DialogPrimitive.Description className="mt-1 text-[21px] leading-7 text-muted-foreground">
               Board에 새 GitHub 이슈를 추가합니다.
             </DialogPrimitive.Description>
           </div>

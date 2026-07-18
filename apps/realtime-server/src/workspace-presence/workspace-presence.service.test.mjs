@@ -18,6 +18,28 @@ function homeLocation(overrides = {}) {
   };
 }
 
+function prReviewLocation(overrides = {}) {
+  return {
+    context: { reviewSessionId: "session-1" },
+    page: "pr-review",
+    route: {
+      pathname: "/pr-review",
+      search: "?reviewSessionId=session-1",
+    },
+    viewport: { kind: "camera", x: 0, y: 0, z: 1 },
+    ...overrides,
+  };
+}
+
+function presenceUpdate(location) {
+  return {
+    focused: true,
+    location,
+    visible: true,
+    workspaceId,
+  };
+}
+
 test("location parser는 허용된 route와 payload 제한을 적용한다", () => {
   const parsed = readWorkspacePresenceUpdatePayload({
     focused: true,
@@ -83,6 +105,191 @@ test("location parser는 허용된 route와 payload 제한을 적용한다", () 
     }),
     null,
   );
+});
+
+test("기존 PR camera payload는 누락된 reviewFileId를 null로 정규화한다", () => {
+  const parsed = readWorkspacePresenceUpdatePayload(
+    presenceUpdate(prReviewLocation()),
+  );
+
+  assert.deepEqual(parsed?.location?.context, {
+    reviewFileId: null,
+    reviewSessionId: "session-1",
+  });
+});
+
+test("PR diff payload는 opaque ID를 보존하고 scroll ratio를 clamp한다", () => {
+  const parsed = readWorkspacePresenceUpdatePayload(
+    presenceUpdate(
+      prReviewLocation({
+        context: {
+          reviewFileId: " file-opaque-1 ",
+          reviewSessionId: " session-1 ",
+        },
+        viewport: {
+          kind: "element",
+          key: "pr-review-diff",
+          xRatio: 0.25,
+          yRatio: 1.4,
+        },
+      }),
+    ),
+  );
+
+  assert.deepEqual(parsed?.location?.context, {
+    reviewFileId: "file-opaque-1",
+    reviewSessionId: "session-1",
+  });
+  assert.deepEqual(parsed?.location?.viewport, {
+    kind: "element",
+    key: "pr-review-diff",
+    xRatio: 0.25,
+    yRatio: 1,
+  });
+});
+
+test("PR inspector payload를 허용한다", () => {
+  const parsed = readWorkspacePresenceUpdatePayload(
+    presenceUpdate(
+      prReviewLocation({
+        context: {
+          reviewFileId: "file-1",
+          reviewSessionId: "session-1",
+        },
+        viewport: {
+          kind: "element",
+          key: "pr-review-inspector",
+          xRatio: 0,
+          yRatio: 0.5,
+        },
+      }),
+    ),
+  );
+
+  assert.equal(parsed?.location?.viewport.kind, "element");
+  assert.equal(parsed?.location?.viewport.key, "pr-review-inspector");
+});
+
+test("PR file ID에 대응하는 session ID가 없으면 거부한다", () => {
+  const parsed = readWorkspacePresenceUpdatePayload(
+    presenceUpdate(
+      prReviewLocation({
+        context: { reviewFileId: "file-1", reviewSessionId: null },
+        viewport: {
+          kind: "element",
+          key: "pr-review-diff",
+          xRatio: 0,
+          yRatio: 0,
+        },
+      }),
+    ),
+  );
+
+  assert.equal(parsed, null);
+});
+
+test("PR element viewport에 file ID가 없으면 거부한다", () => {
+  for (const context of [
+    { reviewFileId: null, reviewSessionId: "session-1" },
+    { reviewSessionId: "session-1" },
+  ]) {
+    const parsed = readWorkspacePresenceUpdatePayload(
+      presenceUpdate(
+        prReviewLocation({
+          context,
+          viewport: {
+            kind: "element",
+            key: "pr-review-diff",
+            xRatio: 0,
+            yRatio: 0,
+          },
+        }),
+      ),
+    );
+
+    assert.equal(parsed, null);
+  }
+});
+
+test("PR element key를 다른 page에서 사용하면 거부한다", () => {
+  for (const location of [
+    homeLocation({
+      viewport: {
+        kind: "element",
+        key: "pr-review-diff",
+        xRatio: 0,
+        yRatio: 0,
+      },
+    }),
+    homeLocation({
+      context: { boardId: "board-1" },
+      page: "board",
+      route: { pathname: "/board", search: "" },
+      viewport: {
+        kind: "element",
+        key: "pr-review-inspector",
+        xRatio: 0,
+        yRatio: 0,
+      },
+    }),
+  ]) {
+    assert.equal(
+      readWorkspacePresenceUpdatePayload(presenceUpdate(location)),
+      null,
+    );
+  }
+});
+
+test("PR context의 잘못된 identifier를 거부한다", () => {
+  for (const context of [
+    { reviewFileId: "a".repeat(257), reviewSessionId: "session-1" },
+    { reviewFileId: " ", reviewSessionId: "session-1" },
+    { reviewFileId: "file-1", reviewSessionId: " " },
+  ]) {
+    assert.equal(
+      readWorkspacePresenceUpdatePayload(
+        presenceUpdate(prReviewLocation({ context })),
+      ),
+      null,
+    );
+  }
+});
+
+test("PR element viewport의 non-finite ratio를 거부한다", () => {
+  const parsed = readWorkspacePresenceUpdatePayload(
+    presenceUpdate(
+      prReviewLocation({
+        context: {
+          reviewFileId: "file-1",
+          reviewSessionId: "session-1",
+        },
+        viewport: {
+          kind: "element",
+          key: "pr-review-diff",
+          xRatio: Number.NaN,
+          yRatio: 0,
+        },
+      }),
+    ),
+  );
+
+  assert.equal(parsed, null);
+});
+
+test("page context의 허용되지 않은 추가 key를 거부한다", () => {
+  for (const context of [
+    { rawDiff: "secret", reviewFileId: "file-1", reviewSessionId: "session-1" },
+    { content: "secret", reviewFileId: "file-1", reviewSessionId: "session-1" },
+    { draft: "unsaved", reviewFileId: "file-1", reviewSessionId: "session-1" },
+    { comment: "private", reviewFileId: "file-1", reviewSessionId: "session-1" },
+  ]) {
+    assert.equal(
+      readWorkspacePresenceUpdatePayload(
+        presenceUpdate(prReviewLocation({ context })),
+      ),
+      null,
+    );
+  }
 });
 
 test("대표 탭은 focused+visible, visible, 최신 연결 순서로 선택된다", () => {

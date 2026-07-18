@@ -22,7 +22,7 @@ type BoardIssueCreateFormProps = {
 };
 
 const selectClassName =
-  "h-9 rounded-[11px] border border-slate-200 bg-white px-3 text-[12.5px] font-semibold text-slate-700 shadow-sm outline-none transition focus-visible:border-violet-300 focus-visible:ring-2 focus-visible:ring-violet-200 disabled:cursor-not-allowed disabled:opacity-50";
+  "h-[54px] rounded-[11px] border border-slate-200 bg-white px-3 text-[18.75px] font-semibold text-slate-700 shadow-sm outline-none transition focus-visible:border-violet-300 focus-visible:ring-2 focus-visible:ring-violet-200 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function BoardIssueCreateForm({
   columns,
@@ -109,10 +109,10 @@ export function BoardIssueCreateForm({
       className="board-issue-create-form grid gap-4"
       onSubmit={(event) => void handleSubmit(event)}
     >
-      <label className="grid gap-1.5 text-[12px] font-bold text-slate-500">
+      <label className="grid gap-1.5 text-[18px] font-bold text-slate-500">
         제목
         <Input
-          className="h-9 rounded-[11px] border-slate-200 bg-white text-[12.5px] shadow-sm"
+          className="h-[54px] rounded-[11px] border-slate-200 bg-white text-[18.75px] shadow-sm md:text-[18.75px]"
           disabled={submitDisabled}
           placeholder="새 이슈 제목"
           value={title}
@@ -120,10 +120,10 @@ export function BoardIssueCreateForm({
         />
       </label>
 
-      <label className="grid gap-1.5 text-[12px] font-bold text-slate-500">
+      <label className="grid gap-1.5 text-[18px] font-bold text-slate-500">
         본문
         <textarea
-          className="min-h-36 resize-y rounded-[11px] border border-slate-200 bg-white px-3 py-2 text-[12.5px] font-medium text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 focus-visible:border-violet-300 focus-visible:ring-2 focus-visible:ring-violet-200 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-[216px] resize-y rounded-[11px] border border-slate-200 bg-white px-3 py-2 text-[18.75px] font-medium leading-7 text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 focus-visible:border-violet-300 focus-visible:ring-2 focus-visible:ring-violet-200 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={submitDisabled}
           placeholder="본문 markdown"
           value={body}
@@ -131,7 +131,7 @@ export function BoardIssueCreateForm({
         />
       </label>
 
-      <label className="grid gap-1.5 text-[12px] font-bold text-slate-500">
+      <label className="grid gap-1.5 text-[18px] font-bold text-slate-500">
         컬럼
         <select
           className={selectClassName}
@@ -149,14 +149,19 @@ export function BoardIssueCreateForm({
       </label>
 
       <div className="flex justify-end">
-        <Button type="submit" size="lg" disabled={submitDisabled}>
+        <Button
+          type="submit"
+          size="lg"
+          className="h-[54px] text-[21px]"
+          disabled={submitDisabled}
+        >
           {isCreating ? <Loader2 className="animate-spin" /> : <Plus />}
           새 이슈
         </Button>
       </div>
 
       {validationError || error ? (
-        <p className="basis-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600">
+        <p className="basis-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[21px] font-medium text-red-600">
           {validationError ?? error}
         </p>
       ) : null}

@@ -8,6 +8,7 @@ const { GithubIntegrationService } = require("../../dist/modules/github-integrat
 const { GithubAppInstallationStateService } = require("../../dist/modules/github-integration/github-app-installation-state.service.js");
 const { GithubAppClient } = require("../../dist/modules/github-integration/github-app.client.js");
 const { GithubOAuthClient } = require("../../dist/modules/github-integration/github-oauth.client.js");
+const { GithubOAuthInstallationLookupError } = require("../../dist/modules/github-integration/github-oauth-installation-lookup.error.js");
 const { GithubTokenEncryptionService } = require("../../dist/modules/github-integration/github-token-encryption.service.js");
 const { GithubSyncJobEnqueueError } = require("../../dist/modules/github-integration/github-sync-job.service.js");
 
@@ -228,6 +229,26 @@ function createService({
 }
 
 {
+  const database = new FakeDatabase({ oneRows: [connectedGithubOAuthRow] });
+  const service = createService({
+    database,
+    githubOAuthClient: {
+      async assertUserInstallationLookupSupported() {
+        throw new GithubOAuthInstallationLookupError("reconnect_required");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.startGithubAppInstallation(currentUserId, workspaceId, { returnUrl: "https://pilo.test/github" }),
+    (error) =>
+      error?.response?.error?.code === "GITHUB_OAUTH_RECONNECT_REQUIRED" &&
+      error?.response?.error?.message === "GitHub OAuth reconnection is required"
+  );
+  assert.equal(database.queries.some(({ text }) => /UPDATE github_oauth_connections/i.test(text)), false);
+}
+
+{
   const service = createService({
     database: new FakeDatabase({
       oneRows: [
@@ -248,6 +269,45 @@ function createService({
     (error) =>
       error?.response?.error?.message === "GitHub OAuth connection is required"
   );
+}
+
+for (const scenario of [
+  { name: "401", status: 401, headers: {}, expected: "reconnect_required" },
+  { name: "non-rate-limit 403", status: 403, headers: {}, expected: "reconnect_required" },
+  { name: "rate-limit 403", status: 403, headers: { "x-ratelimit-remaining": "0" }, expected: "transient" },
+  { name: "429", status: 429, headers: { "retry-after": "30" }, expected: "transient" },
+  { name: "5xx", status: 503, headers: {}, expected: "transient" }
+]) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ message: scenario.name }), {
+    status: scenario.status,
+    headers: { "content-type": "application/json", ...scenario.headers }
+  });
+  try {
+    await assert.rejects(
+      () => new GithubOAuthClient().assertUserInstallationLookupSupported({ accessToken: "new-token" }),
+      (error) => error instanceof GithubOAuthInstallationLookupError && error.failure === scenario.expected,
+      scenario.name
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+for (const scenario of ["network", "malformed"]) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = scenario === "network"
+    ? async () => { throw new Error("provider detail"); }
+    : async () => new Response("not-json", { status: 200 });
+  try {
+    await assert.rejects(
+      () => new GithubOAuthClient().assertUserInstallationLookupSupported({ accessToken: "new-token" }),
+      (error) => error instanceof GithubOAuthInstallationLookupError && error.failure === "transient",
+      scenario
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 {

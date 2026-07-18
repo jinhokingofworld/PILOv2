@@ -94,6 +94,14 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
 - `approve_meeting_report_action_item`: 선택한 일정 또는 이슈 하나를 생성하며 후속작업을 승인한다.
 - `regenerate_meeting_report`: 실패한 회의록의 재생성을 확인 후 요청한다.
 
+`resolve_meeting_resource`는 위 사용자 capability를 직접 완료하지 않는 Phase 3 내부 selector helper다.
+선택한 후보는 raw resource ID를 planner에 돌려주지 않고,
+`start_meeting_in_room.useSelectedMeetingRoomCandidate` 또는
+`update_meeting_report_action_item.useSelectedWorkspaceMemberCandidate`를 통해 App Server가 재검증해
+다음 tool input에만 주입한다.
+동명이인·동일 이름 회의방의 0/N 결과를 server-owned candidate selection으로 바꾸며, 18개 사용자
+capability regression catalog에는 별도 capability로 세지 않는다.
+
 현재 Calendar tool은 `list_calendar_events`, `create_calendar_event`,
 `update_calendar_event`이다. Board tool은 검색·문맥 조회·생성·상태 이동·담당자 변경·동기화
 진단을 제공한다. 후속작업에서 생성된 일정·이슈 연결은 Meeting delivery가 담당한다.
