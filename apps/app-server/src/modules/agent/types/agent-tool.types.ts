@@ -153,6 +153,11 @@ export interface AgentToolDefinition<TInput> {
   requiresGroundedAnswer?: boolean;
   inputSchema: AgentToolInputSchema;
   validateInput: (input: unknown) => TInput;
+  /**
+   * Server-only compatibility adapter for planner steps persisted under an
+   * earlier tool schema. Its result is never a planner-facing schema.
+   */
+  adaptLegacyPlannerInput?: (input: unknown) => TInput | null;
   buildConfirmation?: (
     context: AgentToolContext,
     input: TInput

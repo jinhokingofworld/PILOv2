@@ -1709,7 +1709,7 @@ export class MeetingService {
     const from = this.normalizeMeetingReportDate(query.from, "from");
     const to = this.normalizeMeetingReportDate(query.to, "to");
     const status = this.normalizeMeetingReportStatus(query.status);
-    const limit = this.normalizeMeetingReportLimit(query.limit);
+    const limit = this.normalizeAgentMeetingReportLimit(query.limit);
     const roomName = query.roomName === undefined
       ? null
       : this.normalizeAgentResolutionText(String(query.roomName));
@@ -5456,6 +5456,28 @@ export class MeetingService {
     }
 
     return Math.min(integerLimit, MAX_MEETING_REPORT_LIMIT);
+  }
+
+  /**
+   * Agent retrieval needs an exact bounded result count for selector resolution.
+   * Keep the public Meeting API's legacy 20-item minimum unchanged.
+   */
+  private normalizeAgentMeetingReportLimit(limit: unknown): number {
+    if (limit === undefined || limit === null || limit === "") {
+      return 1;
+    }
+    if (Array.isArray(limit)) {
+      throw badRequest("Agent meeting report limit must be a positive integer");
+    }
+    const rawLimit = typeof limit === "number" ? String(limit) : limit;
+    if (typeof rawLimit !== "string") {
+      throw badRequest("Agent meeting report limit must be a positive integer");
+    }
+    const parsed = Number(rawLimit.trim());
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_MEETING_REPORT_LIMIT) {
+      throw badRequest("Agent meeting report limit must be between 1 and 100");
+    }
+    return parsed;
   }
 
   private toJsonArray(value: unknown): unknown[] {

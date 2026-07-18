@@ -69,6 +69,10 @@ interface MeetingReportSelectorInput {
   useSelectedMeetingReportCandidate?: true;
 }
 
+interface LegacyPersistedReportReferenceInput extends ReportIdInput {
+  legacyPersistedPlannerInput: true;
+}
+
 interface RecordingConsentInput {
   accepted: true;
   policyVersion: string;
@@ -651,12 +655,18 @@ export class MeetingAgentToolsService {
         properties: this.meetingReportSelectorSchema()
       },
       validateInput: (input) => this.validateMeetingReportSelectorInput(input),
+      adaptLegacyPlannerInput: (input) => this.adaptLegacyReportReferenceInput(input),
       prepareExecution: async (context, input) =>
         this.prepareMeetingReportSelectorExecution(
           context,
           this.validateMeetingReportSelectorInput(input)
         ),
       execute: async (context, input) => {
+        if (this.isLegacyPersistedReportReferenceInput(input)) {
+          return this.executeGetMeetingReport(context, {
+            reportId: input.reportId
+          });
+        }
         const resolved = await this.requireResolvedReport(
           context,
           this.validateMeetingReportSelectorInput(input)
@@ -681,12 +691,18 @@ export class MeetingAgentToolsService {
         properties: this.meetingReportSelectorSchema()
       },
       validateInput: (input) => this.validateMeetingReportSelectorInput(input),
+      adaptLegacyPlannerInput: (input) => this.adaptLegacyReportReferenceInput(input),
       prepareExecution: async (context, input) =>
         this.prepareMeetingReportSelectorExecution(
           context,
           this.validateMeetingReportSelectorInput(input)
         ),
       execute: async (context, input) => {
+        if (this.isLegacyPersistedReportReferenceInput(input)) {
+          return this.executeSummarizeMeetingReport(context, {
+            reportId: input.reportId
+          });
+        }
         const resolved = await this.requireResolvedReport(
           context,
           this.validateMeetingReportSelectorInput(input)
@@ -2031,6 +2047,33 @@ export class MeetingAgentToolsService {
         ? { useSelectedMeetingReportCandidate: true }
         : {})
     };
+  }
+
+  private adaptLegacyReportReferenceInput(
+    input: unknown
+  ): LegacyPersistedReportReferenceInput | null {
+    try {
+      const report = this.validateReportIdInput(input);
+      return {
+        legacyPersistedPlannerInput: true,
+        reportId: report.reportId
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private isLegacyPersistedReportReferenceInput(
+    input: unknown
+  ): input is LegacyPersistedReportReferenceInput {
+    if (!this.isPlainObject(input) || input.legacyPersistedPlannerInput !== true) {
+      return false;
+    }
+    try {
+      return this.requireReportId(input.reportId) === input.reportId;
+    } catch {
+      return false;
+    }
   }
 
   private validateReportIdInput(input: unknown): ReportIdInput {

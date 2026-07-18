@@ -882,6 +882,9 @@ class FakeCandidateSelectionDatabase {
     );
     meetingService.staleReportIds.clear();
     meetingService.reports.push(createReport({ id: SECOND_REPORT_ID }));
+    const latestReport = await resolver.resolveLatestReport(context);
+    assert.equal(latestReport.kind, "selected");
+    assert.equal(latestReport.reference.resourceId, REPORT_ID);
     const ambiguousReport = await resolver.resolveReport(context, {});
     assert.equal(ambiguousReport.kind, "needs_clarification");
     assert.equal(ambiguousReport.reason, "ambiguous");
