@@ -57,6 +57,7 @@ def catalog_payload() -> dict[str, object]:
                 "toolName": "list_calendar_events",
                 "domain": "calendar",
                 "action": "list_calendar_events",
+                "operation": "read",
                 "capabilityIds": ["calendar.list"],
                 "whenToUse": "이번 주 일정과 Calendar event를 조회합니다.",
                 "mustNotUseFor": ["회의록 요청"],
@@ -76,6 +77,7 @@ def catalog_payload() -> dict[str, object]:
                 "toolName": "list_meeting_reports",
                 "domain": "meeting",
                 "action": "list_meeting_reports",
+                "operation": "read",
                 "capabilityIds": ["meeting.reports.list"],
                 "whenToUse": "회의록과 미팅 report 목록을 조회합니다.",
                 "mustNotUseFor": ["일정 요청"],
@@ -172,6 +174,43 @@ def test_catalog_rejects_descriptor_digest_that_does_not_match_the_tool_schema()
 
     with pytest.raises(ValueError, match="Invalid toolCapabilityCatalog"):
         parse_tool_capability_catalog(invalid, TOOL_SCHEMAS)
+
+
+def test_retrieval_expands_required_chain_within_the_schema_budget() -> None:
+    payload = catalog_payload()
+    payload["capabilities"][0]["toolNames"] = [
+        "list_calendar_events",
+        "list_meeting_reports",
+    ]
+    payload["descriptors"][1]["capabilityIds"].append("calendar.list")
+    payload["descriptors"][1]["selectorKinds"].append("date_range")
+    payload["sha256"] = compute_tool_capability_catalog_sha(
+        payload["version"], payload["capabilities"], payload["descriptors"]
+    )
+    catalog = parse_tool_capability_catalog(payload, TOOL_SCHEMAS)
+    assert catalog is not None
+
+    shortlist = retrieve_tool_shortlist(
+        "이번 주 일정 알려줘",
+        catalog,
+        top_k=1,
+        tool_schema_bytes={"list_calendar_events": 100, "list_meeting_reports": 100},
+        schema_token_budget=50,
+    )
+    assert shortlist.tool_names == ("list_calendar_events", "list_meeting_reports")
+    assert shortlist.selected_capability_ids == ("calendar.list",)
+    assert shortlist.low_confidence is False
+
+    too_small = retrieve_tool_shortlist(
+        "이번 주 일정 알려줘",
+        catalog,
+        top_k=1,
+        tool_schema_bytes={"list_calendar_events": 100, "list_meeting_reports": 100},
+        schema_token_budget=49,
+    )
+    assert too_small.tool_names == ()
+    assert too_small.low_confidence is True
+    assert too_small.fallback_reason == "tool_schema_budget_exceeded"
 
 
 def test_catalog_keeps_unsupported_capabilities_out_of_the_executable_tool_set() -> None:

@@ -572,15 +572,17 @@ model/retrieval rollout**으로 전환하지 않는다. DB 비의존적인 Phase
 
 #### 0-4. DB 비의존 Tool retrieval과 shortlist
 
-- [ ] App Server가 계산한 기존 hard eligibility를 입력으로 사용하되, AI Worker router에는 full JSON
-  schema가 아니라 compact catalog만 전달한다.
-- [ ] 최초 retriever는 deterministic domain/action metadata filter와 교체 가능한 semantic rerank
-  adapter를 결합한다. 기본 shortlist는 `topK = 8`이며 capability의 필수 chain tool은 token budget
-  안에서 추가한다.
-- [ ] planner에는 최종 shortlist schema만 전달한다. shortlist 밖 tool 출력은 거부하고,
-  낮은 confidence 또는 retriever 장애 시 관련 domain bundle 확장 후 legacy all-eligible planner로
-  fallback한다.
-- [ ] low-confidence가 mutation을 단독으로 선택하거나 지원 요청을 즉시 `unsupported`로 바꾸지
+- [x] App Server가 계산한 기존 hard eligibility를 입력으로 사용하되, AI Worker router에는 full JSON
+  schema가 아니라 compact catalog만 전달한다. runtime은 catalog의 canonical schema digest를 검증한 뒤
+  prompt와 compact descriptor로만 retrieval한다.
+- [x] 최초 retriever는 deterministic domain/action metadata filter와 교체 가능한 semantic rerank
+  adapter를 결합한다. 기본 shortlist는 `topK = 8`, schema budget은 8,000 token이며 capability의
+  topK 안에서 예산에 들어온 capability들의 prerequisite/follow-up chain만 추가한다. primary chain이
+  예산을 넘으면 legacy로 fallback하고, 낮은 순위 chain은 건너뛴다.
+- [x] `AGENT_TOOL_RETRIEVAL_MODE=read_only_shortlist`에서 planner에는 최종 read-only shortlist schema만
+  전달한다. shortlist 밖 tool 출력은 planning failure로 거부하고, 낮은 confidence·budget 초과·retriever
+  예외·write capability는 legacy all-eligible planner로 fallback한다. 기본 mode는 `shadow`다.
+- [x] low-confidence가 mutation을 단독으로 선택하거나 지원 요청을 즉시 `unsupported`로 바꾸지
   않도록 한다. App Server registry, validator, Workspace 권한, confirmation, revalidation은
   여전히 권위 있는 실행 경계다.
 
