@@ -93,6 +93,10 @@ export function BoardPanel() {
   const selectedBoardSummary = boardData.boards.find(
     (board) => board.id === selectedBoardId
   );
+  const allowedBoardIds = useMemo(
+    () => boardData.boards.map((board) => board.id),
+    [boardData.boards]
+  );
   const canUseBoard = Boolean(workspaceId.trim() && accessToken);
   const needsSignIn = !accessToken;
   const isCatalogLoading = boardData.catalogStatus === "loading";
@@ -127,7 +131,7 @@ export function BoardPanel() {
     if (selectedBoardId) {
       setSelectedBoardId("");
     }
-  }, [boardData.activeSource?.boardId, selectedBoardId]);
+  }, [boardData.activeSource?.boardId]);
 
   function handleOpenIssue(issue: BoardIssueCardPayload) {
     setSelectedIssueId(issue.id);
@@ -190,12 +194,17 @@ export function BoardPanel() {
     <PageCursorSurface
       boardId={selectedBoardId}
       data-board-main
+      data-workspace-follow-board-id={boardData.board?.id ?? ""}
       className="workspace-board relative -m-6 min-h-[calc(100vh-3.5rem)] overflow-hidden border-l border-slate-200 bg-slate-50 text-slate-950"
       enabled={Boolean(canUseBoard && selectedBoardId)}
       page="board"
       workspaceId={workspaceId}
     >
-      <BoardWorkspaceLocationAdapter boardId={selectedBoardId} />
+      <BoardWorkspaceLocationAdapter
+        allowedBoardIds={allowedBoardIds}
+        onSelectBoard={setSelectedBoardId}
+        onSelectIssue={setSelectedIssueId}
+      />
       <section className="board-toolbar flex min-h-[74px] items-center justify-end border-b border-slate-200 bg-white/90 px-7 py-5 backdrop-blur">
         <div className="board-controls flex w-full min-w-0 flex-wrap items-center justify-end gap-2">
           <label className="relative w-[min(100%,260px)] min-w-48">
