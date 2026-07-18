@@ -19,10 +19,11 @@ from app.agent_processor import (
     parse_agent_run_job_payload,
 )
 from app.agent_tool_retrieval import (
+    DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
     TOOL_RETRIEVER_VERSION,
     ToolRetrievalResult,
     parse_tool_capability_catalog,
-    retrieve_tool_shortlist,
+    select_read_only_tool_shortlist,
 )
 
 EVALUATION_RUN_ID = "00000000-0000-4000-8000-000000000001"
@@ -452,18 +453,24 @@ def evaluate_case(
 
 
 def select_shadow_planner_tools(
-    job: AgentRunJob, prompt: str, top_k: int = 8
+    job: AgentRunJob,
+    prompt: str,
+    top_k: int = 8,
+    schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
 ) -> tuple[tuple[AgentToolSchema, ...], ToolRetrievalResult | None]:
     catalog = job.tool_capability_catalog
     if catalog is None:
         return job.tools, None
 
-    retrieval = retrieve_tool_shortlist(prompt, catalog, top_k=top_k)
-    if retrieval.low_confidence:
-        return job.tools, retrieval
-
-    selected_names = set(retrieval.tool_names)
-    return tuple(tool for tool in job.tools if tool.name in selected_names), retrieval
+    selection = select_read_only_tool_shortlist(
+        prompt,
+        catalog,
+        {tool.name: tool.input_schema for tool in job.tools},
+        top_k=top_k,
+        schema_token_budget=schema_token_budget,
+    )
+    selected_names = set(selection.tool_names)
+    return tuple(tool for tool in job.tools if tool.name in selected_names), selection.retrieval
 
 
 def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[str, object]:
