@@ -221,6 +221,7 @@ export function BoardPanel() {
             type="button"
             variant="outline"
             size="sm"
+            className="h-[48px] text-[19.2px]"
             disabled={!canUseBoard || isCatalogLoading || isBoardLoading}
             onClick={() => {
               void boardData.refreshWorkspace();
@@ -238,6 +239,7 @@ export function BoardPanel() {
           <Button
             type="button"
             size="sm"
+            className="h-[48px] text-[19.2px]"
             disabled={!canUseBoard || !selectedBoardId || isBoardLoading}
             onClick={() => {
               setIssueCreateError(null);

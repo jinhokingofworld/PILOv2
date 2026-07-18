@@ -144,6 +144,21 @@ assert.match(boardIssueCreateForm, /text-\[21px\]/);
 assert.match(boardIssueCreateDialog, /text-\[27px\]/);
 assert.match(boardIssueSheet, /text-\[27px\]/);
 assert.match(boardIssueAssigneeSelector, /text-\[18px\]/);
+assert.match(boardPanel, /text-\[19\.2px\]/);
+assert.match(boardKanban, /text-\[19\.2px\]/);
+assert.match(boardIssueCreateForm, /text-\[19\.2px\]/);
+assert.match(boardIssueSheet, /text-\[19\.2px\]/);
+assert.match(boardIssueAssigneeSelector, /text-\[19\.2px\]/);
+assert.match(boardIssueSheet, /<Input[\s\S]*className="[^"]*text-\[21px\]/);
+assert.match(
+  boardIssueAssigneeSelector,
+  /<Input[\s\S]*className="[^"]*text-\[21px\]/
+);
+assert.match(
+  boardKanban,
+  /avatar[^\n]*size-6[^\n]*text-\[14\.25px\]/
+);
+assert.doesNotMatch(boardKanban, /avatar[^\n]*size-9/);
 assert.doesNotMatch(boardPanel, /board-title/);
 assert.doesNotMatch(boardPanel, /board-icon/);
 assert.doesNotMatch(boardPanel, /board-issue-create-dock/);

@@ -351,6 +351,7 @@ export function BoardIssueSheet({
                         <label className="grid gap-1 text-[21px] font-medium">
                           제목
                           <Input
+                            className="h-[54px] text-[21px]"
                             value={draftTitle}
                             disabled={isSaving}
                             onChange={(event) =>
@@ -388,6 +389,7 @@ export function BoardIssueSheet({
                           type="button"
                           size="sm"
                           variant="outline"
+                          className="h-[48px] text-[19.2px]"
                           disabled={isSaving}
                           onClick={() => {
                             resetDraft(issue);
@@ -401,6 +403,7 @@ export function BoardIssueSheet({
                         <Button
                           type="button"
                           size="sm"
+                          className="h-[48px] text-[19.2px]"
                           disabled={isSaving}
                           onClick={() => void handleSaveIssue()}
                         >
@@ -417,6 +420,7 @@ export function BoardIssueSheet({
                         type="button"
                         size="sm"
                         variant="outline"
+                        className="h-[48px] text-[19.2px]"
                         onClick={handleStartEditing}
                       >
                         <Pencil />
@@ -427,6 +431,7 @@ export function BoardIssueSheet({
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="h-[48px] text-[19.2px]"
                       disabled={!issue.htmlUrl}
                       onClick={() =>
                         issue.htmlUrl

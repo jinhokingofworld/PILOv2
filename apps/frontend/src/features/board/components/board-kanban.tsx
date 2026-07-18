@@ -172,7 +172,7 @@ function BoardIssueCard({
             visibleAssignees.map((login) => (
               <span
                 key={login}
-                className="avatar -ml-1.5 first:ml-0 grid size-9 place-items-center rounded-full border-2 border-white bg-violet-500 font-mono text-[14.25px] font-extrabold text-white"
+                className="avatar -ml-1.5 first:ml-0 grid size-6 place-items-center rounded-full border-2 border-white bg-violet-500 font-mono text-[14.25px] font-extrabold text-white"
                 title={`@${login}`}
               >
                 {readAssigneeInitials(login) || "?"}
@@ -318,6 +318,7 @@ export function BoardKanban({
           type="button"
           variant="outline"
           size="sm"
+          className="h-[48px] text-[19.2px]"
           disabled={!board.repository.htmlUrl}
           onClick={() => window.open(board.repository.htmlUrl, "_blank", "noopener")}
         >

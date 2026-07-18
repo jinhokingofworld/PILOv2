@@ -149,7 +149,12 @@ export function BoardIssueCreateForm({
       </label>
 
       <div className="flex justify-end">
-        <Button type="submit" size="lg" disabled={submitDisabled}>
+        <Button
+          type="submit"
+          size="lg"
+          className="h-[54px] text-[19.2px]"
+          disabled={submitDisabled}
+        >
           {isCreating ? <Loader2 className="animate-spin" /> : <Plus />}
           새 이슈
         </Button>

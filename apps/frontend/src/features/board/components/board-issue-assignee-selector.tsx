@@ -64,6 +64,7 @@ export function BoardIssueAssigneeSelector({
             type="button"
             size="sm"
             variant="outline"
+            className="h-[48px] text-[19.2px]"
             disabled={disabled}
             onClick={onRetry}
           >
@@ -113,6 +114,7 @@ export function BoardIssueAssigneeSelector({
   return (
     <div className="grid gap-2">
       <Input
+        className="h-[54px] text-[21px]"
         value={query}
         disabled={disabled || status !== "success"}
         placeholder="담당자 검색"
