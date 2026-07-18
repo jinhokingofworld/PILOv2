@@ -12,6 +12,7 @@ const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
 const PR_REVIEW_SESSION_ID = "88888888-8888-4888-8888-888888888888";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
+const THREAD_ID = "55555555-5555-4555-8555-555555555555";
 const CREATED_AT = new Date("2026-07-08T00:00:00.000Z");
 const UPDATED_AT = new Date("2026-07-08T00:00:01.000Z");
 const EXPIRES_AT = new Date("2026-08-07T00:00:00.000Z");
@@ -102,6 +103,15 @@ class FakeTransaction {
   }
 
   async queryOne(text, values = []) {
+    if (text.includes("FROM agent_threads AS thread")) {
+      this.state.threadLookupQuery = text;
+      return this.findActiveThread(values);
+    }
+
+    if (text.includes("INSERT INTO agent_threads")) {
+      return this.insertThread(values);
+    }
+
     if (text.includes("UPDATE agent_run_outbox")) {
       const outbox = this.state.outbox?.find((row) => row.run_id === values[0]);
       if (!outbox) return null;
@@ -155,6 +165,16 @@ class FakeTransaction {
   }
 
   async execute(text, values = []) {
+    if (text.includes("pg_advisory_xact_lock")) {
+      return { rowCount: 1, rows: [] };
+    }
+
+    if (text.includes("UPDATE agent_threads SET last_activity_at")) {
+      const thread = this.state.threads?.find((candidate) => candidate.id === values[0]);
+      if (thread) thread.last_activity_at = new Date();
+      return { rowCount: thread ? 1 : 0, rows: [] };
+    }
+
     if (text.includes("INSERT INTO agent_run_messages")) {
       this.state.messages ??= [];
       this.state.messages.push({
@@ -241,9 +261,32 @@ class FakeTransaction {
     return { next_order: maxOrder + 1 };
   }
 
+  findActiveThread([workspaceId, currentUserId]) {
+    if (this.state.activeThread === false) return null;
+    const thread = (this.state.threads ?? []).find(
+      (candidate) =>
+        candidate.workspace_id === workspaceId &&
+        candidate.requested_by_user_id === currentUserId
+    );
+    return thread ? { id: thread.id } : null;
+  }
+
+  insertThread([workspaceId, currentUserId]) {
+    this.state.threads ??= [];
+    const thread = {
+      id: this.state.threads.length === 0 ? THREAD_ID : "new-thread-id",
+      workspace_id: workspaceId,
+      requested_by_user_id: currentUserId,
+      last_activity_at: new Date()
+    };
+    this.state.threads.push(thread);
+    return { id: thread.id };
+  }
+
   insertRun([
     workspaceId,
     currentUserId,
+    threadId,
     clientRequestId,
     requestContext,
     prompt,
@@ -257,6 +300,7 @@ class FakeTransaction {
     const run = createRun({
       workspace_id: workspaceId,
       requested_by_user_id: currentUserId,
+      thread_id: threadId,
       client_request_id: clientRequestId,
       request_context_json: requestContext,
       prompt,
@@ -413,6 +457,30 @@ class FakeTransaction {
   }
 }
 
+{
+  const state = {
+    runs: [], steps: [], logs: [], activeThread: false,
+    threads: [{ id: THREAD_ID, workspace_id: WORKSPACE_ID, requested_by_user_id: USER_ID }]
+  };
+  const { service } = createService(state);
+  await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "한 시간 뒤의 새 요청" });
+  assert.equal(state.threads.length, 2);
+  assert.equal(state.runs[0].thread_id, "new-thread-id");
+  assert.match(state.threadLookupQuery, /last_activity_at > now\(\) - INTERVAL '1 hour'/);
+}
+
+{
+  const state = {
+    runs: [], steps: [], logs: [], activeThread: true,
+    threads: [{ id: THREAD_ID, workspace_id: WORKSPACE_ID, requested_by_user_id: USER_ID }]
+  };
+  const { service } = createService(state);
+  await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "confirmation 대기 중인 요청" });
+  assert.equal(state.threads.length, 1);
+  assert.equal(state.runs[0].thread_id, THREAD_ID);
+  assert.match(state.threadLookupQuery, /confirmation\.status = 'pending'/);
+}
+
 function createService(state) {
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
@@ -449,6 +517,8 @@ function errorMessage(error) {
   assert.equal(result.run.timezone, "Asia/Seoul");
   assert.equal(result.run.clientRequestId, "request-1");
   assert.equal(state.runs.length, 1);
+  assert.equal(state.threads.length, 1);
+  assert.equal(state.runs[0].thread_id, THREAD_ID);
   assert.equal(state.logs[0].event_type, "run_created");
   assert.deepEqual(state.outbox, [
     {
@@ -461,6 +531,29 @@ function errorMessage(error) {
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
+}
+
+{
+  const state = {
+    runs: [],
+    steps: [],
+    logs: [],
+    threads: [
+      {
+        id: THREAD_ID,
+        workspace_id: WORKSPACE_ID,
+        requested_by_user_id: USER_ID,
+        last_activity_at: CREATED_AT
+      }
+    ]
+  };
+  const { service } = createService(state);
+  await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "지난 회의록 이어서 알려줘"
+  });
+
+  assert.equal(state.threads.length, 1);
+  assert.equal(state.runs[0].thread_id, THREAD_ID);
 }
 
 {

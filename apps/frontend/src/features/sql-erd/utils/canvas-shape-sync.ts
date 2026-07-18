@@ -22,7 +22,7 @@ export type SqlErdTablePositionChangeBuffer = {
   flush: (
     resolvePosition: (tableId: string) => SqltoerdTableLayout | null
   ) => SqltoerdTableLayout[];
-  record: (entry: SqlErdTablePositionChangeEntry) => void;
+  record: (entry: SqlErdTablePositionChangeEntry) => string[];
   suppressNext: (tablePositions: readonly SqltoerdTableLayout[]) => void;
 };
 
@@ -56,9 +56,10 @@ export function createSqlErdTablePositionChangeBuffer<
     },
     record(entry: SqlErdTablePositionChangeEntry) {
       if (entry.source !== "user") {
-        return;
+        return [];
       }
 
+      const recordedTableIds = new Set<string>();
       Object.values(entry.changes.updated).forEach(([before, after]) => {
         if (
           !isTableShape(before) ||
@@ -85,7 +86,9 @@ export function createSqlErdTablePositionChangeBuffer<
         }
 
         changedTableIds.add(after.props.tableId);
+        recordedTableIds.add(after.props.tableId);
       });
+      return [...recordedTableIds];
     },
     suppressNext(tablePositions: readonly SqltoerdTableLayout[]) {
       tablePositions.forEach(({ tableId, x, y }) => {

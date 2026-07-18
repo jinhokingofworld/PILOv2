@@ -11,6 +11,7 @@ import {
   GITHUB_OAUTH_TOKEN_REFRESH_FAILED_MESSAGE
 } from "./github-oauth-refresh.error";
 import { toGithubOAuthExpiryIso } from "./github-oauth-token-expiry";
+import { GithubOAuthInstallationLookupError } from "./github-oauth-installation-lookup.error";
 
 const GITHUB_OAUTH_TOKEN_REFRESH_TIMEOUT_MS = 10_000;
 
@@ -601,22 +602,33 @@ export class GithubOAuthClient {
         }
       });
     } catch {
-      throw badRequest("GitHub OAuth installation lookup failed");
+      throw new GithubOAuthInstallationLookupError("transient");
     }
 
-    if (response.status === 401 || response.status === 403) {
-      throw badRequest(
-        "GitHub App user access token is required for installation lookup"
+    if (response.status === 401) {
+      throw new GithubOAuthInstallationLookupError("reconnect_required");
+    }
+
+    if (response.status === 403) {
+      const rateLimited = response.headers?.get("x-ratelimit-remaining") === "0" ||
+        response.headers?.has("retry-after") === true;
+      throw new GithubOAuthInstallationLookupError(
+        rateLimited ? "transient" : "reconnect_required"
       );
     }
 
     if (!response.ok) {
-      throw badRequest("GitHub OAuth installation lookup failed");
+      throw new GithubOAuthInstallationLookupError("transient");
     }
 
-    const payload = await this.readInstallationJson(response);
+    let payload: unknown;
+    try {
+      payload = await this.readInstallationJson(response);
+    } catch {
+      throw new GithubOAuthInstallationLookupError("transient");
+    }
     if (!this.isUserInstallationsPayload(payload)) {
-      throw badRequest("GitHub OAuth installation lookup failed");
+      throw new GithubOAuthInstallationLookupError("transient");
     }
 
     return payload;

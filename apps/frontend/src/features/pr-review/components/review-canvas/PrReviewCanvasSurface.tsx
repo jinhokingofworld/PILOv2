@@ -99,6 +99,7 @@ import {
   registerPrReviewFileNodeActivationHandler
 } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
 import { shouldRemoveCreatedPrReviewSystemShape } from "@/features/pr-review/components/review-canvas/pr-review-system-shape-policy";
+import type { PrReviewFollowSurfaceKey } from "@/features/pr-review/pr-review-follow-location";
 import {
   buildPrReviewGraphPresentation,
   createPrReviewFlowLayout,
@@ -111,14 +112,18 @@ import {
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
 type PrReviewCanvasSurfaceProps = {
+  activeFollowSurface: PrReviewFollowSurfaceKey;
   apiClient: PrReviewApiClient;
   canvas: PrReviewCanvas;
   className?: string;
   conflictAnalysis?: PrReviewConflictAnalysis | null;
   onDecisionUpdated?: (event: PrReviewDecisionUpdatedEvent) => void;
   onFileOpen?: (reviewFileId: string) => void;
+  onFollowSurfaceChange: (surface: PrReviewFollowSurfaceKey) => void;
+  onOpenedReviewFileChange: (reviewFileId: string | null) => void;
   onRealtimeRoomJoined?: () => void;
   onRealtimeRoomDeleted?: (event: PrReviewRoomDeletedEvent) => void;
+  openedReviewFileId: string | null;
   preparedConflictFileIds?: Set<string>;
   readOnly?: boolean;
   realtimeIdentity: CanvasRealtimeIdentity;
@@ -2008,14 +2013,18 @@ function PrReviewCanvasPersistenceBridge({
 }
 
 export function PrReviewCanvasSurface({
+  activeFollowSurface,
   apiClient,
   canvas,
   className,
   conflictAnalysis,
   onDecisionUpdated,
   onFileOpen,
+  onFollowSurfaceChange,
+  onOpenedReviewFileChange,
   onRealtimeRoomJoined,
   onRealtimeRoomDeleted,
+  openedReviewFileId,
   preparedConflictFileIds = new Set<string>(),
   readOnly: isReviewVersionStale = false,
   realtimeIdentity,
@@ -2636,6 +2645,10 @@ export function PrReviewCanvasSurface({
         shapeUtils={prReviewShapeUtils}
       >
         <PrReviewWorkspaceLocationAdapter
+          activeFollowSurface={activeFollowSurface}
+          onFollowSurfaceChange={onFollowSurfaceChange}
+          onOpenedReviewFileChange={onOpenedReviewFileChange}
+          openedReviewFileId={openedReviewFileId}
           reviewSessionId={canvas.reviewSessionId}
         />
         <PrReviewCanvasRealtimeBridge

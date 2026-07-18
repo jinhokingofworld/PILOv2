@@ -97,3 +97,34 @@ test("avatar UI는 tooltip, popover, button, online badge와 두 배치 mode를 
   assert.match(layout, /<Toaster/);
   assert.match(sonner, /sonner/);
 });
+
+test("visible과 overflow avatar는 동일한 Follow toggle과 활성 상태를 제공한다", async () => {
+  const component = await readFile(
+    new URL("./components/workspace-member-avatars.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(component, /followingUserId/);
+  assert.match(component, /toggleFollow/);
+  assert.equal(
+    component.match(/void toggleFollow\(entry\.userId\)/g)?.length,
+    2,
+  );
+  assert.match(component, /aria-pressed=\{followingUserId === entry\.userId\}/);
+  assert.match(component, /isFollowing=\{followingUserId === entry\.userId\}/);
+  assert.equal(
+    component.match(/data-workspace-follow-trigger/g)?.length,
+    2,
+  );
+  assert.match(component, /ring-primary/);
+});
+
+test("Follow 중인 대상 이름과 Esc 종료 안내를 status로 표시한다", async () => {
+  const component = await readFile(
+    new URL("./components/workspace-member-avatars.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(component, /role="status"/);
+  assert.match(component, /님 따라가는 중 · Esc로 종료/);
+});

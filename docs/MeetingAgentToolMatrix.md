@@ -26,6 +26,11 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
   이전 사용자 입력·질문·bounded tool 결과는 run 범위 multi-turn memory로 다음 planner turn에 전달한다.
 - 사람에게 제어를 넘기는 시점은 후보 선택, 필요한 동의·confirmation, 또는 필수 정보 누락일 때로
   제한한다. 그 외에는 Agent가 다음 tool 호출을 계속 결정한다.
+- `meetingRoomId`, `meetingId`, `reportId`, `actionItemId`, `assigneeUserId`는 내부 식별자다.
+  사용자에게 UUID 입력을 요구하지 않고 회의방 이름, 현재 참여 상태, 상대 날짜, 담당자 표시 이름,
+  직전 목록의 순번을 App Server에서 해소한다.
+- 대상이 여러 개일 때만 이름·일시·상태 후보를 최대 3개 제시하고 run-scoped `selectionToken`으로
+  선택을 이어간다. 후보나 최종 답변에 raw UUID를 노출하지 않는다.
 
 ### Chatbot의 직접 Meeting 제어
 
@@ -48,6 +53,12 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
 
 상세 계약과 구현 체크리스트는 [Meeting Agent 다단계 Workflow 설계](MeetingAgentWorkflowDesign.md)를
 따른다. 이 설계와 현재 Agent API 계약을 함께 구현 기준으로 사용한다.
+
+> **현재 검증 상태:** 아래 tool의 등록 여부와 자연어 의도 인식·대상 해소 완료 여부는 다르다. 2026-07-17
+> 대화 검증에서는 현재 회의 나가기, 회의방 이름으로 참여, 날짜별 참여자·회의록, 최근 실패 원인,
+> 담당자별 후속 작업, 순번 기반 수정에서 UUID를 다시 요구하거나 지원 tool을 선택하지 못하는 문제가
+> 확인됐다. 성공한 기능을 포함한 전체 제목별 해결 작업과 수용
+> 기준은 [Meeting Agent Tool 개선 Plan](MeetingAgentToolImprovementPlan.md)에서 추적한다.
 
 | 사용자 의도 | 이용하는 Tool | 예시 발화 | 실행 성격 |
 | --- | --- | --- | --- |
@@ -94,16 +105,32 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
 - `approve_meeting_report_action_item`: 선택한 일정 또는 이슈 하나를 생성하며 후속작업을 승인한다.
 - `regenerate_meeting_report`: 실패한 회의록의 재생성을 확인 후 요청한다.
 
+`resolve_meeting_resource`는 위 사용자 capability를 직접 완료하지 않는 Phase 3 내부 selector helper다.
+선택한 후보는 raw resource ID를 planner에 돌려주지 않고,
+`start_meeting_in_room.useSelectedMeetingRoomCandidate` 또는
+`update_meeting_report_action_item.useSelectedWorkspaceMemberCandidate`를 통해 App Server가 재검증해
+다음 tool input에만 주입한다.
+동명이인·동일 이름 회의방의 0/N 결과를 server-owned candidate selection으로 바꾸며, 18개 사용자
+capability regression catalog에는 별도 capability로 세지 않는다.
+
 현재 Calendar tool은 `list_calendar_events`, `create_calendar_event`,
 `update_calendar_event`이다. Board tool은 검색·문맥 조회·생성·상태 이동·담당자 변경·동기화
 진단을 제공한다. 후속작업에서 생성된 일정·이슈 연결은 Meeting delivery가 담당한다.
 
 ## 남은 통합 단위
 
-구현 순서는 고정하지 않는다. 확정된 데이터 모델·상태 전이·Agent loop 계약과 세부
-체크리스트는 [Meeting Agent 다단계 Workflow 설계](MeetingAgentWorkflowDesign.md)를 따른다.
+확정된 데이터 모델·상태 전이·Agent loop 계약은
+[Meeting Agent 다단계 Workflow 설계](MeetingAgentWorkflowDesign.md)를 따른다. 전체 Meeting capability의
+자연어 의도 인식, resource 해소, 근거 답변과 ID-free UX의 구현 순서·체크리스트·수용 테스트는
+[Meeting Agent Tool 개선 Plan](MeetingAgentToolImprovementPlan.md)을 따른다.
 
 - Agent chat UI의 clarification 입력과 `connect_meeting` client action 처리
+- 모든 기능 제목의 intent catalog와 표현 변형 regression eval 구현
+- Meeting room/Meeting/report/action item/member 자연어 selector와 run-scoped `selectionToken` 구현
+- AI Worker의 Meeting UUID 누락 hard stop 제거와 selector 기반 multi-tool planning 적용
+- 회의록 section 선택 조회와 transcript·Activity·decision evidence grounding 검증
+- join/leave/recording 뒤 Meeting runtime·우측 상단 header 즉시 갱신
+- 2026-07-17 자연어 발화 regression eval과 응답·질문의 UUID 미노출 검증
 - 실제 Postgres에서 migration 074의 FK·상태 제약과 RLS 검증
 - LiveKit 연결 성공·실패 callback과 participant session 정리의 Frontend E2E 검증
 - 새 endpoint가 필요하면 이 문서와 `docs/api/agent-api.md`를 함께 갱신

@@ -5,6 +5,7 @@ export type WorkspacePresencePage =
   | "sql-erd"
   | "pr-review"
   | "meeting"
+  | "chat"
   | "canvas"
   | "drive";
 
@@ -19,19 +20,38 @@ export type WorkspacePresenceViewport =
       kind: "element";
       key:
         | "board-kanban"
+        | "board-issue-sheet"
         | "calendar-grid"
+        | "calendar-event-detail"
+        | "calendar-events-dialog"
+        | "chat-messages"
         | "drive-list"
-        | "meeting-content";
+        | "drive-pdf"
+        | "meeting-content"
+        | "pr-review-diff"
+        | "pr-review-inspector"
+        | "sql-erd-inspector";
       xRatio: number;
       yRatio: number;
     }
-  | { kind: "camera"; x: number; y: number; z: number };
+  | {
+      kind: "camera";
+      selectedShapeIds?: string[];
+      x: number;
+      y: number;
+      z: number;
+    };
 
 export type WorkspacePresenceLocation = {
   context: Record<string, string | null>;
   page: WorkspacePresencePage;
   route: WorkspacePresenceRoute;
   viewport: WorkspacePresenceViewport;
+};
+
+export type WorkspaceLocationRestoreContext = {
+  signal: AbortSignal;
+  source: "jump" | "follow";
 };
 
 export type WorkspacePresenceState = {
@@ -65,5 +85,8 @@ export type WorkspaceLocationAdapter = {
   capture: () => WorkspacePresenceLocation | null;
   page: WorkspacePresencePage;
   ready: boolean;
-  restore: (location: WorkspacePresenceLocation) => boolean | Promise<boolean>;
+  restore: (
+    location: WorkspacePresenceLocation,
+    context: WorkspaceLocationRestoreContext,
+  ) => boolean | Promise<boolean>;
 };

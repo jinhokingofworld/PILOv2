@@ -48,9 +48,10 @@ export function WorkspaceMemberAvatars({
   const authSession = useAuthSession();
   const {
     clearJumpError,
+    followingUserId,
     jumpError,
-    jumpToUser,
     onlineUsers,
+    toggleFollow,
   } = useWorkspacePresence();
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
 
@@ -96,6 +97,9 @@ export function WorkspaceMemberAvatars({
     entries,
     HEADER_AVATAR_LIMIT,
   );
+  const followingEntry = entries.find(
+    (entry) => entry.userId === followingUserId,
+  );
 
   if (entries.length === 0) return null;
 
@@ -109,12 +113,21 @@ export function WorkspaceMemberAvatars({
         )}
         data-mode={mode}
       >
+        {followingEntry ? (
+          <p
+            className="mr-2 whitespace-nowrap text-xs font-medium text-primary"
+            role="status"
+          >
+            {followingEntry.displayName}님 따라가는 중 · Esc로 종료
+          </p>
+        ) : null}
         <AvatarGroup>
           {visible.map((entry) => (
             <WorkspaceAvatarButton
               entry={entry}
+              isFollowing={followingUserId === entry.userId}
               key={entry.userId}
-              onSelect={() => void jumpToUser(entry.userId)}
+              onSelect={() => void toggleFollow(entry.userId)}
             />
           ))}
 
@@ -138,13 +151,21 @@ export function WorkspaceMemberAvatars({
                 <div className="max-h-72 overflow-y-auto">
                   {all.map((entry) => (
                     <button
-                      className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left outline-none hover:bg-muted focus-visible:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                      aria-pressed={followingUserId === entry.userId}
+                      className={cn(
+                        "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left outline-none hover:bg-muted focus-visible:bg-muted disabled:cursor-not-allowed disabled:opacity-50",
+                        followingUserId === entry.userId && "bg-primary/10",
+                      )}
                       disabled={!entry.location}
+                      data-workspace-follow-trigger
                       key={entry.userId}
-                      onClick={() => void jumpToUser(entry.userId)}
+                      onClick={() => void toggleFollow(entry.userId)}
                       type="button"
                     >
-                      <WorkspaceAvatar entry={entry} />
+                      <WorkspaceAvatar
+                        entry={entry}
+                        isFollowing={followingUserId === entry.userId}
+                      />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">
                           {entry.displayName}
@@ -169,9 +190,11 @@ export function WorkspaceMemberAvatars({
 
 function WorkspaceAvatarButton({
   entry,
+  isFollowing,
   onSelect,
 }: {
   entry: WorkspaceAvatarEntry;
+  isFollowing: boolean;
   onSelect: () => void;
 }) {
   const pageLabel = entry.location
@@ -187,14 +210,16 @@ function WorkspaceAvatarButton({
         render={
           <button
             aria-label={label}
+            aria-pressed={isFollowing}
             className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-workspace-follow-trigger
             disabled={!entry.location}
             onClick={onSelect}
             type="button"
           />
         }
       >
-        <WorkspaceAvatar entry={entry} />
+        <WorkspaceAvatar entry={entry} isFollowing={isFollowing} />
       </TooltipTrigger>
       <TooltipContent>
         {entry.location ? (
@@ -209,9 +234,21 @@ function WorkspaceAvatarButton({
   );
 }
 
-function WorkspaceAvatar({ entry }: { entry: WorkspaceAvatarEntry }) {
+function WorkspaceAvatar({
+  entry,
+  isFollowing,
+}: {
+  entry: WorkspaceAvatarEntry;
+  isFollowing: boolean;
+}) {
   return (
-    <Avatar className="ring-2 ring-background" size="sm">
+    <Avatar
+      className={cn(
+        "ring-2 ring-background",
+        isFollowing && "bg-primary/10 ring-primary",
+      )}
+      size="sm"
+    >
       {entry.avatarUrl ? (
         <AvatarImage alt={entry.displayName} src={entry.avatarUrl} />
       ) : null}

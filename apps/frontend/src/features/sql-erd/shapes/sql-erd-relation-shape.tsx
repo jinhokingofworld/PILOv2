@@ -16,6 +16,7 @@ import {
 
 import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 import { useSqlErdTableFocus } from "@/features/sql-erd/components/sql-erd-table-focus-context";
+import { useSqlErdContextRelationIds } from "@/features/sql-erd/components/sql-erd-selection-context";
 import type { ErdRelation } from "@/features/sql-erd/types";
 import { getSqlErdFocusedRelationRole } from "@/features/sql-erd/utils/agent-table-focus";
 import type { SqlErdRelationCardinality } from "@/features/sql-erd/utils/model";
@@ -156,9 +157,11 @@ export function isSqlErdRelationShape(
 }
 
 export function getSqlErdRelationVisualStyle({
+  isContextual = false,
   isHovered,
   isSelected
 }: {
+  isContextual?: boolean;
   isHovered: boolean;
   isSelected: boolean;
 }) {
@@ -173,6 +176,13 @@ export function getSqlErdRelationVisualStyle({
     return {
       stroke: "rgba(37, 99, 235, 0.82)",
       strokeWidth: 3.25
+    };
+  }
+
+  if (isContextual) {
+    return {
+      stroke: "rgba(37, 99, 235, 0.74)",
+      strokeWidth: 3
     };
   }
 
@@ -784,6 +794,7 @@ function SqlErdCardinalityMarker({
 function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
   const editor = useEditor();
   const tableFocus = useSqlErdTableFocus();
+  const contextRelationIds = useSqlErdContextRelationIds();
   const [isHovered, setIsHovered] = useState(false);
   const focusRole = tableFocus
     ? getSqlErdFocusedRelationRole(tableFocus, shape.props.relationId)
@@ -800,6 +811,7 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
     shape.props.endSide
   );
   const visualStyle = getSqlErdRelationVisualStyle({
+    isContextual: contextRelationIds.has(shape.props.relationId),
     isHovered,
     isSelected
   });
@@ -858,7 +870,13 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
       />
       <path
         data-sqltoerd-relation-state={
-          isSelected ? "selected" : isHovered ? "hovered" : "default"
+          isSelected
+            ? "selected"
+            : isHovered
+              ? "hovered"
+              : contextRelationIds.has(shape.props.relationId)
+                ? "contextual"
+                : "default"
         }
         d={pathData}
         fill="none"

@@ -2,6 +2,8 @@ export const sqlErdClientEvents = {
   join: "sql-erd:join",
   leave: "sql-erd:leave",
   presenceUpdate: "sql-erd:presence:update",
+  tableMoveClear: "sql-erd:table-move:clear",
+  tableMovePreview: "sql-erd:table-move:preview",
 } as const;
 
 export const sqlErdServerEvents = {
@@ -10,6 +12,8 @@ export const sqlErdServerEvents = {
   presenceLeave: "sql-erd:presence:leave",
   presenceUpdate: "sql-erd:presence:update",
   operation: "sql-erd:operation",
+  tableMoveClear: "sql-erd:table-move:clear",
+  tableMovePreview: "sql-erd:table-move:preview",
 } as const;
 
 export function isSqlErdOperationPayload(

@@ -29,7 +29,7 @@ import { PageCursorSurface } from "@/shared/page-cursor/PageCursorSurface";
 import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
 const selectClassName =
-  "h-9 rounded-[11px] border border-slate-200 bg-white px-3 text-[12.5px] font-semibold text-slate-700 shadow-sm outline-none transition focus-visible:border-violet-300 focus-visible:ring-2 focus-visible:ring-violet-200 disabled:cursor-not-allowed disabled:opacity-50";
+  "h-[54px] rounded-[11px] border border-slate-200 bg-white px-3 text-[18.75px] font-semibold text-slate-700 shadow-sm outline-none transition focus-visible:border-violet-300 focus-visible:ring-2 focus-visible:ring-violet-200 disabled:cursor-not-allowed disabled:opacity-50";
 
 function SummaryChip({
   children,
@@ -41,7 +41,7 @@ function SummaryChip({
   return (
     <span
       className={cn(
-        "summary-chip inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-full border bg-white px-3 text-[11.5px] font-bold text-slate-600 shadow-sm",
+        "summary-chip inline-flex min-h-[42px] shrink-0 items-center gap-1.5 rounded-full border bg-white px-3 text-[17.25px] font-bold text-slate-600 shadow-sm",
         tone === "danger" && "border-red-200 bg-red-50 text-red-600",
         tone === "success" && "border-emerald-200 bg-emerald-50 text-emerald-700",
         tone === "warning" && "border-amber-200 bg-amber-50 text-amber-700"
@@ -93,6 +93,10 @@ export function BoardPanel() {
   const selectedBoardSummary = boardData.boards.find(
     (board) => board.id === selectedBoardId
   );
+  const allowedBoardIds = useMemo(
+    () => boardData.boards.map((board) => board.id),
+    [boardData.boards]
+  );
   const canUseBoard = Boolean(workspaceId.trim() && accessToken);
   const needsSignIn = !accessToken;
   const isCatalogLoading = boardData.catalogStatus === "loading";
@@ -127,7 +131,7 @@ export function BoardPanel() {
     if (selectedBoardId) {
       setSelectedBoardId("");
     }
-  }, [boardData.activeSource?.boardId, selectedBoardId]);
+  }, [boardData.activeSource?.boardId]);
 
   function handleOpenIssue(issue: BoardIssueCardPayload) {
     setSelectedIssueId(issue.id);
@@ -190,19 +194,24 @@ export function BoardPanel() {
     <PageCursorSurface
       boardId={selectedBoardId}
       data-board-main
+      data-workspace-follow-board-id={boardData.board?.id ?? ""}
       className="workspace-board relative -m-6 min-h-[calc(100vh-3.5rem)] overflow-hidden border-l border-slate-200 bg-slate-50 text-slate-950"
       enabled={Boolean(canUseBoard && selectedBoardId)}
       page="board"
       workspaceId={workspaceId}
     >
-      <BoardWorkspaceLocationAdapter boardId={selectedBoardId} />
+      <BoardWorkspaceLocationAdapter
+        allowedBoardIds={allowedBoardIds}
+        onSelectBoard={setSelectedBoardId}
+        onSelectIssue={setSelectedIssueId}
+      />
       <section className="board-toolbar flex min-h-[74px] items-center justify-end border-b border-slate-200 bg-white/90 px-7 py-5 backdrop-blur">
         <div className="board-controls flex w-full min-w-0 flex-wrap items-center justify-end gap-2">
           <label className="relative w-[min(100%,260px)] min-w-48">
             <span className="sr-only">이슈 검색</span>
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
             <Input
-              className="h-9 rounded-[11px] border-slate-200 bg-white pl-9 text-[12.5px] shadow-sm"
+              className="h-[54px] rounded-[11px] border-slate-200 bg-white pl-9 text-[18.75px] shadow-sm md:text-[18.75px]"
               value={query}
               placeholder="Search issues"
               onChange={(event) => {
@@ -211,23 +220,6 @@ export function BoardPanel() {
               }}
             />
           </label>
-
-          <select
-            className={selectClassName}
-            disabled
-            value={selectedBoardId}
-            onChange={(event) => {
-              setSelectedBoardId(event.currentTarget.value);
-              setSelectedIssueId(null);
-            }}
-          >
-            <option value="">Board 선택</option>
-            {boardData.boards.map((board) => (
-              <option key={board.id} value={board.id}>
-                {board.name}
-              </option>
-            ))}
-          </select>
 
           <Button
             {...pageCursorTargetAttributes({
@@ -238,6 +230,7 @@ export function BoardPanel() {
             type="button"
             variant="outline"
             size="sm"
+            className="h-[48px] text-[19.2px]"
             disabled={!canUseBoard || isCatalogLoading || isBoardLoading}
             onClick={() => {
               void boardData.refreshWorkspace();
@@ -255,6 +248,7 @@ export function BoardPanel() {
           <Button
             type="button"
             size="sm"
+            className="h-[48px] text-[19.2px]"
             disabled={!canUseBoard || !selectedBoardId || isBoardLoading}
             onClick={() => {
               setIssueCreateError(null);
@@ -268,13 +262,13 @@ export function BoardPanel() {
       </section>
 
       {needsSignIn ? (
-        <p className="mx-7 mt-4 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-500">
+        <p className="mx-7 mt-4 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-[21px] font-medium text-slate-500">
           Board를 보려면 로그인이 필요합니다.
         </p>
       ) : null}
 
       {boardData.catalogError ? (
-        <p className="mx-7 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+        <p className="mx-7 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[21px] font-medium text-red-600">
           GitHub repository, ProjectV2 또는 Board 목록을 불러오지 못했습니다.
         </p>
       ) : null}
@@ -304,7 +298,7 @@ export function BoardPanel() {
       </section>
 
       <section className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white/50 px-7 py-3">
-        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500">
+        <span className="inline-flex items-center gap-1.5 text-[18px] font-bold text-slate-500">
           <SlidersHorizontal className="size-4" />
           Filters
         </span>
@@ -356,13 +350,13 @@ export function BoardPanel() {
       </section>
 
       {boardData.boardError ? (
-        <p className="mx-7 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+        <p className="mx-7 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[21px] font-medium text-red-600">
           Board 상세, 컬럼 또는 이슈를 불러오지 못했습니다.
         </p>
       ) : null}
 
       {statusMoveError ? (
-        <p className="mx-7 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+        <p className="mx-7 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[21px] font-medium text-red-600">
           {statusMoveError}
         </p>
       ) : null}

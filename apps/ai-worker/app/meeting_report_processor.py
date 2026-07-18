@@ -115,6 +115,7 @@ class ActivityEvidenceReference:
 @dataclass(frozen=True)
 class GeneratedMeetingReport:
     transcript_text: str
+    title: str
     summary: str
     discussion_points: str
     decisions: str
@@ -447,6 +448,12 @@ def parse_generated_report_json(
         raise ProviderBusinessError("Invalid meeting report payload")
 
     summary = _require_payload_string(payload, "summary")
+    title = payload.get("title", summary)
+    if not isinstance(title, str) or not title.strip():
+        raise ProviderBusinessError("Invalid title")
+    title = title.strip()
+    if len(title.encode("utf-8")) > 500:
+        raise ProviderBusinessError("Invalid meeting report title")
     discussion_points = _require_payload_string(payload, "discussionPoints")
     decisions = _require_payload_string(payload, "decisions")
     decision_items = _parse_decision_items(payload.get("decisionItems"), decisions)
@@ -482,6 +489,7 @@ def parse_generated_report_json(
 
     return GeneratedMeetingReport(
         transcript_text=transcript_text,
+        title=title,
         summary=summary,
         discussion_points=discussion_points,
         decisions=decisions,

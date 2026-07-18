@@ -23,6 +23,7 @@ import {
   MeetingRoomListPayload,
   MeetingRoomMutationPayload,
   MeetingReportDetailResponsePayload,
+  MeetingReportContentMutationPayload,
   MeetingReportDeletionPayload,
   MeetingReportActionItemMutationPayload,
   MeetingReportActionItemExtractionRetryPayload,
@@ -345,6 +346,23 @@ export class MeetingController {
       reportId
     );
     return apiResponse(result);
+  }
+
+  @Patch("meeting-reports/:reportId")
+  async updateReportContent(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<MeetingReportContentMutationPayload>> {
+    return apiResponse(
+      await this.meetingService.updateMeetingReportContent(
+        currentUserId,
+        workspaceId,
+        reportId,
+        body
+      )
+    );
   }
 
   @Delete("meeting-reports/:reportId")

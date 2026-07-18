@@ -6,6 +6,7 @@ import type { GithubOAuthRuntimeConfig } from "./github-integration-config.servi
 export interface GithubOAuthStateInput {
   userId: string;
   returnUrl: string | null;
+  expectedConnectionGeneration?: string;
 }
 
 export interface GithubOAuthStatePayload extends GithubOAuthStateInput {
@@ -25,6 +26,7 @@ export class GithubOAuthStateService {
       version: 1,
       userId: input.userId,
       returnUrl: input.returnUrl,
+      expectedConnectionGeneration: input.expectedConnectionGeneration,
       nonce: randomBytes(16).toString("base64url"),
       expiresAt: now + config.stateTtlSeconds * 1000
     };
@@ -56,6 +58,7 @@ export class GithubOAuthStateService {
     return {
       userId: payload.userId,
       returnUrl: payload.returnUrl,
+      expectedConnectionGeneration: payload.expectedConnectionGeneration,
       nonce: payload.nonce,
       expiresAt: payload.expiresAt
     };
@@ -75,6 +78,7 @@ export class GithubOAuthStateService {
         typeof value.expiresAt !== "number" ||
         !Number.isFinite(value.expiresAt) ||
         (value.returnUrl !== null && typeof value.returnUrl !== "string")
+        || (value.expectedConnectionGeneration !== undefined && typeof value.expectedConnectionGeneration !== "string")
       ) {
         throw new Error("Invalid payload");
       }
@@ -83,6 +87,7 @@ export class GithubOAuthStateService {
         version: 1,
         userId: value.userId,
         returnUrl: value.returnUrl,
+        expectedConnectionGeneration: value.expectedConnectionGeneration,
         nonce: value.nonce,
         expiresAt: value.expiresAt
       };

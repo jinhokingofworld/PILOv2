@@ -1,4 +1,5 @@
 import json
+from uuid import UUID
 
 from app.workspace_indexing_worker_runtime import (
     DocumentEmbeddingProcessor,
@@ -26,7 +27,7 @@ class FakeRepository:
         self.failed: list[tuple[str, str]] = []
 
     def claim_document_embedding_job(self, job_id: str) -> dict[str, object] | None:
-        assert self.job is None or self.job["id"] == job_id
+        assert self.job is None or str(self.job["id"]) == job_id
         return self.job
 
     def get_document_embedding_source(
@@ -124,6 +125,23 @@ def test_document_embedding_processor_chunks_and_completes_latest_snapshot() -> 
     assert repository.superseded == []
     assert len(repository.replaced) == 1
     assert repository.replaced[0][1][0].chunk_text == "첫 문단입니다.\n\n둘째 문단입니다."
+
+
+def test_document_embedding_processor_completes_latest_uuid_snapshot() -> None:
+    job_id = UUID("11111111-1111-4111-8111-111111111111")
+    snapshot_id = UUID("22222222-2222-4222-8222-222222222222")
+    repository = FakeRepository(
+        {"id": job_id, "snapshot_id": snapshot_id},
+        DocumentEmbeddingSource(
+            snapshot_id=str(snapshot_id),
+            plain_text="최신 문서입니다.",
+        ),
+    )
+    processor = DocumentEmbeddingProcessor(repository, FakeEmbedder())
+
+    assert processor.process(str(job_id)) == "document_embedding_completed"
+    assert repository.completed == [str(job_id)]
+    assert repository.superseded == []
 
 
 def test_document_embedding_processor_supersedes_stale_snapshot() -> None:

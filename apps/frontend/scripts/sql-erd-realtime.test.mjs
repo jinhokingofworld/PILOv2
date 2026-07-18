@@ -56,6 +56,30 @@ async function loadOperationSyncRuntime() {
   }
 }
 
+async function loadTableMovePreviewRuntime() {
+  const outputDir = await mkdtemp(
+    fileURLToPath(new URL("../../.pilo-sqltoerd-table-move-preview-", import.meta.url))
+  );
+  const outputPath = join(outputDir, "sql-erd-table-move-preview.mjs");
+
+  try {
+    await compileRuntimeModule(
+      "../src/features/sql-erd/realtime/sql-erd-table-move-preview.ts",
+      outputPath
+    );
+
+    return {
+      preview: await import(
+        `${new URL(`file:///${outputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`
+      ),
+      outputDir
+    };
+  } catch (error) {
+    await rm(outputDir, { force: true, recursive: true });
+    throw error;
+  }
+}
+
 async function loadOperationSyncHookRuntime() {
   const outputDir = await mkdtemp(
     fileURLToPath(new URL("../../.pilo-sqltoerd-operation-hook-", import.meta.url))
@@ -189,6 +213,10 @@ const canvas = await readFile(
   new URL("../src/features/sql-erd/components/sql-erd-canvas.tsx", import.meta.url),
   "utf8",
 );
+const panel = await readFile(
+  new URL("../src/features/sql-erd/components/sql-erd-panel.tsx", import.meta.url),
+  "utf8",
+);
 const apiDocument = await readFile(
   new URL("../../../docs/api/sqltoerd-api.md", import.meta.url),
   "utf8",
@@ -202,9 +230,20 @@ assert.match(
   apiDocument,
   /on `SQL_ERD_WRITE_PROTOCOL_MISMATCH`, the client pauses autosave and persistence, disables retry, and shows a reload\/read-only 안내\. a session reload is required before persistence resumes/i
 );
+assert.match(apiDocument, /"sql-erd:table-move:preview"/);
+assert.match(apiDocument, /"sql-erd:table-move:clear"/);
+assert.match(apiDocument, /emits at most once every 33ms/);
+assert.match(apiDocument, /not written to the database/);
+assert.match(apiDocument, /position captured before the preview/);
+assert.match(apiDocument, /actorUserId, tableId, dragId/);
+assert.match(apiDocument, /late preview packets/);
+assert.match(apiDocument, /enabled only for `operations_v1` sessions/i);
+assert.match(apiDocument, /auto layout.*do not emit.*preview/is);
 
 assert.match(types, /"sql-erd:join"/);
 assert.match(types, /"sql-erd:presence:update"/);
+assert.match(types, /"sql-erd:table-move:preview"/);
+assert.match(types, /"sql-erd:table-move:clear"/);
 assert.match(types, /selectedObjects: SqlErdPresenceSelectedObject\[\]/);
 assert.match(types, /editingMode: SqlErdPresenceEditingMode/);
 assert.match(types, /sentAt: string/);
@@ -214,7 +253,7 @@ assert.match(presenceHook, /"sql-erd:presence:leave"/);
 assert.match(presenceHook, /socket\.volatile\.emit\("sql-erd:presence:update"/);
 assert.match(presenceHook, /localPresenceRef\.current/);
 assert.match(presenceHook, /PRESENCE_HEARTBEAT_MS = 5_000/);
-assert.match(presenceHook, /PRESENCE_UPDATE_MIN_INTERVAL_MS = 80/);
+assert.match(presenceHook, /PRESENCE_UPDATE_MIN_INTERVAL_MS = 33/);
 assert.match(presenceHook, /hasCursorMovedEnough/);
 assert.match(types, /"sql-erd:operation"/);
 assert.match(operationHook, /useSqlErdOperationSync/);
@@ -238,10 +277,250 @@ assert.match(bridge, /pointer-events-none/);
 assert.match(bridge, /requestAnimationFrame/);
 assert.match(canvas, /useSqlErdPresence/);
 assert.match(canvas, /SqlErdRealtimeBridge/);
+assert.match(canvas, /cancelPendingTableMovePreviews\(tableIds\)/);
+assert.match(
+  canvas,
+  /shouldClearSqlErdTableMovePreviewAfterDrop\(scheduled\)/
+);
+assert.match(panel, /context\?\.clientOperationId\?\.trim\(\)/);
+assert.match(panel, /recordCommittedTableMove\(operationResult\.operation\)/);
+assert.match(
+  panel,
+  /areSqltoerdLayoutsEqual\(previousLayoutJson, nextLayoutJson\)/
+);
+assert.match(
+  panel,
+  /enableTableMovePreview=\{isSqlErdTableMovePreviewEnabled\(\s*sqlErdViewSession\.writeProtocol\s*\)\}/
+);
+assert.match(
+  canvas,
+  /enableTableMovePreview\s*\?\s*sqlErdPresence\.sendTableMovePreview\s*:\s*undefined/
+);
 assert.equal(
   [...canvas.matchAll(/window\.addEventListener\("pointerup", flushPendingLayoutSync\)/g)].length,
   2
 );
+
+{
+  const { outputDir, preview } = await loadTableMovePreviewRuntime();
+  const emitted = [];
+  const timers = [];
+  let now = 0;
+
+  try {
+    const throttle = preview.createSqlErdTableMovePreviewThrottle({
+      emit: (payload) => emitted.push(payload),
+      now: () => now,
+      schedule: (callback, delay) => {
+        const timer = { callback, delay };
+        timers.push(timer);
+        return timer;
+      },
+      cancelSchedule: (timer) => {
+        const index = timers.indexOf(timer);
+        if (index >= 0) timers.splice(index, 1);
+      }
+    });
+
+    throttle.push({ tableId: "table.orders", x: 10, y: 20 });
+    now = 5;
+    throttle.push({ tableId: "table.orders", x: 20, y: 30 });
+    now = 10;
+    throttle.push({ tableId: "table.orders", x: 30, y: 40 });
+
+    assert.deepEqual(emitted, [{ tableId: "table.orders", x: 10, y: 20 }]);
+    assert.equal(timers.length, 1);
+    assert.equal(timers[0].delay, 28);
+
+    now = 33;
+    timers.shift().callback();
+    assert.deepEqual(emitted, [
+      { tableId: "table.orders", x: 10, y: 20 },
+      { tableId: "table.orders", x: 30, y: 40 }
+    ]);
+
+    now = 40;
+    throttle.push({ tableId: "table.users", x: 50, y: 60 });
+    assert.equal(timers.length, 1);
+    throttle.cancel();
+    assert.equal(timers.length, 0);
+    assert.equal(
+      preview.shouldClearSqlErdTableMovePreviewAfterDrop(false),
+      true
+    );
+    assert.equal(
+      preview.shouldClearSqlErdTableMovePreviewAfterDrop(true),
+      false
+    );
+    assert.equal(
+      preview.isSqlErdTableMovePreviewEnabled("operations_v1"),
+      true
+    );
+    assert.equal(preview.isSqlErdTableMovePreviewEnabled("snapshot"), false);
+
+    const firstPreview = {
+      actorUserId: "user-se-in",
+      dragId: "drag-1",
+      sentAt: "2026-07-18T00:00:00.000Z",
+      tableId: "table.orders",
+      x: 240,
+      y: 180
+    };
+    const initialResolution = preview.resolveSqlErdRemoteTableMovePreview({
+      canonicalPosition: null,
+      currentPosition: { x: 80, y: 80 },
+      preview: firstPreview,
+      previousState: null
+    });
+    assert.deepEqual(initialResolution, {
+      dismissPreview: null,
+      nextState: {
+        actorUserId: "user-se-in",
+        basePosition: { x: 80, y: 80 },
+        dragId: "drag-1"
+      },
+      position: { x: 240, y: 180 }
+    });
+
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: null,
+        currentPosition: { x: 240, y: 180 },
+        preview: null,
+        previousState: initialResolution.nextState
+      }),
+      {
+        dismissPreview: null,
+        nextState: null,
+        position: { x: 80, y: 80 }
+      }
+    );
+
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 320, y: 260 },
+        currentPosition: { x: 240, y: 180 },
+        preview: firstPreview,
+        previousState: initialResolution.nextState
+      }),
+      {
+        dismissPreview: null,
+        nextState: {
+          actorUserId: "user-se-in",
+          basePosition: { x: 80, y: 80 },
+          dragId: "drag-1",
+        },
+        position: { x: 240, y: 180 }
+      }
+    );
+
+    const completedDragKeys = new Set([
+      preview.createSqlErdTableMoveCompletionKey(
+        "user-se-in",
+        "table.orders",
+        "drag-1"
+      )
+    ]);
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 80, y: 80 },
+        completedDragKeys,
+        currentPosition: { x: 240, y: 180 },
+        preview: firstPreview,
+        previousState: initialResolution.nextState
+      }),
+      {
+        dismissPreview: {
+          actorUserId: "user-se-in",
+          dragId: "drag-1",
+          sentAt: "2026-07-18T00:00:00.000Z",
+          tableId: "table.orders"
+        },
+        nextState: null,
+        position: { x: 80, y: 80 }
+      }
+    );
+
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 80, y: 80 },
+        completedDragKeys,
+        currentPosition: { x: 80, y: 80 },
+        preview: firstPreview,
+        previousState: null
+      }).position,
+      { x: 80, y: 80 }
+    );
+
+    const secondPreview = {
+      ...firstPreview,
+      dragId: "drag-2",
+      sentAt: "2026-07-18T00:00:01.000Z",
+      x: 360,
+      y: 280
+    };
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 80, y: 80 },
+        completedDragKeys,
+        currentPosition: { x: 80, y: 80 },
+        preview: secondPreview,
+        previousState: null
+      }),
+      {
+        dismissPreview: null,
+        nextState: {
+          actorUserId: "user-se-in",
+          basePosition: { x: 80, y: 80 },
+          dragId: "drag-2"
+        },
+        position: { x: 360, y: 280 }
+      }
+    );
+    const secondPreviewState =
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 80, y: 80 },
+        completedDragKeys,
+        currentPosition: { x: 80, y: 80 },
+        preview: secondPreview,
+        previousState: null
+      }).nextState;
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 240, y: 180 },
+        completedDragKeys,
+        currentPosition: { x: 360, y: 280 },
+        preview: secondPreview,
+        previousState: secondPreviewState
+      }),
+      {
+        dismissPreview: null,
+        nextState: secondPreviewState,
+        position: { x: 360, y: 280 }
+      }
+    );
+
+    assert.deepEqual(
+      preview.getSqlErdTableMoveCommit({
+        actorUserId: "user-se-in",
+        clientOperationId: "drag-1",
+        patch: {
+          tableLayouts: {
+            upsert: [{ tableId: "table.orders", x: 80, y: 80 }]
+          }
+        },
+        type: "layout_patch"
+      }),
+      {
+        actorUserId: "user-se-in",
+        dragId: "drag-1",
+        tableIds: ["table.orders"]
+      }
+    );
+  } finally {
+    await rm(outputDir, { force: true, recursive: true });
+  }
+}
 
 {
   const {

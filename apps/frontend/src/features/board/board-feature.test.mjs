@@ -17,7 +17,8 @@ const [
   boardKanban,
   boardIssueSheet,
   boardIssueCreateForm,
-  boardIssueCreateDialog
+  boardIssueCreateDialog,
+  boardIssueAssigneeSelector
 ] = await Promise.all([
   readFeatureFile("./types/index.ts"),
   readFeatureFile("./api/client.ts"),
@@ -26,7 +27,8 @@ const [
   readFeatureFile("./components/board-kanban.tsx"),
   readFeatureFile("./components/board-issue-sheet.tsx"),
   readFeatureFile("./components/board-issue-create-form.tsx"),
-  readFeatureFile("./components/board-issue-create-dialog.tsx")
+  readFeatureFile("./components/board-issue-create-dialog.tsx"),
+  readFeatureFile("./components/board-issue-assignee-selector.tsx")
 ]);
 
 assert.match(boardTypes, /export type BoardPayload/);
@@ -130,9 +132,47 @@ assert.match(boardPanel, /summary-chip/);
 assert.match(boardPanel, /board-controls/);
 assert.match(
   boardPanel,
-  /board-controls[\s\S]*placeholder="Search issues"[\s\S]*<select[\s\S]*Board 선택[\s\S]*RefreshCw[\s\S]*setIsIssueCreateModalOpen\(true\)/,
-  "Board toolbar controls should keep search, board selection, refresh, and new issue together"
+  /board-controls[\s\S]*placeholder="Search issues"[\s\S]*RefreshCw[\s\S]*setIsIssueCreateModalOpen\(true\)/,
+  "Board toolbar should keep search, refresh, and new issue controls"
 );
+assert.doesNotMatch(boardPanel, />Board 선택</);
+assert.match(boardPanel, /text-\[18\.75px\]/);
+assert.match(boardPanel, /text-\[17\.25px\]/);
+assert.match(boardKanban, /text-\[23\.25px\]/);
+assert.match(boardKanban, /text-\[21\.75px\]/);
+assert.match(boardIssueCreateForm, /text-\[21px\]/);
+assert.match(boardIssueCreateDialog, /text-\[27px\]/);
+assert.match(boardIssueSheet, /text-\[27px\]/);
+assert.match(boardIssueAssigneeSelector, /text-\[18px\]/);
+assert.match(boardPanel, /text-\[19\.2px\]/);
+assert.match(boardKanban, /text-\[19\.2px\]/);
+assert.match(boardIssueSheet, /text-\[19\.2px\]/);
+assert.match(boardIssueAssigneeSelector, /text-\[19\.2px\]/);
+assert.match(
+  boardIssueCreateForm,
+  /<Button\s+type="submit"\s+size="lg"\s+className="[^"]*text-\[21px\]/
+);
+assert.match(
+  boardPanel,
+  /<Input\s+className="[^"]*text-\[18\.75px\][^"]*md:text-\[18\.75px\]/
+);
+assert.match(
+  boardIssueCreateForm,
+  /<Input\s+className="[^"]*text-\[18\.75px\][^"]*md:text-\[18\.75px\]/
+);
+assert.match(
+  boardIssueSheet,
+  /<Input\s+className="[^"]*text-\[21px\][^"]*md:text-\[21px\]/
+);
+assert.match(
+  boardIssueAssigneeSelector,
+  /<Input\s+className="[^"]*text-\[21px\][^"]*md:text-\[21px\]/
+);
+assert.match(
+  boardKanban,
+  /avatar[^\n]*size-6[^\n]*text-\[14\.25px\]/
+);
+assert.doesNotMatch(boardKanban, /avatar[^\n]*size-9/);
 assert.doesNotMatch(boardPanel, /board-title/);
 assert.doesNotMatch(boardPanel, /board-icon/);
 assert.doesNotMatch(boardPanel, /board-issue-create-dock/);

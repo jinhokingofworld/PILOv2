@@ -7,6 +7,8 @@ import pytest
 
 from app.agent_processor import (
     AGENT_TOOL_SCHEMA_VERSION,
+    TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+    TOOL_RETRIEVAL_MODE_SHADOW,
     AgentPlannerDecision,
     AgentPlanningRequest,
     AgentRunContext,
@@ -14,13 +16,20 @@ from app.agent_processor import (
     OpenAiAgentPlannerClient,
     _agent_planner_schema,
     _agent_planner_system_prompt,
+    _agent_planner_user_prompt,
     normalize_agent_planner_decision,
     parse_agent_planner_output,
     parse_agent_run_job_payload,
+    select_agent_planner_tools,
+)
+from app.agent_tool_retrieval import (
+    compute_input_schema_sha256,
+    compute_tool_capability_catalog_sha,
 )
 from app.meeting_report_processor import InfrastructureError
 
 RUN_ID = "33333333-3333-3333-3333-333333333333"
+USER_VISIBLE_UUID = "12345678-1234-4123-8123-123456789abc"
 WORKSPACE_ID = "22222222-2222-2222-2222-222222222222"
 USER_ID = "11111111-1111-1111-1111-111111111111"
 SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777"
@@ -93,6 +102,170 @@ def planner_decision(**overrides: object) -> AgentPlannerDecision:
     return AgentPlannerDecision(**values)
 
 
+def tool_capability_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
+    capabilities = []
+    descriptors = []
+    for tool in tools:
+        tool_name = tool["name"]
+        assert isinstance(tool_name, str)
+        is_read = tool_name == "list_calendar_events"
+        examples = [
+            {"kind": "canonical", "utterance": "일정 조회" if is_read else "일정 생성"},
+            {"kind": "paraphrase", "utterance": "캘린더 확인" if is_read else "캘린더 만들기"},
+            {"kind": "typo", "utterance": "일정 조희" if is_read else "일정 생섬"},
+            {
+                "kind": "honorific",
+                "utterance": "일정 보여주세요" if is_read else "일정 만들어주세요",
+            },
+            {"kind": "abbreviation", "utterance": "캘린더" if is_read else "캘 등록"},
+        ]
+        capability_id = "calendar.events.list" if is_read else "calendar.events.create"
+        execution_mode = tool["executionMode"]
+        input_schema = tool["inputSchema"]
+        assert isinstance(execution_mode, str)
+        assert isinstance(input_schema, dict)
+        capabilities.append(
+            {
+                "id": capability_id,
+                "domain": "calendar",
+                "toolNames": [tool_name],
+                "whenToUse": "일정을 조회할 때" if is_read else "새 일정을 생성할 때",
+                "mustNotUseFor": ["새 일정 생성" if is_read else "일정 조회"],
+                "positiveExamples": [example["utterance"] for example in examples],
+                "examples": examples,
+                "selectorKinds": ["date_range"],
+                "requiresConfirmation": execution_mode == "confirmation_required",
+                "availability": "supported",
+            }
+        )
+        descriptors.append(
+            {
+                "toolName": tool_name,
+                "domain": "calendar",
+                "action": tool_name,
+                "operation": "read" if is_read else "write",
+                "capabilityIds": [capability_id],
+                "whenToUse": "일정을 조회할 때" if is_read else "새 일정을 생성할 때",
+                "mustNotUseFor": ["새 일정 생성" if is_read else "일정 조회"],
+                "acceptedSelectorFields": ["start", "end"],
+                "selectorKinds": ["date_range"],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+                "riskLevel": tool["riskLevel"],
+                "executionMode": execution_mode,
+                "requiresConfirmation": execution_mode == "confirmation_required",
+                "contextSurface": None,
+                "inputSchemaSha256": compute_input_schema_sha256(input_schema),
+            }
+        )
+    catalog = {
+        "version": "agent-tool-capabilities:v2",
+        "capabilities": capabilities,
+        "descriptors": descriptors,
+    }
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
+def calendar_list_update_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
+    catalog = tool_capability_catalog(tools)
+    list_capability, update_capability = catalog["capabilities"]
+    list_descriptor, update_descriptor = catalog["descriptors"]
+    assert isinstance(list_capability, dict)
+    assert isinstance(update_capability, dict)
+    assert isinstance(list_descriptor, dict)
+    assert isinstance(update_descriptor, dict)
+
+    update_capability.update(
+        {
+            "id": "calendar.events.update",
+            "toolNames": ["list_calendar_events", "update_calendar_event"],
+            "whenToUse": "기존 일정의 시간이나 내용을 변경할 때",
+            "mustNotUseFor": ["새 일정 생성 요청"],
+            "positiveExamples": [
+                "기존 일정 변경",
+                "일정 수정",
+                "일정 수졍",
+                "일정 바꿔주세요",
+                "일정 수정",
+            ],
+            "examples": [
+                {"kind": "canonical", "utterance": "기존 일정 변경"},
+                {"kind": "paraphrase", "utterance": "일정 수정"},
+                {"kind": "typo", "utterance": "일정 수졍"},
+                {"kind": "honorific", "utterance": "일정 바꿔주세요"},
+                {"kind": "abbreviation", "utterance": "일정 수정"},
+            ],
+        }
+    )
+    list_descriptor.update(
+        {
+            "capabilityIds": ["calendar.events.list", "calendar.events.update"],
+            "followUpToolNames": ["update_calendar_event"],
+        }
+    )
+    update_descriptor.update(
+        {
+            "toolName": "update_calendar_event",
+            "action": "update_calendar_event",
+            "capabilityIds": ["calendar.events.update"],
+        }
+    )
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
+def calendar_and_meeting_read_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
+    catalog = tool_capability_catalog(tools)
+    meeting_capability = catalog["capabilities"][1]
+    meeting_descriptor = catalog["descriptors"][1]
+    assert isinstance(meeting_capability, dict)
+    assert isinstance(meeting_descriptor, dict)
+    meeting_examples = [
+        {"kind": "canonical", "utterance": "회의록 조회"},
+        {"kind": "paraphrase", "utterance": "미팅 보고서 확인"},
+        {"kind": "typo", "utterance": "회의록 조희"},
+        {"kind": "honorific", "utterance": "회의록 보여주세요"},
+        {"kind": "abbreviation", "utterance": "회의록"},
+    ]
+    meeting_capability.update(
+        {
+            "id": "meeting.reports.list",
+            "domain": "meeting",
+            "toolNames": ["list_meeting_reports"],
+            "whenToUse": "최근 회의록을 조회할 때",
+            "mustNotUseFor": ["일정 조회 요청"],
+            "positiveExamples": [example["utterance"] for example in meeting_examples],
+            "examples": meeting_examples,
+            "selectorKinds": ["meeting_report"],
+            "requiresConfirmation": False,
+        }
+    )
+    meeting_descriptor.update(
+        {
+            "toolName": "list_meeting_reports",
+            "domain": "meeting",
+            "action": "list_meeting_reports",
+            "operation": "read",
+            "capabilityIds": ["meeting.reports.list"],
+            "whenToUse": "최근 회의록을 조회할 때",
+            "mustNotUseFor": ["일정 조회 요청"],
+            "selectorKinds": ["meeting_report"],
+            "riskLevel": "low",
+            "executionMode": "auto",
+            "requiresConfirmation": False,
+        }
+    )
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
 def test_completed_planner_decision_finishes_multi_tool_run() -> None:
     job = parse_agent_run_job_payload(agent_payload())
     normalized = normalize_agent_planner_decision(
@@ -109,6 +282,54 @@ def test_completed_planner_decision_finishes_multi_tool_run() -> None:
     assert normalized.status == "completed"
     assert normalized.final_answer == "회의 참여 준비를 마쳤습니다."
     assert "unsupportedReason" not in normalized.output_summary
+
+
+def test_normalized_user_visible_text_redacts_uuid() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[tool_snapshot(executionMode="confirmation_required")],
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            message=f"대상 ID는 {USER_VISIBLE_UUID}입니다.",
+            final_answer_draft=f"{USER_VISIBLE_UUID} 항목을 확인한 뒤 승인해 주세요.",
+        ),
+        job,
+    )
+
+    assert USER_VISIBLE_UUID not in normalized.message
+    assert USER_VISIBLE_UUID not in normalized.final_answer
+    assert normalized.output_summary["message"] == normalized.message
+    assert normalized.output_summary["finalAnswerDraft"] == normalized.final_answer
+    assert "내부 식별자" in normalized.final_answer
+
+
+def test_normalized_user_visible_text_redacts_uuid_before_length_limit() -> None:
+    job = parse_agent_run_job_payload(agent_payload())
+    user_visible_text = "가" * 980 + USER_VISIBLE_UUID
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            message=user_visible_text,
+            final_answer_draft=user_visible_text,
+        ),
+        job,
+    )
+
+    assert USER_VISIBLE_UUID not in normalized.message
+    assert USER_VISIBLE_UUID not in normalized.final_answer
+    assert normalized.message.endswith("내부 식별자")
+    assert normalized.final_answer.endswith("내부 식별자")
+
+
+def test_planner_prompt_limits_prior_thread_resource_reuse() -> None:
+    prompt = _agent_planner_system_prompt()
+
+    assert "previous resource" in prompt
+    assert "Never copy, ask for, or invent a raw resource ID" in prompt
+    assert "useSelectedMeetingRoomCandidate=true" in prompt
+    assert "useSelectedWorkspaceMemberCandidate=true" in prompt
 
 
 class FakeAgentRunRepository:
@@ -361,6 +582,195 @@ def test_processor_completes_planning_run_with_tool_candidate() -> None:
     assert handoff_client.calls == [RUN_ID]
     assert planner_client.requests[0].current_date == "2026-07-09"
     assert planner_client.requests[0].timezone == "Asia/Seoul"
+
+
+def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_only_tools() -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="create_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+
+    shadow = select_agent_planner_tools(
+        job,
+        "이번 주 일정 조회해줘",
+        mode=TOOL_RETRIEVAL_MODE_SHADOW,
+    )
+    shortlist = select_agent_planner_tools(
+        job,
+        "이번 주 일정 조회해줘",
+        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        top_k=1,
+    )
+    mutation = select_agent_planner_tools(
+        job,
+        "새 일정 생성해줘",
+        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+    )
+    low_confidence = select_agent_planner_tools(
+        job,
+        "점심 메뉴 추천해줘",
+        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+    )
+    budget_fallback = select_agent_planner_tools(
+        job,
+        "이번 주 일정 조회해줘",
+        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        top_k=1,
+        schema_token_budget=1,
+    )
+
+    assert [tool.name for tool in shadow] == [
+        "list_calendar_events",
+        "create_calendar_event",
+    ]
+    assert [tool.name for tool in shortlist] == ["list_calendar_events"]
+    assert [tool.name for tool in mutation] == [
+        "list_calendar_events",
+        "create_calendar_event",
+    ]
+    assert [tool.name for tool in low_confidence] == [
+        "list_calendar_events",
+        "create_calendar_event",
+    ]
+    assert [tool.name for tool in budget_fallback] == [
+        "list_calendar_events",
+        "create_calendar_event",
+    ]
+
+
+def test_shared_calendar_list_tool_uses_the_matched_read_only_capability_chain() -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="update_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=calendar_list_update_catalog(tools),
+        )
+    )
+
+    list_shortlist = select_agent_planner_tools(
+        job,
+        "이번 주 일정 조회해줘",
+        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        top_k=1,
+    )
+    update_fallback = select_agent_planner_tools(
+        job,
+        "기존 일정 변경해줘",
+        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+    )
+
+    assert [tool.name for tool in list_shortlist] == ["list_calendar_events"]
+    assert [tool.name for tool in update_fallback] == [
+        "list_calendar_events",
+        "update_calendar_event",
+    ]
+
+
+def test_read_only_shortlist_passes_all_selected_top_k_capability_chains() -> None:
+    tools = [tool_snapshot(), tool_snapshot(name="list_meeting_reports")]
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=calendar_and_meeting_read_catalog(tools),
+        )
+    )
+
+    shortlist = select_agent_planner_tools(
+        job,
+        "이번 주 일정 조회와 최근 회의록 조회해줘",
+        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        top_k=2,
+    )
+
+    assert [tool.name for tool in shortlist] == [
+        "list_calendar_events",
+        "list_meeting_reports",
+    ]
+
+
+def test_read_only_shortlist_rejects_planner_tool_outside_the_shortlist() -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="create_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
+    ]
+    repository = FakeAgentRunRepository(context=run_context(prompt="이번 주 일정 조회해줘"))
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            tool_name="create_calendar_event",
+            tool_input={"start": "2026-07-09", "end": "2026-07-09"},
+            requires_confirmation=True,
+        )
+    )
+    processor = AgentRunProcessor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+        tool_retrieval_mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        tool_retrieval_top_k=1,
+    )
+
+    result = processor.process_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+
+    assert result.reason == "agent_planning_failed"
+    assert [tool.name for tool in planner_client.requests[0].tools] == ["list_calendar_events"]
+    assert repository.tool_execution_ready_updates == []
+
+
+def test_processor_forwards_only_pr_review_surface_to_planner() -> None:
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            tool_name="recommend_pr_review_focus",
+            tool_input={},
+            requires_confirmation=False,
+        )
+    )
+    processor = create_processor(repository, planner_client)
+
+    result = processor.process_payload(
+        agent_payload(
+            requestContext={
+                "surface": "pr_review",
+                "sessionId": PR_REVIEW_SESSION_ID,
+            },
+            tools=[
+                tool_snapshot(
+                    name="recommend_pr_review_focus",
+                    executionMode="contextual",
+                    inputSchema={"type": "object"},
+                )
+            ],
+        )
+    )
+
+    request = planner_client.requests[0]
+    planner_prompt = _agent_planner_user_prompt(request)
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert request.context_surface == "pr_review"
+    assert json.loads(planner_prompt)["contextSurface"] == "pr_review"
+    assert PR_REVIEW_SESSION_ID not in planner_prompt
 
 
 def test_processor_stops_when_planner_step_completion_loses_claim() -> None:
@@ -983,6 +1393,14 @@ def test_planner_prompt_uses_server_board_issue_defaults() -> None:
     assert "do not ask the user for those defaults" in prompt
 
 
+def test_planner_prompt_knows_pr_review_contextual_tool_contract() -> None:
+    prompt = _agent_planner_system_prompt()
+
+    assert "contextSurface is pr_review" in prompt
+    assert "recommend_pr_review_focus" in prompt
+    assert "never request or invent either identifier" in prompt
+
+
 def test_processor_marks_planning_failed_for_invalid_planner_output() -> None:
     repository = FakeAgentRunRepository()
     planner_client = FakePlannerClient(decision=planner_decision(status="bad_status"))
@@ -1162,8 +1580,181 @@ def test_sql_erd_table_focus_planner_contract_inspects_before_focusing() -> None
     assert "copy the exact selected selectionToken into sessionSelectionToken" in prompt
     assert "completed inspect_sql_erd_schema result" in prompt
     assert "sessionRevision" in prompt
+    assert "modelFingerprint" in prompt
     assert "primaryTableRefs" in prompt
     assert "relatedTableRefs" in prompt
+
+
+def sql_erd_inspection_planning_context(*table_refs: str) -> str:
+    return "tool inspect_sql_erd_schema: " + json.dumps(
+        {
+            "sessionId": SQL_ERD_SESSION_ID,
+            "sessionRevision": 7,
+            "modelFingerprint": "fnv1a32:1234abcd",
+            "projection": {
+                "tables": [{"ref": table_ref} for table_ref in table_refs],
+                "edges": [],
+                "truncated": False,
+            },
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "primary_table_refs",
+    [
+        [],
+        "t1",
+        ["t0"],
+        ["table-meetings"],
+        ["t1", "t1"],
+        [f"t{index}" for index in range(1, 22)],
+    ],
+)
+def test_sql_erd_table_focus_rejects_invalid_primary_refs_before_handoff(
+    primary_table_refs: object,
+) -> None:
+    focus_tool = tool_snapshot(
+        name="focus_sql_erd_tables",
+        description="SQLtoERD 테이블 집중 보기를 생성합니다.",
+        inputSchema={
+            "type": "object",
+            "required": ["primaryTableRefs"],
+            "additionalProperties": False,
+            "properties": {
+                "primaryTableRefs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "uniqueItems": True,
+                    "items": {"type": "string", "pattern": "^t[1-9][0-9]*$"},
+                }
+            },
+        },
+    )
+    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="focus_sql_erd_tables",
+            tool_input={
+                "sessionId": SQL_ERD_SESSION_ID,
+                "sessionRevision": 7,
+                "modelFingerprint": "fnv1a32:1234abcd",
+                "primaryTableRefs": primary_table_refs,
+            },
+        ),
+        job,
+        planning_context=sql_erd_inspection_planning_context("t1", "t20"),
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["primaryTableRefs"]
+    assert "핵심 테이블" in normalized.final_answer
+    assert "toolName" not in normalized.output_summary
+
+
+def test_sql_erd_table_focus_accepts_unique_compact_primary_refs() -> None:
+    focus_tool = tool_snapshot(
+        name="focus_sql_erd_tables",
+        description="SQLtoERD 테이블 집중 보기를 생성합니다.",
+        inputSchema={
+            "type": "object",
+            "required": ["primaryTableRefs"],
+            "additionalProperties": False,
+            "properties": {
+                "primaryTableRefs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "uniqueItems": True,
+                    "items": {"type": "string", "pattern": "^t[1-9][0-9]*$"},
+                }
+            },
+        },
+    )
+    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="focus_sql_erd_tables",
+            tool_input={
+                "sessionId": SQL_ERD_SESSION_ID,
+                "sessionRevision": 7,
+                "modelFingerprint": "fnv1a32:1234abcd",
+                "primaryTableRefs": ["t1", "t20"],
+            },
+        ),
+        job,
+        planning_context=sql_erd_inspection_planning_context("t1", "t20"),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"]["primaryTableRefs"] == ["t1", "t20"]
+
+
+def test_sql_erd_table_focus_rejects_ref_missing_from_latest_inspection() -> None:
+    focus_tool = tool_snapshot(
+        name="focus_sql_erd_tables",
+        description="SQLtoERD 테이블 집중 보기를 생성합니다.",
+        inputSchema={
+            "type": "object",
+            "required": ["primaryTableRefs"],
+            "additionalProperties": False,
+            "properties": {"primaryTableRefs": {"type": "array", "minItems": 1}},
+        },
+    )
+    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="focus_sql_erd_tables",
+            tool_input={
+                "sessionId": SQL_ERD_SESSION_ID,
+                "sessionRevision": 7,
+                "modelFingerprint": "fnv1a32:1234abcd",
+                "primaryTableRefs": ["t999"],
+            },
+        ),
+        job,
+        planning_context=sql_erd_inspection_planning_context("t1", "t20"),
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["primaryTableRefs"]
+    assert "toolName" not in normalized.output_summary
+
+
+def test_sql_erd_table_focus_requires_latest_inspection_context() -> None:
+    focus_tool = tool_snapshot(
+        name="focus_sql_erd_tables",
+        description="SQLtoERD 테이블 집중 보기를 생성합니다.",
+        inputSchema={
+            "type": "object",
+            "required": ["primaryTableRefs"],
+            "additionalProperties": False,
+            "properties": {"primaryTableRefs": {"type": "array", "minItems": 1}},
+        },
+    )
+    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="focus_sql_erd_tables",
+            tool_input={
+                "sessionId": SQL_ERD_SESSION_ID,
+                "sessionRevision": 7,
+                "modelFingerprint": "fnv1a32:1234abcd",
+                "primaryTableRefs": ["t1"],
+            },
+        ),
+        job,
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["sqlErdInspection"]
+    assert "스키마" in normalized.final_answer
+    assert "toolName" not in normalized.output_summary
 
 
 def test_sql_erd_nullable_requested_dialect_is_not_missing() -> None:

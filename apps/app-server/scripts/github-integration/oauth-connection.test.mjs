@@ -10,6 +10,67 @@ const { GithubOAuthRefreshRejectedError } = require(
   "../../dist/modules/github-integration/github-oauth-refresh.error.js"
 );
 
+{
+  let currentRow = null;
+  const calls = [];
+  const database = {
+    async queryOne(text, values = []) {
+      calls.push({ method: "queryOne", text, values });
+      if (/SELECT id, github_user_id/i.test(text)) return currentRow;
+      if (/INSERT INTO github_oauth_connections/i.test(text)) {
+        currentRow = {
+          id: "connection-first",
+          github_user_id: "42",
+          github_login: "octocat",
+          access_token_encrypted: "encrypted-first",
+          refresh_token_encrypted: null,
+          token_scope: null,
+          access_token_expires_at: null,
+          refresh_token_expires_at: null,
+          connected_at: new Date("2026-07-18T00:00:00.000Z"),
+          revoked_at: null
+        };
+        return currentRow;
+      }
+      return null;
+    },
+    async query(text, values = []) {
+      calls.push({ method: "query", text, values });
+      return [];
+    },
+    async execute(text, values = []) {
+      calls.push({ method: "execute", text, values });
+      return { rowCount: 1, rows: [] };
+    },
+    async transaction(callback) {
+      return callback(this);
+    }
+  };
+  const connectionService = new GithubOAuthConnectionService(database, {}, {});
+  const generation = await connectionService.getConnectionGeneration("user-a", "app_user", "generation-secret");
+  const input = {
+    userId: "user-a",
+    purpose: "app_user",
+    githubUserId: 42,
+    githubLogin: "octocat",
+    encryptedToken: "encrypted-first",
+    encryptedRefreshToken: null,
+    tokenScope: null,
+    accessTokenExpiresAt: null,
+    refreshTokenExpiresAt: null,
+    expectedConnectionGeneration: generation,
+    generationSecret: "generation-secret"
+  };
+
+  await connectionService.saveConnection(input);
+  await assert.rejects(
+    () => connectionService.saveConnection({ ...input, encryptedToken: "encrypted-late" }),
+    (error) => error?.response?.error?.message === "GitHub OAuth callback is stale"
+  );
+  assert.equal(calls.filter(({ text }) => /INSERT INTO github_oauth_connections/i.test(text)).length, 1);
+  assert.equal(calls.filter(({ text }) => /pg_advisory_xact_lock/i.test(text)).length, 2);
+}
+
 const migrationsDirectory = new URL("../../../../db/migrations/", import.meta.url);
 const migrationNames = await readdir(migrationsDirectory);
 assert.equal(migrationNames.includes("090_add_github_oauth_token_refresh.sql"), true);
@@ -53,6 +114,9 @@ assert.doesNotMatch(reviewService, /FROM users[\s\S]*github_access_token_encrypt
     calls: [],
     async queryOne(text, values) {
       this.calls.push({ text, values });
+      if (/SELECT id, github_user_id/i.test(text)) {
+        return null;
+      }
       throw uniqueViolation;
     },
     async query() {},

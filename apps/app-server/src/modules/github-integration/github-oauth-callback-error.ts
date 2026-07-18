@@ -19,6 +19,7 @@ export type GithubCallbackErrorCode =
   | "invalid_state"
   | "project_oauth_account_mismatch"
   | "project_oauth_scope_missing"
+  | "stale_callback"
   | "token_exchange_failed";
 
 export const GITHUB_CALLBACK_ERROR_QUERY_PARAM = "github_callback_error";
@@ -42,6 +43,7 @@ const CALLBACK_ERROR_BY_MESSAGE = new Map<string, GithubCallbackErrorCode>([
     "installation_not_accessible"
   ],
   ["GitHub App installation lookup failed", "installation_lookup_failed"],
+  ["GitHub OAuth callback is stale", "stale_callback"],
   ["GitHub App installation could not be saved", "installation_failed"]
 ]);
 

@@ -5,6 +5,15 @@ import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
 import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service";
 import { CanvasAgentDelegationToolsService } from "./tools/canvas-agent-delegation-tools.service";
+import { DriveAgentToolsService } from "./tools/drive-agent-tools.service";
+import {
+  buildAgentToolCapabilityCatalog,
+  type AgentToolCapabilityCatalogSnapshot
+} from "./agent-tool-capability-catalog";
+import {
+  buildAgentToolInventory,
+  type AgentToolInventorySnapshot
+} from "./agent-tool-inventory";
 import type {
   AgentRunRequestContext,
   AgentToolDefinition
@@ -20,7 +29,8 @@ export class AgentToolRegistryService {
     boardAgentToolsService?: BoardAgentToolsService,
     sqlErdAgentToolsService?: SqlErdAgentToolsService,
     prReviewAgentToolsService?: PrReviewAgentToolsService,
-    canvasAgentDelegationToolsService?: CanvasAgentDelegationToolsService
+    canvasAgentDelegationToolsService?: CanvasAgentDelegationToolsService,
+    driveAgentToolsService?: DriveAgentToolsService
   ) {
     if (calendarAgentToolsService) {
       this.registerMany(calendarAgentToolsService.listDefinitions());
@@ -45,10 +55,18 @@ export class AgentToolRegistryService {
     if (canvasAgentDelegationToolsService) {
       this.registerMany(canvasAgentDelegationToolsService.listDefinitions());
     }
+
+    if (driveAgentToolsService) {
+      this.registerMany(driveAgentToolsService.listDefinitions());
+    }
   }
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
     return [...this.definitions.values()];
+  }
+
+  listToolInventory(): AgentToolInventorySnapshot {
+    return buildAgentToolInventory(this.listDefinitions());
   }
 
   listDefinitionsForContext(
@@ -57,6 +75,20 @@ export class AgentToolRegistryService {
     return this.listDefinitions().filter((definition) =>
       this.isAvailableForContext(definition, requestContext)
     );
+  }
+
+  listCapabilityCatalogForContext(
+    requestContext: AgentRunRequestContext
+  ): AgentToolCapabilityCatalogSnapshot {
+    return buildAgentToolCapabilityCatalog(
+      this.listDefinitionsForContext(requestContext)
+    );
+  }
+
+  listToolInventoryForContext(
+    requestContext: AgentRunRequestContext
+  ): AgentToolInventorySnapshot {
+    return buildAgentToolInventory(this.listDefinitionsForContext(requestContext));
   }
 
   getDefinition(name: string): AgentToolDefinition<unknown> | null {

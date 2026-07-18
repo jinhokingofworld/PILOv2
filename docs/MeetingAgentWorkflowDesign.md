@@ -99,6 +99,16 @@ sequenceDiagram
 이전 SQS job은 현재 `agent_run_outbox.turn_sequence`와 일치하지 않으면 무시하며, tool step과
 confirmation은 turn sequence 또는 실행 claim으로 멱등하게 만든다.
 
+## Meeting Agent 자연어 인식과 ID-free UX
+
+Meeting Agent는 사용자에게 `meetingId`, `reportId`, `actionItemId` 같은 내부 UUID를 요구하지
+않는다. 회의방 이름, 현재 참여 상태, 상대 날짜, 담당자 표시 이름, 직전 결과의 순번을 App Server에서
+해소하고, 모호할 때만 사람이 읽을 수 있는 후보를 제시한다.
+
+수동 검증의 모든 기능 제목에 대한 의도 인식, 구현 단계, selector 계약, tool 연쇄, 근거 답변,
+Frontend 상태 동기화, 수용 테스트는 별도 문서인
+[Meeting Agent Tool 개선 Plan](MeetingAgentToolImprovementPlan.md)을 따른다.
+
 ## 후속작업 승인과 일정·이슈 자동 생성
 
 ### 입력을 수집하는 loop
@@ -210,6 +220,12 @@ URL, 브라우저 영구 저장소에 보관할 필요가 없다.
 - [x] planner가 `tool_call`, `needs_user_input`, `final`을 반환하도록 Worker schema를 확장한다.
 - [x] App Server가 한 tool 결과를 다음 planner turn에 bounded context로 전달한다.
 - [x] confirmation approve/reject 뒤 loop 재개와 5회 budget을 구현한다.
+
+### Meeting Agent Tool 개선
+
+- [ ] 전체 Meeting capability의 자연어 인식, resource 해소, 근거 답변과 ID-free UX는
+  [Meeting Agent Tool 개선 Plan](MeetingAgentToolImprovementPlan.md)의 Phase 1~8과 수용 테스트를
+  완료한다.
 
 ### Tool·Frontend
 

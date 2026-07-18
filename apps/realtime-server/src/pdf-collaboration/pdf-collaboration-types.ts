@@ -16,6 +16,7 @@ export type PdfCollaborationStroke = {
   pageNumber: number;
   points: PdfCollaborationPoint[];
   tool: PdfCollaborationTool;
+  width: number;
 };
 
 export type PdfCollaborationPresence = PdfCollaborationRoomRef & {
@@ -42,10 +43,12 @@ export type PdfCollaborationPointerUpdate = PdfCollaborationPageUpdate &
   PdfCollaborationPoint;
 
 export type PdfCollaborationStrokeCommit = PdfCollaborationRoomRef & {
+  color: string;
   id: string;
   pageNumber: number;
   points: PdfCollaborationPoint[];
   tool: PdfCollaborationTool;
+  width: number;
 };
 
 export type PdfCollaborationStrokeRemove = PdfCollaborationRoomRef & {

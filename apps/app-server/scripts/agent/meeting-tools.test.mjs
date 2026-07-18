@@ -9,6 +9,12 @@ const { AgentToolRegistryService } = require(
 const { MeetingAgentToolsService } = require(
   "../../dist/modules/agent/tools/meeting-agent-tools.service.js"
 );
+const { MeetingAgentResourceResolver } = require(
+  "../../dist/modules/agent/tools/meeting-agent-resource-resolver.service.js"
+);
+const { AgentCandidateSelectionService } = require(
+  "../../dist/modules/agent/agent-candidate-selection.service.js"
+);
 const { MeetingActionItemDeliveryService } = require(
   "../../dist/modules/meeting/meeting-action-item-delivery.service.js"
 );
@@ -24,6 +30,8 @@ const MEETING_ID = "55555555-5555-5555-8555-555555555555";
 const RECORDING_ID = "66666666-6666-6666-8666-666666666666";
 const MEETING_ROOM_ID = "99999999-9999-4999-8999-999999999991";
 const SECOND_MEETING_ROOM_ID = "99999999-9999-4999-8999-999999999992";
+const CANDIDATE_STEP_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const ACTION_ITEM_ID = "99999999-9999-4999-8999-999999999994";
 
 const meetingAgentWorkflowMigration = await readFile(
   new URL(
@@ -64,11 +72,33 @@ const meetingServiceSource = await readFile(
   new URL("../../src/modules/meeting/meeting.service.ts", import.meta.url),
   "utf8"
 );
+const candidateSelectionMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/099_create_agent_candidate_selections.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 assert.match(
   meetingAgentWorkflowMigration,
   /pilo_issue_id BIGINT[\s\S]*?REFERENCES public\.pilo_issues\(id\) ON DELETE RESTRICT/,
   "The applied 074 migration must keep the Board target FK type compatible"
+);
+assert.match(
+  candidateSelectionMigration,
+  /CREATE TABLE public\.agent_candidate_selections[\s\S]*?run_id UUID NOT NULL REFERENCES public\.agent_runs\(id\) ON DELETE CASCADE[\s\S]*?tool_step_id UUID NOT NULL REFERENCES public\.agent_steps\(id\) ON DELETE CASCADE/,
+  "Meeting candidate records must be bound to one Agent run and clarification step"
+);
+assert.match(
+  candidateSelectionMigration,
+  /expires_at TIMESTAMPTZ NOT NULL DEFAULT \(now\(\) \+ INTERVAL '15 minutes'\)[\s\S]*?consumed_at TIMESTAMPTZ/,
+  "Meeting candidate records must be short-lived and one-time consumable"
+);
+assert.match(
+  candidateSelectionMigration,
+  /ALTER TABLE public\.agent_candidate_selections ENABLE ROW LEVEL SECURITY/,
+  "Meeting candidate records must remain server-only behind all-deny RLS"
 );
 assert.match(
   deliveryTargetPreservationMigration,
@@ -129,6 +159,16 @@ assert.match(
   meetingServiceSource,
   /approveMeetingReportActionItem[\s\S]*?transitionMeetingReportActionItem\([\s\S]*?"APPROVED"/,
   "The legacy approval endpoint must remain compatible during the delivery rollout"
+);
+assert.match(
+  meetingServiceSource,
+  /async listMeetingsForAgent[\s\S]*?WHERE meetings\.workspace_id = \$1/,
+  "Meeting resolver reads must scope every Meeting query to the current Workspace"
+);
+assert.match(
+  meetingServiceSource,
+  /async listActionItemsForAgent[\s\S]*?WHERE meetings\.workspace_id = \$1/,
+  "Action item resolver reads must scope every query to the current Workspace"
 );
 
 function createMeeting(overrides = {}) {
@@ -256,6 +296,32 @@ class FakeMeetingService {
       meeting: createMeeting(),
       meetingRoom: createMeetingRoom()
     };
+    this.meetings = [
+      {
+        meeting: createMeeting(),
+        roomName: "기본 회의실"
+      }
+    ];
+    this.actionItems = [
+      {
+        id: "99999999-9999-4999-8999-999999999994",
+        reportId: REPORT_ID,
+        sourceIndex: 0,
+        title: "문서 정리",
+        status: "PENDING",
+        assignee: { userId: USER_ID, name: "진호", avatarUrl: null },
+        reportCreatedAt: "2026-07-08T00:00:00.000Z"
+      }
+    ];
+    this.reports[0].actionItems = [
+      {
+        id: this.actionItems[0].id,
+        title: this.actionItems[0].title,
+        status: this.actionItems[0].status
+      }
+    ];
+    this.staleMeetingIds = new Set();
+    this.staleReportIds = new Set();
     this.recordingConsentAccepted = true;
   }
 
@@ -286,6 +352,9 @@ class FakeMeetingService {
 
   async getMeeting(currentUserId, workspaceId, meetingId) {
     this.calls.push({ method: "getMeeting", currentUserId, workspaceId, meetingId });
+    if (this.staleMeetingIds.has(meetingId)) {
+      throw new Error("Meeting no longer exists");
+    }
     return {
       meeting: createMeeting({ id: meetingId }),
       currentRecording: this.currentMeetings.get(MEETING_ROOM_ID).currentRecording,
@@ -355,6 +424,40 @@ class FakeMeetingService {
     };
   }
 
+  async listReportsForAgent(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listReportsForAgent",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return {
+      reports: this.reports.slice(0, query.limit ?? this.reports.length).map((report) =>
+        toSummaryReport(report)
+      )
+    };
+  }
+
+  async listMeetingsForAgent(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listMeetingsForAgent",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return { meetings: this.meetings };
+  }
+
+  async listActionItemsForAgent(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listActionItemsForAgent",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return { actionItems: this.actionItems };
+  }
+
   async getReport(currentUserId, workspaceId, reportId) {
     this.calls.push({
       method: "getReport",
@@ -362,6 +465,10 @@ class FakeMeetingService {
       workspaceId,
       reportId
     });
+
+    if (this.staleReportIds.has(reportId)) {
+      throw new Error("Meeting report no longer exists");
+    }
 
     const report =
       this.reports.find((candidate) => candidate.id === reportId) ?? this.reports[0];
@@ -378,9 +485,42 @@ class FakeMeetingTranscriptRagService {
   }
 }
 
+class FakeWorkspaceService {
+  constructor() {
+    this.members = [
+      {
+        userId: USER_ID,
+        role: "owner",
+        user: { name: "진호", email: "jinho@example.com" }
+      },
+      {
+        userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        role: "member",
+        user: { name: "김진호", email: "jinho.one@example.com" }
+      },
+      {
+        userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        role: "member",
+        user: { name: "김진호", email: "jinho.two@example.com" }
+      }
+    ];
+  }
+
+  async assertWorkspaceAccess() {}
+
+  async listMembers() {
+    return this.members;
+  }
+}
+
 function createRegistry() {
   const meetingService = new FakeMeetingService();
-  const meetingTools = new MeetingAgentToolsService(meetingService, new FakeMeetingTranscriptRagService());
+  const meetingTools = new MeetingAgentToolsService(
+    meetingService,
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService())
+  );
   const registry = new AgentToolRegistryService(undefined, meetingTools);
 
   return {
@@ -395,6 +535,8 @@ const context = {
   runId: RUN_ID
 };
 
+process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
+
 {
   const { registry } = createRegistry();
   const tool = registry.getDefinition("search_meeting_transcript");
@@ -403,6 +545,405 @@ const context = {
   assert.equal(result.outputSummary.sourceCount, 1);
   assert.deepEqual(result.outputSummary.sourceIds, ["99999999-9999-4999-8999-999999999999"]);
   assert.doesNotMatch(JSON.stringify(result.outputSummary), /원문/);
+}
+
+class FakeCandidateSelectionDatabase {
+  constructor() {
+    this.id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    this.resourceId = MEETING_ROOM_ID;
+    this.latestStepId = CANDIDATE_STEP_ID;
+    this.consumed = false;
+  }
+
+  async transaction(callback) {
+    return callback(this);
+  }
+
+  async queryOne(text, values = []) {
+    if (text.includes("INSERT INTO agent_candidate_selections")) {
+      return {
+        id: this.id,
+        tool_step_id: CANDIDATE_STEP_ID,
+        resource_type: "meeting_room",
+        resource_id: this.resourceId,
+        report_id: null,
+        label: "기본 회의실",
+        description: "기본 회의방",
+        status: null
+      };
+    }
+    if (text.includes("FROM agent_candidate_selections")) {
+      const [id, workspaceId, userId, runId] = values;
+      if (
+        this.consumed ||
+        this.latestStepId !== CANDIDATE_STEP_ID ||
+        id !== this.id ||
+        workspaceId !== WORKSPACE_ID ||
+        userId !== USER_ID ||
+        runId !== RUN_ID
+      ) {
+        return null;
+      }
+      return {
+        id: this.id,
+        tool_step_id: CANDIDATE_STEP_ID,
+        resource_type: "meeting_room",
+        resource_id: this.resourceId,
+        report_id: null,
+        label: "기본 회의실",
+        description: "기본 회의방",
+        status: null
+      };
+    }
+    if (text.includes("UPDATE agent_candidate_selections SET consumed_at")) {
+      if (this.consumed || values[0] !== this.id) return null;
+      this.consumed = true;
+      return { id: this.id };
+    }
+    return null;
+  }
+}
+
+{
+  const database = new FakeCandidateSelectionDatabase();
+  const resolver = {
+    async revalidateReference(_context, reference) {
+      return reference.resourceId === MEETING_ROOM_ID ? reference : null;
+    }
+  };
+  const service = new AgentCandidateSelectionService(database, resolver);
+  const context = {
+    currentUserId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    runId: RUN_ID,
+    requestContext: null
+  };
+  const [candidate] = await service.createMeetingCandidates(context, CANDIDATE_STEP_ID, [
+    {
+      reference: { resourceType: "meeting_room", resourceId: MEETING_ROOM_ID },
+      candidate: {
+        resourceType: "meeting_room",
+        label: "기본 회의실",
+        description: "기본 회의방",
+        status: null
+      }
+    }
+  ]);
+  assert.deepEqual(candidate, {
+    candidateSelectionId: database.id,
+    resourceType: "meeting_room",
+    label: "기본 회의실",
+    description: "기본 회의방",
+    status: null
+  });
+  assert.doesNotMatch(JSON.stringify(candidate), new RegExp(MEETING_ROOM_ID));
+  assert.deepEqual(
+    await service.consumeMeetingCandidate(context, candidate.candidateSelectionId),
+    {
+      label: "기본 회의실",
+      reference: { resourceType: "meeting_room", resourceId: MEETING_ROOM_ID }
+    }
+  );
+  await assert.rejects(
+    () => service.consumeMeetingCandidate(context, candidate.candidateSelectionId),
+    (error) => error.getStatus?.() === 400
+  );
+}
+
+{
+  const database = new FakeCandidateSelectionDatabase();
+  database.latestStepId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const service = new AgentCandidateSelectionService(database, {
+    async revalidateReference(_context, reference) {
+      return reference;
+    }
+  });
+  await assert.rejects(
+    () => service.consumeMeetingCandidate(context, database.id),
+    (error) => error.getStatus?.() === 400,
+    "A candidate from an earlier clarification cannot be claimed after a newer tool step"
+  );
+}
+
+{
+  const selectedMemberId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const calls = [];
+  const candidateSelectionService = {
+    async getLatestConsumedMeetingReference(candidateContext, resourceType) {
+      calls.push({ candidateContext, resourceType });
+      return {
+        resourceType: "workspace_member",
+        resourceId: selectedMemberId
+      };
+    }
+  };
+  const meetingService = {
+    async updateMeetingReportActionItem(...args) {
+      calls.push({ method: "updateMeetingReportActionItem", args });
+      return {
+        actionItem: {
+          id: ACTION_ITEM_ID,
+          title: "문서 정리",
+          status: "PENDING"
+        }
+      };
+    }
+  };
+  const tools = new MeetingAgentToolsService(
+    meetingService,
+    {},
+    {},
+    undefined,
+    candidateSelectionService
+  );
+  const definition = tools
+    .listDefinitions()
+    .find((tool) => tool.name === "update_meeting_report_action_item");
+  const result = await definition.execute(
+    context,
+    definition.validateInput({
+      reportId: REPORT_ID,
+      actionItemId: ACTION_ITEM_ID,
+      useSelectedWorkspaceMemberCandidate: true
+    })
+  );
+
+  assert.equal(result.status, "updated");
+  assert.deepEqual(calls, [
+    {
+      candidateContext: context,
+      resourceType: "workspace_member"
+    },
+    {
+      method: "updateMeetingReportActionItem",
+      args: [
+        USER_ID,
+        WORKSPACE_ID,
+        REPORT_ID,
+        ACTION_ITEM_ID,
+        { assigneeUserId: selectedMemberId }
+      ]
+    }
+  ]);
+  assert.doesNotMatch(JSON.stringify(result.outputSummary), new RegExp(selectedMemberId));
+}
+
+{
+  const previousSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "meeting-agent-resource-resolver-test-secret";
+  try {
+    const meetingService = new FakeMeetingService();
+    const workspaceService = new FakeWorkspaceService();
+    const resolver = new MeetingAgentResourceResolver(
+      meetingService,
+      workspaceService
+    );
+
+    const room = await resolver.resolveMeetingRoom(context, " 디자인   회의실 ");
+    assert.equal(room.kind, "selected");
+    assert.equal(room.candidate.label, "디자인 회의실");
+    assert.equal(room.candidate.resourceType, "meeting_room");
+    assert.equal(room.selectionToken.includes(SECOND_MEETING_ROOM_ID), false);
+    assert.deepEqual(
+      await resolver.revalidateSelectionToken(context, room.selectionToken),
+      room.reference
+    );
+    assert.equal(
+      await resolver.revalidateSelectionToken(
+        { ...context, workspaceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" },
+        room.selectionToken
+      ),
+      null
+    );
+    assert.equal(
+      await resolver.revalidateSelectionToken(
+        { ...context, currentUserId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" },
+        room.selectionToken
+      ),
+      null
+    );
+    assert.equal(
+      await resolver.revalidateSelectionToken(
+        { ...context, runId: "ffffffff-ffff-4fff-8fff-ffffffffffff" },
+        room.selectionToken
+      ),
+      null
+    );
+    const tamperSegment = (token, index) => {
+      const parts = token.split(".");
+      const first = parts[index][0];
+      parts[index] = `${first === "A" ? "B" : "A"}${parts[index].slice(1)}`;
+      return parts.join(".");
+    };
+    for (const index of [2, 3, 4]) {
+      assert.equal(
+        await resolver.revalidateSelectionToken(
+          context,
+          tamperSegment(room.selectionToken, index)
+        ),
+        null
+      );
+    }
+    const originalNow = Date.now;
+    try {
+      let now = 1_000;
+      Date.now = () => now;
+      const expiringRoom = await resolver.resolveMeetingRoom(context, "기본 회의실");
+      assert.equal(expiringRoom.kind, "selected");
+      now += 15 * 60 * 1000 + 1;
+      assert.equal(
+        await resolver.revalidateSelectionToken(context, expiringRoom.selectionToken),
+        null
+      );
+    } finally {
+      Date.now = originalNow;
+    }
+    delete process.env.SESSION_SECRET;
+    await assert.rejects(
+      () => resolver.resolveMeetingRoom(context, "기본 회의실"),
+      /SESSION_SECRET/
+    );
+    process.env.SESSION_SECRET = "meeting-agent-resource-resolver-test-secret";
+
+    const missingRoom = await resolver.resolveMeetingRoom(context, "없는 회의실");
+    assert.equal(missingRoom.kind, "needs_clarification");
+    assert.equal(missingRoom.reason, "not_found");
+
+    meetingService.rooms.push(
+      createMeetingRoom({
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        roomKey: "ROOM_THIRD",
+        name: "디자인 회의실",
+        isDefault: false
+      })
+    );
+    const ambiguousRoom = await resolver.resolveMeetingRoom(context, "디자인 회의실");
+    assert.equal(ambiguousRoom.kind, "needs_clarification");
+    assert.equal(ambiguousRoom.reason, "ambiguous");
+    assert.equal(ambiguousRoom.candidates.length, 2);
+    assert.doesNotMatch(JSON.stringify(ambiguousRoom.candidates), /[0-9a-f]{8}-/i);
+    assert.equal(typeof ambiguousRoom.candidates[0].selectionToken, "string");
+    assert.notEqual(
+      ambiguousRoom.candidates[0].selectionToken,
+      ambiguousRoom.candidates[1].selectionToken
+    );
+
+    const member = await resolver.resolveMember(context, { displayName: "김진호" });
+    assert.equal(member.kind, "needs_clarification");
+    assert.equal(member.reason, "ambiguous");
+    const self = await resolver.resolveMember(context, { self: true });
+    assert.equal(self.kind, "selected");
+    assert.equal(self.candidate.label, "진호");
+    const staleMemberToken = self.selectionToken;
+    workspaceService.members = [];
+    assert.equal(
+      await resolver.revalidateSelectionToken(context, staleMemberToken),
+      null
+    );
+    workspaceService.members = [
+      {
+        userId: USER_ID,
+        role: "owner",
+        user: { name: "진호" }
+      },
+      {
+        userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        role: "member",
+        user: { name: "김진호" }
+      },
+      {
+        userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        role: "member",
+        user: { name: "김진호" }
+      }
+    ];
+
+    const meeting = await resolver.resolveMeeting(context, {
+      roomName: "기본 회의실",
+      from: "2026-07-08T00:00:00.000Z",
+      to: "2026-07-09T00:00:00.000Z"
+    });
+    assert.equal(meeting.kind, "selected");
+    assert.equal(meeting.candidate.label, "기본 회의실");
+    meetingService.staleMeetingIds.add(meeting.reference.resourceId);
+    assert.equal(
+      await resolver.revalidateSelectionToken(context, meeting.selectionToken),
+      null
+    );
+    meetingService.staleMeetingIds.clear();
+
+    const report = await resolver.resolveReport(context, { status: "COMPLETED" });
+    assert.equal(report.kind, "selected");
+    assert.equal(report.candidate.status, "COMPLETED");
+    meetingService.staleReportIds.add(report.reference.resourceId);
+    assert.equal(
+      await resolver.revalidateSelectionToken(context, report.selectionToken),
+      null
+    );
+    meetingService.staleReportIds.clear();
+    meetingService.reports.push(createReport({ id: SECOND_REPORT_ID }));
+    const latestReport = await resolver.resolveLatestReport(context);
+    assert.equal(latestReport.kind, "selected");
+    assert.equal(latestReport.reference.resourceId, REPORT_ID);
+    const ambiguousReport = await resolver.resolveReport(context, {});
+    assert.equal(ambiguousReport.kind, "needs_clarification");
+    assert.equal(ambiguousReport.reason, "ambiguous");
+    meetingService.reports.splice(1);
+
+    meetingService.activeMeeting = {
+      meeting: createMeeting({
+        workspaceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      }),
+      meetingRoom: createMeetingRoom({
+        workspaceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      })
+    };
+    const otherWorkspaceActive = await resolver.resolveCurrentMeeting(context);
+    assert.equal(otherWorkspaceActive.kind, "needs_clarification");
+    assert.equal(otherWorkspaceActive.reason, "not_found");
+
+    meetingService.activeMeeting = {
+      meeting: createMeeting(),
+      meetingRoom: createMeetingRoom()
+    };
+    meetingService.actionItems.push({
+      id: "99999999-9999-4999-8999-999999999995",
+      reportId: REPORT_ID,
+      sourceIndex: 8,
+      title: "두 번째 필터 결과",
+      status: "PENDING",
+      assignee: { userId: USER_ID, name: "진호", avatarUrl: null },
+      reportCreatedAt: "2026-07-08T00:00:00.000Z"
+    });
+    const secondActionItem = await resolver.resolveActionItem(context, {
+      reportId: REPORT_ID,
+      ordinal: 2
+    });
+    assert.equal(secondActionItem.kind, "selected");
+    assert.equal(secondActionItem.candidate.label, "두 번째 필터 결과");
+    meetingService.actionItems.splice(1);
+    const actionItem = await resolver.resolveActionItem(context, {
+      reportId: REPORT_ID,
+      ordinal: 1
+    });
+    assert.equal(actionItem.kind, "selected");
+    assert.equal(actionItem.candidate.label, "문서 정리");
+    assert.deepEqual(
+      await resolver.revalidateSelectionToken(context, actionItem.selectionToken),
+      actionItem.reference
+    );
+    meetingService.reports[0].actionItems = [];
+    assert.equal(
+      await resolver.revalidateSelectionToken(context, actionItem.selectionToken),
+      null
+    );
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.SESSION_SECRET;
+    } else {
+      process.env.SESSION_SECRET = previousSecret;
+    }
+  }
 }
 
 function errorCode(error) {
@@ -415,6 +956,7 @@ function errorCode(error) {
 
   assert.deepEqual(names, [
     "list_meeting_rooms",
+    "resolve_meeting_resource",
     "get_active_meeting",
     "get_meeting_participants",
     "start_meeting_in_room",
@@ -433,6 +975,46 @@ function errorCode(error) {
     "approve_meeting_report_action_item",
     "regenerate_meeting_report"
   ]);
+}
+
+{
+  const previousSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "meeting-tool-selection-test-secret";
+  const meetingService = new FakeMeetingService();
+  const workspaceService = new FakeWorkspaceService();
+  const resolver = new MeetingAgentResourceResolver(
+    meetingService,
+    workspaceService
+  );
+  const meetingTools = new MeetingAgentToolsService(
+    meetingService,
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    resolver
+  );
+  const tool = meetingTools
+    .listDefinitions()
+    .find((definition) => definition.name === "resolve_meeting_resource");
+  try {
+    const preparation = await tool.prepareExecution(context, {
+      resourceType: "workspace_member",
+      displayName: "김진호"
+    });
+    assert.equal(preparation.kind, "needs_clarification");
+    assert.equal(preparation.candidateResources.length, 2);
+    assert.match(preparation.candidateResources[0].candidate.description, /member · ji\*+@example\.com/);
+    assert.equal(
+      "resourceId" in preparation.outputSummary,
+      false,
+      "Clarification output must not persist a raw resource reference"
+    );
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.SESSION_SECRET;
+    } else {
+      process.env.SESSION_SECRET = previousSecret;
+    }
+  }
 }
 
 {
@@ -469,7 +1051,7 @@ function errorCode(error) {
 {
   const { registry } = createRegistry();
   const tool = registry.getDefinition("start_meeting_in_room");
-  const input = tool.validateInput({ meetingRoomId: SECOND_MEETING_ROOM_ID });
+  const input = tool.validateInput({ roomName: "디자인 회의실" });
   const plan = await tool.buildConfirmation(context, input);
   assert.equal(plan.toolName, "start_meeting_in_room");
   assert.match(plan.summary, /현재 회의에서 나간 뒤/);
@@ -481,7 +1063,7 @@ function errorCode(error) {
   const tool = registry.getDefinition("join_meeting");
   const clarification = await tool.buildConfirmation(
     context,
-    tool.validateInput({ meetingId: MEETING_ID })
+    tool.validateInput({ roomName: "기본 회의실" })
   );
   assert.equal(clarification.kind, "needs_clarification");
   assert.equal(clarification.outputSummary.policyVersion, "v1");
@@ -492,7 +1074,7 @@ function errorCode(error) {
   const tool = registry.getDefinition("join_meeting");
   const result = await tool.execute(
     context,
-    tool.validateInput({ meetingId: MEETING_ID })
+    tool.validateConfirmationInput({ meetingId: MEETING_ID })
   );
   assert.equal(result.outputSummary.clientAction.type, "connect_meeting");
   assert.equal(result.outputSummary.clientAction.expiresInSec, 20);
@@ -502,10 +1084,9 @@ function errorCode(error) {
 {
   const { registry } = createRegistry();
   const tool = registry.getDefinition("leave_meeting");
-  const result = await tool.execute(
-    context,
-    tool.validateInput({ meetingId: MEETING_ID })
-  );
+  const preparation = await tool.prepareExecution(context, tool.validateInput({}));
+  assert.equal(preparation.kind, "execute");
+  const result = await tool.execute(context, tool.validateInput({}));
   assert.equal(result.status, "left");
 }
 
@@ -515,11 +1096,11 @@ function errorCode(error) {
   const end = registry.getDefinition("end_meeting_recording");
   const startResult = await start.execute(
     context,
-    start.validateInput({ meetingId: MEETING_ID })
+    start.validateConfirmationInput({ meetingId: MEETING_ID })
   );
   const endResult = await end.execute(
     context,
-    end.validateInput({ meetingId: MEETING_ID })
+    end.validateConfirmationInput({ meetingId: MEETING_ID })
   );
   assert.equal(startResult.status, "recording_started");
   assert.equal(endResult.status, "recording_ended");
@@ -565,10 +1146,7 @@ function errorCode(error) {
 {
   const { meetingService, registry } = createRegistry();
   const tool = registry.getDefinition("get_meeting_participants");
-  const result = await tool.execute(
-    context,
-    tool.validateInput({ meetingId: MEETING_ID })
-  );
+  const result = await tool.execute(context, tool.validateInput({}));
 
   assert.deepEqual(result.outputSummary, {
     meetingId: MEETING_ID,
@@ -586,6 +1164,10 @@ function errorCode(error) {
     ]
   });
   assert.deepEqual(meetingService.calls, [
+    {
+      method: "getCurrentUserActiveMeeting",
+      currentUserId: USER_ID
+    },
     {
       method: "listParticipants",
       currentUserId: USER_ID,
@@ -618,7 +1200,7 @@ function errorCode(error) {
   assert.equal(result.resourceRefs[0].domain, "meeting");
   assert.equal(result.resourceRefs[0].resourceType, "meeting_report");
   assert.deepEqual(meetingService.calls[0], {
-    method: "listReports",
+    method: "listReportsForAgent",
     currentUserId: USER_ID,
     workspaceId: WORKSPACE_ID,
     query: {
@@ -646,10 +1228,7 @@ function errorCode(error) {
   assert.equal(result.outputSummary.reports[0].reportId, REPORT_ID);
   assert.equal(result.resourceRefs.length, 1);
   assert.equal(result.resourceRefs[0].resourceId, REPORT_ID);
-  assert.deepEqual(meetingService.calls[0].query, {
-    status: undefined,
-    limit: 1
-  });
+  assert.deepEqual(meetingService.calls[0].query, { limit: 1 });
 }
 
 {
@@ -682,10 +1261,7 @@ function errorCode(error) {
 {
   const { registry } = createRegistry();
   const tool = registry.getDefinition("summarize_meeting_report");
-  const input = tool.validateInput({
-    reportId: REPORT_ID
-  });
-  const result = await tool.execute(context, input);
+  const result = await tool.execute(context, tool.validateInput({}));
   const report = result.outputSummary.report;
   const serialized = JSON.stringify(result.outputSummary);
 
@@ -707,10 +1283,7 @@ function errorCode(error) {
 {
   const { registry } = createRegistry();
   const tool = registry.getDefinition("get_meeting_report");
-  const input = tool.validateInput({
-    reportId: REPORT_ID
-  });
-  const result = await tool.execute(context, input);
+  const result = await tool.execute(context, tool.validateInput({}));
 
   assert.equal(result.status, "completed");
   assert.equal(result.outputSummary.report.sections[0].title, "요약");
@@ -729,7 +1302,7 @@ function errorCode(error) {
     })
   ];
   const tool = registry.getDefinition("summarize_meeting_report");
-  const result = await tool.execute(context, { reportId: REPORT_ID });
+  const result = await tool.execute(context, tool.validateInput({}));
   const report = result.outputSummary.report;
 
   assert.equal(report.status, "PROCESSING");
@@ -757,7 +1330,7 @@ function errorCode(error) {
     })
   ];
   const tool = registry.getDefinition("summarize_meeting_report");
-  const result = await tool.execute(context, { reportId: REPORT_ID });
+  const result = await tool.execute(context, tool.validateInput({}));
   const serialized = JSON.stringify(result.outputSummary);
 
   assert.equal(result.outputSummary.report.status, "FAILED");
@@ -813,6 +1386,49 @@ function errorCode(error) {
       assert.match(error.getResponse().error.message, /meetingId/);
       return true;
     }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  for (const toolName of [
+    "get_meeting_participants",
+    "join_meeting",
+    "leave_meeting",
+    "start_meeting_recording",
+    "end_meeting_recording"
+  ]) {
+    const tool = registry.getDefinition(toolName);
+    assert.throws(
+      () => tool.validateInput({ meetingId: MEETING_ID }),
+      (error) => {
+        assert.match(error.getResponse().error.message, /meetingId/);
+        return true;
+      },
+      `${toolName} must not expose a raw meetingId in the planner input`
+    );
+  }
+  for (const toolName of ["get_meeting_report", "summarize_meeting_report"]) {
+    const tool = registry.getDefinition(toolName);
+    assert.throws(
+      () => tool.validateInput({ reportId: REPORT_ID }),
+      (error) => {
+        assert.match(error.getResponse().error.message, /reportId/);
+        return true;
+      },
+      `${toolName} must not expose a raw reportId in the planner input`
+    );
+  }
+  assert.throws(
+    () =>
+      registry
+        .getDefinition("start_meeting_in_room")
+        .validateInput({ meetingRoomId: MEETING_ROOM_ID }),
+    (error) => {
+      assert.match(error.getResponse().error.message, /meetingRoomId/);
+      return true;
+    },
+    "start_meeting_in_room must resolve a room selector instead of accepting a raw ID"
   );
 }
 

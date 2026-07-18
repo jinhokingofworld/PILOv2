@@ -11,6 +11,14 @@ import type {
 const MAX_PAGE_NUMBER = 100_000;
 const MAX_STROKE_ID_LENGTH = 96;
 const MAX_STROKE_POINTS = 500;
+const PDF_STROKE_COLORS = new Set(["#111827", "#2563eb", "#dc2626", "#16a34a", "#facc15"]);
+const PDF_STROKE_WIDTHS = new Set([0.7, 1.2, 1.8, 2.8, 4.2, 5.6]);
+
+function defaultStrokeStyle(tool: "pen" | "highlighter") {
+  return tool === "highlighter"
+    ? { color: "#facc15", width: 2.8 }
+    : { color: "#111827", width: 0.7 };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -98,9 +106,21 @@ export function readPdfCollaborationStrokeCommit(
     return null;
   }
 
+  const defaults = defaultStrokeStyle(tool);
+  const color = payload.color === undefined ? defaults.color : payload.color;
+  const width = payload.width === undefined ? defaults.width : payload.width;
+  if (
+    typeof color !== "string" ||
+    !PDF_STROKE_COLORS.has(color) ||
+    typeof width !== "number" ||
+    !PDF_STROKE_WIDTHS.has(width)
+  ) {
+    return null;
+  }
+
   const points = pointValues.map(readPoint);
   return points.every((point): point is PdfCollaborationPoint => point !== null)
-    ? { ...update, id, points, tool }
+    ? { ...update, color, id, points, tool, width }
     : null;
 }
 

@@ -224,9 +224,15 @@ class FakeAgentContextConnection:
         self,
         run_row: dict[str, object] | None,
         timeline_rows: list[dict[str, object]] | None = None,
+        thread_runs: list[dict[str, object]] | None = None,
+        resource_refs_by_run: dict[str, list[dict[str, object]]] | None = None,
+        selected_candidate: dict[str, object] | None = None,
     ) -> None:
         self.run_row = run_row
         self.timeline_rows = timeline_rows or []
+        self.thread_runs = thread_runs or []
+        self.resource_refs_by_run = resource_refs_by_run or {}
+        self.selected_candidate = selected_candidate
         self.executed: list[tuple[str, tuple[object, ...]]] = []
 
     def execute(self, query: str, values: tuple[object, ...]) -> FakeAgentContextCursor:
@@ -235,6 +241,12 @@ class FakeAgentContextConnection:
             return FakeAgentContextCursor(row=self.run_row)
         if "WITH timeline AS" in query:
             return FakeAgentContextCursor(rows=self.timeline_rows)
+        if "SELECT resource_refs" in query:
+            return FakeAgentContextCursor(rows=self.resource_refs_by_run.get(str(values[0]), []))
+        if "FROM agent_candidate_selections" in query:
+            return FakeAgentContextCursor(row=self.selected_candidate)
+        if "AND status = 'completed'" in query:
+            return FakeAgentContextCursor(rows=self.thread_runs)
         raise AssertionError(f"Unexpected query: {query}")
 
 
@@ -840,6 +852,7 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
             "prompt": "그 회의를 다시 연결해줘",
             "timezone": "Asia/Seoul",
             "planner_turn_count": 2,
+            "thread_id": None,
         },
         timeline_rows=[
             {
@@ -894,12 +907,270 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
         "user: 회의 상태 조회가 끝났나요?",
         "assistant: 현재 회의를 찾았습니다.",
     ]
-    timeline_query, timeline_values = connection.executed[1]
+    timeline_query, timeline_values = connection.executed[-1]
     assert "UNION ALL" in timeline_query
     assert "ORDER BY occurred_at DESC" in timeline_query
     assert "LIMIT 17" in timeline_query
     assert "ORDER BY occurred_at ASC" in timeline_query
     assert timeline_values == (job.run_id, job.run_id)
+
+
+def test_agent_repository_preserves_large_sql_erd_inspection_as_valid_json() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    projection_tables = [
+        {
+            "ref": f"t{index}",
+            "name": f"회의_관련_도메인_테이블_{index:03d}",
+            "comment": "회의 관련 기능 설명을 다음 Planner turn까지 온전히 보존합니다.",
+            "columns": [
+                {"name": "workspace_id", "foreignKey": True},
+                {"name": f"회의_속성_{index:03d}"},
+            ],
+        }
+        for index in range(1, 51)
+    ]
+    inspection_output = {
+        "sessionId": "44444444-4444-4444-4444-444444444444",
+        "sessionRevision": 7,
+        "modelFingerprint": "fnv1a32:1234abcd",
+        "projection": {
+            "tables": projection_tables,
+            "edges": [[f"t{index}", f"t{index + 1}"] for index in range(1, 50)],
+            "truncated": False,
+        },
+    }
+    serialized_inspection = json.dumps(inspection_output, ensure_ascii=False)
+    assert 3_000 < len(serialized_inspection) < 12_000
+    assert len(serialized_inspection.encode("utf-8")) > 12_000
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-3333-3333-333333333333",
+            "workspace_id": "22222222-2222-2222-2222-222222222222",
+            "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+            "status": "planning",
+            "prompt": "회의 관련 테이블만 집중 보기로 보여줘",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 1,
+            "thread_id": None,
+        },
+        timeline_rows=[
+            *[
+                {
+                    "item_kind": "message",
+                    "role": "user",
+                    "content": f"old context {index} " + "x" * 980,
+                    "tool_name": None,
+                    "output_json": None,
+                }
+                for index in range(1, 9)
+            ],
+            {
+                "item_kind": "tool_step",
+                "role": "tool",
+                "content": None,
+                "tool_name": "inspect_sql_erd_schema",
+                "output_json": inspection_output,
+            },
+        ],
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "turnSequence": 2,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    prefix = "tool inspect_sql_erd_schema: "
+    inspection_line = next(
+        line for line in context.planning_context.splitlines() if line.startswith(prefix)
+    )
+    restored_output = json.loads(inspection_line[len(prefix) :])
+    assert restored_output == inspection_output
+    assert restored_output["projection"]["tables"][-1]["ref"] == "t50"
+    assert len(context.planning_context) <= 12_000
+
+
+def test_agent_repository_preserves_complete_entries_from_large_general_tool_output() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    events = [
+        {
+            "id": index,
+            "title": f"회의 일정 {index}",
+            "description": "회의 안건과 참석자 정보를 포함한 일정입니다. " * 4,
+        }
+        for index in range(1, 41)
+    ]
+    tool_output = {
+        "start": "2026-07-01",
+        "end": "2026-07-31",
+        "count": len(events),
+        "events": events,
+    }
+    assert len(json.dumps(tool_output, ensure_ascii=False)) > 3_000
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-3333-3333-333333333333",
+            "workspace_id": "22222222-2222-2222-2222-222222222222",
+            "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+            "status": "planning",
+            "prompt": "이번 달 회의 일정을 요약해줘",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 1,
+            "thread_id": None,
+        },
+        timeline_rows=[
+            {
+                "item_kind": "tool_step",
+                "role": "tool",
+                "content": None,
+                "tool_name": "list_calendar_events",
+                "output_json": tool_output,
+            },
+        ],
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "turnSequence": 2,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    prefix = "tool list_calendar_events: "
+    tool_line = next(
+        line for line in context.planning_context.splitlines() if line.startswith(prefix)
+    )
+    restored_output = json.loads(tool_line[len(prefix) :])
+    assert restored_output["planningContextTruncated"] is True
+    assert restored_output["start"] == tool_output["start"]
+    assert restored_output["end"] == tool_output["end"]
+    assert restored_output["count"] == len(events)
+    assert restored_output["events"][0] == events[0]
+    assert 0 < len(restored_output["events"]) < len(events)
+    assert restored_output["events"] == events[: len(restored_output["events"])]
+    assert len(tool_line[len(prefix) :]) <= 3_000
+
+
+def test_agent_repository_adds_only_bounded_same_thread_memory() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    thread_runs = [
+        {"id": f"run-{index}", "prompt": f"prompt-{index}", "final_answer": f"answer-{index}"}
+        for index in range(1, 7)
+    ]
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-3333-3333-333333333333",
+            "workspace_id": "22222222-2222-2222-2222-222222222222",
+            "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+            "status": "planning",
+            "prompt": "그 회의록을 요약해줘",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 0,
+            "thread_id": "thread-1",
+        },
+        thread_runs=thread_runs,
+        resource_refs_by_run={
+            "run-6": [
+                {
+                    "resource_refs": [
+                        {
+                            "domain": "meeting",
+                            "resourceType": "meeting_report",
+                            "resourceId": "report-6",
+                            "label": "최근 회의",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    assert "previous user: prompt-1" in context.planning_context
+    assert "previous user: prompt-6" in context.planning_context
+    assert (
+        "previous resource meeting:meeting_report id=report-6 label=최근 회의"
+        in context.planning_context
+    )
+    assert len(context.planning_context.encode()) <= 12000
+    thread_query, thread_values = connection.executed[1]
+    assert "workspace_id = %s" in thread_query
+    assert "requested_by_user_id = %s" in thread_query
+    assert "LIMIT 6" in thread_query
+    assert thread_values == ("thread-1", job.run_id, job.workspace_id, job.requested_by_user_id)
+
+
+def test_agent_repository_exposes_only_safe_selected_candidate_context() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-3333-3333-333333333333",
+            "workspace_id": "22222222-2222-2222-2222-222222222222",
+            "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+            "status": "planning",
+            "prompt": "김진호를 선택했어",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 0,
+            "thread_id": None,
+        },
+        selected_candidate={
+            "resource_type": "workspace_member",
+            "label": "김진호",
+            "description": "member · ji***@example.com",
+            "status": None,
+        },
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    assert (
+        "selected meeting resource type=workspace_member label=김진호" in context.planning_context
+    )
+    assert "ji***@example.com" in context.planning_context
+    assert "candidateSelectionId" not in context.planning_context
+    assert "resource_id" not in context.planning_context
 
 
 def test_agent_repository_appends_clarification_only_after_state_transition() -> None:

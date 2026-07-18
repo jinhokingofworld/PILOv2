@@ -46,6 +46,7 @@ interface FocusSqlErdReason {
 interface FocusSqlErdTablesInput {
   sessionId: string;
   sessionRevision: number;
+  modelFingerprint: string;
   featureLabel: string;
   primaryTableRefs: string[];
   relatedTableRefs: string[];
@@ -76,6 +77,7 @@ const TARGET_MODES: SqlErdAgentTargetMode[] = [
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TABLE_REF_PATTERN = /^t[1-9][0-9]*$/;
+const MODEL_FINGERPRINT_PATTERN = /^fnv1a32:[0-9a-f]{8}$/;
 const FOCUS_CONFIDENCE_VALUES = ["high", "medium", "low"] as const;
 const MAX_PRIMARY_TABLES = 20;
 const MAX_RELATED_TABLES = 30;
@@ -98,6 +100,7 @@ const FOCUS_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
   required: [
     "sessionId",
     "sessionRevision",
+    "modelFingerprint",
     "featureLabel",
     "primaryTableRefs",
     "relatedTableRefs",
@@ -108,6 +111,10 @@ const FOCUS_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
   properties: {
     sessionId: { type: "string", format: "uuid" },
     sessionRevision: { type: "integer", minimum: 1 },
+    modelFingerprint: {
+      type: "string",
+      pattern: "^fnv1a32:[0-9a-f]{8}$"
+    },
     featureLabel: { type: "string", minLength: 1, maxLength: 100 },
     primaryTableRefs: {
       type: "array",
@@ -362,7 +369,7 @@ export class SqlErdAgentToolsService {
     return {
       name: "focus_sql_erd_tables",
       description:
-        "inspect_sql_erd_schema 결과의 compact table ref를 현재 session revision으로 검증하고 핵심 및 직접 관련 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session은 변경하지 않습니다.",
+        "inspect_sql_erd_schema 결과의 compact table ref를 model fingerprint로 검증하고 핵심 및 직접 관련 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session은 변경하지 않습니다.",
       riskLevel: "low",
       executionMode: "auto",
       inputSchema: FOCUS_SQL_ERD_INPUT_SCHEMA,
@@ -543,10 +550,12 @@ export class SqlErdAgentToolsService {
       session.modelJson,
       input.featureQuery
     );
+    const modelFingerprint = createSqlErdModelFingerprint(session.modelJson);
     return {
       outputSummary: this.toAgentJsonObject({
         sessionId: session.id,
         sessionRevision: session.revision,
+        modelFingerprint,
         title: session.title,
         dialect: session.dialect,
         tableCount: session.tableCount,
@@ -566,10 +575,9 @@ export class SqlErdAgentToolsService {
       context.workspaceId,
       input.sessionId
     );
-    if (session.revision !== input.sessionRevision) {
-      throw conflict(
-        "SQLtoERD session revision changed; inspect the schema again"
-      );
+    const modelFingerprint = createSqlErdModelFingerprint(session.modelJson);
+    if (modelFingerprint !== input.modelFingerprint) {
+      throw conflict("SQLtoERD model changed; inspect the schema again");
     }
     const resolved = resolveSqlErdAgentTableFocus(session.modelJson, input);
     const reasonByRef = new Map(
@@ -593,6 +601,7 @@ export class SqlErdAgentToolsService {
         action: "focused",
         sessionId: session.id,
         sessionRevision: session.revision,
+        modelFingerprint,
         title: session.title,
         featureLabel: input.featureLabel,
         confidence: input.confidence,
@@ -612,7 +621,7 @@ export class SqlErdAgentToolsService {
             version: 1,
             view: "table_focus",
             sessionRevision: session.revision,
-            modelFingerprint: createSqlErdModelFingerprint(session.modelJson),
+            modelFingerprint,
             featureLabel: input.featureLabel,
             primaryTableIds: resolved.primaryTableIds,
             relatedTableIds: resolved.relatedTableIds,
@@ -802,6 +811,7 @@ export class SqlErdAgentToolsService {
       [
         "sessionId",
         "sessionRevision",
+        "modelFingerprint",
         "featureLabel",
         "primaryTableRefs",
         "relatedTableRefs",
@@ -815,6 +825,14 @@ export class SqlErdAgentToolsService {
       Number(input.sessionRevision) < 1
     ) {
       throw badRequest("sessionRevision must be a positive integer");
+    }
+    const modelFingerprint = this.readBoundedText(
+      input.modelFingerprint,
+      32,
+      "modelFingerprint"
+    );
+    if (!MODEL_FINGERPRINT_PATTERN.test(modelFingerprint)) {
+      throw badRequest("modelFingerprint is invalid");
     }
     const primaryTableRefs = this.readTableRefs(
       input.primaryTableRefs,
@@ -866,6 +884,7 @@ export class SqlErdAgentToolsService {
     return {
       sessionId: this.readUuid(input.sessionId, "sessionId"),
       sessionRevision: Number(input.sessionRevision),
+      modelFingerprint,
       featureLabel: this.readBoundedText(
         input.featureLabel,
         100,

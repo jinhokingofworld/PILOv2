@@ -921,7 +921,8 @@ function createService({
   executionStarted = false,
   requestContext = null,
   toolCallLimitReached = false,
-  publisherError = null
+  publisherError = null,
+  candidateSelectionService = undefined
 } = {}) {
   const state = {
     run: {
@@ -958,7 +959,8 @@ function createService({
       toolRegistryService,
       undefined,
       undefined,
-      outboxPublisherService
+      outboxPublisherService,
+      candidateSelectionService
     ),
     workspaceService,
     database,
@@ -1534,6 +1536,108 @@ function formatterMeetingReport(index, overrides = {}) {
 }
 
 {
+  const resourceId = "99999999-9999-4999-8999-999999999999";
+  const candidateSelectionService = {
+    calls: [],
+    async createMeetingCandidates(context, toolStepId, candidates) {
+      this.calls.push({ context, toolStepId, candidates });
+      return [
+        {
+          candidateSelectionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          resourceType: "workspace_member",
+          label: "김진호",
+          description: "member · ji*******@example.com",
+          status: null
+        }
+      ];
+    }
+  };
+  const planner = plannerOutput({
+    toolName: "resolve_meeting_resource",
+    executionMode: "contextual",
+    requiresConfirmation: null,
+    input: {
+      resourceType: "workspace_member",
+      displayName: "김진호"
+    }
+  });
+  const { service, loggingService } = createService({
+    planner,
+    candidateSelectionService,
+    registryState: {
+      name: "resolve_meeting_resource",
+      executionMode: "contextual",
+      prepareExecution: {
+        kind: "needs_clarification",
+        outputSummary: {
+          status: "needs_clarification",
+          question: "김진호 중 한 명을 선택해 주세요."
+        },
+        resourceRefs: [],
+        candidateResources: [
+          {
+            reference: {
+              resourceType: "workspace_member",
+              resourceId
+            },
+            candidate: {
+              resourceType: "workspace_member",
+              label: "김진호",
+              description: "member · ji*******@example.com",
+              status: null
+            }
+          }
+        ]
+      }
+    }
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "waiting_user_input");
+  assert.deepEqual(candidateSelectionService.calls, [
+    {
+      context: {
+        currentUserId: USER_ID,
+        workspaceId: WORKSPACE_ID,
+        runId: RUN_ID,
+        requestContext: null
+      },
+      toolStepId: STEP_ID,
+      candidates: [
+        {
+          reference: {
+            resourceType: "workspace_member",
+            resourceId
+          },
+          candidate: {
+            resourceType: "workspace_member",
+            label: "김진호",
+            description: "member · ji*******@example.com",
+            status: null
+          }
+        }
+      ]
+    }
+  ]);
+  const outputSummary = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  ).input.outputSummary;
+  assert.deepEqual(outputSummary.candidateSelections, [
+    {
+      candidateSelectionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      resourceType: "workspace_member",
+      label: "김진호",
+      description: "member · ji*******@example.com",
+      status: null
+    }
+  ]);
+  assert.equal(JSON.stringify(outputSummary).includes(resourceId), false);
+}
+
+{
   const { service, loggingService, toolRegistryService } = createService({
     registryState: {
       missingTool: true
@@ -1633,6 +1737,7 @@ function formatterMeetingReport(index, overrides = {}) {
     "create_calendar_event",
     "update_calendar_event",
     "list_meeting_rooms",
+    "resolve_meeting_resource",
     "get_active_meeting",
     "get_meeting_participants",
     "start_meeting_in_room",
@@ -2020,6 +2125,13 @@ function formatterMeetingReport(index, overrides = {}) {
   const outputSummary = loggingService.calls[1].input.outputSummary;
 
   assert.equal(result.status, "skipped");
+  assert.deepEqual(loggingService.calls[0].input.inputSummary.input, {
+    compatibility: "legacy_persisted_planner_input"
+  });
+  assert.doesNotMatch(
+    JSON.stringify(loggingService.calls[0].input.inputSummary),
+    new RegExp(REPORT_ID)
+  );
   assert.equal(meetingService.calls[0].method, "getReport");
   assert.equal(outputSummary.report.reportId, REPORT_ID);
   assert.equal("transcript" in outputSummary.report, false);

@@ -126,7 +126,11 @@ export class AgentOutboxPublisherService
         requestContext: this.toPlannerRequestContext(claim.request_context_json),
         turnSequence: Number(claim.turn_sequence),
         toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
-        tools: this.buildToolSchemaSnapshot(claim.request_context_json)
+        tools: this.buildToolSchemaSnapshot(claim.request_context_json),
+        toolCapabilityCatalog:
+          this.agentToolRegistryService.listCapabilityCatalogForContext(
+            claim.request_context_json
+          )
       });
       await this.markDelivered(claim);
     } catch {

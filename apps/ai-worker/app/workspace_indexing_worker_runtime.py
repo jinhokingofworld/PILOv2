@@ -359,7 +359,7 @@ class DocumentEmbeddingProcessor:
 
         try:
             source = self.repository.get_document_embedding_source(job)
-            if source is None or source.snapshot_id != job["snapshot_id"]:
+            if source is None or source.snapshot_id != str(job["snapshot_id"]):
                 self.repository.supersede_document_embedding_job(str(job["id"]))
                 return "document_embedding_superseded"
 

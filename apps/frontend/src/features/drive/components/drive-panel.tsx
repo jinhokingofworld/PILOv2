@@ -69,6 +69,7 @@ import type { DriveItem, DriveListPayload } from "@/features/drive/types";
 import { cn } from "@/lib/utils";
 
 import { DriveDocumentEditor } from "./document-editor";
+import { getPreviewFileKind, PdfPreviewDialog } from "./pdf-preview-dialog";
 
 type DriveStatus = "idle" | "loading" | "success" | "error";
 
@@ -281,6 +282,7 @@ function DriveItemRow({
   onOpenDocument,
   onOpenFolder,
   onOpenMove,
+  onOpenPreview,
   onOpenRename
 }: {
   activeActionItemId: string | null;
@@ -290,24 +292,39 @@ function DriveItemRow({
   onOpenDocument: (item: DriveItem) => void;
   onOpenFolder: (item: DriveItem) => void;
   onOpenMove: (item: DriveItem) => void;
+  onOpenPreview: (item: DriveItem) => void;
   onOpenRename: (item: DriveItem) => void;
 }) {
   const isFolder = item.itemType === "folder";
   const isDocument = item.itemType === "document";
+  const isPreviewableFile = item.itemType === "file" && getPreviewFileKind(item.mimeType) !== null;
+  const isOpenable = isFolder || isDocument || isPreviewableFile;
   const isBusy = activeActionItemId === item.id;
 
   return (
     <li
       className={cn(
         "grid gap-3 border-b px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_3rem] md:items-center",
-        (isFolder || isDocument) && "transition hover:bg-muted/40"
+        isOpenable && "transition hover:bg-muted/40"
       )}
     >
-      {isFolder || isDocument ? (
+      {isOpenable ? (
         <button
           type="button"
           className="flex min-w-0 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => (isFolder ? onOpenFolder(item) : onOpenDocument(item))}
+          onClick={() => {
+            if (isFolder) {
+              onOpenFolder(item);
+              return;
+            }
+
+            if (isDocument) {
+              onOpenDocument(item);
+              return;
+            }
+
+            onOpenPreview(item);
+          }}
         >
           <DriveItemName item={item} />
         </button>
@@ -913,6 +930,8 @@ export function DrivePanel() {
     useState(0);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [isMoving, setIsMoving] = useState(false);
+  const [previewFile, setPreviewFile] = useState<DriveItem | null>(null);
+  const [previewPageNumber, setPreviewPageNumber] = useState(1);
   const [deleteItem, setDeleteItem] = useState<DriveItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -1299,6 +1318,39 @@ export function DrivePanel() {
     }
   }
 
+  function openPreview(item: DriveItem) {
+    setPreviewPageNumber(1);
+    setPreviewFile(item);
+  }
+
+  const openWorkspaceLocationPdf = useCallback(
+    async (fileId: string, folderId: string | null) => {
+      if (!canUseDrive) return false;
+      try {
+        const nextDriveData = await driveClient.listItems(workspaceId, {
+          parentId: folderId
+        });
+        const pdf = nextDriveData.items.find(
+          (item) =>
+            item.id === fileId &&
+            item.itemType === "file" &&
+            item.mimeType === "application/pdf"
+        );
+        if (!pdf) return false;
+        loadedDriveParentIdRef.current = { folderId, workspaceId };
+        setCurrentParentId(folderId);
+        setDriveData(nextDriveData);
+        setStatus("success");
+        setError(null);
+        setPreviewFile(pdf);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [canUseDrive, driveClient, workspaceId]
+  );
+
   function openMoveSheet(item: DriveItem) {
     setMoveItem(item);
     setMoveDestinationParentId(item.parentId);
@@ -1467,12 +1519,29 @@ export function DrivePanel() {
     }
   }
 
+  const workspaceLocationAdapter = (
+    <DriveWorkspaceLocationAdapter
+      documentId={documentId}
+      folderId={currentParentId}
+      listRef={driveListRef}
+      loadFolder={loadWorkspaceLocationFolder}
+      openPdf={openWorkspaceLocationPdf}
+      pdfFileId={previewFile?.id ?? null}
+      pdfPageNumber={previewPageNumber}
+      setPdfPageNumber={setPreviewPageNumber}
+      workspaceId={workspaceId}
+    />
+  );
+
   if (documentId) {
     return (
-      <DriveDocumentEditor
-        documentId={documentId}
-        onClose={() => updateDocumentLocation(null)}
-      />
+      <>
+        {workspaceLocationAdapter}
+        <DriveDocumentEditor
+          documentId={documentId}
+          onClose={() => updateDocumentLocation(null)}
+        />
+      </>
     );
   }
 
@@ -1481,12 +1550,7 @@ export function DrivePanel() {
 
   return (
     <div className="flex min-h-[calc(100vh-6.5rem)] flex-col gap-4">
-      <DriveWorkspaceLocationAdapter
-        folderId={currentParentId}
-        listRef={driveListRef}
-        loadFolder={loadWorkspaceLocationFolder}
-        workspaceId={workspaceId}
-      />
+      {workspaceLocationAdapter}
       <section className="flex flex-col gap-4">
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
           <div className="min-w-0">
@@ -1678,6 +1742,7 @@ export function DrivePanel() {
                         onOpenDocument={(document) => updateDocumentLocation(document.id)}
                         onOpenFolder={(folder) => setCurrentParentId(folder.id)}
                         onOpenMove={openMoveSheet}
+                        onOpenPreview={openPreview}
                         onOpenRename={openRenameSheet}
                       />
                     ))}
@@ -1733,6 +1798,20 @@ export function DrivePanel() {
         item={deleteItem}
         onConfirm={() => void handleConfirmDelete()}
         onOpenChange={handleDeleteOpenChange}
+      />
+
+      <PdfPreviewDialog
+        fileId={previewFile?.id ?? ""}
+        fileName={previewFile?.name ?? ""}
+        mimeType={previewFile?.mimeType ?? null}
+        open={previewFile !== null}
+        onPageNumberChange={setPreviewPageNumber}
+        pageNumber={previewPageNumber}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewFile(null);
+          }
+        }}
       />
     </div>
   );

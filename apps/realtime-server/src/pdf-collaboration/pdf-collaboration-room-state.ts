@@ -132,17 +132,13 @@ export function createPdfCollaborationRoomState() {
     },
     commitStroke(
       room: PdfCollaborationRoomRef,
-      stroke: Omit<PdfCollaborationStroke, "color">,
+      stroke: PdfCollaborationStroke,
     ) {
       const state = getOrCreateRoom(room);
       const strokes = state.strokesByPage.get(stroke.pageNumber) ?? new Map();
-      const committed: PdfCollaborationStroke = {
-        ...stroke,
-        color: stroke.tool === "highlighter" ? "#facc15" : "#111827",
-      };
-      strokes.set(committed.id, committed);
-      state.strokesByPage.set(committed.pageNumber, strokes);
-      return committed;
+      strokes.set(stroke.id, stroke);
+      state.strokesByPage.set(stroke.pageNumber, strokes);
+      return stroke;
     },
     removeStroke(room: PdfCollaborationRoomRef, pageNumber: number, strokeId: string) {
       const strokes = getRoom(room)?.strokesByPage.get(pageNumber);

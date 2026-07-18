@@ -24,8 +24,19 @@ import {
   type SqlErdCanvasTool
 } from "@/features/sql-erd/components/sql-erd-canvas-toolbar";
 import { SqlErdTableFocusProvider } from "@/features/sql-erd/components/sql-erd-table-focus-context";
+import { SqlErdSelectionContextProvider } from "@/features/sql-erd/components/sql-erd-selection-context";
 import { SqlErdRealtimeBridge } from "@/features/sql-erd/realtime/sql-erd-realtime-bridge";
-import type { SqlErdRealtimeConfig } from "@/features/sql-erd/realtime/sql-erd-realtime-types";
+import {
+  createSqlErdTableMoveCompletionKey,
+  resolveSqlErdRemoteTableMovePreview,
+  shouldClearSqlErdTableMovePreviewAfterDrop,
+  type SqlErdRemoteTableMovePreviewState,
+  type SqlErdTableMoveCommit
+} from "@/features/sql-erd/realtime/sql-erd-table-move-preview";
+import type {
+  SqlErdRealtimeConfig,
+  SqlErdTableMovePreview
+} from "@/features/sql-erd/realtime/sql-erd-realtime-types";
 import { useSqlErdPresence } from "@/features/sql-erd/realtime/use-sql-erd-presence";
 import { commerceSqltoerdFixture } from "@/features/sql-erd/fixtures/commerce";
 import {
@@ -102,8 +113,7 @@ import {
   isSqlErdTableShape,
   type SqlErdColumnConnectStartEventDetail,
   type SqlErdTableConnectStartEventDetail,
-  type SqlErdTableShape,
-  type SqlErdTableSelectionState
+  type SqlErdTableShape
 } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 import type {
   SqlErdSelection,
@@ -153,20 +163,38 @@ import {
 } from "@/features/sql-erd/utils/agent-table-focus";
 import {
   areSqlErdSelectionsEqual,
+  getSqlErdContextRelationIds,
   getSqlErdSelectionFromSelectedShapes,
-  selectSqlErdCanvasShapeAtPoint
+  resolveSqlErdTableInteractionSelection,
+  selectSqlErdCanvasShapeAtPoint,
+  shouldHandleSqlErdSchemaDeleteShortcut
 } from "@/features/sql-erd/utils/canvas-selection";
 import { cn } from "@/lib/utils";
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 import { SqlErdWorkspaceLocationAdapter } from "@/features/sql-erd/sql-erd-workspace-location-adapter";
 
+export type SqlErdLayoutPatchContext = {
+  clientOperationId?: string;
+};
+
 type SqlErdCanvasProps = {
   className?: string;
+  committedTableMoves?: SqlErdTableMoveCommit[];
+  enableTableMovePreview?: boolean;
   isReadOnly?: boolean;
+  isInspectorOpen?: boolean;
   layoutJson?: SqltoerdLayoutJsonV1;
   modelJson?: SqltoerdModelJsonV1;
-  onLayoutPatch?: (patch: SqltoerdLayoutPatch) => void;
+  onLayoutPatch?: (
+    patch: SqltoerdLayoutPatch,
+    context?: SqlErdLayoutPatchContext
+  ) => boolean | void;
+  onDeleteForeignKey?: (relationId: string) => void;
+  onSchemaDelete?: (
+    selection: Extract<SqlErdSelection, { type: "table" | "column" }>
+  ) => void;
   onSelectionChange?: (selection: SqlErdSelection) => void;
+  onInspectorOpenChange?: (isOpen: boolean) => void;
   pinNavigationRequestId?: number;
   pinnedTableId?: string | null;
   realtimeConfig?: SqlErdRealtimeConfig | null;
@@ -1289,6 +1317,120 @@ function SqlErdSelectionSync({
   return null;
 }
 
+function SqlErdSchemaDeleteBridge({
+  onDeleteForeignKey,
+  onSchemaDelete,
+  selectedSqlErdObject
+}: {
+  onDeleteForeignKey?: (relationId: string) => void;
+  onSchemaDelete: (
+    selection: Extract<SqlErdSelection, { type: "table" | "column" }>
+  ) => void;
+  selectedSqlErdObject: SqlErdSelection;
+}) {
+  const editor = useEditor();
+  const onDeleteForeignKeyRef = useRef(onDeleteForeignKey);
+  const onSchemaDeleteRef = useRef(onSchemaDelete);
+  const selectedSqlErdObjectRef = useRef(selectedSqlErdObject);
+
+  useEffect(() => {
+    onDeleteForeignKeyRef.current = onDeleteForeignKey;
+    onSchemaDeleteRef.current = onSchemaDelete;
+    selectedSqlErdObjectRef.current = selectedSqlErdObject;
+  }, [onDeleteForeignKey, onSchemaDelete, selectedSqlErdObject]);
+
+  useEffect(() => {
+    function isEditableTarget(target: EventTarget | null) {
+      return (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      );
+    }
+
+    function hasMatchingSelectedSchemaShape() {
+      const selection = selectedSqlErdObjectRef.current;
+      const selectedShape = editor.getOnlySelectedShape();
+
+      if (
+        (selection.type === "table" || selection.type === "column") &&
+        isSqlErdTableShape(selectedShape) &&
+        selectedShape.props.tableId === selection.tableId
+      ) {
+        return true;
+      }
+
+      return (
+        selection.type === "relation" &&
+        isSqlErdRelationShape(selectedShape) &&
+        selectedShape.props.relationId === selection.relationId
+      );
+    }
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      const selection = selectedSqlErdObjectRef.current;
+
+      if (
+        selection.type !== "table" &&
+        selection.type !== "column" &&
+        selection.type !== "relation"
+      ) {
+        return;
+      }
+
+      if (
+        !shouldHandleSqlErdSchemaDeleteShortcut({
+          isEditableTarget: isEditableTarget(event.target),
+          key: event.key,
+          selection
+        }) ||
+        !hasMatchingSelectedSchemaShape()
+      ) {
+        return;
+      }
+
+      if (selection.type === "relation" && !onDeleteForeignKeyRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (selection.type === "relation") {
+        onDeleteForeignKeyRef.current?.(selection.relationId);
+      } else {
+        onSchemaDeleteRef.current(selection);
+      }
+    }
+
+    const removeBeforeDeleteHandler =
+      editor.sideEffects.registerBeforeDeleteHandler(
+        "shape",
+        (shape, source) => {
+          if (
+            source === "user" &&
+            (isSqlErdTableShape(shape) ||
+              (isSqlErdRelationShape(shape) &&
+                Boolean(onDeleteForeignKeyRef.current))) &&
+            hasMatchingSelectedSchemaShape()
+          ) {
+            return false;
+          }
+        }
+      );
+
+    window.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      removeBeforeDeleteHandler();
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [editor]);
+
+  return null;
+}
+
 function SqlErdTableFocusInteractionGuard({
   focus
 }: {
@@ -1405,49 +1547,25 @@ function SqlErdTableFocusInteractionGuard({
   return null;
 }
 
-function getSelectedColumnIdForTable(
-  selection: SqlErdSelection,
-  tableId: string
-) {
-  return selection.type === "column" && selection.tableId === tableId
-    ? selection.columnId
-    : null;
-}
-
-function getSelectedStateForTable(
-  selection: SqlErdSelection,
-  tableId: string
-): SqlErdTableSelectionState {
-  if (selection.type === "table" && selection.tableId === tableId) {
-    return "table";
-  }
-
-  if (selection.type === "column" && selection.tableId === tableId) {
-    return "column";
-  }
-
-  return "none";
-}
-
 function syncSqlErdSelectedColumnShapes(
   editor: Editor,
   selectedSqlErdObject: SqlErdSelection
 ) {
   const updates: TLShapePartial<SqlErdTableShape>[] = [];
+  const selectedShapeIds = new Set(editor.getSelectedShapeIds());
 
   for (const shape of editor.getCurrentPageShapes()) {
     if (!isSqlErdTableShape(shape)) {
       continue;
     }
 
-    const selectedColumnId = getSelectedColumnIdForTable(
-      selectedSqlErdObject,
-      shape.props.tableId
-    );
-    const selectedState = getSelectedStateForTable(
-      selectedSqlErdObject,
-      shape.props.tableId
-    );
+    const isShapeSelected = selectedShapeIds.has(shape.id);
+    const { selectedColumnId, selectedState } =
+      resolveSqlErdTableInteractionSelection({
+        isShapeSelected,
+        selection: selectedSqlErdObject,
+        tableId: shape.props.tableId
+      });
 
     if (
       shape.props.selectedColumnId === selectedColumnId &&
@@ -1487,8 +1605,130 @@ function SqlErdSelectedColumnSync({
   const editor = useEditor();
 
   useEffect(() => {
-    syncSqlErdSelectedColumnShapes(editor, selectedSqlErdObject);
+    const syncSelection = () => {
+      syncSqlErdSelectedColumnShapes(editor, selectedSqlErdObject);
+    };
+    syncSelection();
+    const removeListener = editor.store.listen(syncSelection, {
+      scope: "all"
+    });
+
+    return removeListener;
   }, [editor, selectedSqlErdObject]);
+
+  return null;
+}
+
+function SqlErdRemoteTableMovePreviewSync({
+  commits,
+  dismissPreviews,
+  layoutJson,
+  previews
+}: {
+  commits: SqlErdTableMoveCommit[];
+  dismissPreviews: (
+    previews: Pick<
+      SqlErdTableMovePreview,
+      "actorUserId" | "dragId" | "sentAt" | "tableId"
+    >[]
+  ) => void;
+  layoutJson: SqltoerdLayoutJsonV1;
+  previews: SqlErdTableMovePreview[];
+}) {
+  const editor = useEditor();
+  const previewStateByTableIdRef = useRef(
+    new Map<string, SqlErdRemoteTableMovePreviewState>()
+  );
+
+  useEffect(() => {
+    const latestPreviewByTableId = new Map<string, SqlErdTableMovePreview>();
+    previews.forEach((preview) => {
+      const current = latestPreviewByTableId.get(preview.tableId);
+      if (
+        !current ||
+        Date.parse(preview.sentAt) >= Date.parse(current.sentAt)
+      ) {
+        latestPreviewByTableId.set(preview.tableId, preview);
+      }
+    });
+
+    const affectedTableIds = new Set([
+      ...previewStateByTableIdRef.current.keys(),
+      ...latestPreviewByTableId.keys()
+    ]);
+    const canonicalLayoutByTableId = new Map(
+      layoutJson.tableLayouts.map((layout) => [layout.tableId, layout])
+    );
+    const completedDragKeys = new Set(
+      commits.flatMap((commit) =>
+        commit.tableIds.map((tableId) =>
+          createSqlErdTableMoveCompletionKey(
+            commit.actorUserId,
+            tableId,
+            commit.dragId
+          )
+        )
+      )
+    );
+    const updates: TLShapePartial<SqlErdTableShape>[] = [];
+    const nextPreviewStateByTableId = new Map<
+      string,
+      SqlErdRemoteTableMovePreviewState
+    >();
+    const previewsToDismiss: Pick<
+      SqlErdTableMovePreview,
+      "actorUserId" | "dragId" | "sentAt" | "tableId"
+    >[] = [];
+
+    editor.getCurrentPageShapes().forEach((shape) => {
+      if (
+        !isSqlErdTableShape(shape) ||
+        !affectedTableIds.has(shape.props.tableId)
+      ) {
+        return;
+      }
+
+      const resolution = resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition:
+          canonicalLayoutByTableId.get(shape.props.tableId) ?? null,
+        completedDragKeys,
+        currentPosition: { x: shape.x, y: shape.y },
+        preview: latestPreviewByTableId.get(shape.props.tableId) ?? null,
+        previousState:
+          previewStateByTableIdRef.current.get(shape.props.tableId) ?? null
+      });
+      if (resolution.nextState) {
+        nextPreviewStateByTableId.set(
+          shape.props.tableId,
+          resolution.nextState
+        );
+      }
+      if (resolution.dismissPreview) {
+        previewsToDismiss.push(resolution.dismissPreview);
+      }
+      if (
+        shape.x === resolution.position.x &&
+        shape.y === resolution.position.y
+      ) {
+        return;
+      }
+
+      updates.push({
+        id: shape.id,
+        type: SQLTOERD_TABLE_SHAPE_TYPE,
+        x: resolution.position.x,
+        y: resolution.position.y
+      });
+    });
+
+    if (updates.length) {
+      editor.store.mergeRemoteChanges(() => {
+        editor.updateShapes(updates);
+      });
+    }
+    previewStateByTableIdRef.current = nextPreviewStateByTableId;
+    dismissPreviews(previewsToDismiss);
+  }, [commits, dismissPreviews, editor, layoutJson, previews]);
 
   return null;
 }
@@ -2607,16 +2847,32 @@ function SqlErdCanvasAnnotationSync({
 }
 
 type SqlErdLayoutSyncProps = {
-  onLayoutPatch: (patch: SqltoerdLayoutPatch) => void;
+  cancelPendingTableMovePreviews: (tableIds: string[]) => void;
+  clearTableMovePreviews: (tableIds: string[]) => void;
+  onLayoutPatch: (
+    patch: SqltoerdLayoutPatch,
+    context?: SqlErdLayoutPatchContext
+  ) => boolean | void;
+  sendTableMovePreview?: (preview: {
+    dragId: string;
+    tableId: string;
+    x: number;
+    y: number;
+  }) => void;
   tablePositionChanges: SqlErdTablePositionChangeBuffer;
 };
 
 function SqlErdLayoutSync({
+  cancelPendingTableMovePreviews,
+  clearTableMovePreviews,
   onLayoutPatch,
+  sendTableMovePreview,
   tablePositionChanges
 }: SqlErdLayoutSyncProps) {
   const editor = useEditor();
   const onLayoutPatchRef = useRef(onLayoutPatch);
+  const activeTableMoveDragIdRef = useRef<string | null>(null);
+  const previewedTableIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
     onLayoutPatchRef.current = onLayoutPatch;
@@ -2633,13 +2889,30 @@ function SqlErdLayoutSync({
           return;
         }
 
-        onLayoutPatchRef.current({ tablePositions });
+        const tableIds = tablePositions.map(({ tableId }) => tableId);
+        const dragId = activeTableMoveDragIdRef.current;
+        activeTableMoveDragIdRef.current = null;
+        cancelPendingTableMovePreviews(tableIds);
+        tableIds.forEach((tableId) => {
+          previewedTableIdsRef.current.delete(tableId);
+        });
+        const scheduled = onLayoutPatchRef.current(
+          { tablePositions },
+          dragId ? { clientOperationId: dragId } : undefined
+        );
+        if (shouldClearSqlErdTableMovePreviewAfterDrop(scheduled)) {
+          clearTableMovePreviews(tableIds);
+        }
       });
     }
 
     function cancelPendingLayoutSync() {
       window.requestAnimationFrame(() => {
         tablePositionChanges.cancel();
+        activeTableMoveDragIdRef.current = null;
+        const tableIds = [...previewedTableIdsRef.current];
+        previewedTableIdsRef.current.clear();
+        clearTableMovePreviews(tableIds);
       });
     }
 
@@ -2650,7 +2923,23 @@ function SqlErdLayoutSync({
     }
 
     const removeStoreListener = editor.store.listen((entry) => {
-      tablePositionChanges.record(entry);
+      tablePositionChanges.record(entry).forEach((tableId) => {
+        const tablePosition = getSqlErdTablePositionFromEditor(editor, tableId);
+        if (!tablePosition) return;
+
+        if (!sendTableMovePreview) return;
+
+        const dragId =
+          activeTableMoveDragIdRef.current ?? crypto.randomUUID();
+        activeTableMoveDragIdRef.current = dragId;
+        previewedTableIdsRef.current.add(tableId);
+        sendTableMovePreview({
+          dragId,
+          tableId,
+          x: tablePosition.x,
+          y: tablePosition.y
+        });
+      });
     }, {
       scope: "document",
       source: "user"
@@ -2664,10 +2953,19 @@ function SqlErdLayoutSync({
       window.removeEventListener("pointercancel", cancelPendingLayoutSync);
       window.removeEventListener("keyup", handleTablePositionKeyUp);
       removeStoreListener();
+      clearTableMovePreviews([...previewedTableIdsRef.current]);
+      previewedTableIdsRef.current.clear();
+      activeTableMoveDragIdRef.current = null;
       tablePositionChanges.cancel();
       tablePositionChanges.clearSuppressed();
     };
-  }, [editor, tablePositionChanges]);
+  }, [
+    cancelPendingTableMovePreviews,
+    clearTableMovePreviews,
+    editor,
+    sendTableMovePreview,
+    tablePositionChanges
+  ]);
 
   return null;
 }
@@ -2684,10 +2982,16 @@ function SqlErdCanvasReadOnlyBridge({ isReadOnly }: { isReadOnly: boolean }) {
 
 export function SqlErdCanvas({
   className,
+  committedTableMoves = [],
+  enableTableMovePreview = false,
   isReadOnly = false,
+  isInspectorOpen = false,
   layoutJson = commerceSqltoerdFixture.layoutJson,
   modelJson = commerceSqltoerdFixture.modelJson,
   onLayoutPatch: onLayoutPatchProp,
+  onDeleteForeignKey,
+  onSchemaDelete,
+  onInspectorOpenChange,
   onSelectionChange,
   pinNavigationRequestId = 0,
   pinnedTableId = null,
@@ -2738,6 +3042,10 @@ export function SqlErdCanvas({
   const canvasContentKey = useMemo(
     () => createSqlErdCanvasContentKey({ modelJson, sessionId }),
     [modelJson, sessionId]
+  );
+  const contextRelationIds = useMemo(
+    () => getSqlErdContextRelationIds(modelJson, selectedSqlErdObject),
+    [modelJson, selectedSqlErdObject]
   );
   const handleMount = useCallback(
     (editor: Editor) => {
@@ -3115,7 +3423,9 @@ export function SqlErdCanvas({
       }
 
       if (eventTarget.closest("input, textarea, select, button")) {
-        selectSqlErdCanvasShapeAtPoint(editor, pagePoint);
+        selectSqlErdCanvasShapeAtPoint(editor, pagePoint, {
+          toggle: event.shiftKey
+        });
         return;
       }
 
@@ -3166,6 +3476,18 @@ export function SqlErdCanvas({
         event.preventDefault();
         event.stopPropagation();
         return;
+      }
+
+      if (
+        toolRef.current === null &&
+        !editor.getShapeAtPoint(pagePoint, {
+          hitInside: true,
+          hitLabels: true,
+          hitLocked: true
+        })
+      ) {
+        editor.selectNone();
+        onSelectionChange?.({ type: "none" });
       }
 
       const annotationTarget = eventTarget.closest<HTMLElement>(
@@ -3297,8 +3619,9 @@ export function SqlErdCanvas({
       onPointerMoveCapture={handlePointerMoveCapture}
       onPointerUpCapture={handlePointerUpCapture}
     >
-      <SqlErdTableFocusProvider focus={tableFocus}>
-        <TldrawSurface
+      <SqlErdSelectionContextProvider relationIds={contextRelationIds}>
+        <SqlErdTableFocusProvider focus={tableFocus}>
+          <TldrawSurface
           className={cn(
             "h-full w-full bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]",
             className
@@ -3309,13 +3632,25 @@ export function SqlErdCanvas({
           onPointerDownCapture={handlePointerDownCapture}
           shapeUtils={sqlErdShapeUtils}
         >
-        {sessionId ? (
-          <SqlErdWorkspaceLocationAdapter sessionId={sessionId} />
+        {sessionId && onInspectorOpenChange && onSelectionChange ? (
+          <SqlErdWorkspaceLocationAdapter
+            isInspectorOpen={isInspectorOpen}
+            onInspectorOpenChange={onInspectorOpenChange}
+            onSelectionChange={onSelectionChange}
+            selectedSqlErdObject={selectedSqlErdObject}
+            sessionId={sessionId}
+          />
         ) : null}
         <SqlErdCanvasReadOnlyBridge isReadOnly={isReadOnly} />
         <SqlErdCanvasShapeSync
           canvasContentKey={canvasContentKey}
           shapes={shapes}
+        />
+        <SqlErdRemoteTableMovePreviewSync
+          commits={committedTableMoves}
+          dismissPreviews={sqlErdPresence.dismissRemoteTableMovePreviews}
+          layoutJson={layoutJson}
+          previews={sqlErdPresence.remoteTableMovePreviews}
         />
         <SqlErdTableFocusInteractionGuard focus={tableFocus} />
         <SqlErdRelationLayoutSync />
@@ -3328,6 +3663,13 @@ export function SqlErdCanvas({
           pinnedTableId={pinnedTableId}
         />
         <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
+        {onSchemaDelete ? (
+          <SqlErdSchemaDeleteBridge
+            onDeleteForeignKey={onDeleteForeignKey}
+            onSchemaDelete={onSchemaDelete}
+            selectedSqlErdObject={selectedSqlErdObject}
+          />
+        ) : null}
         {sqlErdPresence.enabled ? (
           <SqlErdRealtimeBridge
             currentUserId={sqlErdPresence.currentUserId}
@@ -3345,7 +3687,16 @@ export function SqlErdCanvas({
               onLayoutPatch={onLayoutPatch}
             />
             <SqlErdLayoutSync
+              cancelPendingTableMovePreviews={
+                sqlErdPresence.cancelPendingTableMovePreviews
+              }
+              clearTableMovePreviews={sqlErdPresence.clearTableMovePreviews}
               onLayoutPatch={onLayoutPatch}
+              sendTableMovePreview={
+                enableTableMovePreview
+                  ? sqlErdPresence.sendTableMovePreview
+                  : undefined
+              }
               tablePositionChanges={tablePositionChanges}
             />
             <SqlErdCanvasAnnotationSync
@@ -3360,8 +3711,9 @@ export function SqlErdCanvas({
             selectedSqlErdObject={selectedSqlErdObject}
           />
         ) : null}
-        </TldrawSurface>
-      </SqlErdTableFocusProvider>
+          </TldrawSurface>
+        </SqlErdTableFocusProvider>
+      </SqlErdSelectionContextProvider>
       {onLayoutPatch && canvasEditor ? (
         <SqlErdCanvasToolbar
           editor={canvasEditor}

@@ -58,10 +58,10 @@ function ProjectFieldValue({
 
   return (
     <div className="rounded-lg border bg-muted/20 px-3 py-2">
-      <dt className="text-xs font-medium text-muted-foreground">
+      <dt className="text-[18px] font-medium text-muted-foreground">
         {value.fieldName}
       </dt>
-      <dd className="mt-1 break-words text-sm">{displayValue}</dd>
+      <dd className="mt-1 break-words text-[21px]">{displayValue}</dd>
     </div>
   );
 }
@@ -303,10 +303,10 @@ export function BoardIssueSheet({
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/20 backdrop-blur-xs transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <DialogPrimitive.Popup className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(900px,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-[1080px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl shadow-slate-950/20 outline-none transition duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
           <div className="border-b p-5 pr-14">
-            <DialogPrimitive.Title className="font-heading text-lg font-semibold">
+            <DialogPrimitive.Title className="font-heading text-[27px] font-semibold leading-9">
               이슈 상세
             </DialogPrimitive.Title>
-            <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+            <DialogPrimitive.Description className="mt-1 text-[21px] leading-7 text-muted-foreground">
               Board 카드와 연결 가능한 관련 PR 정보를 확인합니다.
             </DialogPrimitive.Description>
           </div>
@@ -325,16 +325,21 @@ export function BoardIssueSheet({
             <X className="size-4" />
           </DialogPrimitive.Close>
 
-          <div className="flex-1 overflow-y-auto px-5 py-5">
+          <div
+            className="flex-1 overflow-y-auto px-5 py-5"
+            data-workspace-follow-board-id={!isEditing ? boardId : undefined}
+            data-workspace-follow-issue-id={!isEditing ? issueId ?? undefined : undefined}
+            data-workspace-follow-surface={!isEditing ? "board-issue-sheet" : undefined}
+          >
           {status === "loading" ? (
-            <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">
+            <div className="grid min-h-64 place-items-center text-[21px] text-muted-foreground">
               <span className="inline-flex items-center gap-2">
                 <Loader2 className="size-4 animate-spin" />
                 이슈 상세를 불러오는 중입니다.
               </span>
             </div>
           ) : status === "error" ? (
-            <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-[21px] text-destructive">
               {error}
             </p>
           ) : issue ? (
@@ -342,15 +347,16 @@ export function BoardIssueSheet({
               <section className="grid gap-3 rounded-lg border bg-muted/20 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold text-muted-foreground">
+                    <p className="text-[18px] font-semibold text-muted-foreground">
                       {formatBoardIssueNumber(issue)} -{" "}
                       {formatBoardIssueState(issue.state)}
                     </p>
                     {isEditing ? (
                       <div className="mt-2 grid gap-2">
-                        <label className="grid gap-1 text-sm font-medium">
+                        <label className="grid gap-1 text-[21px] font-medium">
                           제목
                           <Input
+                            className="h-[54px] text-[21px] md:text-[21px]"
                             value={draftTitle}
                             disabled={isSaving}
                             onChange={(event) =>
@@ -358,10 +364,10 @@ export function BoardIssueSheet({
                             }
                           />
                         </label>
-                        <label className="grid gap-1 text-sm font-medium">
+                        <label className="grid gap-1 text-[21px] font-medium">
                           상태
                           <select
-                            className="h-9 rounded-md border bg-background px-3 text-sm"
+                            className="h-[54px] rounded-md border bg-background px-3 text-[21px]"
                             value={draftState}
                             disabled={isSaving}
                             onChange={(event) =>
@@ -376,7 +382,7 @@ export function BoardIssueSheet({
                         </label>
                       </div>
                     ) : (
-                      <h2 className="mt-1 break-words font-heading text-xl font-semibold">
+                      <h2 className="mt-1 break-words font-heading text-[30px] font-semibold leading-10">
                         {issue.title}
                       </h2>
                     )}
@@ -388,6 +394,7 @@ export function BoardIssueSheet({
                           type="button"
                           size="sm"
                           variant="outline"
+                          className="h-[48px] text-[19.2px]"
                           disabled={isSaving}
                           onClick={() => {
                             resetDraft(issue);
@@ -401,6 +408,7 @@ export function BoardIssueSheet({
                         <Button
                           type="button"
                           size="sm"
+                          className="h-[48px] text-[19.2px]"
                           disabled={isSaving}
                           onClick={() => void handleSaveIssue()}
                         >
@@ -417,6 +425,7 @@ export function BoardIssueSheet({
                         type="button"
                         size="sm"
                         variant="outline"
+                        className="h-[48px] text-[19.2px]"
                         onClick={handleStartEditing}
                       >
                         <Pencil />
@@ -427,6 +436,7 @@ export function BoardIssueSheet({
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="h-[48px] text-[19.2px]"
                       disabled={!issue.htmlUrl}
                       onClick={() =>
                         issue.htmlUrl
@@ -441,7 +451,7 @@ export function BoardIssueSheet({
                 </div>
 
                 {saveError ? (
-                  <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-[21px] text-destructive">
                     {saveError}
                   </p>
                 ) : null}
@@ -455,7 +465,7 @@ export function BoardIssueSheet({
                     return (
                       <span
                         key={name}
-                        className="rounded-full border px-2 py-0.5 text-xs font-medium"
+                        className="rounded-full border px-2 py-0.5 text-[18px] font-medium"
                         style={{
                           borderColor: color ?? undefined,
                           color: color ?? undefined
@@ -467,7 +477,7 @@ export function BoardIssueSheet({
                   })}
                 </div>
 
-                <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                <dl className="grid gap-3 text-[21px] sm:grid-cols-2">
                   <div>
                     <dt className="font-medium text-muted-foreground">담당자</dt>
                     <dd className="mt-1">
@@ -500,16 +510,16 @@ export function BoardIssueSheet({
               </section>
 
               <section className="grid gap-2">
-                <h3 className="font-heading text-base font-semibold">본문</h3>
+                <h3 className="font-heading text-[24px] font-semibold leading-8">본문</h3>
                 {isEditing ? (
                   <textarea
-                    className="min-h-48 resize-y rounded-md border bg-background p-3 text-sm leading-6 outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="min-h-72 resize-y rounded-md border bg-background p-3 text-[21px] leading-9 outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     value={draftBody}
                     disabled={isSaving}
                     onChange={(event) => setDraftBody(event.currentTarget.value)}
                   />
                 ) : (
-                  <div className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-sm leading-6">
+                  <div className="max-h-[432px] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-[21px] leading-9">
                     {issue.body || "등록된 본문이 없습니다."}
                   </div>
                 )}
@@ -517,7 +527,7 @@ export function BoardIssueSheet({
 
               {issue.projectFields.length ? (
                 <section className="grid gap-2">
-                  <h3 className="font-heading text-base font-semibold">
+                  <h3 className="font-heading text-[24px] font-semibold leading-8">
                     Project fields
                   </h3>
                   <dl className="grid gap-2 sm:grid-cols-2">
@@ -532,7 +542,7 @@ export function BoardIssueSheet({
               ) : null}
 
               <section className="grid gap-2">
-                <h3 className="font-heading text-base font-semibold">관련 PR</h3>
+                <h3 className="font-heading text-[24px] font-semibold leading-8">관련 PR</h3>
                 {pullRequests.length ? (
                   <ul className="grid gap-2">
                     {pullRequests.map((pullRequest) => (
@@ -544,12 +554,12 @@ export function BoardIssueSheet({
                           target="_blank"
                         >
                           <span className="flex items-start justify-between gap-2">
-                            <span className="line-clamp-2 text-sm font-medium">
+                            <span className="line-clamp-2 text-[21px] font-medium">
                               #{pullRequest.githubNumber} {pullRequest.title}
                             </span>
                             <span
                               className={cn(
-                                "rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                                "rounded-full border px-2 py-0.5 text-[16.5px] font-semibold",
                                 pullRequest.state === "closed"
                                   ? "border-violet-200 bg-violet-50 text-violet-700"
                                   : "border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -558,7 +568,7 @@ export function BoardIssueSheet({
                               {pullRequest.state}
                             </span>
                           </span>
-                          <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <span className="flex flex-wrap items-center gap-2 text-[18px] text-muted-foreground">
                             <GitPullRequest className="size-3.5" />
                             {pullRequest.headBranch ?? "-"} {" -> "}
                             {pullRequest.baseBranch ?? "-"} -{" "}
@@ -569,7 +579,7 @@ export function BoardIssueSheet({
                     ))}
                   </ul>
                 ) : (
-                  <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                  <p className="rounded-lg border border-dashed px-3 py-4 text-[21px] text-muted-foreground">
                     연결된 PR이 없습니다.
                   </p>
                 )}

@@ -1,26 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { SqlErdPanel } from "@/features/sql-erd/components/sql-erd-panel";
 import { readSqlErdSessionId } from "@/features/sql-erd/utils/session-navigation";
 
 export function SqlErdSessionPage() {
-  const [sessionId, setSessionId] = useState<string | null>();
+  return (
+    <Suspense fallback={<SqlErdSessionLoading />}>
+      <SqlErdSessionRoute />
+    </Suspense>
+  );
+}
 
-  useEffect(() => {
-    setSessionId(readSqlErdSessionId(window.location.search));
-  }, []);
-
-  if (sessionId === undefined) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-        Session을 불러오는 중입니다.
-      </div>
-    );
-  }
+function SqlErdSessionRoute() {
+  const searchParams = useSearchParams();
+  const sessionId = readSqlErdSessionId(searchParams.toString());
 
   if (!sessionId) {
     return (
@@ -45,7 +43,15 @@ export function SqlErdSessionPage() {
 
   return (
     <div className="sql-erd-full-bleed h-screen overflow-hidden">
-      <SqlErdPanel sessionId={sessionId} />
+      <SqlErdPanel key={sessionId} sessionId={sessionId} />
+    </div>
+  );
+}
+
+function SqlErdSessionLoading() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+      Session을 불러오는 중입니다.
     </div>
   );
 }

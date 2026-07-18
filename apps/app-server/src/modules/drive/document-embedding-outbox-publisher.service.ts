@@ -49,6 +49,8 @@ export class DocumentEmbeddingOutboxPublisherService
   }
 
   async publishDue(): Promise<void> {
+    await this.recoverCurrentSupersededJobs();
+
     const rows = await this.database.query<{ id: string }>(
       `
         SELECT outbox.id
@@ -74,6 +76,37 @@ export class DocumentEmbeddingOutboxPublisherService
     for (const row of rows) {
       await this.publishOne(row.id);
     }
+  }
+
+  private async recoverCurrentSupersededJobs(): Promise<void> {
+    await this.database.execute(
+      `
+        WITH recovered_jobs AS (
+          UPDATE document_embedding_jobs AS job
+          SET status = 'queued',
+              claimed_at = NULL,
+              completed_at = NULL,
+              error_code = NULL,
+              error_message = NULL
+          FROM documents AS document
+          WHERE job.status = 'superseded'
+            AND document.id = job.document_id
+            AND document.workspace_id = job.workspace_id
+            AND document.deleted_at IS NULL
+            AND document.latest_snapshot_id = job.snapshot_id
+          RETURNING job.id
+        )
+        UPDATE document_embedding_outbox AS outbox
+        SET status = 'pending',
+            attempt_count = 0,
+            next_attempt_at = now(),
+            claim_token = NULL,
+            claimed_at = NULL,
+            delivered_at = NULL
+        FROM recovered_jobs
+        WHERE outbox.job_id = recovered_jobs.id
+      `
+    );
   }
 
   private async publishOne(outboxId: string): Promise<void> {
@@ -141,9 +174,7 @@ export class DocumentEmbeddingOutboxPublisherService
         SET status = 'delivered',
             delivered_at = now(),
             claim_token = NULL,
-            claimed_at = NULL,
-            error_code = NULL,
-            error_message = NULL
+            claimed_at = NULL
         WHERE id = $1
           AND status = 'publishing'
           AND claim_token = $2
@@ -161,18 +192,14 @@ export class DocumentEmbeddingOutboxPublisherService
           SET status = 'pending',
               next_attempt_at = $2,
               claim_token = NULL,
-              claimed_at = NULL,
-              error_code = $3,
-              error_message = $4
+              claimed_at = NULL
           WHERE id = $1
             AND status = 'publishing'
-            AND claim_token = $5
+            AND claim_token = $3
         `,
         [
           claim.id,
           new Date(Date.now() + RETRY_DELAYS_MS[attempts - 1]),
-          PUBLISH_FAILURE_CODE,
-          PUBLISH_FAILURE_MESSAGE,
           claim.claim_token
         ]
       );
@@ -185,20 +212,13 @@ export class DocumentEmbeddingOutboxPublisherService
           UPDATE document_embedding_outbox
           SET status = 'failed',
               claim_token = NULL,
-              claimed_at = NULL,
-              error_code = $2,
-              error_message = $3
+              claimed_at = NULL
           WHERE id = $1
             AND status = 'publishing'
-            AND claim_token = $4
+            AND claim_token = $2
           RETURNING job_id
         `,
-        [
-          claim.id,
-          PUBLISH_FAILURE_CODE,
-          PUBLISH_FAILURE_MESSAGE,
-          claim.claim_token
-        ]
+        [claim.id, claim.claim_token]
       );
       if (!outbox) return;
 

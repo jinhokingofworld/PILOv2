@@ -5,6 +5,7 @@ export type WorkspacePresencePage =
   | "sql-erd"
   | "pr-review"
   | "meeting"
+  | "chat"
   | "canvas"
   | "drive";
 
@@ -23,15 +24,24 @@ export type WorkspacePresenceElementViewport = {
   kind: "element";
   key:
     | "board-kanban"
+    | "board-issue-sheet"
     | "calendar-grid"
+    | "calendar-event-detail"
+    | "calendar-events-dialog"
+    | "chat-messages"
     | "drive-list"
-    | "meeting-content";
+    | "drive-pdf"
+    | "meeting-content"
+    | "pr-review-diff"
+    | "pr-review-inspector"
+    | "sql-erd-inspector";
   xRatio: number;
   yRatio: number;
 };
 
 export type WorkspacePresenceCameraViewport = {
   kind: "camera";
+  selectedShapeIds?: string[];
   x: number;
   y: number;
   z: number;

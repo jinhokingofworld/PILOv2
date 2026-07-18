@@ -102,6 +102,30 @@ export interface AgentToolClarificationResult {
   kind: "needs_clarification";
   outputSummary: AgentToolOutputSummary;
   resourceRefs: AgentResourceRef[];
+  /** Server-only references. AgentExecution persists opaque candidate IDs before output is stored. */
+  candidateResources?: Array<{
+    reference: {
+      resourceType:
+        | "meeting_room"
+        | "meeting"
+        | "meeting_report"
+        | "workspace_member"
+        | "meeting_report_action_item";
+      resourceId: string;
+      reportId?: string;
+    };
+    candidate: {
+      resourceType:
+        | "meeting_room"
+        | "meeting"
+        | "meeting_report"
+        | "workspace_member"
+        | "meeting_report_action_item";
+      label: string;
+      description: string | null;
+      status: string | null;
+    };
+  }>;
 }
 
 export type AgentToolPreparationResult =
@@ -129,6 +153,11 @@ export interface AgentToolDefinition<TInput> {
   requiresGroundedAnswer?: boolean;
   inputSchema: AgentToolInputSchema;
   validateInput: (input: unknown) => TInput;
+  /**
+   * Server-only compatibility adapter for planner steps persisted under an
+   * earlier tool schema. Its result is never a planner-facing schema.
+   */
+  adaptLegacyPlannerInput?: (input: unknown) => TInput | null;
   buildConfirmation?: (
     context: AgentToolContext,
     input: TInput

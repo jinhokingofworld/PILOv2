@@ -31,6 +31,20 @@ type PreviewState =
   | { status: "ready"; previewUrl: string }
   | { status: "error"; message: string };
 
+export type PreviewFileKind = "image" | "pdf";
+
+const IMAGE_PREVIEW_MIME_TYPES = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+export function getPreviewFileKind(mimeType: string | null): PreviewFileKind | null {
+  if (mimeType === "application/pdf") return "pdf";
+  return mimeType && IMAGE_PREVIEW_MIME_TYPES.has(mimeType) ? "image" : null;
+}
+
 function messageFromUnknown(error: unknown) {
   return error instanceof Error
     ? error.message
@@ -50,12 +64,18 @@ function triggerDownload(url: string) {
 export function PdfPreviewDialog({
   fileId,
   fileName,
+  mimeType,
   open,
+  onPageNumberChange,
+  pageNumber,
   onOpenChange
 }: {
   fileId: string;
   fileName: string;
+  mimeType: string | null;
   open: boolean;
+  onPageNumberChange: (pageNumber: number) => void;
+  pageNumber: number;
   onOpenChange: (open: boolean) => void;
 }) {
   const authSession = useAuthSession();
@@ -68,6 +88,7 @@ export function PdfPreviewDialog({
   const [previewState, setPreviewState] = useState<PreviewState>({ status: "idle" });
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const isPdf = getPreviewFileKind(mimeType) === "pdf";
 
   const loadPreview = useCallback(async () => {
     if (!workspaceId || !accessToken) {
@@ -111,10 +132,10 @@ export function PdfPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100vh-2rem)] max-w-5xl" showCloseButton>
-        <DialogHeader>
+      <DialogContent className="flex h-dvh w-dvw max-h-none max-w-none flex-col gap-0 rounded-none border-0 p-0" showCloseButton>
+        <DialogHeader className="border-b px-5 py-4 pr-12">
           <DialogTitle>{fileName}</DialogTitle>
-          <DialogDescription>PDF 미리보기</DialogDescription>
+          <DialogDescription>{isPdf ? "PDF 미리보기" : "이미지 미리보기"}</DialogDescription>
         </DialogHeader>
 
         <div className={styles.pdfPreviewSurface}>
@@ -135,13 +156,17 @@ export function PdfPreviewDialog({
           ) : (
             <PdfCollaborationSurface
               fileId={fileId}
+              fileName={fileName}
+              mimeType={mimeType}
+              onPageNumberChange={onPageNumberChange}
+              pageNumber={pageNumber}
               previewUrl={previewState.previewUrl}
               workspaceId={workspaceId}
             />
           )}
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex justify-end border-t px-5 py-3">
           <Button type="button" variant="outline" size="sm" disabled={isDownloading} onClick={() => void handleDownload()}>
             {isDownloading ? <Loader2 className="animate-spin" /> : <Download />}
             다운로드

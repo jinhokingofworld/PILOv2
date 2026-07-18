@@ -96,6 +96,24 @@ export type SqlErdPresenceLeavePayload = {
   workspaceId: string;
 };
 
+export type SqlErdTableMovePreview = {
+  actorUserId: string;
+  dragId: string;
+  sentAt: string;
+  sessionId: string;
+  tableId: string;
+  workspaceId: string;
+  x: number;
+  y: number;
+};
+
+export type SqlErdTableMoveClear = {
+  actorUserId: string;
+  sessionId: string;
+  tableIds: string[];
+  workspaceId: string;
+};
+
 export type SqlErdRealtimeErrorPayload = {
   code: string;
   message: string;
@@ -108,6 +126,8 @@ export type SqlErdServerToClientEvents = {
   "sql-erd:joined": (payload: SqlErdJoinedPayload) => void;
   "sql-erd:presence:leave": (payload: SqlErdPresenceLeavePayload) => void;
   "sql-erd:presence:update": (payload: SqlErdRemotePresenceState) => void;
+  "sql-erd:table-move:clear": (payload: SqlErdTableMoveClear) => void;
+  "sql-erd:table-move:preview": (payload: SqlErdTableMovePreview) => void;
 };
 
 export type SqlErdClientToServerEvents = {
@@ -124,5 +144,18 @@ export type SqlErdClientToServerEvents = {
     sentAt: string;
     tool: SqlErdPresenceTool;
     workspaceId: string;
+  }) => void;
+  "sql-erd:table-move:clear": (payload: {
+    sessionId: string;
+    tableIds: string[];
+    workspaceId: string;
+  }) => void;
+  "sql-erd:table-move:preview": (payload: {
+    dragId: string;
+    sessionId: string;
+    tableId: string;
+    workspaceId: string;
+    x: number;
+    y: number;
   }) => void;
 };

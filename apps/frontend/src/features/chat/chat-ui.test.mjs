@@ -98,3 +98,5 @@ assert.doesNotMatch(
   testRunner,
   /features\/chat\/(?:utils\/chat-message-text|utils\/chat-read-policy|utils\/chat-notification|chat-ui)\.test\.mjs/,
 );
+
+await import("./chat-workspace-location.test.mjs");

@@ -59,6 +59,10 @@ import {
   sqlErdClientEvents,
   sqlErdServerEvents,
 } from "../sql-erd/sql-erd-socket-events";
+import {
+  readSqlErdTableMoveClearPayload,
+  readSqlErdTableMovePreviewPayload,
+} from "../sql-erd/sql-erd-table-move-payload";
 import { relaySqlErdOperation } from "../sql-erd/sql-erd-operation-relay";
 import {
   createSqlErdMembershipRevocationHandler,
@@ -991,8 +995,23 @@ export async function createRealtimeSocketServer({
       }
 
       const roomName = createSqlErdRoomName(room);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join SQLtoERD room before leaving it",
+          ),
+        );
+        return;
+      }
       const clearResult = sqlErdPresenceService.clearRoomPresence(socket.id, room);
 
+      socket.to(roomName).emit(sqlErdServerEvents.tableMoveClear, {
+        ...room,
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+        tableIds: [],
+      });
       await socket.leave(roomName);
       delete authedSocket.data.sqlErdPresenceByRoom[roomName];
       authedSocket.data.sqlErdRoomsByName.delete(roomName);
@@ -1063,6 +1082,75 @@ export async function createRealtimeSocketServer({
       authedSocket.data.sqlErdPresenceByRoom[roomName] = presence;
 
       socket.to(roomName).emit(sqlErdServerEvents.presenceUpdate, presence);
+    });
+
+    socket.on(sqlErdClientEvents.tableMovePreview, (payload) => {
+      const preview = readSqlErdTableMovePreviewPayload(payload);
+      if (!preview) {
+        emitSqlErdError(socket, "sql-erd:table-move:preview payload is invalid");
+        return;
+      }
+
+      const roomName = createSqlErdRoomName(preview);
+      if (
+        authedSocket.data.sqlErdRevokedWorkspaceIds.has(preview.workspaceId)
+      ) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload("forbidden", "SQLtoERD room access denied"),
+        );
+        return;
+      }
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join SQLtoERD room before sending table move previews",
+          ),
+        );
+        return;
+      }
+
+      socket.to(roomName).volatile.emit(sqlErdServerEvents.tableMovePreview, {
+        ...preview,
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+        sentAt: new Date().toISOString(),
+      });
+    });
+
+    socket.on(sqlErdClientEvents.tableMoveClear, (payload) => {
+      const clear = readSqlErdTableMoveClearPayload(payload);
+      if (!clear) {
+        emitSqlErdError(socket, "sql-erd:table-move:clear payload is invalid");
+        return;
+      }
+
+      const roomName = createSqlErdRoomName(clear);
+      if (
+        authedSocket.data.sqlErdRevokedWorkspaceIds.has(clear.workspaceId)
+      ) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload("forbidden", "SQLtoERD room access denied"),
+        );
+        return;
+      }
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join SQLtoERD room before clearing table move previews",
+          ),
+        );
+        return;
+      }
+
+      socket.to(roomName).emit(sqlErdServerEvents.tableMoveClear, {
+        ...clear,
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+      });
     });
 
     socket.on(pdfCollaborationClientEvents.pageUpdate, (payload) => {
@@ -1238,6 +1326,7 @@ export async function createRealtimeSocketServer({
 
     socket.on("disconnect", () => {
       void (async () => {
+        const sqlErdRooms = [...authedSocket.data.sqlErdRoomsByName.values()];
         const sqlErdClearResults = sqlErdPresenceService.clearSocket(socket.id);
         const pageCursorLeaveEvents: PageCursorPresenceState[] = Object.values(
           authedSocket.data.pageCursorPresenceByRoom,
@@ -1245,6 +1334,16 @@ export async function createRealtimeSocketServer({
         const pdfCollaborationLeaveEvents = pdfCollaborationRoomState.clearSocket(socket.id);
         authedSocket.data.pageCursorPresenceByRoom = {};
         authedSocket.data.sqlErdRoomsByName.clear();
+
+        for (const room of sqlErdRooms) {
+          socket
+            .to(createSqlErdRoomName(room))
+            .emit(sqlErdServerEvents.tableMoveClear, {
+              ...room,
+              actorUserId: authedSocket.data.auth.userId ?? socket.id,
+              tableIds: [],
+            });
+        }
 
         for (const clearResult of sqlErdClearResults) {
           emitSqlErdPresenceClearResult(socket, clearResult);

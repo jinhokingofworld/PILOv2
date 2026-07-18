@@ -146,6 +146,73 @@ try {
   assert.equal(secondJoined.latestOpSeq, 7);
   assert.equal(observerJoined.latestOpSeq, 7);
 
+  const tableMovePreview = waitForEvent(
+    observer,
+    "sql-erd:table-move:preview",
+  );
+  const senderDoesNotReceiveItsOwnPreview = expectNoEvent(
+    firstTab,
+    "sql-erd:table-move:preview",
+  );
+  firstTab.emit("sql-erd:table-move:preview", {
+    ...room,
+    dragId: "drag-1",
+    tableId: "table.orders",
+    x: 14,
+    y: 28,
+  });
+  const receivedTableMovePreview = await tableMovePreview;
+  assert.ok(Number.isFinite(Date.parse(receivedTableMovePreview.sentAt)));
+  assert.deepEqual(receivedTableMovePreview, {
+    ...room,
+    actorUserId: "user-se-in",
+    dragId: "drag-1",
+    sentAt: receivedTableMovePreview.sentAt,
+    tableId: "table.orders",
+    x: 14,
+    y: 28,
+  });
+  await senderDoesNotReceiveItsOwnPreview;
+
+  const unjoinedRoomError = waitForEvent(firstTab, "sql-erd:error");
+  const observerDoesNotReceiveCrossRoomPreview = expectNoEvent(
+    observer,
+    "sql-erd:table-move:preview",
+  );
+  firstTab.emit("sql-erd:table-move:preview", {
+    ...room,
+    dragId: "drag-cross-room",
+    sessionId: "session-other",
+    tableId: "table.orders",
+    x: 99,
+    y: 99,
+  });
+  assert.equal((await unjoinedRoomError).code, "room_not_joined");
+  await observerDoesNotReceiveCrossRoomPreview;
+
+  const tableMoveClear = waitForEvent(observer, "sql-erd:table-move:clear");
+  firstTab.emit("sql-erd:table-move:clear", {
+    ...room,
+    tableIds: ["table.orders"],
+  });
+  assert.deepEqual(await tableMoveClear, {
+    ...room,
+    actorUserId: "user-se-in",
+    tableIds: ["table.orders"],
+  });
+
+  const unjoinedLeaveError = waitForEvent(firstTab, "sql-erd:error");
+  const observerDoesNotReceiveCrossRoomClear = expectNoEvent(
+    observer,
+    "sql-erd:table-move:clear",
+  );
+  firstTab.emit("sql-erd:leave", {
+    ...room,
+    sessionId: "session-other",
+  });
+  assert.equal((await unjoinedLeaveError).code, "room_not_joined");
+  await observerDoesNotReceiveCrossRoomClear;
+
   let update = waitForEvent(observer, "sql-erd:presence:update");
   firstTab.emit("sql-erd:presence:update", createPresence({ x: 10, y: 20 }));
   assert.deepEqual((await update).cursor, { x: 10, y: 20 });

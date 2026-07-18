@@ -663,6 +663,7 @@ await import("./canvas/review-canvas-access.test.mjs");
 await import("./meeting/test.mjs");
 if (process.env.DATABASE_URL) {
   await import("./meeting/participant-session-postgres.test.mjs");
+  await import("./agent/thread-postgres.test.mjs");
 }
 await import("./github-integration/test.mjs");
 await import("./github-integration/source-webhook-reconcile.test.mjs");

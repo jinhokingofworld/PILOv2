@@ -16,6 +16,7 @@ import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
 import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
+import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
 import type {
   AgentJsonObject,
   AgentJsonPrimitive,
@@ -104,7 +105,8 @@ export class AgentExecutionService {
     private readonly agentToolRegistryService: AgentToolRegistryService,
     private readonly agentGroundedAnswerService: AgentGroundedAnswerService,
     private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService,
-    private readonly agentOutboxPublisherService: AgentOutboxPublisherService
+    private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
+    private readonly agentCandidateSelectionService: AgentCandidateSelectionService
   ) {}
 
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
@@ -207,7 +209,10 @@ export class AgentExecutionService {
       });
     }
 
-    if (!this.matchesRegistry(candidate, definition)) {
+    if (
+      !this.matchesRegistry(candidate, definition) &&
+      !this.isLegacyMeetingReportPlan(candidate, definition)
+    ) {
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_PLAN_MISMATCH",
         errorMessage: "Agent tool plan does not match registry metadata",
@@ -234,14 +239,14 @@ export class AgentExecutionService {
       return validatedInput.result;
     }
 
-    if (definition.executionMode === "contextual") {
+    if (definition.executionMode === "contextual" && !validatedInput.isLegacyAdapter) {
       return this.executeContextualTool(
         currentUserId,
         workspaceId,
         runId,
         definition,
         validatedInput.input,
-        candidate.input,
+        validatedInput.plannerInput,
         requestContext,
         input.prompt,
         input.timezone
@@ -255,7 +260,7 @@ export class AgentExecutionService {
         runId,
         definition,
         validatedInput.input,
-        candidate.input,
+        validatedInput.plannerInput,
         requestContext,
         input.prompt,
         input.timezone
@@ -268,7 +273,7 @@ export class AgentExecutionService {
       runId,
       definition,
       validatedInput.input,
-      candidate.input,
+      validatedInput.plannerInput,
       requestContext,
       input.prompt,
       input.timezone
@@ -415,6 +420,23 @@ export class AgentExecutionService {
     );
   }
 
+  private isLegacyMeetingReportPlan(
+    candidate: PlannedToolCandidate,
+    definition: AgentToolDefinition<unknown>
+  ): boolean {
+    if (
+      (definition.name !== "get_meeting_report" &&
+        definition.name !== "summarize_meeting_report") ||
+      candidate.toolName !== definition.name ||
+      candidate.riskLevel !== "low" ||
+      candidate.executionMode !== "auto" ||
+      candidate.requiresConfirmation !== false
+    ) {
+      return false;
+    }
+    return definition.adaptLegacyPlannerInput?.(candidate.input) !== null;
+  }
+
   private async validateToolInput(
     currentUserId: string,
     workspaceId: string,
@@ -425,6 +447,8 @@ export class AgentExecutionService {
     | {
         ok: true;
         input: unknown;
+        plannerInput: AgentJsonObject;
+        isLegacyAdapter: boolean;
       }
     | {
         ok: false;
@@ -434,9 +458,22 @@ export class AgentExecutionService {
     try {
       return {
         ok: true,
-        input: definition.validateInput(input)
+        input: definition.validateInput(input),
+        plannerInput: input,
+        isLegacyAdapter: false
       };
     } catch (error) {
+      const legacyInput = definition.adaptLegacyPlannerInput?.(input);
+      if (legacyInput !== null && legacyInput !== undefined) {
+        return {
+          ok: true,
+          input: legacyInput,
+          plannerInput: {
+            compatibility: "legacy_persisted_planner_input"
+          },
+          isLegacyAdapter: true
+        };
+      }
       return {
         ok: false,
         result: await this.failRun(currentUserId, workspaceId, runId, {
@@ -673,7 +710,26 @@ export class AgentExecutionService {
       };
     }
 
-    const outputSummary = this.sanitizeJsonObject(clarification.outputSummary);
+    const candidateSelections = clarification.candidateResources?.length
+      ? await this.agentCandidateSelectionService.createMeetingCandidates(
+          {
+            currentUserId,
+            workspaceId,
+            runId,
+            requestContext: await this.findRunRequestContext(
+              currentUserId,
+              workspaceId,
+              runId
+            )
+          },
+          step.id,
+          clarification.candidateResources
+        )
+      : [];
+    const outputSummary = this.sanitizeJsonObject({
+      ...clarification.outputSummary,
+      ...(candidateSelections.length > 0 ? { candidateSelections } : {})
+    });
     const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
     const answer =
       typeof outputSummary.question === "string" && outputSummary.question.trim()

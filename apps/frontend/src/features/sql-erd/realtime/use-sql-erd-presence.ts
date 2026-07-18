@@ -14,12 +14,18 @@ import type {
   SqlErdPresenceTool,
   SqlErdRealtimeConfig,
   SqlErdRemotePresenceState,
+  SqlErdTableMovePreview,
 } from "./sql-erd-realtime-types";
+import {
+  createSqlErdTableMovePreviewThrottle,
+  type SqlErdTableMovePreviewThrottle,
+} from "./sql-erd-table-move-preview";
 
 const STALE_PRESENCE_TIMEOUT_MS = 15_000;
 const STALE_PRESENCE_SWEEP_MS = 2_000;
 const PRESENCE_HEARTBEAT_MS = 5_000;
-const PRESENCE_UPDATE_MIN_INTERVAL_MS = 80;
+const PRESENCE_UPDATE_MIN_INTERVAL_MS = 33;
+const STALE_TABLE_MOVE_PREVIEW_TIMEOUT_MS = 5_000;
 
 type LocalPresencePatch = Partial<
   Pick<
@@ -29,11 +35,32 @@ type LocalPresencePatch = Partial<
 >;
 
 export type SqlErdPresenceController = {
+  cancelPendingTableMovePreviews: (tableIds: string[]) => void;
+  clearTableMovePreviews: (tableIds: string[]) => void;
   currentUserId: string | null;
   enabled: boolean;
   remotePresence: SqlErdRemotePresenceState[];
+  remoteTableMovePreviews: SqlErdTableMovePreview[];
+  dismissRemoteTableMovePreviews: (
+    previews: Pick<
+      SqlErdTableMovePreview,
+      "actorUserId" | "dragId" | "sentAt" | "tableId"
+    >[],
+  ) => void;
+  sendTableMovePreview: (preview: {
+    dragId: string;
+    tableId: string;
+    x: number;
+    y: number;
+  }) => void;
   updatePresence: (patch: LocalPresencePatch) => void;
 };
+
+function normalizeTableMovePreviewIds(tableIds: string[]) {
+  return Array.from(
+    new Set(tableIds.map((tableId) => tableId.trim()).filter(Boolean)),
+  ).slice(0, 100);
+}
 
 function isUsableRealtimeConfig(
   config: SqlErdRealtimeConfig | null | undefined,
@@ -94,6 +121,9 @@ export function useSqlErdPresence(
   config: SqlErdRealtimeConfig | null | undefined,
 ): SqlErdPresenceController {
   const [remotePresence, setRemotePresence] = useState<SqlErdRemotePresenceState[]>([]);
+  const [remoteTableMovePreviews, setRemoteTableMovePreviews] = useState<
+    SqlErdTableMovePreview[]
+  >([]);
   const socketRef = useRef<SqlErdRealtimeSocket | null>(null);
   const joinedRef = useRef(false);
   const roomRef = useRef({ sessionId: "", workspaceId: "" });
@@ -111,6 +141,17 @@ export function useSqlErdPresence(
     selectedObjects: [] as SqlErdPresenceSelectedObject[],
     tool: "select" as SqlErdPresenceTool,
   });
+  const tableMovePreviewThrottlesRef = useRef(
+    new Map<
+      string,
+      SqlErdTableMovePreviewThrottle<{
+        dragId: string;
+        tableId: string;
+        x: number;
+        y: number;
+      }>
+    >(),
+  );
   const usableConfig = useMemo(
     () => (isUsableRealtimeConfig(config) ? config : null),
     [
@@ -167,6 +208,7 @@ export function useSqlErdPresence(
       socketRef.current = null;
       roomRef.current = { sessionId: "", workspaceId: "" };
       setRemotePresence([]);
+      setRemoteTableMovePreviews([]);
       return;
     }
 
@@ -214,6 +256,7 @@ export function useSqlErdPresence(
     socket.on("disconnect", () => {
       joinedRef.current = false;
       setRemotePresence([]);
+      setRemoteTableMovePreviews([]);
     });
     socket.on("sql-erd:joined", (payload) => {
       if (!isSameRoom(payload, room)) return;
@@ -235,6 +278,35 @@ export function useSqlErdPresence(
       setRemotePresence((currentPresence) =>
         currentPresence.filter((entry) => entry.userId !== payload.userId),
       );
+      setRemoteTableMovePreviews((currentPreviews) =>
+        currentPreviews.filter(
+          (preview) => preview.actorUserId !== payload.userId,
+        ),
+      );
+    });
+    socket.on("sql-erd:table-move:preview", (preview) => {
+      if (!isSameRoom(preview, room) || preview.actorUserId === userId) return;
+
+      setRemoteTableMovePreviews((currentPreviews) => [
+        ...currentPreviews.filter(
+          (entry) =>
+            entry.actorUserId !== preview.actorUserId ||
+            entry.tableId !== preview.tableId,
+        ),
+        preview,
+      ]);
+    });
+    socket.on("sql-erd:table-move:clear", (payload) => {
+      if (!isSameRoom(payload, room)) return;
+
+      const tableIds = new Set(payload.tableIds);
+      setRemoteTableMovePreviews((currentPreviews) =>
+        currentPreviews.filter(
+          (preview) =>
+            preview.actorUserId !== payload.actorUserId ||
+            (tableIds.size > 0 && !tableIds.has(preview.tableId)),
+        ),
+      );
     });
     socket.on("sql-erd:error", (error) => {
       console.warn("SQLtoERD realtime socket error.", error);
@@ -251,13 +323,24 @@ export function useSqlErdPresence(
       socket.removeAllListeners();
       socket.disconnect();
       if (socketRef.current === socket) socketRef.current = null;
+      tableMovePreviewThrottlesRef.current.forEach((throttle) =>
+        throttle.cancel(),
+      );
+      tableMovePreviewThrottlesRef.current.clear();
       setRemotePresence([]);
+      setRemoteTableMovePreviews([]);
     };
   }, [emitCurrentPresence, usableConfig]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       setRemotePresence((currentPresence) => currentPresence.filter(isFreshPresence));
+      const staleBefore = Date.now() - STALE_TABLE_MOVE_PREVIEW_TIMEOUT_MS;
+      setRemoteTableMovePreviews((currentPreviews) =>
+        currentPreviews.filter(
+          (preview) => Date.parse(preview.sentAt) >= staleBefore,
+        ),
+      );
     }, STALE_PRESENCE_SWEEP_MS);
 
     return () => window.clearInterval(timer);
@@ -312,16 +395,105 @@ export function useSqlErdPresence(
     }, PRESENCE_UPDATE_MIN_INTERVAL_MS - elapsed);
   }, [emitCurrentPresence]);
 
+  const sendTableMovePreview = useCallback(
+    (preview: { dragId: string; tableId: string; x: number; y: number }) => {
+      let throttle = tableMovePreviewThrottlesRef.current.get(preview.tableId);
+      if (!throttle) {
+        throttle = createSqlErdTableMovePreviewThrottle({
+          emit: (nextPreview) => {
+            const socket = socketRef.current;
+            if (!socket?.connected || !joinedRef.current) return;
+            socket.volatile.emit("sql-erd:table-move:preview", {
+              ...roomRef.current,
+              ...nextPreview,
+            });
+          },
+        });
+        tableMovePreviewThrottlesRef.current.set(preview.tableId, throttle);
+      }
+      throttle.push(preview);
+    },
+    [],
+  );
+
+  const cancelPendingTableMovePreviews = useCallback((tableIds: string[]) => {
+    const normalizedTableIds = normalizeTableMovePreviewIds(tableIds);
+    normalizedTableIds.forEach((tableId) => {
+      tableMovePreviewThrottlesRef.current.get(tableId)?.cancel();
+      tableMovePreviewThrottlesRef.current.delete(tableId);
+    });
+  }, []);
+
+  const clearTableMovePreviews = useCallback((tableIds: string[]) => {
+    const normalizedTableIds = normalizeTableMovePreviewIds(tableIds);
+    cancelPendingTableMovePreviews(normalizedTableIds);
+
+    const socket = socketRef.current;
+    if (
+      !normalizedTableIds.length ||
+      !socket?.connected ||
+      !joinedRef.current
+    ) {
+      return;
+    }
+    socket.emit("sql-erd:table-move:clear", {
+      ...roomRef.current,
+      tableIds: normalizedTableIds,
+    });
+  }, [cancelPendingTableMovePreviews]);
+
+  const dismissRemoteTableMovePreviews = useCallback(
+    (
+      previews: Pick<
+        SqlErdTableMovePreview,
+        "actorUserId" | "dragId" | "sentAt" | "tableId"
+      >[],
+    ) => {
+      const previewKeys = new Set(
+        previews.map(
+          (preview) =>
+            `${preview.actorUserId}\u0000${preview.tableId}\u0000${preview.dragId}\u0000${preview.sentAt}`,
+        ),
+      );
+      if (!previewKeys.size) return;
+
+      setRemoteTableMovePreviews((currentPreviews) =>
+        currentPreviews.filter(
+          (preview) =>
+            !previewKeys.has(
+              `${preview.actorUserId}\u0000${preview.tableId}\u0000${preview.dragId}\u0000${preview.sentAt}`,
+            ),
+        ),
+      );
+    },
+    [],
+  );
+
   return useMemo(
     () => ({
+      cancelPendingTableMovePreviews,
+      clearTableMovePreviews,
       currentUserId,
       enabled,
       remotePresence:
         currentUserId === null
           ? remotePresence
           : remotePresence.filter((entry) => entry.userId !== currentUserId),
+      remoteTableMovePreviews,
+      dismissRemoteTableMovePreviews,
+      sendTableMovePreview,
       updatePresence,
     }),
-    [currentUserId, enabled, remotePresence, updatePresence],
+    [
+      cancelPendingTableMovePreviews,
+      clearTableMovePreviews,
+      currentUserId,
+      enabled,
+      remotePresence,
+      remoteTableMovePreviews,
+      dismissRemoteTableMovePreviews,
+      sendTableMovePreview,
+      updatePresence,
+    ],
   );
 }
