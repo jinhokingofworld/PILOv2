@@ -203,3 +203,18 @@ export function selectSqlErdCanvasShapeAtPoint(
   );
   return true;
 }
+
+export function isSqlErdCanvasBackgroundPoint(
+  editor: Pick<Editor, "getShapeAtPoint"> & {
+    overlays: Pick<Editor["overlays"], "getOverlayAtPoint">;
+  },
+  point: { x: number; y: number }
+) {
+  return (
+    !editor.getShapeAtPoint(point, {
+      hitInside: true,
+      hitLabels: true,
+      hitLocked: true
+    }) && !editor.overlays.getOverlayAtPoint(point)
+  );
+}

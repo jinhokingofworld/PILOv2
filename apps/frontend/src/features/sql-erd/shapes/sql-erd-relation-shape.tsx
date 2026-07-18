@@ -954,6 +954,8 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
     return false;
   }
 
+  override hideRotateHandle() { return true; }
+
   override canResize() {
     return false;
   }

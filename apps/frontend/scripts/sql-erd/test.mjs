@@ -2937,6 +2937,31 @@ assert.equal(
   false
 );
 assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, []);
+const runtimeResizeOverlayEditor = {
+  getShapeAtPoint() {
+    return null;
+  },
+  overlays: {
+    getOverlayAtPoint() {
+      return { id: "selection_fg:bottom_right" };
+    }
+  }
+};
+assert.equal(
+  canvasSelectionRuntime.isSqlErdCanvasBackgroundPoint(
+    runtimeResizeOverlayEditor,
+    { x: 20, y: 20 }
+  ),
+  false
+);
+runtimeResizeOverlayEditor.overlays.getOverlayAtPoint = () => null;
+assert.equal(
+  canvasSelectionRuntime.isSqlErdCanvasBackgroundPoint(
+    runtimeResizeOverlayEditor,
+    { x: 20, y: 20 }
+  ),
+  true
+);
 runtimeInteractiveSelectionEditor.selectedShapeIds = [
   "shape:sqltoerd-table-current"
 ];
@@ -7115,16 +7140,17 @@ assert.equal(
   "BIGINT"
 );
 
-const customPostgreSqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
-  dialect: "postgresql",
-  sourceText: `CREATE TYPE order_status AS ENUM ('pending', 'paid');
+const customPostgreSqlTypeSource = `CREATE TYPE order_status AS ENUM ('pending', 'paid');
 CREATE DOMAIN currency_amount AS NUMERIC(12, 2);
 
 CREATE TABLE payments (
   id BIGSERIAL PRIMARY KEY,
   status order_status NOT NULL,
   amount currency_amount
-);`
+);`;
+const customPostgreSqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: customPostgreSqlTypeSource
 });
 
 assert.equal(customPostgreSqlTypeParseResult.ok, true);
@@ -7135,20 +7161,149 @@ assert.deepEqual(
   ),
   ["BIGSERIAL", "ORDER_STATUS", "CURRENCY_AMOUNT"]
 );
+assert.deepEqual(
+  ddlParserRuntime.collectPostgreSqlUserDefinedTypeStatements(
+    customPostgreSqlTypeSource
+  ),
+  [
+    "CREATE TYPE order_status AS ENUM ('pending', 'paid');",
+    "CREATE DOMAIN currency_amount AS NUMERIC(12, 2);"
+  ]
+);
+const customPostgreSqlTypePreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: customPostgreSqlTypeParseResult.modelJson,
+    resolvedDialect: "postgresql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: customPostgreSqlTypeParseResult.modelJson,
+      sourceText: customPostgreSqlTypeSource
+    }
+  });
+assert.match(
+  customPostgreSqlTypePreview.generatedSourceText,
+  /CREATE TYPE order_status AS ENUM \('pending', 'paid'\);/
+);
+assert.match(
+  customPostgreSqlTypePreview.generatedSourceText,
+  /CREATE DOMAIN currency_amount AS NUMERIC\(12, 2\);/
+);
+const customPostgreSqlTypeApplyResult =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    customPostgreSqlTypePreview
+  );
+assert.equal(
+  customPostgreSqlTypeApplyResult.ok,
+  true,
+  JSON.stringify({
+    applyResult: customPostgreSqlTypeApplyResult,
+    sourceText: customPostgreSqlTypePreview.generatedSourceText
+  })
+);
+const schemaQualifiedPostgreSqlTypeSource = `CREATE TYPE auth.order_status AS ENUM ('pending');
 
-const caseSensitivePostgreSqlDomainParseResult =
+CREATE TABLE orders (
+  id BIGSERIAL PRIMARY KEY,
+  status auth.order_status NOT NULL
+);`;
+const schemaQualifiedPostgreSqlTypeParseResult =
   ddlParserRuntime.parseSqlDdlToErdModel({
     dialect: "postgresql",
-    sourceText: `CREATE DOMAIN "CaseType570" AS TEXT;
+    sourceText: schemaQualifiedPostgreSqlTypeSource
+  });
+assert.equal(schemaQualifiedPostgreSqlTypeParseResult.ok, true);
+assert.equal(
+  schemaQualifiedPostgreSqlTypeParseResult.modelJson.schema.tables[0]
+    .columns[1].dataType,
+  "auth.order_status"
+);
+const schemaQualifiedPostgreSqlTypePreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: schemaQualifiedPostgreSqlTypeParseResult.modelJson,
+    resolvedDialect: "postgresql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: schemaQualifiedPostgreSqlTypeParseResult.modelJson,
+      sourceText: schemaQualifiedPostgreSqlTypeSource
+    }
+  });
+assert.match(
+  schemaQualifiedPostgreSqlTypePreview.generatedSourceText,
+  /CREATE TYPE auth\.order_status AS ENUM \('pending'\);/
+);
+assert.match(
+  schemaQualifiedPostgreSqlTypePreview.generatedSourceText,
+  /"status" auth\.order_status NOT NULL/
+);
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    schemaQualifiedPostgreSqlTypePreview
+  ).ok,
+  true
+);
+const customPostgreSqlTypeMySqlPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: customPostgreSqlTypeParseResult.modelJson,
+    resolvedDialect: "mysql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: customPostgreSqlTypeParseResult.modelJson,
+      sourceText: customPostgreSqlTypeSource
+    }
+  });
+assert.doesNotMatch(
+  customPostgreSqlTypeMySqlPreview.generatedSourceText,
+  /CREATE (?:TYPE|DOMAIN)/
+);
+
+const caseSensitivePostgreSqlDomainSource = `CREATE DOMAIN "CaseType570" AS TEXT;
 CREATE DOMAIN "casetype570" AS TEXT;
 
 CREATE TABLE case_sensitive_values (
   upper_value "CaseType570" NOT NULL,
   lower_value "casetype570" NOT NULL
-);`
+);`;
+const caseSensitivePostgreSqlDomainParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: caseSensitivePostgreSqlDomainSource
   });
 
 assert.equal(caseSensitivePostgreSqlDomainParseResult.ok, true);
+assert.deepEqual(
+  caseSensitivePostgreSqlDomainParseResult.modelJson.schema.tables[0].columns.map(
+    (column) => column.dataType
+  ),
+  ['"CaseType570"', '"casetype570"']
+);
+const caseSensitivePostgreSqlDomainPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: caseSensitivePostgreSqlDomainParseResult.modelJson,
+    resolvedDialect: "postgresql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: caseSensitivePostgreSqlDomainParseResult.modelJson,
+      sourceText: caseSensitivePostgreSqlDomainSource
+    }
+  });
+assert.match(
+  caseSensitivePostgreSqlDomainPreview.generatedSourceText,
+  /"upper_value" "CaseType570" NOT NULL/
+);
+assert.match(
+  caseSensitivePostgreSqlDomainPreview.generatedSourceText,
+  /"lower_value" "casetype570" NOT NULL/
+);
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    caseSensitivePostgreSqlDomainPreview
+  ).ok,
+  true
+);
 
 const commentOnlyPostgreSqlTypeParseResult =
   ddlParserRuntime.parseSqlDdlToErdModel({
@@ -8071,15 +8226,31 @@ assert.match(annotationShape, /SQLTOERD_ANNOTATION_LABEL_CHANGE_EVENT/);
 assert.match(annotationShape, /SQLTOERD_ANNOTATION_DELETE_EVENT/);
 assert.match(annotationShape, /getSqlErdRelationCurvePathData/);
 assert.match(annotationShape, /getSqlErdRelationCurveMidpoint/);
+assert.match(
+  annotationShape,
+  /const shouldShowLabel = isSelected \|\| shape\.props\.label\.length > 0/
+);
+assert.match(annotationShape, /\{shouldShowLabel \? \(/);
 assert.doesNotMatch(
   annotationShape,
   /\(startPoint\.x \+ endPoint\.x\) \/ 2/
 );
 assert.doesNotMatch(annotationShape, /Cardinality/);
+assert.match(panel, /whitespace-pre-wrap/);
+assert.match(panel, /\[overflow-wrap:anywhere\]/);
+assert.doesNotMatch(panel, /min-w-\[760px\]/);
+assert.doesNotMatch(panel, /<code className="whitespace-pre px-2">/);
+assert.match(panel, /createSqlErdGeneratedSqlParseError\(/);
+assert.doesNotMatch(
+  panel,
+  /setNormalizedSqlApplyError\(parseResult\.error\.message\)/
+);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
 assert.match(frameShape, /editor\.select\(shape\.id\)/);
 assert.match(frameShape, /resizeBox/);
 assert.match(frameShape, /onResize/);
+assert.match(frameShape, /isLocked: false/);
+assert.match(canvasSurface, /isLocked: false/);
 assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
 assert.match(noteShape, /useEditor/);
 assert.match(noteShape, /data-sqltoerd-note-id/);
@@ -8094,6 +8265,17 @@ assert.match(textShape, /onResize/);
 assert.match(strokeShape, /SQLTOERD_STROKE_SHAPE_TYPE/);
 assert.match(strokeShape, /stroke-linecap="round"/);
 assert.match(strokeShape, /canResize\(\)/);
+for (const shapeSource of [
+  annotationShape,
+  frameShape,
+  noteShape,
+  relationShape,
+  strokeShape,
+  tableShape,
+  textShape
+]) {
+  assert.match(shapeSource, /override hideRotateHandle\(\) \{ return true; \}/);
+}
 assert.match(annotationToolbar, /export function SqlErdCanvasToolbar/);
 assert.match(annotationToolbar, /aria-label="선택\/드래그"/);
 assert.match(annotationToolbar, /aria-label="메모 추가"/);

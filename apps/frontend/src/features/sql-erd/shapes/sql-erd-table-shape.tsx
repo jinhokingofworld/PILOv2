@@ -811,6 +811,8 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
     return false;
   }
 
+  override hideRotateHandle() { return true; }
+
   override canResize() {
     return false;
   }
