@@ -53,7 +53,10 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.actionTimer = setInterval(() => void this.processNextAction(), ACTION_POLL_INTERVAL_MS);
+    this.actionTimer = setInterval(
+      () => void this.processPendingAction(),
+      ACTION_POLL_INTERVAL_MS
+    );
     this.activeRunSweepTimer = setInterval(() => void this.expireStaleActiveRuns(), ACTIVE_RUN_SWEEP_INTERVAL_MS);
   }
 
@@ -175,8 +178,22 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     runId: string
   ): Promise<CanvasAgentRunDetailPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-    const run = await this.repository.findRunForRequester(currentUserId, workspaceId, canvasId, runId);
+    let run = await this.repository.findRunForRequester(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      runId
+    );
     if (!run) throw notFound("Canvas Agent run not found");
+    if (run.status === "executing") {
+      await this.processPendingAction(run.id);
+      run = await this.repository.findRunForRequester(
+        currentUserId,
+        workspaceId,
+        canvasId,
+        runId
+      ) ?? run;
+    }
     const [steps, drafts] = await Promise.all([
       this.repository.listSteps(run.id),
       this.repository.listDrafts(run.id)
@@ -271,11 +288,11 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     return this.mapDraft(discarded);
   }
 
-  private async processNextAction(): Promise<void> {
+  async processPendingAction(runId: string | null = null): Promise<void> {
     if (this.isProcessing) return;
     this.isProcessing = true;
     try {
-      const claimed = await this.repository.claimNextPendingStep();
+      const claimed = await this.repository.claimNextPendingStep(runId);
       if (!claimed) return;
       const currentStatus = await this.repository.statusForRun(claimed.run.id);
       if (currentStatus !== "executing") return;

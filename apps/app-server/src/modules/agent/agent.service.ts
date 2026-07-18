@@ -4,6 +4,7 @@ import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { agentStorageUnavailable } from "./agent-api-error";
+import { AgentCanvasDelegationCompletionService } from "./agent-canvas-delegation-completion.service";
 import {
   CreateAgentRunResult as StoredCreateAgentRunResult,
   AgentLoggingService,
@@ -286,6 +287,8 @@ export class AgentService {
     private readonly workspaceService: WorkspaceService,
     private readonly agentLoggingService: AgentLoggingService,
     private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
+    private readonly canvasDelegationCompletionService:
+      AgentCanvasDelegationCompletionService,
     private readonly agentCandidateSelectionService: AgentCandidateSelectionService
   ) {}
 
@@ -598,7 +601,7 @@ export class AgentService {
   ): Promise<AgentRunDetailPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
     await this.applyRequestTimeLifecycle(currentUserId, workspaceId);
-    const run = await this.database.queryOne<AgentRunRow>(
+    let run = await this.database.queryOne<AgentRunRow>(
       `
         SELECT *
         FROM agent_runs
@@ -611,6 +614,24 @@ export class AgentService {
 
     if (!run) {
       throw notFound("Agent run not found");
+    }
+
+    if (run.status === "running" && this.canvasDelegationCompletionService) {
+      await this.canvasDelegationCompletionService.reconcileRun({
+        agentRunId: runId,
+        workspaceId,
+        requestedByUserId: currentUserId
+      });
+      run = await this.database.queryOne<AgentRunRow>(
+        `
+          SELECT *
+          FROM agent_runs
+          WHERE id = $1
+            AND workspace_id = $2
+            AND requested_by_user_id = $3
+        `,
+        [runId, workspaceId, currentUserId]
+      ) ?? run;
     }
 
     const [steps, messages, confirmation] = await Promise.all([

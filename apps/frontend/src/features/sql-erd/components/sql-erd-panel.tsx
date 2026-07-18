@@ -19,7 +19,11 @@ import {
   indentOnInput,
   syntaxHighlighting
 } from "@codemirror/language";
-import { Compartment, EditorState } from "@codemirror/state";
+import {
+  Compartment,
+  EditorState,
+  type TransactionSpec
+} from "@codemirror/state";
 import {
   drawSelection,
   EditorView,
@@ -134,6 +138,7 @@ import {
 } from "@/features/sql-erd/utils/foreign-key-add";
 import {
   areSqltoerdLayoutsEqual,
+  createSqltoerdLayoutForModel,
   createSqltoerdModelIndex,
   getSqltoerdModelCounts,
   getTableDisplayName,
@@ -181,9 +186,22 @@ import {
   type SqltoerdSourceRange
 } from "@/features/sql-erd/utils/sql-source-map";
 import {
+  clampSqlErdSourceNavigationRange,
+  resolveSqlErdSourceNavigationTarget,
+  type SqlErdSourceNavigationRequest,
+  type SqlErdSourceNavigationTarget
+} from "@/features/sql-erd/utils/source-navigation";
+import {
+  applySqlErdSchemaMutation,
+  type SqlErdSchemaMutationFailureReason,
+  type SqlErdSchemaMutationRequest,
+  type SqlErdSchemaMutationResult
+} from "@/features/sql-erd/utils/schema-mutation";
+import {
   createSqlErdModelSqlHistory,
   createSqlErdNormalizedSqlPreview,
   createSqlErdSqlLineDiff,
+  createSqlErdVerifiedNormalizedSnapshot,
   isSqlErdNormalizedSqlPreviewCurrent,
   isSqlErdViewSessionCurrent,
   recordSqlErdModelSqlHistory,
@@ -341,6 +359,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const panelContainerRef = useRef<HTMLElement | null>(null);
   const manualAutosaveRetryRef = useRef(false);
   const sessionLoadRequestIdRef = useRef(0);
+  const sourceNavigationRequestIdRef = useRef(0);
+  const lastAutoNavigatedRelationIdRef = useRef<string | null>(null);
   const hasLoadedSessionRef = useRef(false);
   const currentSessionIdRef = useRef(sessionId);
   const autosaveGateRef = useRef<SqlErdAutosaveGateState>({
@@ -551,6 +571,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     useState<SqltoerdResolvedDialect | null>(null);
   const [sqlSourceMap, setSqlSourceMap] =
     useState<SqltoerdSourceMap | null>(null);
+  const [sourceNavigationRequest, setSourceNavigationRequest] =
+    useState<SqlErdSourceNavigationRequest | null>(null);
   const [normalizedSqlPreview, setNormalizedSqlPreview] =
     useState<SqlErdNormalizedSqlPreview | null>(null);
   const [normalizedSqlApplyError, setNormalizedSqlApplyError] = useState<
@@ -792,6 +814,62 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       }),
     [selectedSqlErdObject, sqlErdEditState.draftSourceText, sqlSourceMap]
   );
+  const handleNavigateRelationSource = useCallback(
+    (
+      relationId: string,
+      target: SqlErdSourceNavigationTarget = "constraint"
+    ) => {
+      if (
+        !sqlSourceMap ||
+        sqlSourceMap.sourceText !==
+          sqlErdEditStateRef.current.draftSourceText
+      ) {
+        return false;
+      }
+
+      const range = resolveSqlErdSourceNavigationTarget(
+        sqlSourceMap,
+        relationId,
+        target
+      );
+
+      if (!range) {
+        return false;
+      }
+
+      sourceNavigationRequestIdRef.current += 1;
+      setIsSourceOpen(true);
+      setSourceNavigationRequest({
+        id: sourceNavigationRequestIdRef.current,
+        range
+      });
+      return true;
+    },
+    [sqlSourceMap]
+  );
+  useEffect(() => {
+    if (selectedSqlErdObject.type !== "relation") {
+      lastAutoNavigatedRelationIdRef.current = null;
+      return;
+    }
+
+    if (
+      lastAutoNavigatedRelationIdRef.current ===
+      selectedSqlErdObject.relationId
+    ) {
+      return;
+    }
+
+    if (
+      handleNavigateRelationSource(
+        selectedSqlErdObject.relationId,
+        "constraint"
+      )
+    ) {
+      lastAutoNavigatedRelationIdRef.current =
+        selectedSqlErdObject.relationId;
+    }
+  }, [handleNavigateRelationSource, selectedSqlErdObject]);
   const modelIndex = useMemo(
     () => createSqltoerdModelIndex(sqlErdViewSession.modelJson),
     [sqlErdViewSession.modelJson]
@@ -846,6 +924,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     setTablePinState(createSqlErdTablePinState());
+    setSourceNavigationRequest(null);
+    sourceNavigationRequestIdRef.current = 0;
+    lastAutoNavigatedRelationIdRef.current = null;
   }, [sessionId]);
 
   useEffect(() => {
@@ -945,13 +1026,23 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           return;
         }
 
-        const parsedSnapshot: SqlErdViewSession = {
-          ...baseSnapshot,
-          layoutJson: parseResult.layoutJson,
-          modelJson: parseResult.modelJson,
-          settingsJson: targetSnapshot.settingsJson,
-          sourceText: targetSnapshot.sourceText
-        };
+        const verifiedSnapshot = createSqlErdVerifiedNormalizedSnapshot({
+          parsedModelJson: parseResult.modelJson,
+          targetModelJson: sourceMapModelJson,
+          targetSnapshot: {
+            ...baseSnapshot,
+            layoutJson: targetSnapshot.layoutJson,
+            settingsJson: targetSnapshot.settingsJson,
+            sourceText: targetSnapshot.sourceText
+          }
+        });
+        if (!verifiedSnapshot.ok) {
+          setNormalizedSqlApplyError(verifiedSnapshot.error);
+          setIsNormalizedSqlApplying(false);
+          return;
+        }
+
+        const parsedSnapshot = verifiedSnapshot.snapshot;
 
         applySqlErdEditAction({
           baseSnapshot,
@@ -1005,6 +1096,87 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       })
     );
   }, [isWriteProtocolMismatch, lastResolvedDialect]);
+  const handlePreviewSchemaMutation = useCallback(
+    (
+      request: SqlErdSchemaMutationRequest
+    ): SqlErdSchemaMutationResult | null => {
+      const currentSnapshot =
+        sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+      const resolvedDialect =
+        lastResolvedDialect ??
+        (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
+
+      if (
+        isWriteProtocolMismatch ||
+        !resolvedDialect ||
+        isNormalizedSqlApplying ||
+        isSqlErdDraftDirty(sqlErdEditStateRef.current)
+      ) {
+        return null;
+      }
+
+      const candidate = applySqlErdSchemaMutation(
+        currentSnapshot.modelJson,
+        request
+      );
+
+      if (!candidate.ok) {
+        return candidate;
+      }
+
+      setNormalizedSqlApplyError(null);
+      setNormalizedSqlPreview(
+        createSqlErdNormalizedSqlPreview({
+          layoutJson: createSqltoerdLayoutForModel(
+            candidate.modelJson,
+            currentSnapshot.layoutJson
+          ),
+          modelJson: candidate.modelJson,
+          resolvedDialect,
+          session: currentSnapshot
+        })
+      );
+      return candidate;
+    },
+    [isNormalizedSqlApplying, isWriteProtocolMismatch, lastResolvedDialect]
+  );
+  const handleDeleteSchemaSelection = useCallback(
+    (
+      selection: Extract<
+        SqlErdSelection,
+        { type: "table" | "column" }
+      >
+    ) => {
+      const result = handlePreviewSchemaMutation(
+        selection.type === "table"
+          ? { type: "delete_table", tableId: selection.tableId }
+          : {
+              type: "delete_column",
+              tableId: selection.tableId,
+              columnId: selection.columnId
+            }
+      );
+
+      if (!result) {
+        setSessionLoadState({
+          label: "Edit unavailable",
+          message:
+            "현재 SQL을 Generate하고 source 변경을 저장한 뒤 다시 시도하세요.",
+          tone: "error"
+        });
+        return;
+      }
+
+      if (!result.ok) {
+        setSessionLoadState({
+          label: "Edit blocked",
+          message: getSchemaMutationFailureMessage(result.reason),
+          tone: "error"
+        });
+      }
+    },
+    [handlePreviewSchemaMutation]
+  );
   const handlePreviewForeignKeyAdd = useCallback(
     ({
       fromColumnId,
@@ -1201,6 +1373,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const handleApplyNormalizedSql = useCallback(() => {
     if (
       isWriteProtocolMismatch ||
+      (sqlErdViewSession.writeProtocol === "operations_v1" &&
+        !sourceLock.canEdit) ||
       !normalizedSqlPreview ||
       !normalizedSqlPreview.hasChanges ||
       isNormalizedSqlApplying
@@ -1241,10 +1415,25 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     applyNormalizedSqlSnapshot,
     isNormalizedSqlApplying,
     isWriteProtocolMismatch,
-    normalizedSqlPreview
+    normalizedSqlPreview,
+    sourceLock.canEdit,
+    sqlErdViewSession.writeProtocol
   ]);
+  useEffect(() => {
+    if (
+      normalizedSqlPreview &&
+      sqlErdViewSession.writeProtocol === "operations_v1"
+    ) {
+      setIsSourceOpen(true);
+    }
+  }, [normalizedSqlPreview, sqlErdViewSession.writeProtocol]);
   const handleUndoNormalizedSql = useCallback(() => {
-    if (isWriteProtocolMismatch || isNormalizedSqlApplying) {
+    if (
+      isWriteProtocolMismatch ||
+      isNormalizedSqlApplying ||
+      (sqlErdViewSession.writeProtocol === "operations_v1" &&
+        !sourceLock.canEdit)
+    ) {
       return;
     }
 
@@ -1264,9 +1453,21 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         revision: baseSnapshot.revision
       }
     });
-  }, [applyNormalizedSqlSnapshot, isNormalizedSqlApplying, isWriteProtocolMismatch, modelSqlHistory]);
+  }, [
+    applyNormalizedSqlSnapshot,
+    isNormalizedSqlApplying,
+    isWriteProtocolMismatch,
+    modelSqlHistory,
+    sourceLock.canEdit,
+    sqlErdViewSession.writeProtocol
+  ]);
   const handleRedoNormalizedSql = useCallback(() => {
-    if (isWriteProtocolMismatch || isNormalizedSqlApplying) {
+    if (
+      isWriteProtocolMismatch ||
+      isNormalizedSqlApplying ||
+      (sqlErdViewSession.writeProtocol === "operations_v1" &&
+        !sourceLock.canEdit)
+    ) {
       return;
     }
 
@@ -1286,7 +1487,14 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         revision: baseSnapshot.revision
       }
     });
-  }, [applyNormalizedSqlSnapshot, isNormalizedSqlApplying, isWriteProtocolMismatch, modelSqlHistory]);
+  }, [
+    applyNormalizedSqlSnapshot,
+    isNormalizedSqlApplying,
+    isWriteProtocolMismatch,
+    modelSqlHistory,
+    sourceLock.canEdit,
+    sqlErdViewSession.writeProtocol
+  ]);
   const handleLayoutChange = useCallback(
     (layoutJson: SqltoerdLayoutJsonV1) => {
       applySqlErdEditAction({
@@ -2253,11 +2461,15 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         canRedoNormalizedSql={
           !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
+          (sqlErdViewSession.writeProtocol !== "operations_v1" ||
+            sourceLock.canEdit) &&
           modelSqlHistory.future.length > 0
         }
         canUndoNormalizedSql={
           !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
+          (sqlErdViewSession.writeProtocol !== "operations_v1" ||
+            sourceLock.canEdit) &&
           modelSqlHistory.past.length > 0
         }
         counts={sessionCounts}
@@ -2285,6 +2497,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         sourceText={sqlErdEditState.draftSourceText}
         resolvedDialect={sourceEditorDialect}
         relationSourceRanges={selectedRelationSourceRanges}
+        sourceNavigationRequest={sourceNavigationRequest}
         width={clampedSourcePanelWidth}
       />
       {isSourceOpen ? (
@@ -2308,6 +2521,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           modelJson={sqlErdViewSession.modelJson}
           committedTableMoves={committedTableMoves}
           onLayoutPatch={handleLayoutPatch}
+          onSchemaDelete={handleDeleteSchemaSelection}
           onReloadSession={handleReloadPausedSession}
           onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
           onSelectionChange={setSelectedSqlErdObject}
@@ -2348,6 +2562,14 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           (lastResolvedDialect !== null ||
             sqlErdEditState.draftDialect !== "auto")
         }
+        canEditSchema={
+          isSessionReady &&
+          !isWriteProtocolMismatch &&
+          !isNormalizedSqlApplying &&
+          !isSqlErdDraftDirty(sqlErdEditState) &&
+          (lastResolvedDialect !== null ||
+            sqlErdEditState.draftDialect !== "auto")
+        }
         emptyState={{
           sessionLoadState,
           title: sqlErdViewSession.title
@@ -2361,7 +2583,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         onDeleteForeignKey={handlePreviewForeignKeyDelete}
         onClearTablePin={handleClearTablePin}
         onNavigateToPinnedTable={handleNavigateToPinnedTable}
+        onNavigateRelationSource={handleNavigateRelationSource}
         onPinTable={handlePinTable}
+        onSchemaMutation={handlePreviewSchemaMutation}
         onUpdateForeignKey={handlePreviewForeignKeyUpdate}
         onToggle={() => setIsInspectorOpen((current) => !current)}
         pinnedTableId={tablePinState.pinnedTableId}
@@ -2373,7 +2597,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       <NormalizedSqlPreviewDialog
         error={normalizedSqlApplyError}
         isApplying={isNormalizedSqlApplying}
-        isReadOnly={isWriteProtocolMismatch}
+        isReadOnly={
+          isWriteProtocolMismatch ||
+          (sqlErdViewSession.writeProtocol === "operations_v1" &&
+            !sourceLock.canEdit)
+        }
         onApply={handleApplyNormalizedSql}
         onOpenChange={(open) => {
           if (!open && !isNormalizedSqlApplying) {
@@ -2565,6 +2793,7 @@ type SourcePanelProps = PanelToggleProps & {
   sourceText: string;
   resolvedDialect: SqltoerdResolvedDialect;
   relationSourceRanges: SqltoerdSourceRange[];
+  sourceNavigationRequest: SqlErdSourceNavigationRequest | null;
   width: number;
 };
 
@@ -2587,6 +2816,7 @@ function SourcePanel({
   sourceText,
   resolvedDialect,
   relationSourceRanges,
+  sourceNavigationRequest,
   width
 }: SourcePanelProps) {
   if (!isOpen) {
@@ -2697,6 +2927,7 @@ function SourcePanel({
           onChange={onSourceTextChange}
           readOnly={isSourceTextReadOnly}
           relationSourceRanges={relationSourceRanges}
+          navigationRequest={sourceNavigationRequest}
           value={sourceText}
         />
       </div>
@@ -2766,6 +2997,7 @@ function CollapsedSourcePanel({ onToggle }: { onToggle: () => void }) {
 
 type SqlSourceEditorProps = {
   dialect: SqltoerdResolvedDialect;
+  navigationRequest: SqlErdSourceNavigationRequest | null;
   onChange: (sourceText: string) => void;
   readOnly: boolean;
   relationSourceRanges: SqltoerdSourceRange[];
@@ -2774,6 +3006,7 @@ type SqlSourceEditorProps = {
 
 function SqlSourceEditor({
   dialect,
+  navigationRequest,
   onChange,
   readOnly,
   relationSourceRanges,
@@ -2785,6 +3018,7 @@ function SqlSourceEditor({
   const readOnlyCompartmentRef = useRef(new Compartment());
   const relationSourceCompartmentRef = useRef(new Compartment());
   const isApplyingExternalValueRef = useRef(false);
+  const lastNavigationRequestIdRef = useRef<number | null>(null);
   const onChangeRef = useRef(onChange);
 
   useEffect(() => {
@@ -2851,37 +3085,67 @@ function SqlSourceEditor({
   useEffect(() => {
     const view = viewRef.current;
 
-    if (!view || view.state.doc.toString() === value) {
-      return;
-    }
-
-    isApplyingExternalValueRef.current = true;
-    view.dispatch({
-      changes: {
-        from: 0,
-        insert: value,
-        to: view.state.doc.length
-      }
-    });
-    isApplyingExternalValueRef.current = false;
-  }, [value]);
-
-  useEffect(() => {
-    const view = viewRef.current;
-
     if (!view) {
       return;
     }
 
-    view.dispatch({
-      effects: relationSourceCompartmentRef.current.reconfigure(
+    const hasDocumentChange = view.state.doc.toString() !== value;
+    const isNewNavigationRequest = Boolean(
+      navigationRequest &&
+        navigationRequest.id !== lastNavigationRequestIdRef.current
+    );
+    const navigationRange =
+      isNewNavigationRequest && navigationRequest
+        ? clampSqlErdSourceNavigationRange(
+            navigationRequest.range,
+            value.length
+          )
+        : null;
+    const effects = [
+      relationSourceCompartmentRef.current.reconfigure(
         createSqlErdRelationSourceDecorationExtension(
           relationSourceRanges,
-          view.state.doc.length
+          value.length
         )
       )
-    });
-  }, [relationSourceRanges]);
+    ];
+
+    if (navigationRange) {
+      effects.push(
+        EditorView.scrollIntoView(navigationRange.from, { y: "center" })
+      );
+    }
+
+    const transaction: TransactionSpec = { effects };
+
+    if (hasDocumentChange) {
+      transaction.changes = {
+        from: 0,
+        insert: value,
+        to: view.state.doc.length
+      };
+    }
+
+    if (navigationRange) {
+      transaction.selection = {
+        anchor: navigationRange.from,
+        head: navigationRange.to
+      };
+      lastNavigationRequestIdRef.current = navigationRequest?.id ?? null;
+    } else if (hasDocumentChange) {
+      transaction.selection = {
+        anchor: Math.min(view.state.selection.main.anchor, value.length),
+        head: Math.min(view.state.selection.main.head, value.length)
+      };
+    }
+
+    isApplyingExternalValueRef.current = hasDocumentChange;
+    try {
+      view.dispatch(transaction);
+    } finally {
+      isApplyingExternalValueRef.current = false;
+    }
+  }, [navigationRequest, relationSourceRanges, value]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
@@ -3088,6 +3352,9 @@ type CanvasShellProps = {
     patch: SqltoerdLayoutPatch,
     context?: SqlErdLayoutPatchContext
   ) => boolean | void;
+  onSchemaDelete: (
+    selection: Extract<SqlErdSelection, { type: "table" | "column" }>
+  ) => void;
   onReloadSession: () => void;
   onRetryLayoutAutosaveOnce: () => void;
   onSelectionChange: (selection: SqlErdSelection) => void;
@@ -3109,6 +3376,7 @@ function CanvasShell({
   layoutJson,
   modelJson,
   onLayoutPatch,
+  onSchemaDelete,
   onReloadSession,
   onRetryLayoutAutosaveOnce,
   onSelectionChange,
@@ -3130,6 +3398,7 @@ function CanvasShell({
         layoutJson={layoutJson}
         modelJson={modelJson}
         onLayoutPatch={onLayoutPatch}
+        onSchemaDelete={onSchemaDelete}
         onSelectionChange={onSelectionChange}
         pinNavigationRequestId={pinNavigationRequestId}
         pinnedTableId={pinnedTableId}
@@ -3246,6 +3515,7 @@ type InspectorEmptyState = {
 
 type InspectorPanelProps = PanelToggleProps & {
   canAddForeignKey: boolean;
+  canEditSchema: boolean;
   emptyState: InspectorEmptyState;
   modelJson: SqltoerdModelJsonV1;
   onAddForeignKey: (input: {
@@ -3263,7 +3533,14 @@ type InspectorPanelProps = PanelToggleProps & {
   }) => SqltoerdForeignKeyEditResult | null;
   onClearTablePin: () => void;
   onNavigateToPinnedTable: () => void;
+  onNavigateRelationSource: (
+    relationId: string,
+    target: SqlErdSourceNavigationTarget
+  ) => boolean;
   onPinTable: () => void;
+  onSchemaMutation: (
+    request: SqlErdSchemaMutationRequest
+  ) => SqlErdSchemaMutationResult | null;
   onUpdateForeignKey: (input: {
     relationId: string;
     toColumnId: string;
@@ -3277,6 +3554,7 @@ type InspectorPanelProps = PanelToggleProps & {
 
 function InspectorPanel({
   canAddForeignKey,
+  canEditSchema,
   emptyState,
   isOpen,
   modelJson,
@@ -3285,7 +3563,9 @@ function InspectorPanel({
   onDeleteForeignKey,
   onClearTablePin,
   onNavigateToPinnedTable,
+  onNavigateRelationSource,
   onPinTable,
+  onSchemaMutation,
   onUpdateForeignKey,
   onToggle,
   pinnedTableId,
@@ -3310,10 +3590,19 @@ function InspectorPanel({
 
   return (
     <aside
-      className="flex shrink-0 flex-col border-l bg-background"
+      className="relative flex shrink-0 flex-col border-l bg-background"
       id="inspector"
       style={{ width }}
     >
+      <button
+        aria-label="상세 정보 패널 닫기"
+        className="absolute top-1/2 -left-4 z-20 inline-flex size-8 -translate-y-1/2 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-md transition-colors hover:bg-muted hover:text-foreground"
+        data-sqltoerd-inspector-toggle
+        onClick={onToggle}
+        type="button"
+      >
+        <PanelRightClose className="size-4" />
+      </button>
       <div className="flex min-h-20 items-center justify-between gap-3 border-b px-6">
         <div className="min-w-0">
           <p className="text-xl font-semibold">{inspectorTitle}</p>
@@ -3323,24 +3612,19 @@ function InspectorPanel({
             </p>
           ) : null}
         </div>
-        <button
-          aria-label="상세 정보 패널 닫기"
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          onClick={onToggle}
-          type="button"
-        >
-          <PanelRightClose className="size-4" />
-        </button>
       </div>
 
       <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
         <InspectorContent
           canAddForeignKey={canAddForeignKey}
+          canEditSchema={canEditSchema}
           emptyState={emptyState}
           modelJson={modelJson}
           onAddForeignKey={onAddForeignKey}
           onConvertAnnotationToForeignKey={onConvertAnnotationToForeignKey}
           onDeleteForeignKey={onDeleteForeignKey}
+          onNavigateRelationSource={onNavigateRelationSource}
+          onSchemaMutation={onSchemaMutation}
           onUpdateForeignKey={onUpdateForeignKey}
           viewModel={viewModel}
         />
@@ -3502,15 +3786,19 @@ function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {
 
 function InspectorContent({
   canAddForeignKey,
+  canEditSchema,
   emptyState,
   modelJson,
   onAddForeignKey,
   onConvertAnnotationToForeignKey,
   onDeleteForeignKey,
+  onNavigateRelationSource,
+  onSchemaMutation,
   onUpdateForeignKey,
   viewModel
 }: {
   canAddForeignKey: boolean;
+  canEditSchema: boolean;
   emptyState: InspectorEmptyState;
   modelJson: SqltoerdModelJsonV1;
   onAddForeignKey: (input: {
@@ -3526,6 +3814,13 @@ function InspectorContent({
   onDeleteForeignKey: (input: {
     relationId: string;
   }) => SqltoerdForeignKeyEditResult | null;
+  onNavigateRelationSource: (
+    relationId: string,
+    target: SqlErdSourceNavigationTarget
+  ) => boolean;
+  onSchemaMutation: (
+    request: SqlErdSchemaMutationRequest
+  ) => SqlErdSchemaMutationResult | null;
   onUpdateForeignKey: (input: {
     relationId: string;
     toColumnId: string;
@@ -3534,15 +3829,23 @@ function InspectorContent({
   viewModel: SqlErdInspectorViewModel;
 }) {
   if (viewModel.type === "table") {
-    return <TableInspector viewModel={viewModel} />;
+    return (
+      <TableInspector
+        canEditSchema={canEditSchema}
+        onSchemaMutation={onSchemaMutation}
+        viewModel={viewModel}
+      />
+    );
   }
 
   if (viewModel.type === "column") {
     return (
       <ColumnInspector
         canAddForeignKey={canAddForeignKey}
+        canEditSchema={canEditSchema}
         modelJson={modelJson}
         onAddForeignKey={onAddForeignKey}
+        onSchemaMutation={onSchemaMutation}
         viewModel={viewModel}
       />
     );
@@ -3554,6 +3857,7 @@ function InspectorContent({
         canEditForeignKey={canAddForeignKey}
         modelJson={modelJson}
         onDeleteForeignKey={onDeleteForeignKey}
+        onNavigateRelationSource={onNavigateRelationSource}
         onUpdateForeignKey={onUpdateForeignKey}
         viewModel={viewModel}
       />
@@ -3600,13 +3904,88 @@ function InspectorContent({
 }
 
 function TableInspector({
+  canEditSchema,
+  onSchemaMutation,
   viewModel
 }: {
+  canEditSchema: boolean;
+  onSchemaMutation: (
+    request: SqlErdSchemaMutationRequest
+  ) => SqlErdSchemaMutationResult | null;
   viewModel: Extract<SqlErdInspectorViewModel, { type: "table" }>;
 }) {
+  const [tableName, setTableName] = useState(viewModel.table.name);
+  const [schemaEditError, setSchemaEditError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTableName(viewModel.table.name);
+    setSchemaEditError(null);
+  }, [viewModel.table.id, viewModel.table.name]);
+
+  const previewMutation = (request: SqlErdSchemaMutationRequest) => {
+    const result = onSchemaMutation(request);
+
+    if (!result) {
+      setSchemaEditError(
+        "현재 SQL을 Generate하고 저장한 뒤 다시 시도하세요."
+      );
+      return;
+    }
+
+    setSchemaEditError(
+      result.ok ? null : getSchemaMutationFailureMessage(result.reason)
+    );
+  };
+
   return (
     <>
       <InspectorSectionTitle>테이블 정보</InspectorSectionTitle>
+      <div className="space-y-3 rounded-md border p-3">
+        <label className="grid gap-1.5 text-sm font-medium">
+          테이블명
+          <input
+            className="h-9 rounded-md border bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!canEditSchema}
+            onChange={(event) => {
+              setTableName(event.target.value);
+              setSchemaEditError(null);
+            }}
+            value={tableName}
+          />
+        </label>
+        {schemaEditError ? (
+          <p className="text-sm leading-6 text-destructive">
+            {schemaEditError}
+          </p>
+        ) : null}
+        <button
+          className="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:pointer-events-none disabled:opacity-50"
+          disabled={!canEditSchema || tableName === viewModel.table.name}
+          onClick={() =>
+            previewMutation({
+              type: "rename_table",
+              tableId: viewModel.table.id,
+              name: tableName
+            })
+          }
+          type="button"
+        >
+          테이블명 SQL diff 보기
+        </button>
+        <button
+          className="inline-flex h-9 w-full items-center justify-center rounded-md border border-destructive/40 px-3 text-sm font-medium text-destructive disabled:pointer-events-none disabled:opacity-50"
+          disabled={!canEditSchema}
+          onClick={() =>
+            previewMutation({
+              type: "delete_table",
+              tableId: viewModel.table.id
+            })
+          }
+          type="button"
+        >
+          테이블 삭제 SQL diff 보기
+        </button>
+      </div>
       <div className="space-y-2">
         <InspectorRow label="테이블명" value={viewModel.title} />
         <InspectorRow label="컬럼" value={`${viewModel.columnCount}`} />
@@ -3619,11 +3998,14 @@ function TableInspector({
 
 function ColumnInspector({
   canAddForeignKey,
+  canEditSchema,
   modelJson,
   onAddForeignKey,
+  onSchemaMutation,
   viewModel
 }: {
   canAddForeignKey: boolean;
+  canEditSchema: boolean;
   modelJson: SqltoerdModelJsonV1;
   onAddForeignKey: (input: {
     fromColumnId: string;
@@ -3631,6 +4013,9 @@ function ColumnInspector({
     toColumnId: string;
     toTableId: string;
   }) => SqltoerdForeignKeyAddResult | null;
+  onSchemaMutation: (
+    request: SqlErdSchemaMutationRequest
+  ) => SqlErdSchemaMutationResult | null;
   viewModel: Extract<SqlErdInspectorViewModel, { type: "column" }>;
 }) {
   const { column, table } = viewModel;
@@ -3640,6 +4025,9 @@ function ColumnInspector({
   );
   const [targetTableId, setTargetTableId] = useState("");
   const [targetColumnId, setTargetColumnId] = useState("");
+  const [columnName, setColumnName] = useState(column.name);
+  const [columnDataType, setColumnDataType] = useState(column.dataType);
+  const [schemaEditError, setSchemaEditError] = useState<string | null>(null);
   const targetTables = modelJson.schema.tables.filter((candidateTable) =>
     getSqltoerdForeignKeyTargetColumns(candidateTable).some(
       (candidateColumn) =>
@@ -3661,7 +4049,25 @@ function ColumnInspector({
     setForeignKeyAddError(null);
     setTargetTableId("");
     setTargetColumnId("");
-  }, [column.id, table.id]);
+    setColumnName(column.name);
+    setColumnDataType(column.dataType);
+    setSchemaEditError(null);
+  }, [column.dataType, column.id, column.name, table.id]);
+
+  const previewSchemaMutation = (request: SqlErdSchemaMutationRequest) => {
+    const result = onSchemaMutation(request);
+
+    if (!result) {
+      setSchemaEditError(
+        "현재 SQL을 Generate하고 저장한 뒤 다시 시도하세요."
+      );
+      return;
+    }
+
+    setSchemaEditError(
+      result.ok ? null : getSchemaMutationFailureMessage(result.reason)
+    );
+  };
 
   const handleTargetTableChange = (nextTargetTableId: string) => {
     setTargetTableId(nextTargetTableId);
@@ -3700,6 +4106,70 @@ function ColumnInspector({
   return (
     <>
       <InspectorSectionTitle>컬럼 정보</InspectorSectionTitle>
+      <div className="space-y-3 rounded-md border p-3">
+        <label className="grid gap-1.5 text-sm font-medium">
+          컬럼명
+          <input
+            className="h-9 rounded-md border bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!canEditSchema}
+            onChange={(event) => {
+              setColumnName(event.target.value);
+              setSchemaEditError(null);
+            }}
+            value={columnName}
+          />
+        </label>
+        <label className="grid gap-1.5 text-sm font-medium">
+          컬럼 타입
+          <input
+            className="h-9 rounded-md border bg-background px-3 font-mono text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!canEditSchema}
+            onChange={(event) => {
+              setColumnDataType(event.target.value);
+              setSchemaEditError(null);
+            }}
+            value={columnDataType}
+          />
+        </label>
+        {schemaEditError ? (
+          <p className="text-sm leading-6 text-destructive">
+            {schemaEditError}
+          </p>
+        ) : null}
+        <button
+          className="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:pointer-events-none disabled:opacity-50"
+          disabled={
+            !canEditSchema ||
+            (columnName === column.name && columnDataType === column.dataType)
+          }
+          onClick={() => {
+            previewSchemaMutation({
+              type: "update_column",
+              tableId: table.id,
+              columnId: column.id,
+              name: columnName,
+              dataType: columnDataType
+            });
+          }}
+          type="button"
+        >
+          컬럼 변경 SQL diff 보기
+        </button>
+        <button
+          className="inline-flex h-9 w-full items-center justify-center rounded-md border border-destructive/40 px-3 text-sm font-medium text-destructive disabled:pointer-events-none disabled:opacity-50"
+          disabled={!canEditSchema}
+          onClick={() =>
+            previewSchemaMutation({
+              type: "delete_column",
+              tableId: table.id,
+              columnId: column.id
+            })
+          }
+          type="button"
+        >
+          컬럼 삭제 SQL diff 보기
+        </button>
+      </div>
       <div className="space-y-2">
         <InspectorRow label="테이블" value={getTableDisplayName(table)} />
         <InspectorRow label="컬럼명" value={column.name} />
@@ -3827,6 +4297,32 @@ function getForeignKeyAddFailureMessage(
   return "선택한 FK 관계를 만들 수 없습니다.";
 }
 
+function getSchemaMutationFailureMessage(
+  reason: SqlErdSchemaMutationFailureReason
+) {
+  if (reason === "DUPLICATE_NAME") {
+    return "같은 범위에 동일한 테이블 또는 컬럼명이 이미 있습니다.";
+  }
+
+  if (reason === "INVALID_NAME") {
+    return "이름의 앞뒤 공백과 제어 문자를 제거한 뒤 다시 시도하세요.";
+  }
+
+  if (reason === "INVALID_DATA_TYPE") {
+    return "유효한 단일 SQL 컬럼 타입을 입력하세요.";
+  }
+
+  if (reason === "LAST_COLUMN") {
+    return "테이블의 마지막 컬럼은 삭제할 수 없습니다. 테이블을 삭제하세요.";
+  }
+
+  if (reason === "LAST_TABLE") {
+    return "마지막 테이블은 삭제할 수 없습니다. 새 테이블을 만든 뒤 다시 시도하세요.";
+  }
+
+  return "선택한 테이블 또는 컬럼을 찾을 수 없습니다. Canvas를 다시 확인하세요.";
+}
+
 function getAnnotationForeignKeyConversionFailureMessage(
   reason: SqltoerdAnnotationForeignKeyConversionFailureReason
 ) {
@@ -3863,6 +4359,7 @@ function RelationInspector({
   canEditForeignKey,
   modelJson,
   onDeleteForeignKey,
+  onNavigateRelationSource,
   onUpdateForeignKey,
   viewModel
 }: {
@@ -3871,6 +4368,10 @@ function RelationInspector({
   onDeleteForeignKey: (input: {
     relationId: string;
   }) => SqltoerdForeignKeyEditResult | null;
+  onNavigateRelationSource: (
+    relationId: string,
+    target: SqlErdSourceNavigationTarget
+  ) => boolean;
   onUpdateForeignKey: (input: {
     relationId: string;
     toColumnId: string;
@@ -3988,6 +4489,24 @@ function RelationInspector({
           />
         ) : null}
         {relationNote ? <InspectorRow label="메모" value={relationNote} /> : null}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          aria-label="참조하는 컬럼의 SQL 위치로 이동"
+          className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-medium transition-colors hover:bg-muted"
+          onClick={() => onNavigateRelationSource(relation.id, "from")}
+          type="button"
+        >
+          참조하는 컬럼 SQL
+        </button>
+        <button
+          aria-label="참조되는 컬럼의 SQL 위치로 이동"
+          className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-medium transition-colors hover:bg-muted"
+          onClick={() => onNavigateRelationSource(relation.id, "to")}
+          type="button"
+        >
+          참조되는 컬럼 SQL
+        </button>
       </div>
       <div className="space-y-3 rounded-md border p-3">
         <div className="flex items-center justify-between gap-3">

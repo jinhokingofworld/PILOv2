@@ -105,6 +105,10 @@ terminal 상태를 기다린다. App Server는 사용자의 최신 원문 prompt
 완료되면 Canvas Agent의 `resultSummary`를 두 번째 LLM 호출 없이 일반 Agent의 `finalAnswer`에 그대로
 복사한다. 실패·취소도 child 상태에 맞춰 일반 Agent run을 terminal 상태로 정리한다.
 
+일반 Agent run 조회는 연결된 Canvas Agent child run이 `executing`이면 해당 run의 대기 중 action을
+명시적으로 진행한 뒤 terminal 결과를 즉시 정산한다. 주기적인 완료 감시는 유실·재시작 복구용으로
+계속 유지하지만, PILO AI의 응답 완료가 새로운 Canvas AI 요청에 의존해서는 안 된다.
+
 `search_meeting_transcript`는 read-only tool이지만 일반 formatter로 즉시 완료하지 않는다. App Server가
 현재 사용자 권한으로 query embedding과 pgvector 검색을 수행한다. 검색 대상은 current transcript chunk와
 `meeting_report_activity_evidence`의 안전한 snapshot(`occurredAt`, `action`, `summary`) chunk다. raw
@@ -847,7 +851,7 @@ Status code: `200 OK`
 | `diagnose_board_freshness` | `low` | 가능 | active source, Board/issue/PR cache freshness와 Unmapped 진단 |
 | `generate_sql_erd` | `medium` | 상황별 | `SqlErdSchemaSpecV1`을 검증해 새 session을 만들거나 현재 operations_v1 session의 schema를 교체 |
 | `inspect_sql_erd_schema` | `low` | 가능 | session의 modelJson을 bounded compact projection으로 조회하고 여러 session이면 사용자 선택을 요청 |
-| `focus_sql_erd_tables` | `low` | 가능 | inspect 결과의 compact ref와 `sessionRevision`을 재검증해 일회성 `table_focus` resource ref 생성 |
+| `focus_sql_erd_tables` | `low` | 가능 | inspect 결과의 compact ref와 `modelFingerprint`를 재검증해 일회성 `table_focus` resource ref 생성 |
 | `recommend_pr_review_focus` | `low` | 가능 | PR Review context의 immutable revision 안전 projection에서 핵심 검토 파일과 연결 파일을 추천 |
 | `delegate_canvas_agent` | `low` | 가능 | 사용자 원문과 검증된 Canvas context를 별도 Canvas Agent run으로 위임 |
 
@@ -883,12 +887,15 @@ Status code: `200 OK`
   기존 `/inputs` endpoint로 보내며 UUID를 사용자 bubble에 표시하지 않는다.
 - inspect 결과의 table은 `t1`, `t2` 형태의 요청별 compact ref로 표시한다. projection은 최대
   9,000자이며 내부 table/column ID와 sourceText, DDL, 전체 modelJson을 Agent step에 복제하지 않는다.
-- `focus_sql_erd_tables`는 inspect 결과의 `sessionId`, `sessionRevision`, compact
+- inspect 성공 output은 `sessionId`, 진단용 `sessionRevision`, compact ref 검증용
+  `modelFingerprint`를 포함한다.
+- `focus_sql_erd_tables`는 inspect 결과의 `sessionId`, `sessionRevision`, `modelFingerprint`, compact
   `primaryTableRefs`·`relatedTableRefs`, confidence와 선택 table별 짧은 reason을 받는다. primary는
   기능에 직접 해당하는 table이고 related는 primary와 직접 FK로 연결된 의미 있는 1-hop table만
   허용한다. 기본 2-hop 확장은 하지 않는다.
-- App Server는 현재 session revision과 compact ref, primary/related 중복, primary-related 직접 FK를
-  다시 검증한다. revision이 바뀌면 `409 CONFLICT`로 거부하고 inspect부터 다시 수행한다.
+- App Server는 현재 model fingerprint와 compact ref, primary/related 중복, primary-related 직접 FK를
+  다시 검증한다. layout/annotation 변경으로 revision만 증가한 경우에는 focus를 허용하고, 실제
+  modelJson 변경으로 fingerprint가 달라진 경우에만 `409 CONFLICT`로 거부해 inspect부터 다시 수행한다.
 - 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`, `modelFingerprint`,
   `featureLabel`, `primaryTableIds`, `relatedTableIds`, `relationIds`, `confidence`를 가진 resource ref다.
   Frontend는 핵심·관련 table과 그 사이 relation만 선명하게 표시하고 나머지 table/relation을 흐리게
@@ -899,6 +906,20 @@ Status code: `200 OK`
   writer lease, autosave와 Activity Log를 만들지 않으며 blur는 접근 제어나 보안 경계가 아니다.
 - 지원 범위를 벗어난 schema 기능은 `unsupportedFeatures`에 명시한다. DB 실행·배포만 요구하는
   요청은 `unsupported`이며, 요구 entity/table 정보가 없으면 먼저 clarification을 요청한다.
+
+#### Dev Agent CORS preflight 진단
+
+브라우저에서 Agent 답변 뒤 `No 'Access-Control-Allow-Origin' header`가 발생하면 토큰이나 request
+body를 보내기 전에 실제 배포 endpoint의 OPTIONS 응답을 확인한다.
+
+```powershell
+node apps/app-server/scripts/agent/cors-preflight-smoke.mjs --url "https://api.dev.pilo.my/api/v1/workspaces/<workspaceId>/agent/runs" --origin "https://dev.pilo.my"
+```
+
+스크립트는 status와 `Access-Control-Allow-*` header만 출력하며 인증 정보나 response body를
+출력하지 않는다. `ok=true`면 preflight 계약은 정상이므로 브라우저 Network 탭에서 실제 실패
+request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=false`면 App Server 코드를 임의로
+완화하지 않고 dev gateway와 배포 환경의 origin 전달 및 OPTIONS routing부터 점검한다.
 
 ### PR Review
 

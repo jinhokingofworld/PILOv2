@@ -8,12 +8,62 @@ const { CanvasAgentDelegationToolsService } = require(
 const { AgentCanvasDelegationCompletionService } = require(
   "../../dist/modules/agent/agent-canvas-delegation-completion.service.js"
 );
+const { CanvasAgentService } = require(
+  "../../dist/modules/canvas/agent/canvas-agent.service.js"
+);
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const AGENT_RUN_ID = "33333333-3333-4333-8333-333333333333";
 const CANVAS_ID = "44444444-4444-4444-8444-444444444444";
 const CANVAS_RUN_ID = "55555555-5555-4555-8555-555555555555";
+
+{
+  const calls = [];
+  const service = new CanvasAgentService(
+    {
+      async execute() {
+        return {
+          summary: "대시보드 프레임을 찾았습니다.",
+          resourceRefs: ["shape:dashboard"],
+          shouldContinue: false,
+          progress: null,
+        };
+      },
+    },
+    {},
+    {},
+    {},
+    {
+      async claimNextPendingStep(runId) {
+        calls.push(["claim", runId]);
+        return {
+          run: { id: CANVAS_RUN_ID },
+          step: { id: "canvas-step-1" },
+        };
+      },
+      async statusForRun() {
+        return "executing";
+      },
+      async completeStep(stepId, output, resourceRefs) {
+        calls.push(["completeStep", stepId, output, resourceRefs]);
+      },
+      async completeRun(runId, summary) {
+        calls.push(["completeRun", runId, summary]);
+      },
+    },
+    {},
+  );
+
+  await service.processPendingAction(CANVAS_RUN_ID);
+
+  assert.deepEqual(calls[0], ["claim", CANVAS_RUN_ID]);
+  assert.deepEqual(calls.at(-1), [
+    "completeRun",
+    CANVAS_RUN_ID,
+    "대시보드 프레임을 찾았습니다.",
+  ]);
+}
 
 const database = {
   async query(sql) {
@@ -104,3 +154,54 @@ assert.equal(
   "선택한 영역의 정적 HTML/CSS 초안을 만들었습니다.",
 );
 assert.equal(settleCalls[0][2].outputSummary.hasArtifact, true);
+
+const targetedSettleCalls = [];
+const targetedActionCalls = [];
+const targetedCompletion = new AgentCanvasDelegationCompletionService(
+  {
+    async queryOne() {
+      return {
+        canvas_agent_run_id: CANVAS_RUN_ID,
+        canvas_status: "executing",
+      };
+    },
+    async query() {
+      return [
+        {
+          agent_run_id: AGENT_RUN_ID,
+          agent_step_id: "66666666-6666-4666-8666-666666666666",
+          workspace_id: WORKSPACE_ID,
+          requested_by_user_id: USER_ID,
+          canvas_agent_run_id: CANVAS_RUN_ID,
+          canvas_id: CANVAS_ID,
+          canvas_status: "completed",
+          result_summary: "대시보드 프레임을 찾았습니다.",
+          error_message: null,
+          has_artifact: false,
+        },
+      ];
+    },
+  },
+  {
+    async settleDelegatedToolStep(...args) {
+      targetedSettleCalls.push(args);
+      return true;
+    },
+  },
+  {
+    async processPendingAction(runId) {
+      targetedActionCalls.push(runId);
+    },
+  },
+);
+await targetedCompletion.reconcileRun({
+  agentRunId: AGENT_RUN_ID,
+  workspaceId: WORKSPACE_ID,
+  requestedByUserId: USER_ID,
+});
+assert.deepEqual(targetedActionCalls, [CANVAS_RUN_ID]);
+assert.equal(targetedSettleCalls.length, 1);
+assert.equal(
+  targetedSettleCalls[0][2].finalAnswer,
+  "대시보드 프레임을 찾았습니다.",
+);

@@ -24,6 +24,7 @@ import {
   type SqlErdCanvasTool
 } from "@/features/sql-erd/components/sql-erd-canvas-toolbar";
 import { SqlErdTableFocusProvider } from "@/features/sql-erd/components/sql-erd-table-focus-context";
+import { SqlErdSelectionContextProvider } from "@/features/sql-erd/components/sql-erd-selection-context";
 import { SqlErdRealtimeBridge } from "@/features/sql-erd/realtime/sql-erd-realtime-bridge";
 import {
   createSqlErdTableMoveCompletionKey,
@@ -162,9 +163,11 @@ import {
 } from "@/features/sql-erd/utils/agent-table-focus";
 import {
   areSqlErdSelectionsEqual,
+  getSqlErdContextRelationIds,
   getSqlErdSelectionFromSelectedShapes,
   resolveSqlErdTableInteractionSelection,
-  selectSqlErdCanvasShapeAtPoint
+  selectSqlErdCanvasShapeAtPoint,
+  shouldHandleSqlErdSchemaDeleteShortcut
 } from "@/features/sql-erd/utils/canvas-selection";
 import { cn } from "@/lib/utils";
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
@@ -185,6 +188,9 @@ type SqlErdCanvasProps = {
     patch: SqltoerdLayoutPatch,
     context?: SqlErdLayoutPatchContext
   ) => boolean | void;
+  onSchemaDelete?: (
+    selection: Extract<SqlErdSelection, { type: "table" | "column" }>
+  ) => void;
   onSelectionChange?: (selection: SqlErdSelection) => void;
   pinNavigationRequestId?: number;
   pinnedTableId?: string | null;
@@ -1304,6 +1310,94 @@ function SqlErdSelectionSync({
       window.removeEventListener(SQLTOERD_TABLE_SELECT_EVENT, handleTableSelect);
     };
   }, [editor, onSelectionChange]);
+
+  return null;
+}
+
+function SqlErdSchemaDeleteBridge({
+  onSchemaDelete,
+  selectedSqlErdObject
+}: {
+  onSchemaDelete: (
+    selection: Extract<SqlErdSelection, { type: "table" | "column" }>
+  ) => void;
+  selectedSqlErdObject: SqlErdSelection;
+}) {
+  const editor = useEditor();
+  const onSchemaDeleteRef = useRef(onSchemaDelete);
+  const selectedSqlErdObjectRef = useRef(selectedSqlErdObject);
+
+  useEffect(() => {
+    onSchemaDeleteRef.current = onSchemaDelete;
+    selectedSqlErdObjectRef.current = selectedSqlErdObject;
+  }, [onSchemaDelete, selectedSqlErdObject]);
+
+  useEffect(() => {
+    function isEditableTarget(target: EventTarget | null) {
+      return (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      );
+    }
+
+    function getSelectedSchemaTableShape() {
+      const selection = selectedSqlErdObjectRef.current;
+      const selectedShape = editor.getOnlySelectedShape();
+
+      return (
+        (selection.type === "table" || selection.type === "column") &&
+        isSqlErdTableShape(selectedShape) &&
+        selectedShape.props.tableId === selection.tableId
+      );
+    }
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      const selection = selectedSqlErdObjectRef.current;
+
+      if (selection.type !== "table" && selection.type !== "column") {
+        return;
+      }
+
+      if (
+        !shouldHandleSqlErdSchemaDeleteShortcut({
+          isEditableTarget: isEditableTarget(event.target),
+          key: event.key,
+          selection
+        }) ||
+        !getSelectedSchemaTableShape()
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onSchemaDeleteRef.current(selection);
+    }
+
+    const removeBeforeDeleteHandler =
+      editor.sideEffects.registerBeforeDeleteHandler(
+        "shape",
+        (shape, source) => {
+          if (
+            source === "user" &&
+            isSqlErdTableShape(shape) &&
+            getSelectedSchemaTableShape()
+          ) {
+            return false;
+          }
+        }
+      );
+
+    window.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      removeBeforeDeleteHandler();
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [editor]);
 
   return null;
 }
@@ -2865,6 +2959,7 @@ export function SqlErdCanvas({
   layoutJson = commerceSqltoerdFixture.layoutJson,
   modelJson = commerceSqltoerdFixture.modelJson,
   onLayoutPatch: onLayoutPatchProp,
+  onSchemaDelete,
   onSelectionChange,
   pinNavigationRequestId = 0,
   pinnedTableId = null,
@@ -2915,6 +3010,10 @@ export function SqlErdCanvas({
   const canvasContentKey = useMemo(
     () => createSqlErdCanvasContentKey({ modelJson, sessionId }),
     [modelJson, sessionId]
+  );
+  const contextRelationIds = useMemo(
+    () => getSqlErdContextRelationIds(modelJson, selectedSqlErdObject),
+    [modelJson, selectedSqlErdObject]
   );
   const handleMount = useCallback(
     (editor: Editor) => {
@@ -3488,8 +3587,9 @@ export function SqlErdCanvas({
       onPointerMoveCapture={handlePointerMoveCapture}
       onPointerUpCapture={handlePointerUpCapture}
     >
-      <SqlErdTableFocusProvider focus={tableFocus}>
-        <TldrawSurface
+      <SqlErdSelectionContextProvider relationIds={contextRelationIds}>
+        <SqlErdTableFocusProvider focus={tableFocus}>
+          <TldrawSurface
           className={cn(
             "h-full w-full bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]",
             className
@@ -3525,6 +3625,12 @@ export function SqlErdCanvas({
           pinnedTableId={pinnedTableId}
         />
         <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
+        {onSchemaDelete ? (
+          <SqlErdSchemaDeleteBridge
+            onSchemaDelete={onSchemaDelete}
+            selectedSqlErdObject={selectedSqlErdObject}
+          />
+        ) : null}
         {sqlErdPresence.enabled ? (
           <SqlErdRealtimeBridge
             currentUserId={sqlErdPresence.currentUserId}
@@ -3566,8 +3672,9 @@ export function SqlErdCanvas({
             selectedSqlErdObject={selectedSqlErdObject}
           />
         ) : null}
-        </TldrawSurface>
-      </SqlErdTableFocusProvider>
+          </TldrawSurface>
+        </SqlErdTableFocusProvider>
+      </SqlErdSelectionContextProvider>
       {onLayoutPatch && canvasEditor ? (
         <SqlErdCanvasToolbar
           editor={canvasEditor}
