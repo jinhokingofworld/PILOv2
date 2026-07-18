@@ -319,11 +319,11 @@ type SqlErdTableFocusResourceRef = {
 };
 ```
 
+App Server는 실제 modelJson이 달라진 경우
+`SQLtoERD model changed; inspect the schema again` 메시지의 `409 CONFLICT`를 반환한다.
 Frontend는 기존 same-origin URL allowlist와 metadata를 모두 검증한 뒤 focus를 일회성
 `sessionStorage`와 same-page event로 전달한다. 최초 적용 시 `sessionRevision`과
-`modelFingerprint`를 모두 검증한다. 실제 modelJson이 달라진 경우에는
-`SQLtoERD model changed; inspect the schema again` 메시지의 `409 CONFLICT`를 반환한다.
-활성화된 뒤에는 layout/annotation 변경으로 증가한 revision은
+`modelFingerprint`를 모두 검증한다. 활성화된 뒤에는 layout/annotation 변경으로 증가한 revision은
 focus를 해제하지 않고, 실제 `modelJson` fingerprint가 바뀔 때만 해제한다. primary는 가장 강하게,
 related는 보조 강조하고 나머지 table과 FK relation은 흐리게 표시하며 선택·transform·delete를
 막는다. annotation은 이 필터 대상이 아니다. `전체 보기`, session 변경, 새로고침으로 해제되며
