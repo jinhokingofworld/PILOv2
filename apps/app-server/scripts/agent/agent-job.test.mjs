@@ -12,6 +12,9 @@ const { AgentOutboxPublisherService } = require(
 const { AgentToolRegistryService } = require(
   "../../dist/modules/agent/agent-tool-registry.service.js"
 );
+const { buildAgentToolCapabilityCatalog } = require(
+  "../../dist/modules/agent/agent-tool-capability-catalog.js"
+);
 const { CalendarAgentToolsService } = require(
   "../../dist/modules/agent/tools/calendar-agent-tools.service.js"
 );
@@ -128,13 +131,54 @@ const payload = {
       (descriptor) =>
         descriptor.whenToUse &&
         descriptor.mustNotUseFor.length > 0 &&
-        descriptor.capabilityIds.length === 1
+        descriptor.capabilityIds.length > 0
     )
   );
   assert.deepEqual(
     registry.listCapabilityCatalogForContext(null),
     capabilityCatalog,
     "capability snapshot must be deterministic for the same eligible tools"
+  );
+  assert.deepEqual(
+    capabilityCatalog.capabilities.find(
+      (capability) => capability.id === "meeting.action_items.transfer_and_approve"
+    )?.toolNames,
+    [
+      "find_action_items",
+      "update_meeting_report_action_item",
+      "approve_meeting_report_action_item"
+    ]
+  );
+  const updateActionItem = capabilityCatalog.descriptors.find(
+    (descriptor) => descriptor.toolName === "update_meeting_report_action_item"
+  );
+  assert.ok(
+    updateActionItem?.capabilityIds.includes(
+      "meeting.action_items.transfer_and_approve"
+    )
+  );
+  assert.ok(updateActionItem?.prerequisiteToolNames.includes("find_action_items"));
+  assert.ok(
+    updateActionItem?.followUpToolNames.includes(
+      "approve_meeting_report_action_item"
+    )
+  );
+  assert.ok(updateActionItem?.mustNotUseFor.includes("후속 작업 승인 또는 반려 요청"));
+
+  const calendarDefinition = registry.getDefinition("list_calendar_events");
+  const changedSelectorSchema = buildAgentToolCapabilityCatalog([
+    {
+      ...calendarDefinition,
+      inputSchema: {
+        ...calendarDefinition.inputSchema,
+        required: ["start"]
+      }
+    }
+  ]);
+  assert.notEqual(
+    changedSelectorSchema.sha256,
+    buildAgentToolCapabilityCatalog([calendarDefinition]).sha256,
+    "selector schema constraints must affect the capability catalog SHA"
   );
 }
 
