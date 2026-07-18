@@ -45,6 +45,7 @@ function plannerOutput(overrides = {}) {
     status: "tool_candidate",
     message: "Calendar 일정 조회 후보입니다.",
     finalAnswerDraft: "일정 조회 계획을 만들었습니다.",
+    toolSchemaVersion: "agent-tools:v7",
     toolName: "list_calendar_events",
     riskLevel: "low",
     executionMode: "auto",
@@ -506,6 +507,10 @@ function createSmokeReport(overrides = {}) {
     discussionPoints: "논의사항",
     decisions: "결정사항",
     actionItemCandidates: [],
+    actionItems: [],
+    evidence: [],
+    evidenceSegments: [],
+    activityEvidence: [],
     retryCount: 0,
     createdAt: "2026-07-10T00:00:00.000Z",
     updatedAt: "2026-07-10T00:00:00.000Z",
@@ -705,6 +710,32 @@ class SmokeMeetingService {
     return {
       report: this.report
     };
+  }
+
+  async getMeetingReportDecisionItem(
+    currentUserId,
+    workspaceId,
+    reportId,
+    decisionIndex
+  ) {
+    this.calls.push({
+      method: "getMeetingReportDecisionItem",
+      currentUserId,
+      workspaceId,
+      reportId,
+      decisionIndex
+    });
+    return { decisionIndex, text: "결정사항" };
+  }
+
+  async requestReportRegeneration(currentUserId, workspaceId, reportId) {
+    this.calls.push({
+      method: "requestReportRegeneration",
+      currentUserId,
+      workspaceId,
+      reportId
+    });
+    return { report: { ...this.report, status: "QUEUED" } };
   }
 }
 
@@ -2107,6 +2138,7 @@ function formatterMeetingReport(index, overrides = {}) {
   const { service, loggingService } = createExecutionServiceWithRegistry(
     plannerOutput({
       toolName: "summarize_meeting_report",
+      toolSchemaVersion: "agent-tools:v6",
       riskLevel: "low",
       executionMode: "auto",
       requiresConfirmation: false,
@@ -2139,6 +2171,77 @@ function formatterMeetingReport(index, overrides = {}) {
     JSON.stringify(outputSummary),
     /Agent smoke test must not persist transcript text/
   );
+}
+
+for (const legacyTool of [
+  { name: "find_action_items", input: { reportId: REPORT_ID } },
+  {
+    name: "get_meeting_decision_evidence",
+    input: { reportId: REPORT_ID, decisionIndex: 0 }
+  }
+]) {
+  const { registry } = createSmokeRegistry();
+  const { service, loggingService } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: legacyTool.name,
+      toolSchemaVersion: "agent-tools:v6",
+      riskLevel: "low",
+      executionMode: "auto",
+      requiresConfirmation: false,
+      input: legacyTool.input
+    }),
+    registry
+  );
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "skipped");
+  assert.deepEqual(loggingService.calls[0].input.inputSummary.input, {
+    compatibility: "legacy_persisted_planner_input"
+  });
+}
+
+{
+  const { registry } = createSmokeRegistry();
+  const { service, loggingService } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: "summarize_meeting_report",
+      toolSchemaVersion: "agent-tools:v7",
+      riskLevel: "low",
+      executionMode: "contextual",
+      requiresConfirmation: null,
+      input: { reportId: REPORT_ID }
+    }),
+    registry
+  );
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed");
+  assert.equal(
+    loggingService.calls.at(-1).input.errorCode,
+    "AGENT_TOOL_VALIDATION_FAILED"
+  );
+}
+
+{
+  const { registry } = createSmokeRegistry();
+  const { service } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: "regenerate_meeting_report",
+      toolSchemaVersion: "agent-tools:v6",
+      riskLevel: "medium",
+      executionMode: "confirmation_required",
+      requiresConfirmation: true,
+      input: { reportId: REPORT_ID }
+    }),
+    registry
+  );
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "waiting_confirmation");
+  assert.equal(result.confirmation.plan.call.input.reportId, REPORT_ID);
 }
 
 {

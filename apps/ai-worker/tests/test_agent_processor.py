@@ -1778,6 +1778,246 @@ def test_normalizer_preserves_meeting_report_summary_with_relative_date_selector
     }
 
 
+def test_normalizer_uses_single_opaque_meeting_report_context_reference() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "contextRef": {
+                                "type": "string",
+                                "pattern": "^ctx_[0-9a-f]{24}$",
+                            }
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    context_ref = "ctx_0123456789abcdef01234567"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="summarize_meeting_report",
+            tool_input={"reportId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
+        ),
+        job,
+        prompt="그 회의록 요약해줘",
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+        planning_context=(
+            'previous resource: {"turn":1,"contextRef":"'
+            + context_ref
+            + '","resourceType":"meeting_report","ordinal":1}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {"contextRef": context_ref}
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "tool_input", "requires_confirmation"),
+    [
+        ("find_action_items", {}, False),
+        ("get_meeting_decision_evidence", {"decisionIndex": 0}, False),
+        ("regenerate_meeting_report", {}, True),
+    ],
+)
+def test_normalizer_uses_context_ref_for_meeting_report_follow_up_tools(
+    tool_name: str,
+    tool_input: dict[str, object],
+    requires_confirmation: bool,
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name=tool_name,
+                    description="MeetingReport 후속 작업",
+                    riskLevel="medium" if requires_confirmation else "low",
+                    executionMode=(
+                        "confirmation_required" if requires_confirmation else "contextual"
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "contextRef": {"type": "string"},
+                            **(
+                                {"decisionIndex": {"type": "integer"}}
+                                if tool_name == "get_meeting_decision_evidence"
+                                else {}
+                            ),
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    context_ref = "ctx_0123456789abcdef01234567"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name=tool_name,
+            tool_input={"reportId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", **tool_input},
+            requires_confirmation=requires_confirmation,
+        ),
+        job,
+        prompt="그 회의록의 후속 작업 보여줘",
+        planning_context=(
+            'previous resource: {"turn":1,"contextRef":"'
+            + context_ref
+            + '","resourceType":"meeting_report","ordinal":1}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        **tool_input,
+        "contextRef": context_ref,
+    }
+    assert normalized.output_summary["requiresConfirmation"] is (
+        True if requires_confirmation else None
+    )
+
+
+def test_normalizer_uses_single_opaque_meeting_context_reference() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="leave_meeting",
+                    description="현재 참여 중인 Meeting에서 나갑니다.",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "contextRef": {
+                                "type": "string",
+                                "pattern": "^ctx_[0-9a-f]{24}$",
+                            }
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    context_ref = "ctx_0123456789abcdef01234567"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="leave_meeting",
+            tool_input={"current": True},
+        ),
+        job,
+        prompt="그 회의에서 나가줘",
+        planning_context=(
+            'previous resource: {"turn":2,"contextRef":"'
+            + context_ref
+            + '","resourceType":"meeting","ordinal":1}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {"contextRef": context_ref}
+
+
+@pytest.mark.parametrize(
+    "planning_context",
+    [
+        "",
+        "\n".join(
+            [
+                "previous resource: "
+                '{"turn":1,"contextRef":"ctx_0123456789abcdef01234567",'
+                '"resourceType":"meeting_report","ordinal":1}',
+                "previous resource: "
+                '{"turn":1,"contextRef":"ctx_89abcdef0123456789abcdef",'
+                '"resourceType":"meeting_report","ordinal":2}',
+            ]
+        ),
+    ],
+)
+def test_normalizer_clarifies_missing_or_ambiguous_meeting_report_context(
+    planning_context: str,
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    executionMode="contextual",
+                    inputSchema={"type": "object", "additionalProperties": False, "properties": {}},
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(tool_name="summarize_meeting_report", tool_input={}),
+        job,
+        prompt="그 회의록 요약해줘",
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["meeting_report_context"]
+
+
+def test_normalizer_maps_action_item_ordinal_to_report_context() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="update_meeting_report_action_item",
+                    description="Meeting 후속작업 수정",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "reportContextRef": {"type": "string"},
+                            "ordinal": {"type": "integer"},
+                            "priority": {"type": "string"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    context_ref = "ctx_0123456789abcdef01234567"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="update_meeting_report_action_item",
+            tool_input={"priority": "HIGH"},
+            requires_confirmation=True,
+        ),
+        job,
+        prompt="2번 작업 우선순위를 높음으로 바꿔줘",
+        planning_context=(
+            'previous resource: {"turn":2,"contextRef":"'
+            + context_ref
+            + '","resourceType":"meeting_report","ordinal":1}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "priority": "HIGH",
+        "reportContextRef": context_ref,
+        "ordinal": 2,
+    }
+    assert normalized.output_summary["requiresConfirmation"] is True
+
+
 @pytest.mark.parametrize(
     ("prompt", "current_date", "decision", "expected_input"),
     [

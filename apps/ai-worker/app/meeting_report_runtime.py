@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from collections.abc import Callable
@@ -97,6 +98,9 @@ AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE = (
     "회의록 근거 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요."
 )
 AGENT_PLANNING_CONTEXT_MAX_CHARACTERS = 12_000
+AGENT_THREAD_CONTEXT_MAX_RUNS = 6
+AGENT_THREAD_CONTEXT_MAX_BYTES = 12 * 1024
+AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS = 12
 AGENT_TOOL_OUTPUT_MAX_CHARACTERS = 3_000
 SQL_ERD_INSPECTION_TOOL_NAME = "inspect_sql_erd_schema"
 LOCAL_APP_ENVS = {"local", "test", "development"}
@@ -112,7 +116,7 @@ MEETING_REPORT_FAILURE_STEPS = {
 
 def _project_json_value(value: object, max_characters: int) -> object:
     serialized = json.dumps(value, ensure_ascii=False)
-    if len(serialized) <= max_characters:
+    if _utf8_size(serialized) <= max_characters:
         return value
 
     if isinstance(value, dict):
@@ -120,13 +124,15 @@ def _project_json_value(value: object, max_characters: int) -> object:
         for key, item in value.items():
             key_text = str(key)
             candidate_with_null = {**projected, key_text: None}
-            value_overhead = len(json.dumps(candidate_with_null, ensure_ascii=False)) - len("null")
+            value_overhead = _utf8_size(json.dumps(candidate_with_null, ensure_ascii=False)) - len(
+                "null"
+            )
             remaining = max_characters - value_overhead
             if remaining <= 0:
                 break
             candidate_value = _project_json_value(item, remaining)
             candidate = {**projected, key_text: candidate_value}
-            if len(json.dumps(candidate, ensure_ascii=False)) > max_characters:
+            if _utf8_size(json.dumps(candidate, ensure_ascii=False)) > max_characters:
                 break
             projected = candidate
         return projected
@@ -135,7 +141,7 @@ def _project_json_value(value: object, max_characters: int) -> object:
         projected_items: list[object] = []
         for item in value:
             candidate = [*projected_items, item]
-            if len(json.dumps(candidate, ensure_ascii=False)) > max_characters:
+            if _utf8_size(json.dumps(candidate, ensure_ascii=False)) > max_characters:
                 break
             projected_items = candidate
         return projected_items
@@ -146,7 +152,7 @@ def _project_json_value(value: object, max_characters: int) -> object:
         while low < high:
             midpoint = (low + high + 1) // 2
             candidate = value[:midpoint] + "…"
-            if len(json.dumps(candidate, ensure_ascii=False)) <= max_characters:
+            if _utf8_size(json.dumps(candidate, ensure_ascii=False)) <= max_characters:
                 low = midpoint
             else:
                 high = midpoint - 1
@@ -157,7 +163,7 @@ def _project_json_value(value: object, max_characters: int) -> object:
 
 def _serialize_bounded_agent_tool_output(output_json: object, max_characters: int) -> str:
     marker = {"planningContextTruncated": True}
-    marker_size = len(json.dumps(marker, ensure_ascii=False))
+    marker_size = _utf8_size(json.dumps(marker, ensure_ascii=False))
     projected = _project_json_value(
         output_json,
         max(2, max_characters - marker_size),
@@ -166,39 +172,100 @@ def _serialize_bounded_agent_tool_output(output_json: object, max_characters: in
         {**projected, **marker} if isinstance(projected, dict) else {"value": projected, **marker}
     )
     serialized = json.dumps(bounded, ensure_ascii=False)
-    if len(serialized) <= max_characters:
+    if _utf8_size(serialized) <= max_characters:
         return serialized
     return json.dumps(marker, ensure_ascii=False)
 
 
 def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
     serialized = json.dumps(output_json, ensure_ascii=False)
-    prefix_size = len(f"tool {tool_name}: ")
+    prefix_size = _utf8_size(f"tool {tool_name}: ")
     max_size = (
         AGENT_PLANNING_CONTEXT_MAX_CHARACTERS - prefix_size
         if tool_name == SQL_ERD_INSPECTION_TOOL_NAME
         else AGENT_TOOL_OUTPUT_MAX_CHARACTERS
     )
-    if len(serialized) <= max_size:
+    if _utf8_size(serialized) <= max_size:
         return serialized
     return _serialize_bounded_agent_tool_output(output_json, max_size)
 
 
+SAFE_THREAD_RESOURCE_TYPES = {
+    "meeting",
+    "meeting_report",
+    "meeting_report_action_item",
+}
+UUID_TEXT_PATTERN = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
+SENSITIVE_TEXT_PATTERNS = (
+    re.compile(
+        r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?" r"-----END [A-Z0-9 ]*PRIVATE KEY-----",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{6,}\b"),
+    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_-]{6,}|github_pat_[A-Za-z0-9_-]{6,})\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{6,}\b", re.IGNORECASE),
+    re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b"),
+    re.compile(r"\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
+    re.compile(
+        r"(?<![A-Za-z0-9])[\"']?(?:[A-Za-z][A-Za-z0-9]*[_-]+)*"
+        r"(?:api(?:[\s_-]+)?key|access(?:[\s_-]+)?token|"
+        r"refresh(?:[\s_-]+)?token|client(?:[\s_-]+)?secret|"
+        r"private(?:[\s_-]+)?key|authorization|password|secret|token|credential)"
+        r"[\"']?\s*[:=]\s*[\"']?[^\s\"',;}\]]{4,}[\"']?",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _utf8_size(value: str) -> int:
+    return len(value.encode("utf-8"))
+
+
+def _truncate_utf8(value: str, max_bytes: int) -> str:
+    sanitized = value.replace("\x00", "")
+    for pattern in SENSITIVE_TEXT_PATTERNS:
+        sanitized = pattern.sub("[secret]", sanitized)
+    sanitized = UUID_TEXT_PATTERN.sub("[resource]", sanitized)
+    if _utf8_size(sanitized) <= max_bytes:
+        return sanitized
+    suffix = "…"
+    suffix_size = _utf8_size(suffix)
+    if max_bytes <= suffix_size:
+        return ""
+    encoded = sanitized.encode("utf-8")[: max_bytes - suffix_size]
+    while encoded:
+        try:
+            return encoded.decode("utf-8") + suffix
+        except UnicodeDecodeError:
+            encoded = encoded[:-1]
+    return ""
+
+
+def _agent_context_ref(thread_id: str, run_id: str, step_id: str, ref_index: int) -> str:
+    digest = hashlib.sha256(f"{thread_id}:{run_id}:{step_id}:{ref_index}".encode()).hexdigest()
+    return f"ctx_{digest[:24]}"
+
+
+def _thread_context_line(kind: str, **values: object) -> str:
+    return f"previous {kind}: {json.dumps(values, ensure_ascii=False, separators=(',', ':'))}"
+
+
 def _build_bounded_agent_planning_context(lines: list[str]) -> str:
     selected_reversed: list[str] = []
-    total_characters = 0
+    total_bytes = 0
     for line in reversed(lines):
-        line_characters = len(line)
-        separator_characters = 1 if selected_reversed else 0
-        if line_characters + separator_characters > AGENT_PLANNING_CONTEXT_MAX_CHARACTERS:
+        line_bytes = _utf8_size(line)
+        separator_bytes = 1 if selected_reversed else 0
+        if line_bytes + separator_bytes > AGENT_THREAD_CONTEXT_MAX_BYTES:
             continue
-        if (
-            total_characters + line_characters + separator_characters
-            > AGENT_PLANNING_CONTEXT_MAX_CHARACTERS
-        ):
+        if total_bytes + line_bytes + separator_bytes > AGENT_THREAD_CONTEXT_MAX_BYTES:
             continue
         selected_reversed.append(line)
-        total_characters += line_characters + separator_characters
+        total_bytes += line_bytes + separator_bytes
     return "\n".join(reversed(selected_reversed))
 
 
@@ -1516,51 +1583,90 @@ class PgAgentRunRepository:
                   AND requested_by_user_id = %s
                   AND status = 'completed'
                   AND final_answer IS NOT NULL
-                ORDER BY created_at DESC
-                LIMIT 6
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
                 """,
-                (thread_id, job.run_id, job.workspace_id, job.requested_by_user_id),
+                (
+                    thread_id,
+                    job.run_id,
+                    job.workspace_id,
+                    job.requested_by_user_id,
+                    AGENT_THREAD_CONTEXT_MAX_RUNS,
+                ),
             ).fetchall()
-            for thread_run in reversed(thread_runs):
-                prompt = str(thread_run["prompt"]).strip()[:1000]
-                answer = str(thread_run["final_answer"]).strip()[:2000]
+            thread_memory_newest: list[list[str]] = []
+            remaining_resource_refs = AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS
+            for newest_index, thread_run in enumerate(thread_runs):
+                turn_lines: list[str] = []
+                turn = len(thread_runs) - newest_index
+                prompt = _truncate_utf8(str(thread_run["prompt"]).strip(), 1000)
+                answer = _truncate_utf8(str(thread_run["final_answer"]).strip(), 2000)
                 if prompt:
-                    memory.append(f"previous user: {prompt}")
+                    turn_lines.append(_thread_context_line("user", turn=turn, text=prompt))
                 if answer:
-                    memory.append(f"previous assistant: {answer}")
+                    turn_lines.append(_thread_context_line("assistant", turn=turn, text=answer))
 
                 ref_rows = self.connection.execute(
                     """
-                    SELECT resource_refs
+                    SELECT id, resource_refs
                     FROM agent_steps
                     WHERE run_id = %s
                       AND step_type = 'tool'
                       AND status = 'completed'
-                    ORDER BY step_order ASC
+                    ORDER BY step_order ASC, id ASC
                     """,
                     (thread_run["id"],),
                 ).fetchall()
+                resource_ordinals: dict[str, int] = {}
                 for ref_row in ref_rows:
-                    for resource_ref in ref_row["resource_refs"] or []:
+                    for ref_index, resource_ref in enumerate(ref_row["resource_refs"] or []):
+                        if remaining_resource_refs <= 0:
+                            break
                         if not isinstance(resource_ref, dict):
                             continue
                         domain = resource_ref.get("domain")
                         resource_type = resource_ref.get("resourceType")
                         resource_id = resource_ref.get("resourceId")
                         label = resource_ref.get("label")
+                        status = resource_ref.get("status")
                         if not all(
                             isinstance(value, str) and value.strip()
                             for value in (domain, resource_type, resource_id)
                         ):
                             continue
-                        suffix = (
-                            f" label={str(label).strip()[:300]}"
-                            if isinstance(label, str) and label.strip()
-                            else ""
+                        if domain != "meeting" or resource_type not in SAFE_THREAD_RESOURCE_TYPES:
+                            continue
+                        resource_ordinals[resource_type] = (
+                            resource_ordinals.get(resource_type, 0) + 1
                         )
-                        memory.append(
-                            f"previous resource {domain}:{resource_type} id={resource_id}{suffix}"
+                        turn_lines.append(
+                            _thread_context_line(
+                                "resource",
+                                turn=turn,
+                                contextRef=_agent_context_ref(
+                                    str(thread_id),
+                                    str(thread_run["id"]),
+                                    str(ref_row["id"]),
+                                    ref_index,
+                                ),
+                                resourceType=resource_type,
+                                ordinal=resource_ordinals[resource_type],
+                                **(
+                                    {"label": _truncate_utf8(label.strip(), 300)}
+                                    if isinstance(label, str) and label.strip()
+                                    else {}
+                                ),
+                                **(
+                                    {"status": _truncate_utf8(status.strip(), 100)}
+                                    if isinstance(status, str) and status.strip()
+                                    else {}
+                                ),
+                            )
                         )
+                        remaining_resource_refs -= 1
+                thread_memory_newest.append(turn_lines)
+            for turn_lines in reversed(thread_memory_newest):
+                memory.extend(turn_lines)
 
         selected_candidate = self.connection.execute(
             """

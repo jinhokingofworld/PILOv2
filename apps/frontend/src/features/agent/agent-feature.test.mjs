@@ -6,6 +6,11 @@ import {
   getLatestAgentRunMessageSequence
 } from "./run-input-recovery.ts";
 import {
+  forgetAgentRunId,
+  readRecoverableAgentRunId,
+  rememberAgentRunId
+} from "./thread-run-recovery.ts";
+import {
   presentCanvasAgentDelegationRunOnce,
   registerCanvasAgentDelegationAdapter
 } from "./canvas-delegation-context.ts";
@@ -78,6 +83,23 @@ assert.match(agentApiClient, /cache: "no-store"/);
 assert.match(agentApiClient, /success === true/);
 assert.match(agentApiClient, /createRun/);
 assert.match(agentApiClient, /getRun/);
+
+{
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, value)
+  };
+  const workspaceId = "11111111-1111-4111-8111-111111111111";
+  const runId = "22222222-2222-4222-8222-222222222222";
+  rememberAgentRunId(storage, workspaceId, runId);
+  assert.equal(readRecoverableAgentRunId(storage, workspaceId), runId);
+  forgetAgentRunId(storage, workspaceId);
+  assert.equal(readRecoverableAgentRunId(storage, workspaceId), null);
+  rememberAgentRunId(storage, workspaceId, "not-a-run-id");
+  assert.equal(values.size, 0);
+}
 assert.match(agentApiClient, /submitRunInput/);
 assert.match(agentApiClient, /agentRunInputsPath/);
 assert.match(agentApiClient, /\/inputs/);

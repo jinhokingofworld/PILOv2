@@ -701,7 +701,7 @@ class FakeCandidateSelectionDatabase {
     .find((tool) => tool.name === "update_meeting_report_action_item");
   const result = await definition.execute(
     context,
-    definition.validateInput({
+    definition.validateConfirmationInput({
       reportId: REPORT_ID,
       actionItemId: ACTION_ITEM_ID,
       useSelectedWorkspaceMemberCandidate: true
@@ -736,8 +736,145 @@ class FakeCandidateSelectionDatabase {
     const workspaceService = new FakeWorkspaceService();
     const resolver = new MeetingAgentResourceResolver(
       meetingService,
-      workspaceService
+      workspaceService,
+      {
+        async resolveMeetingReference(_context, contextRef) {
+          if (contextRef === "ctx_0123456789abcdef01234567") {
+            return { resourceType: "meeting_report", resourceId: REPORT_ID };
+          }
+          if (contextRef === "ctx_89abcdef0123456789abcdef") {
+            return { resourceType: "meeting", resourceId: MEETING_ID };
+          }
+          return null;
+        }
+      }
     );
+
+    const contextReport = await resolver.resolveContextReference(
+      context,
+      "ctx_0123456789abcdef01234567",
+      "meeting_report"
+    );
+    assert.equal(contextReport.kind, "selected");
+    assert.equal(contextReport.reference.resourceId, REPORT_ID);
+    assert.equal(
+      (
+        await resolver.resolveContextReference(
+          context,
+          "ctx_0123456789abcdef01234567",
+          "meeting"
+        )
+      ).kind,
+      "needs_clarification"
+    );
+
+    const contextTools = new MeetingAgentToolsService(
+      meetingService,
+      new FakeMeetingTranscriptRagService(),
+      undefined,
+      resolver
+    );
+    const reportTool = contextTools
+      .listDefinitions()
+      .find((tool) => tool.name === "get_meeting_report");
+    const reportResult = await reportTool.execute(
+      context,
+      reportTool.validateInput({
+        contextRef: "ctx_0123456789abcdef01234567"
+      })
+    );
+    assert.equal(reportResult.outputSummary.report.reportId, REPORT_ID);
+
+    for (const toolName of [
+      "find_action_items",
+      "get_meeting_decision_evidence",
+      "regenerate_meeting_report"
+    ]) {
+      const contextualTool = contextTools
+        .listDefinitions()
+        .find((tool) => tool.name === toolName);
+      assert.throws(
+        () => contextualTool.validateInput({ reportId: REPORT_ID }),
+        (error) =>
+          error.getStatus?.() === 400 &&
+          error.response?.error?.message?.includes("reportId is not supported"),
+        `${toolName} must not accept a raw planner-facing reportId`
+      );
+      const contextualInput = contextualTool.validateInput({
+        contextRef: "ctx_0123456789abcdef01234567",
+        ...(toolName === "get_meeting_decision_evidence"
+          ? { decisionIndex: 0 }
+          : {})
+      });
+      if (contextualTool.prepareExecution) {
+        assert.deepEqual(
+          await contextualTool.prepareExecution(context, contextualInput),
+          { kind: "execute" }
+        );
+      }
+      if (toolName === "regenerate_meeting_report") {
+        const plan = await contextualTool.buildConfirmation(
+          context,
+          contextualInput
+        );
+        assert.equal(plan.call.input.reportId, REPORT_ID);
+      }
+    }
+
+    const leaveTool = contextTools
+      .listDefinitions()
+      .find((tool) => tool.name === "leave_meeting");
+    assert.deepEqual(
+      await leaveTool.prepareExecution(
+        context,
+        leaveTool.validateInput({
+          contextRef: "ctx_89abcdef0123456789abcdef"
+        })
+      ),
+      { kind: "execute" }
+    );
+
+    const updateTool = contextTools
+      .listDefinitions()
+      .find((tool) => tool.name === "update_meeting_report_action_item");
+    assert.equal(updateTool.adaptLegacyPlannerInput, undefined);
+    assert.throws(
+      () =>
+        updateTool.validateInput({
+          reportId: REPORT_ID,
+          actionItemId: ACTION_ITEM_ID,
+          priority: "HIGH"
+        }),
+      (error) =>
+        error.getStatus?.() === 400 &&
+        error.response?.error?.message?.includes("reportId is not supported"),
+      "new planner output must not reintroduce raw action item IDs"
+    );
+    assert.deepEqual(
+      updateTool.validateConfirmationInput({
+        reportId: REPORT_ID,
+        actionItemId: ACTION_ITEM_ID,
+        priority: "HIGH"
+      }),
+      {
+        reportId: REPORT_ID,
+        actionItemId: ACTION_ITEM_ID,
+        priority: "HIGH"
+      },
+      "an already persisted confirmation plan remains executable after revalidation"
+    );
+    const updatePlan = await updateTool.buildConfirmation(
+      context,
+      updateTool.validateInput({
+        reportContextRef: "ctx_0123456789abcdef01234567",
+        ordinal: 1,
+        priority: "HIGH"
+      })
+    );
+    assert.equal(updatePlan.toolName, "update_meeting_report_action_item");
+    assert.equal(updatePlan.call.input.reportId, REPORT_ID);
+    assert.equal(updatePlan.call.input.actionItemId, ACTION_ITEM_ID);
+    assert.equal(updatePlan.call.input.priority, "HIGH");
 
     const room = await resolver.resolveMeetingRoom(context, " 디자인   회의실 ");
     assert.equal(room.kind, "selected");
