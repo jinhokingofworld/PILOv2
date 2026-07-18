@@ -1,11 +1,15 @@
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from app.agent_planner_evaluation import (
     attach_tool_capability_catalog,
     build_evaluation_input_hashes,
     build_evaluation_report,
+    build_legacy_shadow_comparison,
     evaluate_suite,
     load_evaluation_suite,
     select_shadow_planner_tools,
@@ -14,6 +18,7 @@ from app.agent_processor import AgentPlannerDecision
 from app.agent_tool_retrieval import (
     compute_input_schema_sha256,
     compute_tool_capability_catalog_sha,
+    parse_tool_capability_catalog,
 )
 
 
@@ -95,6 +100,10 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
                 "expected": {
                     "status": "tool_candidate",
                     "toolName": "list_calendar_events",
+                    "domain": "calendar",
+                    "capabilityId": "calendar.list",
+                    "requiredToolNames": ["list_calendar_events"],
+                    "supported": True,
                 },
             },
             {
@@ -139,6 +148,7 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
                 "toolName": "list_calendar_events",
                 "domain": "calendar",
                 "action": "list_calendar_events",
+                "operation": "read",
                 "capabilityIds": ["calendar.list"],
                 "whenToUse": "이번 주 일정과 Calendar event를 조회합니다.",
                 "mustNotUseFor": ["회의록 요청"],
@@ -154,6 +164,7 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
                 "toolName": "list_meeting_reports",
                 "domain": "meeting",
                 "action": "list_meeting_reports",
+                "operation": "read",
                 "capabilityIds": ["meeting.reports.list"],
                 "whenToUse": "회의록 목록을 조회합니다.",
                 "mustNotUseFor": ["일정 요청"],
@@ -202,7 +213,12 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
     results = evaluate_suite(
         FakePlanner(
             [
-                decision(tool_name="list_meeting_reports"),
+                decision(
+                    tool_name="list_meeting_reports",
+                    provider_input_tokens=120,
+                    provider_output_tokens=30,
+                    provider_total_tokens=150,
+                ),
                 decision(status="unsupported", tool_name=None, tool_input={}),
             ]
         ),
@@ -216,12 +232,124 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
 
     assert "shortlist_tool" in result.failure_reasons
     assert report["retrieval"]["toolRecall"] == 1.0
+    assert report["retrieval"]["domainRecallAtK"] == 1.0
+    assert report["retrieval"]["capabilityRecallAtK"] == 1.0
+    assert report["retrieval"]["requiredToolRecallAtK"] == 1.0
+    assert report["retrieval"]["supportedToUnsupportedRate"] == 0.0
     assert report["retrieval"]["averageShortlistSize"] == 1.5
     assert report["retrieval"]["shortlistViolations"] == 1
     assert report["retrieval"]["fallbackTaxonomy"] == {"no_metadata_match": 1}
     assert report["results"][0]["retrieval"]["fallbackReason"] is None
+    assert report["results"][0]["retrieval"]["candidateCount"] > 0
+    assert report["results"][0]["retrieval"]["confidenceBucket"] in {
+        "low",
+        "medium",
+        "high",
+    }
+    observation = report["retrievalEvents"][0]
+    assert observation["eventVersion"] == "agent-tool-retrieval-observation:v1"
+    assert observation["catalogVersion"] == "agent-tool-capabilities:v1"
+    assert observation["retrieverVersion"] == "agent-tool-metadata-overlap:v1"
+    assert observation["tokenUsage"]["providerTotalTokens"] == 150
+    assert "shortlistToolNames" not in observation
+    assert "prompt" not in observation
     assert "이번 주 일정 보여줘" not in json.dumps(report, ensure_ascii=False)
     assert "prompt" not in report["results"][0]
+
+    budget_fallback, budget_retrieval = select_shadow_planner_tools(
+        suite.job,
+        "이번 주 일정 보여줘",
+        top_k=1,
+        schema_token_budget=1,
+    )
+    assert [tool.name for tool in budget_fallback] == [
+        "list_calendar_events",
+        "list_meeting_reports",
+    ]
+    assert budget_retrieval is not None
+    assert budget_retrieval.fallback_reason == "tool_schema_budget_exceeded"
+
+    retriever_error_fallback, retriever_error = select_shadow_planner_tools(
+        suite.job,
+        "이번 주 일정 보여줘",
+        top_k=1,
+        schema_token_budget=0,
+    )
+    assert [tool.name for tool in retriever_error_fallback] == [
+        "list_calendar_events",
+        "list_meeting_reports",
+    ]
+    assert retriever_error is not None
+    assert retriever_error.fallback_reason == "retriever_error"
+
+    write_catalog_raw = json.loads(json.dumps(raw["toolCapabilityCatalog"]))
+    write_catalog_raw["descriptors"][0]["operation"] = "write"
+    write_catalog_raw["sha256"] = compute_tool_capability_catalog_sha(
+        write_catalog_raw["version"],
+        write_catalog_raw["capabilities"],
+        write_catalog_raw["descriptors"],
+    )
+    write_catalog = parse_tool_capability_catalog(
+        write_catalog_raw,
+        {tool.name: tool.input_schema for tool in suite.job.tools},
+    )
+    assert write_catalog is not None
+    write_job = replace(suite.job, tool_capability_catalog=write_catalog)
+    write_fallback, write_retrieval = select_shadow_planner_tools(
+        write_job,
+        "이번 주 일정 보여줘",
+        top_k=1,
+    )
+    assert [tool.name for tool in write_fallback] == [
+        "list_calendar_events",
+        "list_meeting_reports",
+    ]
+    assert write_retrieval is not None
+    assert write_retrieval.fallback_reason == "write_capability"
+
+
+def test_legacy_shadow_comparison_requires_paired_inputs_and_reports_deltas(tmp_path) -> None:
+    suite = load_evaluation_suite(
+        write_suite(
+            tmp_path,
+            [
+                {
+                    "id": "calendar",
+                    "prompt": "오늘 일정",
+                    "expected": {
+                        "status": "tool_candidate",
+                        "toolName": "list_calendar_events",
+                    },
+                }
+            ],
+        )
+    )
+    legacy = evaluate_suite(
+        FakePlanner([decision()]),
+        suite,
+        current_date="2026-07-11",
+        model_version="planner:test",
+        evaluation_seed=17,
+    )
+    shadow = evaluate_suite(
+        FakePlanner([decision()]),
+        suite,
+        current_date="2026-07-11",
+        model_version="planner:test",
+        evaluation_seed=17,
+    )
+
+    comparison = build_legacy_shadow_comparison(legacy, shadow)
+
+    assert comparison["comparison"]["pairedAttempts"] == 1
+    assert comparison["comparison"]["sameFixedInputs"] is True
+    assert comparison["comparison"]["shadowMinusLegacy"]["exactAttemptRate"] == 0.0
+
+    with pytest.raises(ValueError, match="inputs must match"):
+        build_legacy_shadow_comparison(
+            legacy,
+            (replace(shadow[0], evaluation_seed=18),),
+        )
 
 
 def test_evaluate_suite_scores_normalized_planner_output(tmp_path) -> None:
