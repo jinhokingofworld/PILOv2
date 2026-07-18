@@ -1,7 +1,10 @@
 import { HttpException, Injectable, Logger } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import {
+  DatabaseService,
+  type DatabaseTransaction
+} from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { agentStorageUnavailable } from "./agent-api-error";
 import { AgentCanvasDelegationCompletionService } from "./agent-canvas-delegation-completion.service";
@@ -249,6 +252,9 @@ const MAX_TIMEZONE_LENGTH = 64;
 const MAX_REQUEST_CONTEXT_BYTES = 196_608;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CANDIDATE_ORDINAL_PATTERN =
+  /^\s*([1-3])\s*번(?:\s*후보)?(?:\s*(?:을|를)?\s*(?:선택(?:할게요|합니다|했어요)?|골라(?:주세요|줘|요)?))?\s*[.!?]*\s*$/;
+const MAX_CANDIDATE_SELECTIONS = 3;
 const AGENT_RUN_STATUSES: AgentRunStatus[] = [
   "planning",
   "waiting_user_input",
@@ -355,20 +361,19 @@ export class AgentService {
         );
         return "expired" as const;
       }
+      const selection =
+        input.selection ??
+        (await this.resolveOrdinalCandidateSelection(
+          transaction,
+          runId,
+          input.message
+        ));
       let storedMessage = input.message;
-      if (input.selection?.kind === SQL_ERD_SESSION_SELECTION_KIND) {
-        const selectionToken = input.selection.token;
-        const latestToolStep = await transaction.queryOne<AgentLatestToolStepRow>(
-          `
-            SELECT tool_name, output_json
-            FROM agent_steps
-            WHERE run_id = $1
-              AND step_type = 'tool'
-              AND status = 'completed'
-            ORDER BY step_order DESC
-            LIMIT 1
-          `,
-          [runId]
+      if (selection?.kind === SQL_ERD_SESSION_SELECTION_KIND) {
+        const selectionToken = selection.token;
+        const latestToolStep = await this.getLatestCompletedToolStep(
+          transaction,
+          runId
         );
         const candidates =
           latestToolStep?.tool_name === "inspect_sql_erd_schema" &&
@@ -388,7 +393,7 @@ export class AgentService {
           selected.title
         );
       }
-      if (input.selection?.kind === MEETING_CANDIDATE_SELECTION_KIND) {
+      if (selection?.kind === MEETING_CANDIDATE_SELECTION_KIND) {
         const selected =
           await this.agentCandidateSelectionService.consumeMeetingCandidateInTransaction(
             transaction,
@@ -398,7 +403,7 @@ export class AgentService {
               runId,
               requestContext: run.request_context_json
             },
-            input.selection.candidateSelectionId
+            selection.candidateSelectionId
           );
         storedMessage = buildStoredMeetingCandidateSelectionMessage(selected.label);
       }
@@ -939,6 +944,90 @@ export class AgentService {
       };
     }
     throw badRequest("selection must be a valid Agent selection");
+  }
+
+  private async resolveOrdinalCandidateSelection(
+    transaction: DatabaseTransaction,
+    runId: string,
+    message: string
+  ): Promise<AgentRunInput["selection"] | undefined> {
+    const ordinal = this.parseCandidateOrdinal(message);
+    if (ordinal === null) return undefined;
+    const latestToolStep = await this.getLatestCompletedToolStep(transaction, runId);
+    if (!latestToolStep) return undefined;
+
+    if (
+      latestToolStep.tool_name === "inspect_sql_erd_schema" &&
+      isSqlErdClarificationOutput(latestToolStep.output_json)
+    ) {
+      const candidates = parseSqlErdSessionCandidates(latestToolStep.output_json.candidates);
+      const selected = candidates[ordinal - 1];
+      if (!selected) {
+        throw badRequest("Candidate ordinal is invalid, expired, or unavailable");
+      }
+      return {
+        kind: SQL_ERD_SESSION_SELECTION_KIND,
+        token: selected.selectionToken
+      };
+    }
+
+    const rawCandidates = latestToolStep.output_json.candidateSelections;
+    if (!Array.isArray(rawCandidates)) return undefined;
+    const candidateSelectionIds = this.parseMeetingCandidateSelectionIds(rawCandidates);
+    const candidateSelectionId = candidateSelectionIds[ordinal - 1];
+    if (!candidateSelectionId) {
+      throw badRequest("Candidate ordinal is invalid, expired, or unavailable");
+    }
+    return {
+      kind: MEETING_CANDIDATE_SELECTION_KIND,
+      candidateSelectionId
+    };
+  }
+
+  private async getLatestCompletedToolStep(
+    transaction: DatabaseTransaction,
+    runId: string
+  ): Promise<AgentLatestToolStepRow | null> {
+    return transaction.queryOne<AgentLatestToolStepRow>(
+      `
+        SELECT tool_name, output_json
+        FROM agent_steps
+        WHERE run_id = $1
+          AND step_type = 'tool'
+          AND status = 'completed'
+        ORDER BY step_order DESC
+        LIMIT 1
+      `,
+      [runId]
+    );
+  }
+
+  private parseCandidateOrdinal(message: string): number | null {
+    const matched = CANDIDATE_ORDINAL_PATTERN.exec(message);
+    return matched ? Number(matched[1]) : null;
+  }
+
+  private parseMeetingCandidateSelectionIds(rawCandidates: unknown[]): string[] {
+    if (
+      rawCandidates.length === 0 ||
+      rawCandidates.length > MAX_CANDIDATE_SELECTIONS
+    ) {
+      return [];
+    }
+    const candidateSelectionIds = rawCandidates.map((candidate) =>
+      this.isPlainObject(candidate) &&
+      typeof candidate.candidateSelectionId === "string" &&
+      UUID_PATTERN.test(candidate.candidateSelectionId)
+        ? candidate.candidateSelectionId
+        : null
+    );
+    if (
+      candidateSelectionIds.some((candidateSelectionId) => !candidateSelectionId) ||
+      new Set(candidateSelectionIds).size !== candidateSelectionIds.length
+    ) {
+      return [];
+    }
+    return candidateSelectionIds as string[];
   }
 
   private normalizePagination(query: AgentRunListQuery): NormalizedPagination {

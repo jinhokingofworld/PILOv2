@@ -864,6 +864,79 @@ class FakeRunInputDatabaseService {
     publisher
   );
 
+  const result = await service.submitRunInput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    message: "2번"
+  });
+
+  assert.equal(result.run.messages.at(-1).content, "결제 ERD 세션을 선택했습니다.");
+  assert.match(
+    database.messages.at(-1).content,
+    new RegExp(`sessionSelectionToken=${SQL_ERD_SECOND_SESSION_ID}`)
+  );
+  assert.deepEqual(publisher.calls, [RUN_ID]);
+}
+
+{
+  const meetingCandidateSelectionId = "99999999-9999-4999-8999-999999999999";
+  const database = new FakeRunInputDatabaseService({
+    latestStep: {
+      tool_name: "resolve_meeting_resource",
+      output_json: {
+        status: "needs_clarification",
+        candidateSelections: [
+          {
+            candidateSelectionId: "88888888-8888-4888-8888-888888888888"
+          },
+          { candidateSelectionId: meetingCandidateSelectionId }
+        ]
+      }
+    }
+  });
+  const publisher = new FakeAgentOutboxPublisherService();
+  const candidateSelections = {
+    calls: [],
+    async consumeMeetingCandidateInTransaction(_transaction, _context, selectionId) {
+      this.calls.push(selectionId);
+      return {
+        label: "주간 개발 회의록",
+        reference: {
+          resourceType: "meeting_report",
+          resourceId: "77777777-7777-4777-8777-777777777777"
+        }
+      };
+    }
+  };
+  const service = new AgentService(
+    database,
+    new FakeWorkspaceService(),
+    new FakeAgentLoggingService(null),
+    publisher,
+    null,
+    candidateSelections
+  );
+
+  const result = await service.submitRunInput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    message: "2번 후보를 선택할게요"
+  });
+
+  assert.deepEqual(candidateSelections.calls, [meetingCandidateSelectionId]);
+  assert.equal(result.run.messages.at(-1).content, "주간 개발 회의록 후보를 선택했습니다.");
+  assert.equal(
+    database.messages.at(-1).content.includes(meetingCandidateSelectionId),
+    false
+  );
+}
+
+{
+  const database = new FakeRunInputDatabaseService();
+  const publisher = new FakeAgentOutboxPublisherService();
+  const service = new AgentService(
+    database,
+    new FakeWorkspaceService(),
+    new FakeAgentLoggingService(null),
+    publisher
+  );
+
   await assert.rejects(
     () =>
       service.submitRunInput(USER_ID, WORKSPACE_ID, RUN_ID, {
