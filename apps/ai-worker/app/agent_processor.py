@@ -156,16 +156,15 @@ def select_agent_planner_tool_selection(
     if mode not in TOOL_RETRIEVAL_MODES:
         return AgentPlannerToolSelection(job.tools, None, False)
 
-    if mode == TOOL_RETRIEVAL_MODE_SHADOW:
-        return AgentPlannerToolSelection(job.tools, None, False)
     if job.tool_capability_catalog is None:
-        if job.tool_capability_catalog_error == "missing_catalog":
+        fallback_reason = job.tool_capability_catalog_error or "missing_catalog"
+        if mode == TOOL_RETRIEVAL_MODE_SHADOW or fallback_reason == "missing_catalog":
             return AgentPlannerToolSelection(
                 tools=job.tools,
                 retrieval=ToolRetrievalResult(
                     tool_names=tuple(),
-                    low_confidence=False,
-                    fallback_reason="missing_catalog",
+                    low_confidence=fallback_reason != "missing_catalog",
+                    fallback_reason=fallback_reason,
                 ),
                 used_shortlist=False,
             )
@@ -186,6 +185,12 @@ def select_agent_planner_tool_selection(
         top_k=top_k,
         schema_token_budget=schema_token_budget,
     )
+    if mode == TOOL_RETRIEVAL_MODE_SHADOW:
+        return AgentPlannerToolSelection(
+            tools=job.tools,
+            retrieval=selection.retrieval,
+            used_shortlist=False,
+        )
     if selection.retrieval.low_confidence:
         return AgentPlannerToolSelection(
             tools=job.tools,
@@ -878,6 +883,11 @@ def normalize_agent_planner_decision(
         prompt=prompt,
         planning_context=planning_context,
     )
+    decision = _normalize_meeting_candidate_goal_resume(
+        decision,
+        job,
+        planning_context=planning_context,
+    )
     status = decision.status
     if status not in PLANNER_STATUSES:
         raise AgentPlannerOutputError("Agent planner returned an invalid status")
@@ -1444,6 +1454,179 @@ def _meeting_context_clarification(field: str) -> AgentPlannerDecision:
     )
 
 
+MEETING_CANDIDATE_RESUME_PREFIX = "selected meeting candidate resume: "
+MEETING_SELECTION_FIELD_BY_RESOURCE_TYPE = {
+    "meeting_room": "useSelectedMeetingRoomCandidate",
+    "meeting": "useSelectedMeetingCandidate",
+    "meeting_report": "useSelectedMeetingReportCandidate",
+    "workspace_member": "useSelectedWorkspaceMemberCandidate",
+    "meeting_report_action_item": "useSelectedMeetingActionItemCandidate",
+}
+MEETING_SELECTION_SELECTOR_FIELDS = {
+    "meeting_room": ("roomName",),
+    "meeting": ("contextRef", "current", "roomName"),
+    "meeting_report": (
+        "contextRef",
+        "from",
+        "to",
+        "status",
+        "roomName",
+    ),
+    "workspace_member": ("assigneeUserId", "assigneeDisplayName"),
+    "meeting_report_action_item": (
+        "actionItemContextRef",
+        "reportContextRef",
+        "ordinal",
+    ),
+}
+MEETING_GOAL_TOOLS_BY_RESOURCE_TYPE = {
+    "meeting_room": {"start_meeting_in_room"},
+    "meeting": {
+        "join_meeting",
+        "leave_meeting",
+        "start_meeting_recording",
+        "end_meeting_recording",
+        "get_meeting_participants",
+    },
+    "meeting_report": {
+        "get_meeting_report",
+        "summarize_meeting_report",
+        "find_action_items",
+        "get_meeting_decision_evidence",
+        "regenerate_meeting_report",
+    },
+    "workspace_member": {"update_meeting_report_action_item"},
+    "meeting_report_action_item": {
+        "update_meeting_report_action_item",
+        "dismiss_meeting_report_action_item",
+        "approve_meeting_report_action_item",
+    },
+}
+
+
+def _normalize_meeting_candidate_goal_resume(
+    decision: AgentPlannerDecision,
+    job: AgentRunJob,
+    *,
+    planning_context: str,
+) -> AgentPlannerDecision:
+    resume = _latest_meeting_candidate_resume(planning_context)
+    if resume is None:
+        return decision
+
+    resource_type = resume.get("resourceType")
+    goal_tool_name = resume.get("goalToolName")
+    clarification_tool_name = resume.get("clarificationToolName")
+    if (
+        not isinstance(resource_type, str)
+        or not isinstance(goal_tool_name, str)
+        or not isinstance(clarification_tool_name, str)
+    ):
+        return decision
+
+    compatible_goal_tools = MEETING_GOAL_TOOLS_BY_RESOURCE_TYPE.get(resource_type, set())
+    goal_tool_name = _meeting_candidate_goal(
+        decision,
+        stored_goal_tool_name=goal_tool_name,
+        clarification_tool_name=clarification_tool_name,
+        compatible_goal_tools=compatible_goal_tools,
+    )
+    if goal_tool_name is None:
+        return _meeting_candidate_resume_clarification("meeting_candidate_goal")
+
+    available_tool_names = {tool.name for tool in job.tools}
+    if goal_tool_name not in available_tool_names:
+        return _meeting_candidate_resume_clarification("meeting_candidate_goal")
+
+    selection_field = MEETING_SELECTION_FIELD_BY_RESOURCE_TYPE.get(resource_type)
+    if selection_field is None:
+        return _meeting_candidate_resume_clarification("meeting_candidate_type")
+
+    original_input = resume.get("toolInput")
+    tool_input = (
+        dict(original_input)
+        if clarification_tool_name == goal_tool_name and isinstance(original_input, dict)
+        else {}
+    )
+    if decision.tool_name == goal_tool_name:
+        tool_input.update(decision.tool_input)
+    for field in MEETING_SELECTION_SELECTOR_FIELDS.get(resource_type, ()):
+        tool_input.pop(field, None)
+    tool_input[selection_field] = True
+    if goal_tool_name == "update_meeting_report_action_item" and not any(
+        field in tool_input
+        for field in (
+            "title",
+            "description",
+            "priority",
+            "assigneeUserId",
+            "assigneeDisplayName",
+            "useSelectedWorkspaceMemberCandidate",
+        )
+    ):
+        return _meeting_candidate_resume_clarification("meeting_action_item_changes")
+
+    return AgentPlannerDecision(
+        status="tool_candidate",
+        message=(
+            "선택한 Meeting 대상을 사용해 원래 요청을 재개합니다."
+            if clarification_tool_name != goal_tool_name
+            else "선택한 Meeting 대상으로 요청을 재개합니다."
+        ),
+        final_answer_draft="선택한 대상을 다시 검색하지 않고 다음 단계를 진행합니다.",
+        tool_name=goal_tool_name,
+        tool_input=tool_input,
+        requires_confirmation=decision.requires_confirmation,
+        missing_fields=(),
+        unsupported_reason=None,
+    )
+
+
+def _latest_meeting_candidate_resume(planning_context: str) -> dict[str, object] | None:
+    for line in reversed(planning_context.splitlines()):
+        if not line.startswith(MEETING_CANDIDATE_RESUME_PREFIX):
+            continue
+        try:
+            value = json.loads(line[len(MEETING_CANDIDATE_RESUME_PREFIX) :])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _meeting_candidate_goal(
+    decision: AgentPlannerDecision,
+    *,
+    stored_goal_tool_name: str,
+    clarification_tool_name: str,
+    compatible_goal_tools: set[str],
+) -> str | None:
+    if clarification_tool_name in compatible_goal_tools:
+        return clarification_tool_name
+    if (
+        clarification_tool_name == "resolve_meeting_resource"
+        and stored_goal_tool_name in compatible_goal_tools
+    ):
+        return stored_goal_tool_name
+    if decision.status == "tool_candidate" and decision.tool_name in compatible_goal_tools:
+        return decision.tool_name
+    return None
+
+
+def _meeting_candidate_resume_clarification(field: str) -> AgentPlannerDecision:
+    return AgentPlannerDecision(
+        status="needs_clarification",
+        message="선택한 대상을 원래 요청에 안전하게 연결할 수 없습니다.",
+        final_answer_draft="대상을 다시 선택하거나 요청을 조금 더 구체적으로 알려주세요.",
+        tool_name=None,
+        tool_input={},
+        requires_confirmation=False,
+        missing_fields=(field,),
+        unsupported_reason=None,
+    )
+
+
 def _normalize_meeting_report_relative_date_query(
     decision: AgentPlannerDecision,
     job: AgentRunJob,
@@ -1941,6 +2124,10 @@ def _agent_planner_system_prompt() -> str:
         "When planningContext contains completed tool results, use them to answer the user's "
         "original request. If the request is satisfied, return completed instead of "
         "repeating a tool. "
+        "When planningContext contains selected meeting candidate resume state, continue the "
+        "original Meeting goal with the selected-candidate field. Never call the completed "
+        "lookup tool again. Resolve at most one ambiguous selector per turn; if another selector "
+        "is ambiguous, stop for the next candidate selection before any write or confirmation. "
         "When planningContext contains a completed generate_sql_erd result with "
         "action=replaced, treat it as a successful schema replacement. Its title is the "
         "existing session title and is not evidence that an older schema was generated. "
@@ -2105,6 +2292,8 @@ def _tool_retrieval_observation(
         "fallbackReason": retrieval.fallback_reason if retrieval else None,
         "candidateCount": retrieval.candidate_count if retrieval else 0,
         "confidenceBucket": retrieval.confidence_bucket if retrieval else "none",
+        "primaryCapabilityId": retrieval.primary_capability_id if retrieval else None,
+        "primaryToolName": retrieval.primary_tool_name if retrieval else None,
         "catalogVersion": (
             catalog.version if catalog else job.received_tool_capability_catalog_version
         ),

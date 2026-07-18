@@ -4,9 +4,9 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "0793def51b540fe466f1c023ef2627b1640adb61573b6244e5ffc52f008af373",
-    "catalogSha256": "c6621c638f0b1b88c4e78865904443a243f6adacf29897f1268f8a52429bfd21",
-    "eligibleSnapshotSha256": "144c33b083307634e2ccf7101341e82aee145d7126059764e0cacbc9b86c4673"
+    "inventorySha256": "36689365c034bdae40b673f38182702b94f9d84f45965f077f383ac37edfad4a",
+    "catalogSha256": "4802f6424976926e869dc058ab1c0aa992904c0ab50ee784663cd1026aa5ce07",
+    "eligibleSnapshotSha256": "9c450477de9c58cd74f0a7d7c416eae9632bebcd015c63b9eef7ada2be243b53"
   },
   "privacySensitiveValues": [
     "11111111-1111-4111-8111-111111111111",
@@ -32,6 +32,10 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 20
+        },
+        "useSelectedMeetingActionItemCandidate": {
+          "type": "boolean",
+          "const": true
         },
         "delivery": {
           "type": "object"
@@ -231,6 +235,10 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 20
+        },
+        "useSelectedMeetingActionItemCandidate": {
+          "type": "boolean",
+          "const": true
         }
       }
     },
@@ -1400,6 +1408,10 @@
           "minimum": 1,
           "maximum": 20
         },
+        "useSelectedMeetingActionItemCandidate": {
+          "type": "boolean",
+          "const": true
+        },
         "title": {
           "type": "string"
         },
@@ -1421,6 +1433,11 @@
           ],
           "format": "uuid"
         },
+        "assigneeDisplayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
         "useSelectedWorkspaceMemberCandidate": {
           "type": "boolean",
           "const": true
@@ -1430,7 +1447,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "c6621c638f0b1b88c4e78865904443a243f6adacf29897f1268f8a52429bfd21",
+    "sha256": "4802f6424976926e869dc058ab1c0aa992904c0ab50ee784663cd1026aa5ce07",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -3189,7 +3206,8 @@
           "actionItemContextRef",
           "delivery",
           "ordinal",
-          "reportContextRef"
+          "reportContextRef",
+          "useSelectedMeetingActionItemCandidate"
         ],
         "selectorKinds": [
           "action_item",
@@ -3204,7 +3222,7 @@
         "executionMode": "confirmation_required",
         "requiresConfirmation": true,
         "contextSurface": null,
-        "inputSchemaSha256": "56f90551f32e1625504f7072c2a4249c3e789181e54ba4c783f28b5a9a24e2be"
+        "inputSchemaSha256": "26bd28dcc72c33c4422eefd995196a75e20741fc5e5e5547fee784b0629c1616"
       },
       {
         "toolName": "assign_board_issue_safely",
@@ -3375,7 +3393,8 @@
         "acceptedSelectorFields": [
           "actionItemContextRef",
           "ordinal",
-          "reportContextRef"
+          "reportContextRef",
+          "useSelectedMeetingActionItemCandidate"
         ],
         "selectorKinds": [
           "action_item",
@@ -3389,7 +3408,7 @@
         "executionMode": "confirmation_required",
         "requiresConfirmation": true,
         "contextSurface": null,
-        "inputSchemaSha256": "40d957c1cf1d72dd55473af0997c895c718c0f00025f5a68a3a666f08eb96812"
+        "inputSchemaSha256": "8f15fa17f803ad5589cbb5b8e8e5bde4b4a887c570e68f561c3c798476732967"
       },
       {
         "toolName": "end_meeting_recording",
@@ -4323,12 +4342,14 @@
         ],
         "acceptedSelectorFields": [
           "actionItemContextRef",
+          "assigneeDisplayName",
           "assigneeUserId",
           "description",
           "ordinal",
           "priority",
           "reportContextRef",
           "title",
+          "useSelectedMeetingActionItemCandidate",
           "useSelectedWorkspaceMemberCandidate"
         ],
         "selectorKinds": [
@@ -4345,7 +4366,7 @@
         "executionMode": "confirmation_required",
         "requiresConfirmation": true,
         "contextSurface": null,
-        "inputSchemaSha256": "f0fd0757d59172a74aad3c2d33c13b6df8662a364f9749b01ccde7f986a9ea7d"
+        "inputSchemaSha256": "c26d0aed5532ac8262b2f96ed974af0259442d04d45eb6610f84e58547bb0d05"
       }
     ]
   },

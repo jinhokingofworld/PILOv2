@@ -111,6 +111,7 @@ interface ActionItemContextInput {
   actionItemContextRef?: string;
   reportContextRef?: string;
   ordinal?: number;
+  useSelectedMeetingActionItemCandidate?: true;
 }
 
 interface UpdateActionItemContextInput extends ActionItemContextInput {
@@ -118,6 +119,7 @@ interface UpdateActionItemContextInput extends ActionItemContextInput {
   description?: string;
   priority?: "LOW" | "MEDIUM" | "HIGH";
   assigneeUserId?: string | null;
+  assigneeDisplayName?: string;
   useSelectedWorkspaceMemberCandidate?: true;
 }
 
@@ -208,6 +210,8 @@ const UPDATE_ACTION_ITEM_INPUT_FIELDS = [
   "description",
   "priority",
   "assigneeUserId",
+  "assigneeDisplayName",
+  "useSelectedMeetingActionItemCandidate",
   "useSelectedWorkspaceMemberCandidate"
 ];
 const LEGACY_UPDATE_ACTION_ITEM_INPUT_FIELDS = [
@@ -221,7 +225,8 @@ const LEGACY_UPDATE_ACTION_ITEM_INPUT_FIELDS = [
 const ACTION_ITEM_CONTEXT_INPUT_FIELDS = [
   "actionItemContextRef",
   "reportContextRef",
-  "ordinal"
+  "ordinal",
+  "useSelectedMeetingActionItemCandidate"
 ];
 const APPROVE_ACTION_ITEM_INPUT_FIELDS = [
   ...ACTION_ITEM_CONTEXT_INPUT_FIELDS,
@@ -580,7 +585,7 @@ export class MeetingAgentToolsService {
       description: "저장된 회의 후속작업의 제목, 설명, 우선순위, 담당자를 수정합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
-      inputSchema: { type: "object", additionalProperties: false, properties: { ...this.actionItemContextSchema(), title: { type: "string" }, description: { type: "string" }, priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] }, assigneeUserId: { type: ["string", "null"], format: "uuid" }, useSelectedWorkspaceMemberCandidate: { type: "boolean", const: true } } },
+      inputSchema: { type: "object", additionalProperties: false, properties: { ...this.actionItemContextSchema(), title: { type: "string" }, description: { type: "string" }, priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] }, assigneeUserId: { type: ["string", "null"], format: "uuid" }, assigneeDisplayName: { type: "string", minLength: 1, maxLength: 120 }, useSelectedWorkspaceMemberCandidate: { type: "boolean", const: true } } },
       validateInput: (input) => this.validateUpdateActionItemContextInput(input),
       buildConfirmation: async (context, input) =>
         this.buildUpdateActionItemContextConfirmation(
@@ -1075,18 +1080,20 @@ export class MeetingAgentToolsService {
     if (resolved.kind === "needs_clarification") {
       return this.toResourceClarification(context, resolved);
     }
+    const assignee = await this.resolveActionItemAssignee(context, draft);
+    if ("kind" in assignee) {
+      return assignee;
+    }
     const resolvedInput: UpdateActionItemInput = {
       reportId: resolved.reference.reportId!,
       actionItemId: resolved.reference.resourceId,
       ...this.actionItemPatch(draft),
-      ...(draft.useSelectedWorkspaceMemberCandidate
-        ? { useSelectedWorkspaceMemberCandidate: true }
-        : {})
+      ...assignee
     };
     return this.buildActionItemConfirmation(
       context,
       "update_meeting_report_action_item",
-      await this.resolveSelectedWorkspaceMember(context, resolvedInput)
+      resolvedInput
     );
   }
 
@@ -1133,6 +1140,12 @@ export class MeetingAgentToolsService {
     input: ActionItemContextInput
   ): Promise<MeetingAgentResourceResolution> {
     const resolver = this.requireMeetingResourceResolver();
+    if (input.useSelectedMeetingActionItemCandidate) {
+      return this.resolveLatestCandidateReference(
+        context,
+        "meeting_report_action_item"
+      );
+    }
     if (input.actionItemContextRef) {
       return resolver.resolveContextReference(
         context,
@@ -1150,6 +1163,39 @@ export class MeetingAgentToolsService {
       reportId: report.reference.resourceId,
       ordinal: input.ordinal
     });
+  }
+
+  private async resolveActionItemAssignee(
+    context: AgentToolContext,
+    input: UpdateActionItemContextInput
+  ): Promise<
+    | { assigneeUserId?: string | null }
+    | AgentToolClarificationResult
+  > {
+    if (input.assigneeUserId !== undefined) {
+      return { assigneeUserId: input.assigneeUserId };
+    }
+    if (input.useSelectedWorkspaceMemberCandidate) {
+      const reference = await this.resolveLatestCandidateReference(
+        context,
+        "workspace_member"
+      );
+      if (reference.kind === "needs_clarification") {
+        return this.toResourceClarification(context, reference);
+      }
+      return { assigneeUserId: reference.reference.resourceId };
+    }
+    if (input.assigneeDisplayName) {
+      const reference = await this.requireMeetingResourceResolver().resolveMember(
+        context,
+        { displayName: input.assigneeDisplayName }
+      );
+      if (reference.kind === "needs_clarification") {
+        return this.toResourceClarification(context, reference);
+      }
+      return { assigneeUserId: reference.reference.resourceId };
+    }
+    return {};
   }
 
   private async buildRegenerateConfirmation(
@@ -2588,7 +2634,8 @@ export class MeetingAgentToolsService {
         type: "string",
         pattern: "^ctx_[0-9a-f]{24}$"
       },
-      ordinal: { type: "integer", minimum: 1, maximum: 20 }
+      ordinal: { type: "integer", minimum: 1, maximum: 20 },
+      useSelectedMeetingActionItemCandidate: { type: "boolean", const: true }
     };
   }
 
@@ -2640,6 +2687,18 @@ export class MeetingAgentToolsService {
         ? undefined
         : this.requireContextRef(object.reportContextRef, "reportContextRef");
     const ordinal = object.ordinal;
+    const useSelectedMeetingActionItemCandidate =
+      object.useSelectedMeetingActionItemCandidate === undefined
+        ? undefined
+        : this.requireBoolean(
+            object.useSelectedMeetingActionItemCandidate,
+            "useSelectedMeetingActionItemCandidate"
+          );
+    if (useSelectedMeetingActionItemCandidate === false) {
+      throw badRequest(
+        "useSelectedMeetingActionItemCandidate may only be true when provided"
+      );
+    }
     if (
       ordinal !== undefined &&
       (!Number.isInteger(ordinal) || (ordinal as number) < 1 || (ordinal as number) > 20)
@@ -2647,10 +2706,11 @@ export class MeetingAgentToolsService {
       throw badRequest("ordinal must be an integer from 1 to 20");
     }
     if (
+      (reportContextRef === undefined) !== (ordinal === undefined) ||
       (actionItemContextRef ? 1 : 0) +
-        (reportContextRef !== undefined && ordinal !== undefined ? 1 : 0) !==
-        1 ||
-      (reportContextRef === undefined) !== (ordinal === undefined)
+        (reportContextRef !== undefined && ordinal !== undefined ? 1 : 0) +
+        (useSelectedMeetingActionItemCandidate ? 1 : 0) !==
+        1
     ) {
       throw badRequest(
         "Use actionItemContextRef or reportContextRef with ordinal"
@@ -2659,7 +2719,10 @@ export class MeetingAgentToolsService {
     return {
       ...(actionItemContextRef ? { actionItemContextRef } : {}),
       ...(reportContextRef ? { reportContextRef } : {}),
-      ...(ordinal === undefined ? {} : { ordinal: ordinal as number })
+      ...(ordinal === undefined ? {} : { ordinal: ordinal as number }),
+      ...(useSelectedMeetingActionItemCandidate
+        ? { useSelectedMeetingActionItemCandidate: true }
+        : {})
     };
   }
 
@@ -2679,7 +2742,9 @@ export class MeetingAgentToolsService {
     const base = this.validateActionItemContextInput({
       actionItemContextRef: object.actionItemContextRef,
       reportContextRef: object.reportContextRef,
-      ordinal: object.ordinal
+      ordinal: object.ordinal,
+      useSelectedMeetingActionItemCandidate:
+        object.useSelectedMeetingActionItemCandidate
     });
     const changes = this.readActionItemUpdateChanges(object);
     return { ...base, ...changes };
@@ -2700,13 +2765,22 @@ export class MeetingAgentToolsService {
     const description = object.description === undefined ? undefined : this.requireBoundedString(object.description, "description", 5000);
     const priority = object.priority === undefined ? undefined : this.requirePriority(object.priority);
     const assigneeUserId = object.assigneeUserId === undefined ? undefined : object.assigneeUserId === null ? null : this.requireActionItemId(object.assigneeUserId);
+    const assigneeDisplayName = object.assigneeDisplayName === undefined
+      ? undefined
+      : this.requireBoundedString(
+          object.assigneeDisplayName,
+          "assigneeDisplayName",
+          120
+        );
     const useSelectedWorkspaceMemberCandidate = object.useSelectedWorkspaceMemberCandidate === undefined
       ? undefined
       : this.requireBoolean(object.useSelectedWorkspaceMemberCandidate, "useSelectedWorkspaceMemberCandidate");
     if (useSelectedWorkspaceMemberCandidate === false) throw badRequest("useSelectedWorkspaceMemberCandidate may only be true when provided");
-    if (assigneeUserId !== undefined && useSelectedWorkspaceMemberCandidate) throw badRequest("assigneeUserId may not be combined with useSelectedWorkspaceMemberCandidate");
-    if (title === undefined && description === undefined && priority === undefined && assigneeUserId === undefined && !useSelectedWorkspaceMemberCandidate) throw badRequest("Meeting action item update requires at least one change");
-    return { ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...(priority === undefined ? {} : { priority }), ...(assigneeUserId === undefined ? {} : { assigneeUserId }), ...(useSelectedWorkspaceMemberCandidate ? { useSelectedWorkspaceMemberCandidate: true } : {}) };
+    if (
+      [assigneeUserId !== undefined, assigneeDisplayName !== undefined, Boolean(useSelectedWorkspaceMemberCandidate)].filter(Boolean).length > 1
+    ) throw badRequest("Use one assignee selector at a time");
+    if (title === undefined && description === undefined && priority === undefined && assigneeUserId === undefined && assigneeDisplayName === undefined && !useSelectedWorkspaceMemberCandidate) throw badRequest("Meeting action item update requires at least one change");
+    return { ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...(priority === undefined ? {} : { priority }), ...(assigneeUserId === undefined ? {} : { assigneeUserId }), ...(assigneeDisplayName === undefined ? {} : { assigneeDisplayName }), ...(useSelectedWorkspaceMemberCandidate ? { useSelectedWorkspaceMemberCandidate: true } : {}) };
   }
 
   private validateApproveActionItemInput(input: unknown): ApproveActionItemInput {
@@ -2733,7 +2807,9 @@ export class MeetingAgentToolsService {
     const base = this.validateActionItemContextInput({
       actionItemContextRef: object.actionItemContextRef,
       reportContextRef: object.reportContextRef,
-      ordinal: object.ordinal
+      ordinal: object.ordinal,
+      useSelectedMeetingActionItemCandidate:
+        object.useSelectedMeetingActionItemCandidate
     });
     return { ...base, delivery: this.readActionItemDelivery(object.delivery) };
   }

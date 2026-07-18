@@ -1155,6 +1155,76 @@ function errorCode(error) {
 }
 
 {
+  const previousSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "meeting-tool-sequential-selection-test-secret";
+  const meetingService = new FakeMeetingService();
+  const resolver = new MeetingAgentResourceResolver(
+    meetingService,
+    new FakeWorkspaceService()
+  );
+  const selectedMemberId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const candidateSelectionService = {
+    async getLatestConsumedMeetingReference(_context, resourceType) {
+      if (resourceType === "meeting_report_action_item") {
+        return {
+          resourceType,
+          resourceId: ACTION_ITEM_ID,
+          reportId: REPORT_ID
+        };
+      }
+      if (resourceType === "workspace_member") {
+        return { resourceType, resourceId: selectedMemberId };
+      }
+      return null;
+    }
+  };
+  const meetingTools = new MeetingAgentToolsService(
+    meetingService,
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    resolver,
+    candidateSelectionService
+  );
+  const tool = meetingTools
+    .listDefinitions()
+    .find(
+      (definition) => definition.name === "update_meeting_report_action_item"
+    );
+  try {
+    const nextSelection = await tool.buildConfirmation(
+      context,
+      tool.validateInput({
+        useSelectedMeetingActionItemCandidate: true,
+        assigneeDisplayName: "김진호"
+      })
+    );
+    assert.equal(nextSelection.kind, "needs_clarification");
+    assert.equal(nextSelection.candidateResources.length, 2);
+    assert.equal(
+      nextSelection.candidateResources[0].candidate.resourceType,
+      "workspace_member"
+    );
+
+    const confirmation = await tool.buildConfirmation(
+      context,
+      tool.validateInput({
+        useSelectedMeetingActionItemCandidate: true,
+        useSelectedWorkspaceMemberCandidate: true
+      })
+    );
+    assert.equal(confirmation.toolName, "update_meeting_report_action_item");
+    assert.equal(confirmation.target.resourceId, ACTION_ITEM_ID);
+    assert.equal(confirmation.call.input.assigneeUserId, selectedMemberId);
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.SESSION_SECRET;
+    } else {
+      process.env.SESSION_SECRET = previousSecret;
+    }
+  }
+}
+
+{
   const { meetingService, registry } = createRegistry();
   const tool = registry.getDefinition("list_meeting_rooms");
   const result = await tool.execute(context, tool.validateInput({}));

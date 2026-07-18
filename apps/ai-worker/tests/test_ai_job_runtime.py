@@ -1302,6 +1302,14 @@ def test_agent_repository_exposes_only_safe_selected_candidate_context() -> None
             "label": "김진호",
             "description": "member · ji***@example.com",
             "status": None,
+            "clarification_tool_name": "resolve_meeting_resource",
+            "goal_tool_name": "update_meeting_report_action_item",
+            "input_summary": {
+                "input": {
+                    "displayName": "김진호",
+                    "workspaceId": "22222222-2222-2222-2222-222222222222",
+                }
+            },
         },
     )
     repository.connection = connection
@@ -1325,6 +1333,14 @@ def test_agent_repository_exposes_only_safe_selected_candidate_context() -> None
     assert "ji***@example.com" in context.planning_context
     assert "candidateSelectionId" not in context.planning_context
     assert "resource_id" not in context.planning_context
+    assert "update_meeting_report_action_item" in context.planning_context
+    assert "workspaceId" not in context.planning_context
+    candidate_query = next(
+        query
+        for query, _values in connection.executed
+        if "FROM agent_candidate_selections AS candidate" in query
+    )
+    assert "resumed_step.step_order > clarification_step.step_order" in candidate_query
 
 
 def test_agent_repository_appends_clarification_only_after_state_transition() -> None:

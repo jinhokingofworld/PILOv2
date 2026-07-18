@@ -681,6 +681,10 @@
             "minimum": 1,
             "maximum": 20
           },
+          "useSelectedMeetingActionItemCandidate": {
+            "type": "boolean",
+            "const": true
+          },
           "title": {
             "type": "string"
           },
@@ -701,6 +705,11 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "assigneeDisplayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
           },
           "useSelectedWorkspaceMemberCandidate": {
             "type": "boolean",
@@ -730,6 +739,10 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 20
+          },
+          "useSelectedMeetingActionItemCandidate": {
+            "type": "boolean",
+            "const": true
           }
         }
       }
@@ -758,6 +771,10 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 20
+          },
+          "useSelectedMeetingActionItemCandidate": {
+            "type": "boolean",
+            "const": true
           },
           "delivery": {
             "type": "object"

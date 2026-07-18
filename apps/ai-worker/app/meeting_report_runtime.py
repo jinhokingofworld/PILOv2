@@ -319,6 +319,40 @@ def _thread_context_line(kind: str, **values: object) -> str:
     return f"previous {kind}: {json.dumps(values, ensure_ascii=False, separators=(',', ':'))}"
 
 
+def _safe_meeting_candidate_resume_input(value: dict[object, object]) -> dict[str, object]:
+    safe: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            continue
+        normalized_key = re.sub(r"[_-]", "", key).lower()
+        if normalized_key.endswith("id") or any(
+            part in normalized_key
+            for part in (
+                "authorization",
+                "cookie",
+                "credential",
+                "password",
+                "secret",
+                "token",
+                "transcript",
+            )
+        ):
+            continue
+        if isinstance(item, dict):
+            safe[key] = _safe_meeting_candidate_resume_input(item)
+        elif isinstance(item, list):
+            safe[key] = [
+                _truncate_utf8(str(entry), 300)
+                for entry in item[:20]
+                if isinstance(entry, str | int | float | bool)
+            ]
+        elif isinstance(item, str):
+            safe[key] = _truncate_utf8(item, 1000)
+        elif isinstance(item, int | float | bool) or item is None:
+            safe[key] = item
+    return safe
+
+
 def _build_bounded_agent_planning_context(lines: list[str]) -> str:
     selected_reversed: list[str] = []
     total_bytes = 0
@@ -1735,21 +1769,50 @@ class PgAgentRunRepository:
 
         selected_candidate = self.connection.execute(
             """
-            SELECT resource_type, label, description, status
-            FROM agent_candidate_selections
-            WHERE run_id = %s
-              AND workspace_id = %s
-              AND requested_by_user_id = %s
-              AND consumed_at IS NOT NULL
-              AND expires_at > now()
-            ORDER BY consumed_at DESC
+            SELECT
+              candidate.resource_type,
+              candidate.label,
+              candidate.description,
+              candidate.status,
+              clarification_step.tool_name AS clarification_tool_name,
+              clarification_step.input_summary,
+              planner_step.output_json->'toolRetrieval'->>'primaryToolName'
+                AS goal_tool_name
+            FROM agent_candidate_selections AS candidate
+            INNER JOIN agent_steps AS clarification_step
+              ON clarification_step.id = candidate.tool_step_id
+             AND clarification_step.run_id = candidate.run_id
+            LEFT JOIN LATERAL (
+              SELECT planner.output_json
+              FROM agent_steps AS planner
+              WHERE planner.run_id = candidate.run_id
+                AND planner.step_type = 'planner'
+                AND planner.status = 'completed'
+                AND planner.step_order < clarification_step.step_order
+              ORDER BY planner.step_order DESC, planner.id DESC
+              LIMIT 1
+            ) AS planner_step ON TRUE
+            WHERE candidate.run_id = %s
+              AND candidate.workspace_id = %s
+              AND candidate.requested_by_user_id = %s
+              AND candidate.consumed_at IS NOT NULL
+              AND candidate.expires_at > now()
+              AND NOT EXISTS (
+                SELECT 1
+                FROM agent_steps AS resumed_step
+                WHERE resumed_step.run_id = candidate.run_id
+                  AND resumed_step.step_type = 'tool'
+                  AND resumed_step.status = 'completed'
+                  AND resumed_step.step_order > clarification_step.step_order
+              )
+            ORDER BY candidate.consumed_at DESC, candidate.id DESC
             LIMIT 1
             """,
             (job.run_id, job.workspace_id, job.requested_by_user_id),
         ).fetchone()
         if selected_candidate is not None:
             resource_type = str(selected_candidate["resource_type"]).strip()
-            label = str(selected_candidate["label"]).strip()[:300]
+            label = _truncate_utf8(str(selected_candidate["label"]).strip(), 300)
             description = selected_candidate["description"]
             status = selected_candidate["status"]
             if resource_type and label:
@@ -1758,10 +1821,36 @@ class PgAgentRunRepository:
                     f"label={label}",
                 ]
                 if isinstance(description, str) and description.strip():
-                    details.append(f"description={description.strip()[:300]}")
+                    details.append(f"description={_truncate_utf8(description.strip(), 300)}")
                 if isinstance(status, str) and status.strip():
-                    details.append(f"status={status.strip()[:100]}")
+                    details.append(f"status={_truncate_utf8(status.strip(), 100)}")
                 memory.append(" ".join(details))
+                input_summary = selected_candidate.get("input_summary")
+                tool_input = (
+                    input_summary.get("input")
+                    if isinstance(input_summary, dict)
+                    and isinstance(input_summary.get("input"), dict)
+                    else {}
+                )
+                resume_state = {
+                    "resourceType": resource_type,
+                    "goalToolName": (
+                        selected_candidate["goal_tool_name"]
+                        if isinstance(selected_candidate["goal_tool_name"], str)
+                        else ""
+                    ),
+                    "clarificationToolName": str(selected_candidate["clarification_tool_name"]),
+                    "toolInput": _safe_meeting_candidate_resume_input(tool_input),
+                }
+                memory.append(
+                    "selected meeting candidate resume: "
+                    + json.dumps(
+                        resume_state,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                )
 
         timeline_rows = self.connection.execute(
             """
