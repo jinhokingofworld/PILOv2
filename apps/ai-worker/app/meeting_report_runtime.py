@@ -110,6 +110,67 @@ MEETING_REPORT_FAILURE_STEPS = {
 }
 
 
+def _project_json_value(value: object, max_characters: int) -> object:
+    serialized = json.dumps(value, ensure_ascii=False)
+    if len(serialized) <= max_characters:
+        return value
+
+    if isinstance(value, dict):
+        projected: dict[str, object] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            candidate_with_null = {**projected, key_text: None}
+            value_overhead = len(json.dumps(candidate_with_null, ensure_ascii=False)) - len("null")
+            remaining = max_characters - value_overhead
+            if remaining <= 0:
+                break
+            candidate_value = _project_json_value(item, remaining)
+            candidate = {**projected, key_text: candidate_value}
+            if len(json.dumps(candidate, ensure_ascii=False)) > max_characters:
+                break
+            projected = candidate
+        return projected
+
+    if isinstance(value, list):
+        projected_items: list[object] = []
+        for item in value:
+            candidate = [*projected_items, item]
+            if len(json.dumps(candidate, ensure_ascii=False)) > max_characters:
+                break
+            projected_items = candidate
+        return projected_items
+
+    if isinstance(value, str):
+        low = 0
+        high = len(value)
+        while low < high:
+            midpoint = (low + high + 1) // 2
+            candidate = value[:midpoint] + "…"
+            if len(json.dumps(candidate, ensure_ascii=False)) <= max_characters:
+                low = midpoint
+            else:
+                high = midpoint - 1
+        return value[:low] + "…" if low else ""
+
+    return value
+
+
+def _serialize_bounded_agent_tool_output(output_json: object, max_characters: int) -> str:
+    marker = {"planningContextTruncated": True}
+    marker_size = len(json.dumps(marker, ensure_ascii=False))
+    projected = _project_json_value(
+        output_json,
+        max(2, max_characters - marker_size),
+    )
+    bounded = (
+        {**projected, **marker} if isinstance(projected, dict) else {"value": projected, **marker}
+    )
+    serialized = json.dumps(bounded, ensure_ascii=False)
+    if len(serialized) <= max_characters:
+        return serialized
+    return json.dumps(marker, ensure_ascii=False)
+
+
 def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
     serialized = json.dumps(output_json, ensure_ascii=False)
     prefix_size = len(f"tool {tool_name}: ")
@@ -120,19 +181,7 @@ def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
     )
     if len(serialized) <= max_size:
         return serialized
-
-    summary: dict[str, object] = {"truncated": True}
-    if isinstance(output_json, dict):
-        for key in ("status", "action", "message", "title"):
-            if key not in output_json:
-                continue
-            value = output_json[key]
-            if isinstance(value, str | int | float | bool) or value is None:
-                summary[key] = value
-        summary["topLevelKeys"] = sorted(str(key) for key in output_json)[:50]
-    else:
-        summary["valueType"] = type(output_json).__name__
-    return json.dumps(summary, ensure_ascii=False)
+    return _serialize_bounded_agent_tool_output(output_json, max_size)
 
 
 def _build_bounded_agent_planning_context(lines: list[str]) -> str:

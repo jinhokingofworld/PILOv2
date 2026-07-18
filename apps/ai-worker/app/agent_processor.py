@@ -669,6 +669,7 @@ def normalize_agent_planner_decision(
             missing_fields = _missing_sql_erd_focus_fields(
                 decision.tool_input,
                 missing_fields,
+                planning_context,
             )
         if tool.name == "update_calendar_event":
             missing_fields = _missing_calendar_update_fields(
@@ -797,10 +798,11 @@ def _missing_required_tool_input_fields(
 def _missing_sql_erd_focus_fields(
     input_value: dict[str, object],
     missing_fields: tuple[str, ...],
+    planning_context: str,
 ) -> tuple[str, ...]:
     missing = set(missing_fields)
     primary_refs = input_value.get("primaryTableRefs")
-    if (
+    primary_refs_are_valid = not (
         not isinstance(primary_refs, list)
         or not 1 <= len(primary_refs) <= SQL_ERD_PRIMARY_TABLE_REF_LIMIT
         or any(
@@ -808,9 +810,53 @@ def _missing_sql_erd_focus_fields(
             for ref in primary_refs
         )
         or len(set(primary_refs)) != len(primary_refs)
+    )
+    if not primary_refs_are_valid:
+        missing.add("primaryTableRefs")
+
+    inspection = _latest_sql_erd_inspection(planning_context)
+    if inspection is None:
+        missing.add("sqlErdInspection")
+        return tuple(sorted(missing))
+
+    if any(
+        input_value.get(field) != inspection.get(field)
+        for field in ("sessionId", "sessionRevision", "modelFingerprint")
     ):
+        missing.add("sqlErdInspection")
+
+    projection = inspection.get("projection")
+    tables = projection.get("tables") if isinstance(projection, dict) else None
+    inspected_refs = (
+        {
+            table.get("ref")
+            for table in tables
+            if isinstance(table, dict)
+            and isinstance(table.get("ref"), str)
+            and SQL_ERD_TABLE_REF_PATTERN.fullmatch(str(table["ref"])) is not None
+        }
+        if isinstance(tables, list)
+        else set()
+    )
+    if not inspected_refs:
+        missing.add("sqlErdInspection")
+    elif primary_refs_are_valid and not set(primary_refs).issubset(inspected_refs):
         missing.add("primaryTableRefs")
     return tuple(sorted(missing))
+
+
+def _latest_sql_erd_inspection(planning_context: str) -> dict[str, object] | None:
+    prefix = "tool inspect_sql_erd_schema: "
+    for line in reversed(planning_context.splitlines()):
+        if not line.startswith(prefix):
+            continue
+        try:
+            output = json.loads(line[len(prefix) :])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(output, dict):
+            return output
+    return None
 
 
 def _tool_input_property_schema(
@@ -968,6 +1014,8 @@ def _clarification_answer(
 ) -> str:
     if tool_name == "generate_sql_erd":
         return "ERD에 포함할 핵심 테이블과 각 테이블의 주요 데이터 관계를 알려주세요."
+    if tool_name == "focus_sql_erd_tables" and "sqlErdInspection" in missing_fields:
+        return "ERD 스키마 확인 결과가 없거나 오래되었습니다. 스키마를 다시 확인해주세요."
 
     labels = {
         "eventId": "수정할 일정",

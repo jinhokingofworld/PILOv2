@@ -999,6 +999,75 @@ def test_agent_repository_preserves_large_sql_erd_inspection_as_valid_json() -> 
     assert len(context.planning_context) <= 12_000
 
 
+def test_agent_repository_preserves_complete_entries_from_large_general_tool_output() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    events = [
+        {
+            "id": index,
+            "title": f"회의 일정 {index}",
+            "description": "회의 안건과 참석자 정보를 포함한 일정입니다. " * 4,
+        }
+        for index in range(1, 41)
+    ]
+    tool_output = {
+        "start": "2026-07-01",
+        "end": "2026-07-31",
+        "count": len(events),
+        "events": events,
+    }
+    assert len(json.dumps(tool_output, ensure_ascii=False)) > 3_000
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-3333-3333-333333333333",
+            "workspace_id": "22222222-2222-2222-2222-222222222222",
+            "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+            "status": "planning",
+            "prompt": "이번 달 회의 일정을 요약해줘",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 1,
+            "thread_id": None,
+        },
+        timeline_rows=[
+            {
+                "item_kind": "tool_step",
+                "role": "tool",
+                "content": None,
+                "tool_name": "list_calendar_events",
+                "output_json": tool_output,
+            },
+        ],
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "turnSequence": 2,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    prefix = "tool list_calendar_events: "
+    tool_line = next(
+        line for line in context.planning_context.splitlines() if line.startswith(prefix)
+    )
+    restored_output = json.loads(tool_line[len(prefix) :])
+    assert restored_output["planningContextTruncated"] is True
+    assert restored_output["start"] == tool_output["start"]
+    assert restored_output["end"] == tool_output["end"]
+    assert restored_output["count"] == len(events)
+    assert restored_output["events"][0] == events[0]
+    assert 0 < len(restored_output["events"]) < len(events)
+    assert restored_output["events"] == events[: len(restored_output["events"])]
+    assert len(tool_line[len(prefix) :]) <= 3_000
+
+
 def test_agent_repository_adds_only_bounded_same_thread_memory() -> None:
     repository = object.__new__(PgAgentRunRepository)
     thread_runs = [
