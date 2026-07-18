@@ -209,9 +209,23 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "current": { "type": "boolean", "const": true },
-          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
-          "useSelectedMeetingCandidate": { "type": "boolean", "const": true }
+          "contextRef": {
+            "type": "string",
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "current": {
+            "type": "boolean",
+            "const": true
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingCandidate": {
+            "type": "boolean",
+            "const": true
+          }
         }
       }
     },
@@ -236,7 +250,11 @@
         ],
         "additionalProperties": false,
         "properties": {
-          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
           "useSelectedMeetingRoomCandidate": {
             "type": "boolean",
             "const": true
@@ -271,9 +289,23 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "current": { "type": "boolean", "const": true },
-          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
-          "useSelectedMeetingCandidate": { "type": "boolean", "const": true },
+          "contextRef": {
+            "type": "string",
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "current": {
+            "type": "boolean",
+            "const": true
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingCandidate": {
+            "type": "boolean",
+            "const": true
+          },
           "recordingConsent": {
             "type": "object",
             "additionalProperties": false,
@@ -304,9 +336,23 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "current": { "type": "boolean", "const": true },
-          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
-          "useSelectedMeetingCandidate": { "type": "boolean", "const": true }
+          "contextRef": {
+            "type": "string",
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "current": {
+            "type": "boolean",
+            "const": true
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingCandidate": {
+            "type": "boolean",
+            "const": true
+          }
         }
       }
     },
@@ -319,9 +365,23 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "current": { "type": "boolean", "const": true },
-          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
-          "useSelectedMeetingCandidate": { "type": "boolean", "const": true }
+          "contextRef": {
+            "type": "string",
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "current": {
+            "type": "boolean",
+            "const": true
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingCandidate": {
+            "type": "boolean",
+            "const": true
+          }
         }
       }
     },
@@ -334,9 +394,23 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "current": { "type": "boolean", "const": true },
-          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
-          "useSelectedMeetingCandidate": { "type": "boolean", "const": true }
+          "contextRef": {
+            "type": "string",
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "current": {
+            "type": "boolean",
+            "const": true
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingCandidate": {
+            "type": "boolean",
+            "const": true
+          }
         }
       }
     },
@@ -360,9 +434,19 @@
               "FAILED"
             ]
           },
-          "from": { "type": "string", "format": "date-time" },
-          "to": { "type": "string", "format": "date-time" },
-          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
           "limit": {
             "type": "integer",
             "minimum": 1,
@@ -380,11 +464,38 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "from": { "type": "string", "format": "date-time" },
-          "to": { "type": "string", "format": "date-time" },
-          "status": { "type": "string", "enum": ["QUEUED", "TRANSCRIBING", "SUMMARIZING", "PROCESSING", "COMPLETED", "FAILED"] },
-          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
-          "useSelectedMeetingReportCandidate": { "type": "boolean", "const": true }
+          "contextRef": {
+            "type": "string",
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "TRANSCRIBING",
+              "SUMMARIZING",
+              "PROCESSING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingReportCandidate": {
+            "type": "boolean",
+            "const": true
+          }
         }
       }
     },
@@ -397,11 +508,38 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "from": { "type": "string", "format": "date-time" },
-          "to": { "type": "string", "format": "date-time" },
-          "status": { "type": "string", "enum": ["QUEUED", "TRANSCRIBING", "SUMMARIZING", "PROCESSING", "COMPLETED", "FAILED"] },
-          "roomName": { "type": "string", "minLength": 1, "maxLength": 100 },
-          "useSelectedMeetingReportCandidate": { "type": "boolean", "const": true }
+          "contextRef": {
+            "type": "string",
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "TRANSCRIBING",
+              "SUMMARIZING",
+              "PROCESSING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingReportCandidate": {
+            "type": "boolean",
+            "const": true
+          }
         }
       }
     },
@@ -478,19 +616,20 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "reportId",
-          "actionItemId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "reportId": {
+          "actionItemContextRef": {
             "type": "string",
-            "format": "uuid"
+            "pattern": "^ctx_[0-9a-f]{24}$"
           },
-          "actionItemId": {
+          "reportContextRef": {
             "type": "string",
-            "format": "uuid"
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "ordinal": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
           },
           "title": {
             "type": "string"
@@ -527,19 +666,20 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "reportId",
-          "actionItemId"
-        ],
         "additionalProperties": false,
         "properties": {
-          "reportId": {
+          "actionItemContextRef": {
             "type": "string",
-            "format": "uuid"
+            "pattern": "^ctx_[0-9a-f]{24}$"
           },
-          "actionItemId": {
+          "reportContextRef": {
             "type": "string",
-            "format": "uuid"
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "ordinal": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
           }
         }
       }
@@ -552,19 +692,22 @@
       "inputSchema": {
         "type": "object",
         "required": [
-          "reportId",
-          "actionItemId",
           "delivery"
         ],
         "additionalProperties": false,
         "properties": {
-          "reportId": {
+          "actionItemContextRef": {
             "type": "string",
-            "format": "uuid"
+            "pattern": "^ctx_[0-9a-f]{24}$"
           },
-          "actionItemId": {
+          "reportContextRef": {
             "type": "string",
-            "format": "uuid"
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "ordinal": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
           },
           "delivery": {
             "type": "object"
@@ -1222,13 +1365,29 @@
       "executionMode": "contextual",
       "inputSchema": {
         "type": "object",
-        "required": ["featureQuery"],
+        "required": [
+          "featureQuery"
+        ],
         "additionalProperties": false,
         "properties": {
-          "featureQuery": { "type": "string", "minLength": 1, "maxLength": 200 },
-          "sessionId": { "type": "string", "format": "uuid" },
-          "sessionSelectionToken": { "type": "string", "format": "uuid" },
-          "sessionTitle": { "type": "string", "minLength": 1, "maxLength": 120 }
+          "featureQuery": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionSelectionToken": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionTitle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
         }
       }
     },
@@ -1251,38 +1410,71 @@
         ],
         "additionalProperties": false,
         "properties": {
-          "sessionId": { "type": "string", "format": "uuid" },
-          "sessionRevision": { "type": "integer", "minimum": 1 },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
           "modelFingerprint": {
             "type": "string",
             "pattern": "^fnv1a32:[0-9a-f]{8}$"
           },
-          "featureLabel": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "featureLabel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
           "primaryTableRefs": {
             "type": "array",
             "minItems": 1,
             "maxItems": 20,
             "uniqueItems": true,
-            "items": { "type": "string", "pattern": "^t[1-9][0-9]*$" }
+            "items": {
+              "type": "string",
+              "pattern": "^t[1-9][0-9]*$"
+            }
           },
           "relatedTableRefs": {
             "type": "array",
             "maxItems": 30,
             "uniqueItems": true,
-            "items": { "type": "string", "pattern": "^t[1-9][0-9]*$" }
+            "items": {
+              "type": "string",
+              "pattern": "^t[1-9][0-9]*$"
+            }
           },
-          "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
           "reasons": {
             "type": "array",
             "minItems": 1,
             "maxItems": 50,
             "items": {
               "type": "object",
-              "required": ["tableRef", "reason"],
+              "required": [
+                "tableRef",
+                "reason"
+              ],
               "additionalProperties": false,
               "properties": {
-                "tableRef": { "type": "string", "pattern": "^t[1-9][0-9]*$" },
-                "reason": { "type": "string", "minLength": 1, "maxLength": 240 }
+                "tableRef": {
+                  "type": "string",
+                  "pattern": "^t[1-9][0-9]*$"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                }
               }
             }
           }

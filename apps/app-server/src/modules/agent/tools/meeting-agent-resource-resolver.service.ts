@@ -14,6 +14,7 @@ import {
   type MeetingReportSummaryPayload
 } from "../../meeting/meeting.service";
 import { WorkspaceService } from "../../workspace/workspace.service";
+import { AgentThreadContextService } from "../agent-thread-context.service";
 import type { AgentToolContext } from "../types/agent-tool.types";
 
 const MAX_CANDIDATES = 3;
@@ -98,8 +99,36 @@ interface SelectionTokenPayload {
 export class MeetingAgentResourceResolver {
   constructor(
     private readonly meetingService: MeetingService,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly threadContextService?: AgentThreadContextService
   ) {}
+
+  async resolveContextReference(
+    context: AgentToolContext,
+    contextRef: string,
+    expectedType: MeetingAgentResourceType
+  ): Promise<MeetingAgentResourceResolution> {
+    if (!this.threadContextService) return this.notFound();
+    const reference = await this.threadContextService.resolveMeetingReference(
+      context,
+      contextRef
+    );
+    if (!reference || reference.resourceType !== expectedType) {
+      return this.notFound();
+    }
+    const revalidated = await this.revalidateReference(context, reference);
+    if (!revalidated) return this.notFound();
+    return this.selected(
+      context,
+      revalidated,
+      {
+        resourceType: expectedType,
+        label: "이전 대화에서 확인한 대상",
+        description: null,
+        status: null
+      }
+    );
+  }
 
   async resolveMeetingRoom(
     context: AgentToolContext,

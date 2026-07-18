@@ -24,6 +24,7 @@ import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answ
 import { AgentPlannerService } from "./agent-planner.service";
 import { AgentService } from "./agent.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
+import { AgentThreadContextService } from "./agent-thread-context.service";
 import { BoardAgentToolsService } from "./tools/board-agent-tools.service";
 import { BoardContextResolverService } from "./tools/board-context-resolver.service";
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
@@ -61,6 +62,7 @@ import { DriveAgentToolsService } from "./tools/drive-agent-tools.service";
     AgentGroundedAnswerOutboxPublisherService,
     AgentPlannerService,
     AgentToolRegistryService,
+    AgentThreadContextService,
     AgentCanvasDelegationCompletionService,
     BoardContextResolverService,
     BoardAgentToolsService,

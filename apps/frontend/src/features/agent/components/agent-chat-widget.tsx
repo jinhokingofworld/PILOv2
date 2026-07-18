@@ -48,6 +48,11 @@ import {
   didAgentRunAcceptInput,
   getLatestAgentRunMessageSequence
 } from "@/features/agent/run-input-recovery";
+import {
+  forgetAgentRunId,
+  readRecoverableAgentRunId,
+  rememberAgentRunId
+} from "@/features/agent/thread-run-recovery";
 import type { AgentRun, SubmitAgentRunInput } from "@/features/agent/types";
 import { enqueueMeetingConnectionAction } from "@/features/meeting/stores/meeting-connection-action-store";
 import { cn } from "@/lib/utils";
@@ -412,12 +417,13 @@ export function AgentChatWidget() {
     [router]
   );
 
-  async function pollAgentRunUntilStop(
+  const pollAgentRunUntilStop = useCallback(async function pollAgentRunUntilStop(
     initialRun: AgentRun,
     assistantMessageId: string,
     signal: AbortSignal
   ) {
     let currentRun = initialRun;
+    rememberAgentRunId(window.sessionStorage, currentRun.workspaceId, currentRun.id);
     handleRunClientAction(currentRun);
     updateAssistantMessage(
       assistantMessageId,
@@ -439,6 +445,7 @@ export function AgentChatWidget() {
         }
       );
       currentRun = runPayload.run;
+      rememberAgentRunId(window.sessionStorage, currentRun.workspaceId, currentRun.id);
       handleRunClientAction(currentRun);
       updateAssistantMessage(
         assistantMessageId,
@@ -448,7 +455,64 @@ export function AgentChatWidget() {
     }
 
     return currentRun;
-  }
+  }, [agentApiClient, handleRunClientAction, updateAssistantMessage]);
+
+  useEffect(() => {
+    if (!workspaceId || !accessToken?.trim() || activeRunAbortControllerRef.current) {
+      return;
+    }
+    const runId = readRecoverableAgentRunId(window.sessionStorage, workspaceId);
+    if (!runId) return;
+
+    const abortController = new AbortController();
+    activeRunAbortControllerRef.current = abortController;
+    setBusyState("submitting");
+    const assistantMessageId = `assistant-recovered-${runId}`;
+
+    void (async () => {
+      try {
+        const payload = await agentApiClient.getRun(workspaceId, runId, {
+          signal: abortController.signal
+        });
+        const run = payload.run;
+        if (run.workspaceId !== workspaceId) {
+          forgetAgentRunId(window.sessionStorage, workspaceId);
+          return;
+        }
+        setMessages([
+          ...initialMessages,
+          {
+            id: `user-recovered-${run.id}`,
+            role: "user",
+            content: run.prompt
+          },
+          {
+            id: assistantMessageId,
+            role: "assistant",
+            content: getAgentRunDisplayMessage(run),
+            run
+          }
+        ]);
+        await pollAgentRunUntilStop(run, assistantMessageId, abortController.signal);
+      } catch (error) {
+        if (!isAbortError(error)) {
+          forgetAgentRunId(window.sessionStorage, workspaceId);
+        }
+      } finally {
+        if (activeRunAbortControllerRef.current === abortController) {
+          activeRunAbortControllerRef.current = null;
+          setBusyState("idle");
+        }
+      }
+    })();
+
+    return () => {
+      abortController.abort();
+      if (activeRunAbortControllerRef.current === abortController) {
+        activeRunAbortControllerRef.current = null;
+      }
+    };
+  }, [accessToken, agentApiClient, pollAgentRunUntilStop, workspaceId]);
 
   async function appendRunInput(
     targetMessage: AgentChatMessage,
@@ -635,6 +699,11 @@ export function AgentChatWidget() {
         {
           signal: abortController.signal
         }
+      );
+      rememberAgentRunId(
+        window.sessionStorage,
+        createdRunPayload.run.workspaceId,
+        createdRunPayload.run.id
       );
       await pollAgentRunUntilStop(
         createdRunPayload.run,
