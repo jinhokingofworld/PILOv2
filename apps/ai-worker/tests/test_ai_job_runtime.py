@@ -1217,6 +1217,11 @@ def test_agent_repository_redacts_credentials_from_prior_thread_text() -> None:
         "natural-language-token-value",
         "plain-secret-value",
         "plain-token-value",
+        "aws-secret-value",
+        "stripe-secret-value",
+        "supabase-secret-value",
+        "jwt-secret-value",
+        "private-key-secret-value",
     ]
     connection = FakeAgentContextConnection(
         run_row={
@@ -1243,6 +1248,15 @@ def test_agent_repository_redacts_credentials_from_prior_thread_text() -> None:
                         '{"apiKey":"' + sensitive_values[6] + '"}',
                         "'access_token': '" + sensitive_values[7] + "'",
                         f"client_secret={sensitive_values[6]}",
+                        f"AWS_SECRET_ACCESS_KEY={sensitive_values[8]}",
+                        f"STRIPE_SECRET_KEY={sensitive_values[9]}",
+                        f"SUPABASE_SERVICE_ROLE_KEY={sensitive_values[10]}",
+                        f"JWT_SECRET_KEY={sensitive_values[11]}",
+                        f"PRIVATE_KEY_PASSPHRASE={sensitive_values[12]}",
+                        '{"openaiApiKey":"' + sensitive_values[6] + '"}',
+                        '{"githubAccessToken":"' + sensitive_values[7] + '"}',
+                        "monkey=banana123",
+                        "public_key=public-material",
                     )
                 ),
             }
@@ -1266,6 +1280,8 @@ def test_agent_repository_redacts_credentials_from_prior_thread_text() -> None:
     assert context is not None
     assert "[secret]" in context.planning_context
     assert all(value not in context.planning_context for value in sensitive_values)
+    assert "monkey=banana123" in context.planning_context
+    assert "public_key=public-material" in context.planning_context
 
 
 def test_agent_repository_exposes_only_safe_selected_candidate_context() -> None:

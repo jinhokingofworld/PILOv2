@@ -210,15 +210,80 @@ SENSITIVE_TEXT_PATTERNS = (
     re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b"),
     re.compile(r"\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
-    re.compile(
-        r"(?<![A-Za-z0-9])[\"']?(?:[A-Za-z][A-Za-z0-9]*[_-]+)*"
-        r"(?:api(?:[\s_-]+)?key|access(?:[\s_-]+)?token|"
-        r"refresh(?:[\s_-]+)?token|client(?:[\s_-]+)?secret|"
-        r"private(?:[\s_-]+)?key|authorization|password|secret|token|credential)"
-        r"[\"']?\s*[:=]\s*[\"']?[^\s\"',;}\]]{4,}[\"']?",
-        re.IGNORECASE,
-    ),
 )
+CREDENTIAL_ASSIGNMENT_PATTERN = re.compile(
+    r"""(?<![A-Za-z0-9])
+    (?:
+        (?P<key_quote>["'])(?P<quoted_key>[A-Za-z][A-Za-z0-9_. -]{0,127})(?P=key_quote)
+        |
+        (?P<bare_key>[A-Za-z][A-Za-z0-9_.-]*(?:[ \t]+[A-Za-z][A-Za-z0-9_.-]*){0,4})
+    )
+    [ \t]*[:=][ \t]*
+    (?:
+        (?P<value_quote>["'])(?P<quoted_value>[^"'\r\n]{4,})(?P=value_quote)
+        |
+        (?P<bare_value>[^\s"',;}\]]{4,})
+    )
+    """,
+    re.VERBOSE,
+)
+SENSITIVE_CREDENTIAL_SEGMENTS = {
+    "authorization",
+    "credential",
+    "passphrase",
+    "password",
+    "secret",
+    "token",
+}
+SENSITIVE_CREDENTIAL_SEQUENCES = (
+    ("api", "key"),
+    ("access", "key"),
+    ("private", "key"),
+    ("service", "role", "key"),
+)
+SENSITIVE_CREDENTIAL_COMPACT_NAMES = {
+    "accesstoken",
+    "apikey",
+    "clientsecret",
+    "privatekey",
+    "refreshtoken",
+    "servicerolekey",
+}
+
+
+def _credential_key_segments(key: str) -> tuple[str, ...]:
+    normalized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key)
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized)
+    return tuple(re.findall(r"[a-z0-9]+", normalized.lower()))
+
+
+def _contains_segment_sequence(segments: tuple[str, ...], sequence: tuple[str, ...]) -> bool:
+    sequence_size = len(sequence)
+    return any(
+        segments[index : index + sequence_size] == sequence
+        for index in range(len(segments) - sequence_size + 1)
+    )
+
+
+def _is_sensitive_credential_key(key: str) -> bool:
+    segments = _credential_key_segments(key)
+    if any(segment in SENSITIVE_CREDENTIAL_SEGMENTS for segment in segments):
+        return True
+    if any(
+        _contains_segment_sequence(segments, sequence)
+        for sequence in SENSITIVE_CREDENTIAL_SEQUENCES
+    ):
+        return True
+    compact_key = "".join(segments)
+    return any(name in compact_key for name in SENSITIVE_CREDENTIAL_COMPACT_NAMES)
+
+
+def _redact_sensitive_credential_assignments(value: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        key = match.group("quoted_key") or match.group("bare_key") or ""
+        return "[secret]" if _is_sensitive_credential_key(key) else match.group(0)
+
+    return CREDENTIAL_ASSIGNMENT_PATTERN.sub(replace, value)
 
 
 def _utf8_size(value: str) -> int:
@@ -226,7 +291,7 @@ def _utf8_size(value: str) -> int:
 
 
 def _truncate_utf8(value: str, max_bytes: int) -> str:
-    sanitized = value.replace("\x00", "")
+    sanitized = _redact_sensitive_credential_assignments(value.replace("\x00", ""))
     for pattern in SENSITIVE_TEXT_PATTERNS:
         sanitized = pattern.sub("[secret]", sanitized)
     sanitized = UUID_TEXT_PATTERN.sub("[resource]", sanitized)
