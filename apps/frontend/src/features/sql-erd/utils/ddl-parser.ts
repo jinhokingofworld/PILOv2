@@ -65,6 +65,7 @@ type PostgreSqlSyntaxNode = SqlSyntaxNode;
 type PostgreSqlParserSourceParts = {
   declaredTypes: string[];
   erdStatements: string[];
+  userDefinedTypeStatements: string[];
 };
 
 const parser = new Parser();
@@ -476,7 +477,16 @@ function preparePostgreSqlParserSource(sourceText: string) {
 
   // node-sql-parser registers CREATE TYPE names but not CREATE DOMAIN names.
   // Register both in a parser-only prelude so table columns keep their original type.
-  const parserPrelude = declaredTypes
+  const parserTypeNames = [
+    ...new Set(
+      declaredTypes.flatMap((typeName) =>
+        typeName.includes('"')
+          ? [typeName]
+          : [typeName, typeName.toUpperCase()]
+      )
+    )
+  ];
+  const parserPrelude = parserTypeNames
     .map(
       (typeName) =>
         `CREATE TYPE ${typeName} AS ENUM ('__pilo_sqltoerd_parser_type__');`
@@ -492,6 +502,13 @@ export function collectPostgreSqlUserDefinedTypeDeclarations(
   return collectPostgreSqlParserSourceParts(sourceText).declaredTypes;
 }
 
+export function collectPostgreSqlUserDefinedTypeStatements(
+  sourceText: string
+) {
+  return collectPostgreSqlParserSourceParts(sourceText)
+    .userDefinedTypeStatements;
+}
+
 function collectPostgreSqlParserSourceParts(
   sourceText: string
 ): PostgreSqlParserSourceParts {
@@ -499,9 +516,14 @@ function collectPostgreSqlParserSourceParts(
   const rootCursor = tree.cursor();
   const declaredTypes = new Map<string, string>();
   const erdStatements: string[] = [];
+  const userDefinedTypeStatements: string[] = [];
 
   if (!rootCursor.firstChild()) {
-    return { declaredTypes: [], erdStatements };
+    return {
+      declaredTypes: [],
+      erdStatements,
+      userDefinedTypeStatements
+    };
   }
 
   do {
@@ -573,12 +595,16 @@ function collectPostgreSqlParserSourceParts(
         typeKey,
         sourceText.slice(typeNameNode.from, typeNameNode.to)
       );
+      userDefinedTypeStatements.push(
+        sourceText.slice(rootCursor.from, rootCursor.to).trim()
+      );
     }
   } while (rootCursor.nextSibling());
 
   return {
     declaredTypes: [...declaredTypes.values()],
-    erdStatements
+    erdStatements,
+    userDefinedTypeStatements
   };
 }
 

@@ -6,7 +6,10 @@ import type {
   SqltoerdResolvedDialect,
   SqltoerdSettingsJson
 } from "@/features/sql-erd/types";
-import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
+import {
+  collectPostgreSqlUserDefinedTypeStatements,
+  parseSqlDdlToErdModel
+} from "@/features/sql-erd/utils/ddl-parser";
 import { retainSqltoerdRelationNotesForModel } from "@/features/sql-erd/utils/foreign-key-add";
 import {
   generateSqlDdlFromErdModel,
@@ -111,12 +114,23 @@ export function createSqlErdNormalizedSqlPreview({
       dialect: resolvedDialect,
       modelJson
     });
+    const generatedSourceText =
+      resolvedDialect === "postgresql"
+        ? [
+            ...collectPostgreSqlUserDefinedTypeStatements(
+              session.sourceText
+            ),
+            generated.sql
+          ]
+            .filter(Boolean)
+            .join("\n\n")
+        : generated.sql;
 
     return {
       baseSnapshot: session,
       generationBlocked: false,
-      generatedSourceText: generated.sql,
-      hasChanges: generated.sql !== session.sourceText,
+      generatedSourceText,
+      hasChanges: generatedSourceText !== session.sourceText,
       layoutJson: layoutJson ?? session.layoutJson,
       modelJson: generated.modelJson,
       resolvedDialect,
@@ -314,8 +328,11 @@ export function applySqlErdNormalizedSqlPreview(
   });
 }
 
-function createSqlErdGeneratedSqlParseError(
-  preview: SqlErdNormalizedSqlPreview,
+export function createSqlErdGeneratedSqlParseError(
+  preview: Pick<
+    SqlErdNormalizedSqlPreview,
+    "modelJson" | "resolvedDialect"
+  >,
   parserMessage: string
 ) {
   const dialectLabel =

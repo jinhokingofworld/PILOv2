@@ -198,6 +198,7 @@ import {
   type SqlErdSchemaMutationResult
 } from "@/features/sql-erd/utils/schema-mutation";
 import {
+  createSqlErdGeneratedSqlParseError,
   createSqlErdModelSqlHistory,
   createSqlErdNormalizedSqlPreview,
   createSqlErdSplitDiffRows,
@@ -1021,7 +1022,18 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         }
 
         if (!parseResult.ok) {
-          setNormalizedSqlApplyError(parseResult.error.message);
+          setNormalizedSqlApplyError(
+            createSqlErdGeneratedSqlParseError(
+              {
+                modelJson: sourceMapModelJson,
+                resolvedDialect: resolveSqlSourceEditorDialect(
+                  targetSnapshot.dialect,
+                  lastResolvedDialect
+                )
+              },
+              parseResult.error.message
+            )
+          );
           setIsNormalizedSqlApplying(false);
           return;
         }
@@ -1066,6 +1078,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     [
       applySqlErdEditAction,
       isNormalizedSqlApplying,
+      lastResolvedDialect,
       runSqlErdParseWorker,
       setPendingSourceAutosaveSnapshot
     ]

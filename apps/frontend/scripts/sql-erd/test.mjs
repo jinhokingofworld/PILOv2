@@ -7140,16 +7140,17 @@ assert.equal(
   "BIGINT"
 );
 
-const customPostgreSqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
-  dialect: "postgresql",
-  sourceText: `CREATE TYPE order_status AS ENUM ('pending', 'paid');
+const customPostgreSqlTypeSource = `CREATE TYPE order_status AS ENUM ('pending', 'paid');
 CREATE DOMAIN currency_amount AS NUMERIC(12, 2);
 
 CREATE TABLE payments (
   id BIGSERIAL PRIMARY KEY,
   status order_status NOT NULL,
   amount currency_amount
-);`
+);`;
+const customPostgreSqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: customPostgreSqlTypeSource
 });
 
 assert.equal(customPostgreSqlTypeParseResult.ok, true);
@@ -7159,6 +7160,61 @@ assert.deepEqual(
     (column) => column.dataType
   ),
   ["BIGSERIAL", "ORDER_STATUS", "CURRENCY_AMOUNT"]
+);
+assert.deepEqual(
+  ddlParserRuntime.collectPostgreSqlUserDefinedTypeStatements(
+    customPostgreSqlTypeSource
+  ),
+  [
+    "CREATE TYPE order_status AS ENUM ('pending', 'paid');",
+    "CREATE DOMAIN currency_amount AS NUMERIC(12, 2);"
+  ]
+);
+const customPostgreSqlTypePreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: customPostgreSqlTypeParseResult.modelJson,
+    resolvedDialect: "postgresql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: customPostgreSqlTypeParseResult.modelJson,
+      sourceText: customPostgreSqlTypeSource
+    }
+  });
+assert.match(
+  customPostgreSqlTypePreview.generatedSourceText,
+  /CREATE TYPE order_status AS ENUM \('pending', 'paid'\);/
+);
+assert.match(
+  customPostgreSqlTypePreview.generatedSourceText,
+  /CREATE DOMAIN currency_amount AS NUMERIC\(12, 2\);/
+);
+const customPostgreSqlTypeApplyResult =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    customPostgreSqlTypePreview
+  );
+assert.equal(
+  customPostgreSqlTypeApplyResult.ok,
+  true,
+  JSON.stringify({
+    applyResult: customPostgreSqlTypeApplyResult,
+    sourceText: customPostgreSqlTypePreview.generatedSourceText
+  })
+);
+const customPostgreSqlTypeMySqlPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: customPostgreSqlTypeParseResult.modelJson,
+    resolvedDialect: "mysql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: customPostgreSqlTypeParseResult.modelJson,
+      sourceText: customPostgreSqlTypeSource
+    }
+  });
+assert.doesNotMatch(
+  customPostgreSqlTypeMySqlPreview.generatedSourceText,
+  /CREATE (?:TYPE|DOMAIN)/
 );
 
 const caseSensitivePostgreSqlDomainParseResult =
@@ -8110,6 +8166,11 @@ assert.match(panel, /whitespace-pre-wrap/);
 assert.match(panel, /\[overflow-wrap:anywhere\]/);
 assert.doesNotMatch(panel, /min-w-\[760px\]/);
 assert.doesNotMatch(panel, /<code className="whitespace-pre px-2">/);
+assert.match(panel, /createSqlErdGeneratedSqlParseError\(/);
+assert.doesNotMatch(
+  panel,
+  /setNormalizedSqlApplyError\(parseResult\.error\.message\)/
+);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
 assert.match(frameShape, /editor\.select\(shape\.id\)/);
 assert.match(frameShape, /resizeBox/);
