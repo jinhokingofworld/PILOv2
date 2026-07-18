@@ -915,6 +915,77 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
     assert timeline_values == (job.run_id, job.run_id)
 
 
+def test_agent_repository_preserves_large_sql_erd_inspection_as_valid_json() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    projection_tables = [
+        {
+            "ref": f"t{index}",
+            "name": f"meeting_domain_table_{index:03d}",
+            "columns": [
+                {"name": "workspace_id", "foreignKey": True},
+                {"name": f"meeting_attribute_{index:03d}"},
+            ],
+        }
+        for index in range(1, 51)
+    ]
+    inspection_output = {
+        "sessionId": "44444444-4444-4444-4444-444444444444",
+        "sessionRevision": 7,
+        "modelFingerprint": "fnv1a32:1234abcd",
+        "projection": {
+            "tables": projection_tables,
+            "edges": [[f"t{index}", f"t{index + 1}"] for index in range(1, 50)],
+            "truncated": False,
+        },
+    }
+    assert len(json.dumps(inspection_output, ensure_ascii=False)) > 3_000
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-3333-3333-333333333333",
+            "workspace_id": "22222222-2222-2222-2222-222222222222",
+            "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+            "status": "planning",
+            "prompt": "회의 관련 테이블만 집중 보기로 보여줘",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 1,
+            "thread_id": None,
+        },
+        timeline_rows=[
+            {
+                "item_kind": "tool_step",
+                "role": "tool",
+                "content": None,
+                "tool_name": "inspect_sql_erd_schema",
+                "output_json": inspection_output,
+            }
+        ],
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "turnSequence": 2,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    prefix = "tool inspect_sql_erd_schema: "
+    inspection_line = next(
+        line for line in context.planning_context.splitlines() if line.startswith(prefix)
+    )
+    restored_output = json.loads(inspection_line[len(prefix) :])
+    assert restored_output == inspection_output
+    assert restored_output["projection"]["tables"][-1]["ref"] == "t50"
+    assert len(context.planning_context.encode("utf-8")) <= 12_000
+
+
 def test_agent_repository_adds_only_bounded_same_thread_memory() -> None:
     repository = object.__new__(PgAgentRunRepository)
     thread_runs = [
