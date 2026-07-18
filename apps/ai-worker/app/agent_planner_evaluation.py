@@ -636,6 +636,7 @@ def _retrieval_output(result: CaseEvaluationResult) -> dict[str, object] | None:
         ),
         "lowConfidence": retrieval.low_confidence,
         "fallbackReason": retrieval.fallback_reason,
+        "unsupportedCapabilityId": retrieval.unsupported_capability_id,
         "shortlistViolation": result.shortlist_violation,
         "retrievalLatencyMs": round(result.retrieval_latency_ms, 4),
         "plannerLatencyMs": round(result.planner_latency_ms, 4),
