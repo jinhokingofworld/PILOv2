@@ -80,4 +80,3 @@
 - [ ] `cd apps/frontend && npm.cmd run build`
 - [ ] `git diff --check`와 self review를 수행한다.
 - [ ] convention 형식으로 commit, push, `dev` 대상 PR을 생성한다.
-
