@@ -163,6 +163,88 @@ try {
 }
 
 {
+  const crossReportId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const allowedSourceId = `transcript:${TRANSCRIPT_ID}`;
+  const crossReportSourceId = `activity:${ACTIVITY_ID}`;
+  const executed = [];
+  const database = {
+    async transaction(callback) {
+      return callback(this);
+    },
+    async queryOne(text) {
+      if (text.includes("SELECT id FROM agent_runs")) {
+        return { id: "77777777-7777-4777-8777-777777777777" };
+      }
+      if (text.includes("SELECT COALESCE(MAX(step_order)")) {
+        return { next_order: 2 };
+      }
+      return null;
+    },
+    async execute(text, values) {
+      executed.push({ text, values });
+    }
+  };
+  const ragService = {
+    normalizeSourceIds(sourceIds) {
+      return sourceIds;
+    },
+    async loadAuthorizedSources(_userId, _workspaceId, sourceIds) {
+      assert.deepEqual(sourceIds, [allowedSourceId, crossReportSourceId]);
+      return [
+        {
+          sourceId: allowedSourceId,
+          sourceType: "transcript",
+          reportId: REPORT_ID,
+          content: "선택한 회의록의 근거",
+          directlyReferenced: false
+        },
+        {
+          sourceId: crossReportSourceId,
+          sourceType: "activity",
+          reportId: crossReportId,
+          content: "다른 회의록의 근거",
+          directlyReferenced: true
+        }
+      ];
+    }
+  };
+  const service = new AgentGroundedAnswerService(database, ragService);
+
+  await service.completeToolAndQueue({
+    runId: "77777777-7777-4777-8777-777777777777",
+    workspaceId: WORKSPACE_ID,
+    currentUserId: USER_ID,
+    stepId: "88888888-8888-4888-8888-888888888888",
+    outputSummary: {
+      status: "grounding_queued",
+      sourceIds: [allowedSourceId, crossReportSourceId]
+    },
+    resourceRefs: [
+      {
+        domain: "meeting",
+        resourceType: "meeting_report",
+        resourceId: REPORT_ID
+      }
+    ]
+  });
+
+  const completedStep = executed.find((call) =>
+    call.text.includes("UPDATE agent_steps SET status = 'completed'")
+  );
+  assert.deepEqual(JSON.parse(completedStep.values[2]), {
+    status: "grounding_queued",
+    groundingOutcome: "sources_found",
+    sourceCount: 1,
+    sourceTypes: ["transcript"],
+    sourceIds: [allowedSourceId]
+  });
+  const outboxInsert = executed.find((call) =>
+    call.text.includes("INSERT INTO agent_grounded_answer_outbox")
+  );
+  assert.deepEqual(JSON.parse(outboxInsert.values[2]), [allowedSourceId]);
+}
+
+{
   const sourceId = `activity:${ACTIVITY_ID}`;
   const database = {
     async queryOne() {

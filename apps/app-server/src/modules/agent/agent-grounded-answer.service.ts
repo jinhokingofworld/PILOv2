@@ -8,15 +8,41 @@ export class AgentGroundedAnswerService {
   constructor(private readonly database: DatabaseService, private readonly meetingTranscriptRagService: MeetingTranscriptRagService) {}
 
   async completeToolAndQueue(input: { runId: string; workspaceId: string; currentUserId: string; stepId: string; outputSummary: AgentJsonObject; resourceRefs: AgentResourceRef[] }): Promise<void> {
-    const sourceIds = this.meetingTranscriptRagService.normalizeSourceIds(
+    const requestedSourceIds = this.meetingTranscriptRagService.normalizeSourceIds(
       Array.isArray(input.outputSummary.sourceIds)
         ? input.outputSummary.sourceIds.filter((id): id is string => typeof id === "string")
         : []
     );
+    const scopedReportIds = new Set(
+      input.resourceRefs
+        .filter(
+          (reference) =>
+            reference.domain === "meeting" &&
+            reference.resourceType === "meeting_report"
+        )
+        .map((reference) => reference.resourceId)
+    );
+    const scopedSources =
+      scopedReportIds.size === 0
+        ? []
+        : (await this.meetingTranscriptRagService.loadAuthorizedSources(
+            input.currentUserId,
+            input.workspaceId,
+            requestedSourceIds
+          )).filter((source) => scopedReportIds.has(source.reportId));
+    const sourceIds = scopedSources.map((source) => source.sourceId);
+    const outputSummary: AgentJsonObject = {
+      ...input.outputSummary,
+      groundingOutcome:
+        sourceIds.length === 0 ? "no_relevant_sources" : "sources_found",
+      sourceCount: sourceIds.length,
+      sourceTypes: [...new Set(scopedSources.map((source) => source.sourceType))].sort(),
+      sourceIds
+    };
     await this.database.transaction(async (transaction) => {
       const run = await transaction.queryOne<{ id: string }>(`SELECT id FROM agent_runs WHERE id = $1 AND workspace_id = $2 AND requested_by_user_id = $3 AND status = 'running' FOR UPDATE`, [input.runId, input.workspaceId, input.currentUserId]);
       if (!run) return;
-      await transaction.execute(`UPDATE agent_steps SET status = 'completed', output_json = $3::jsonb, resource_refs = $4::jsonb, completed_at = now() WHERE id = $1 AND run_id = $2 AND status = 'running'`, [input.stepId, input.runId, JSON.stringify(input.outputSummary), JSON.stringify(input.resourceRefs)]);
+      await transaction.execute(`UPDATE agent_steps SET status = 'completed', output_json = $3::jsonb, resource_refs = $4::jsonb, completed_at = now() WHERE id = $1 AND run_id = $2 AND status = 'running'`, [input.stepId, input.runId, JSON.stringify(outputSummary), JSON.stringify(input.resourceRefs)]);
       const order = await transaction.queryOne<{ next_order: number | string }>(`SELECT COALESCE(MAX(step_order), 0) + 1 AS next_order FROM agent_steps WHERE run_id = $1`, [input.runId]);
       await transaction.execute(`INSERT INTO agent_steps (workspace_id, run_id, step_order, step_type, status, input_json, output_json, resource_refs) VALUES ($1, $2, $3, 'answer', 'pending', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb)`, [input.workspaceId, input.runId, Number(order?.next_order ?? 1)]);
       await transaction.execute(`INSERT INTO agent_grounded_answer_outbox (run_id, workspace_id, source_ids) VALUES ($1, $2, $3::jsonb) ON CONFLICT (run_id) DO NOTHING`, [input.runId, input.workspaceId, JSON.stringify(sourceIds)]);
