@@ -2755,7 +2755,7 @@ assert.equal(
     isSelected: false,
     selectedOpacityClassName: "opacity-45"
   }),
-  "pointer-events-none opacity-0 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100 pointer-fine:group-hover:pointer-events-auto pointer-fine:group-hover:opacity-100"
+  "pointer-events-none opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100"
 );
 assert.equal(
   tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({
@@ -2763,7 +2763,7 @@ assert.equal(
     isSelected: false,
     selectedOpacityClassName: "opacity-100"
   }),
-  "pointer-events-none opacity-0 pointer-fine:pointer-events-auto pointer-fine:opacity-100"
+  "pointer-events-none opacity-0 [@media(hover:hover)_and_(pointer:fine)]:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:opacity-100"
 );
 assert.equal(
   tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({

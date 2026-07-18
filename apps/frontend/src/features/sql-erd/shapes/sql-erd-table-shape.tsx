@@ -163,9 +163,9 @@ export function getSqlErdConnectorPortVisibilityClassName({
     return `pointer-events-auto ${selectedOpacityClassName} hover:opacity-100`;
   }
   if (isHighlighted) {
-    return "pointer-events-none opacity-0 pointer-fine:pointer-events-auto pointer-fine:opacity-100";
+    return "pointer-events-none opacity-0 [@media(hover:hover)_and_(pointer:fine)]:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:opacity-100";
   }
-  return "pointer-events-none opacity-0 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100 pointer-fine:group-hover:pointer-events-auto pointer-fine:group-hover:opacity-100";
+  return "pointer-events-none opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100";
 }
 
 export function selectSqlErdColumn(detail: SqlErdColumnSelectEventDetail) {
