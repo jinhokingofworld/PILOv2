@@ -178,6 +178,11 @@ interface UpdateActionItemInput extends ActionItemInput {
   useSelectedWorkspaceMemberCandidate?: true;
 }
 
+interface ResolvedActionItemAssignee {
+  assigneeUserId?: string | null;
+  assigneeLabel?: string;
+}
+
 interface ResolvedUpdateActionItemInput extends ActionItemInput {
   title?: string;
   description?: string;
@@ -1225,7 +1230,12 @@ export class MeetingAgentToolsService {
     const isApproval = toolName === "approve_meeting_report_action_item";
     const delivery = isApproval ? (input as ApproveActionItemInput).delivery : undefined;
     const after: AgentJsonObject = isApproval
-      ? { deliveryType: delivery!.deliveryType, badge: delivery!.deliveryType === "calendar_event" ? "일정" : "이슈" }
+      ? {
+          title: actionItem.title,
+          deliveryType: delivery!.deliveryType,
+          badge: delivery!.deliveryType === "calendar_event" ? "일정" : "이슈",
+          deliveryTarget: this.deliveryTargetLabel(delivery!, actionItem.title)
+        }
       : toolName === "dismiss_meeting_report_action_item"
         ? { status: "DISMISSED" }
         : this.actionItemPatch(input as UpdateActionItemInput);
@@ -1236,11 +1246,36 @@ export class MeetingAgentToolsService {
         : toolName === "dismiss_meeting_report_action_item"
           ? `${actionItem.title} 후속작업을 반려합니다.`
           : `${actionItem.title} 후속작업을 수정합니다.`,
-      target: { domain: "meeting", resourceType: "meeting_report_action_item", resourceId: actionItem.id },
-      before: { title: actionItem.title, description: actionItem.description, priority: actionItem.priority, assigneeUserId: actionItem.assignee?.userId ?? null, status: actionItem.status },
+      target: {
+        domain: "meeting",
+        resourceType: "meeting_report_action_item",
+        resourceId: actionItem.id,
+        label: actionItem.title
+      },
+      before: {
+        title: actionItem.title,
+        description: actionItem.description,
+        priority: actionItem.priority,
+        assignee: actionItem.assignee?.name ?? "미지정",
+        assigneeUserId: actionItem.assignee?.userId ?? null,
+        status: actionItem.status
+      },
       after,
       call: { input: input as unknown as AgentJsonObject }
     };
+  }
+
+  private deliveryTargetLabel(
+    delivery: MeetingActionItemDeliveryInput,
+    fallbackTitle: string
+  ): string {
+    if (delivery.deliveryType === "calendar_event") {
+      const title = delivery.calendar?.title ?? fallbackTitle;
+      const date = delivery.calendar?.startDate;
+      return date ? `${title} (${date})` : title;
+    }
+
+    return delivery.issue?.title ?? fallbackTitle;
   }
 
   private async buildUpdateActionItemContextConfirmation(
@@ -1262,11 +1297,20 @@ export class MeetingAgentToolsService {
       ...this.actionItemPatch(draft),
       ...assignee
     };
-    return this.buildActionItemConfirmation(
+    const plan = await this.buildActionItemConfirmation(
       context,
       "update_meeting_report_action_item",
       resolvedInput
     );
+    return assignee.assigneeLabel && "after" in plan
+      ? {
+          ...plan,
+          after: {
+            ...plan.after,
+            assignee: assignee.assigneeLabel
+          }
+        }
+      : plan;
   }
 
   private async buildActionItemContextConfirmation(
@@ -1341,7 +1385,7 @@ export class MeetingAgentToolsService {
     context: AgentToolContext,
     input: UpdateActionItemContextInput
   ): Promise<
-    | { assigneeUserId?: string | null }
+    | ResolvedActionItemAssignee
     | AgentToolClarificationResult
   > {
     if (input.clearAssignee) {
@@ -1355,7 +1399,10 @@ export class MeetingAgentToolsService {
       if (reference.kind === "needs_clarification") {
         return this.toResourceClarification(context, reference);
       }
-      return { assigneeUserId: reference.reference.resourceId };
+      return {
+        assigneeUserId: reference.reference.resourceId,
+        assigneeLabel: reference.candidate.label
+      };
     }
     if (input.assigneeSelf || input.assigneeDisplayName) {
       const reference = await this.requireMeetingResourceResolver().resolveMember(
@@ -1367,7 +1414,10 @@ export class MeetingAgentToolsService {
       if (reference.kind === "needs_clarification") {
         return this.toResourceClarification(context, reference);
       }
-      return { assigneeUserId: reference.reference.resourceId };
+      return {
+        assigneeUserId: reference.reference.resourceId,
+        assigneeLabel: reference.candidate.label
+      };
     }
     return {};
   }

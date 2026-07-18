@@ -69,14 +69,40 @@ function formatPlanValue(value: unknown): string {
   }
 }
 
+function isInternalPlanKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  return [
+    "id",
+    "resourceid",
+    "userid",
+    "reportid",
+    "meetingid",
+    "eventid",
+    "actionitemid",
+    "boardid",
+    "columnid",
+    "idempotencykey",
+    "path",
+    "method",
+    "service",
+    "input",
+    "call"
+  ].some((part) => normalized === part || normalized.endsWith(part));
+}
+
 function renderObjectSummary(value: Record<string, unknown> | null) {
-  if (!value || Object.keys(value).length === 0) {
+  const entries = value
+    ? Object.entries(value).filter(([key]) => !isInternalPlanKey(key))
+    : [];
+
+  if (entries.length === 0) {
     return <p className="text-xs text-slate-500">표시할 값이 없습니다.</p>;
   }
 
   return (
     <dl className="space-y-1.5">
-      {Object.entries(value).map(([key, entryValue]) => (
+      {entries.map(([key, entryValue]) => (
         <div
           key={key}
           className="grid grid-cols-[minmax(72px,0.45fr)_minmax(0,1fr)] gap-2 text-xs"
@@ -94,6 +120,30 @@ function renderObjectSummary(value: Record<string, unknown> | null) {
 }
 
 function getTargetLabel(plan: AgentConfirmationPlan) {
+  const label =
+    plan.target.label ??
+    plan.target.name ??
+    plan.target.title ??
+    plan.target.boardName ??
+    plan.target.roomName;
+  if (typeof label === "string" && label.trim()) {
+    return label.trim();
+  }
+
+  const beforeTitle =
+    plan.kind === "choice" || !plan.before
+      ? null
+      : plan.before.title;
+  if (typeof beforeTitle === "string" && beforeTitle.trim()) {
+    return beforeTitle.trim();
+  }
+
+  const afterTitle =
+    plan.kind === "choice" || !plan.after ? null : plan.after.title;
+  if (typeof afterTitle === "string" && afterTitle.trim()) {
+    return afterTitle.trim();
+  }
+
   const domain = formatPlanValue(plan.target.domain);
   const resourceType = formatPlanValue(plan.target.resourceType);
 

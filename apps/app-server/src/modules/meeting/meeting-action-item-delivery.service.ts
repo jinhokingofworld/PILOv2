@@ -64,6 +64,8 @@ interface DeliveryRow extends QueryResultRow {
   requested_by_user_id: string | null;
   status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
   locked_until: Date | string | null;
+  calendar_event_id: number | null;
+  pilo_issue_id: string | null;
 }
 
 interface PreparedDelivery {
@@ -100,6 +102,20 @@ export class MeetingActionItemDeliveryService {
       normalizedInput
     );
 
+    if ("completed" in prepared) {
+      return {
+        actionItemId,
+        deliveryType: prepared.delivery.delivery_type,
+        status: "COMPLETED",
+        ...(prepared.delivery.calendar_event_id === null
+          ? {}
+          : { calendarEventId: prepared.delivery.calendar_event_id }),
+        ...(prepared.delivery.pilo_issue_id === null
+          ? {}
+          : { piloIssueId: prepared.delivery.pilo_issue_id })
+      };
+    }
+
     try {
       if (prepared.delivery.delivery_type === "calendar_event") {
         if (!prepared.input.calendar) {
@@ -126,8 +142,6 @@ export class MeetingActionItemDeliveryService {
           await this.completeDeliveryInTransaction(
             transaction,
             prepared.delivery.id,
-            prepared.actionItem.id,
-            currentUserId,
             prepared.claimToken,
             { calendarEventId: created.id }
           );
@@ -160,8 +174,6 @@ export class MeetingActionItemDeliveryService {
       );
       await this.completeIssueDelivery(
         prepared.delivery.id,
-        prepared.actionItem.id,
-        currentUserId,
         prepared.claimToken,
         result.issue.id
       );
@@ -175,7 +187,6 @@ export class MeetingActionItemDeliveryService {
       const errorCode = this.toSafeErrorCode(error);
       await this.failDelivery(
         prepared.delivery.id,
-        prepared.actionItem.id,
         prepared.claimToken,
         errorCode
       );
@@ -223,7 +234,7 @@ export class MeetingActionItemDeliveryService {
     actionItemId: string,
     deliveryType: MeetingActionItemDeliveryType,
     draft: MeetingActionItemDeliveryInput
-  ): Promise<PreparedDelivery> {
+  ): Promise<PreparedDelivery | { completed: true; delivery: DeliveryRow }> {
     const claimToken = randomUUID();
     return this.database.transaction(async (transaction) => {
       const actionItem = await transaction.queryOne<ActionItemRow>(
@@ -250,7 +261,8 @@ export class MeetingActionItemDeliveryService {
       let delivery = await transaction.queryOne<DeliveryRow>(
         `
           SELECT id, delivery_type, draft_json, idempotency_key,
-                 requested_by_user_id, status, locked_until
+                 requested_by_user_id, status, locked_until,
+                 calendar_event_id, pilo_issue_id
           FROM meeting_report_action_item_deliveries
           WHERE action_item_id = $1
           FOR UPDATE
@@ -261,15 +273,8 @@ export class MeetingActionItemDeliveryService {
         throw badRequest("Action item delivery type cannot be changed after a failed delivery");
       }
       if (
-        actionItem.status === "DELIVERING" &&
-        (!delivery ||
-          delivery.status !== "RUNNING" ||
-          delivery.locked_until === null)
-      ) {
-        throw badRequest("Action item delivery is already processing");
-      }
-      if (
         actionItem.status !== "PENDING" &&
+        actionItem.status !== "APPROVED" &&
         actionItem.status !== "DELIVERY_FAILED" &&
         actionItem.status !== "DELIVERING"
       ) {
@@ -293,7 +298,8 @@ export class MeetingActionItemDeliveryService {
             )
             VALUES ($1, $2, $3, $4::jsonb, $5)
             RETURNING id, delivery_type, draft_json, idempotency_key,
-                      requested_by_user_id, status, locked_until
+                      requested_by_user_id, status, locked_until,
+                      calendar_event_id, pilo_issue_id
           `,
           [
             actionItem.id,
@@ -308,14 +314,30 @@ export class MeetingActionItemDeliveryService {
         throw new Error("Action item delivery could not be prepared");
       }
 
-      await transaction.execute(
+      if (delivery.status === "COMPLETED") {
+        return {
+          completed: true as const,
+          delivery
+        };
+      }
+
+      const approved = await transaction.queryOne<{ id: string }>(
         `
           UPDATE meeting_report_action_items
-          SET status = 'DELIVERING', updated_at = now()
+          SET status = 'APPROVED',
+              approved_by_user_id = $2,
+              approved_at = COALESCE(approved_at, now()),
+              updated_by_user_id = $2,
+              updated_at = now()
           WHERE id = $1
+            AND status IN ('PENDING', 'APPROVED', 'DELIVERING', 'DELIVERY_FAILED')
+          RETURNING id
         `,
-        [actionItem.id]
+        [actionItem.id, currentUserId]
       );
+      if (!approved) {
+        throw badRequest("Action item is not ready for delivery");
+      }
       const claimed = await transaction.queryOne<DeliveryRow>(
         `
           UPDATE meeting_report_action_item_deliveries
@@ -333,7 +355,8 @@ export class MeetingActionItemDeliveryService {
               OR (status = 'RUNNING' AND locked_until <= now())
             )
           RETURNING id, delivery_type, draft_json, idempotency_key,
-                    requested_by_user_id, status, locked_until
+                    requested_by_user_id, status, locked_until,
+                    calendar_event_id, pilo_issue_id
         `,
         [delivery.id, claimToken, currentUserId]
       );
@@ -354,17 +377,14 @@ export class MeetingActionItemDeliveryService {
     const recovered = await this.database.query<{ id: string }>(
       `
         WITH candidates AS (
-          SELECT delivery.id, delivery.action_item_id
+          SELECT delivery.id
           FROM meeting_report_action_item_deliveries AS delivery
-          JOIN meeting_report_action_items AS action_item
-            ON action_item.id = delivery.action_item_id
           WHERE delivery.status = 'RUNNING'
             AND delivery.locked_until <= now()
-            AND action_item.status = 'DELIVERING'
           ORDER BY delivery.locked_until ASC
-          FOR UPDATE OF delivery, action_item SKIP LOCKED
+          FOR UPDATE OF delivery SKIP LOCKED
           LIMIT 50
-        ), failed_deliveries AS (
+        )
           UPDATE meeting_report_action_item_deliveries AS delivery
           SET status = 'FAILED',
               last_error_code = 'ACTION_ITEM_DELIVERY_STALE',
@@ -374,14 +394,7 @@ export class MeetingActionItemDeliveryService {
           FROM candidates
           WHERE delivery.id = candidates.id
             AND delivery.status = 'RUNNING'
-          RETURNING delivery.action_item_id
-        )
-        UPDATE meeting_report_action_items AS action_item
-        SET status = 'DELIVERY_FAILED', updated_at = now()
-        FROM failed_deliveries
-        WHERE action_item.id = failed_deliveries.action_item_id
-          AND action_item.status = 'DELIVERING'
-        RETURNING action_item.id
+          RETURNING delivery.id
       `
     );
 
@@ -390,20 +403,16 @@ export class MeetingActionItemDeliveryService {
 
   private async completeIssueDelivery(
     deliveryId: string,
-    actionItemId: string,
-    currentUserId: string,
     claimToken: string,
     piloIssueId: string
   ): Promise<void> {
-    await this.completeDelivery(deliveryId, actionItemId, currentUserId, claimToken, {
+    await this.completeDelivery(deliveryId, claimToken, {
       piloIssueId
     });
   }
 
   private async completeDelivery(
     deliveryId: string,
-    actionItemId: string,
-    currentUserId: string,
     claimToken: string,
     target: { calendarEventId?: number; piloIssueId?: string }
   ): Promise<void> {
@@ -411,8 +420,6 @@ export class MeetingActionItemDeliveryService {
       await this.completeDeliveryInTransaction(
         transaction,
         deliveryId,
-        actionItemId,
-        currentUserId,
         claimToken,
         target
       );
@@ -422,8 +429,6 @@ export class MeetingActionItemDeliveryService {
   private async completeDeliveryInTransaction(
     transaction: DatabaseTransaction,
     deliveryId: string,
-    actionItemId: string,
-    currentUserId: string,
     claimToken: string,
     target: { calendarEventId?: number; piloIssueId?: string }
   ): Promise<void> {
@@ -452,28 +457,10 @@ export class MeetingActionItemDeliveryService {
     if (!completed) {
       throw new Error("Action item delivery completion was lost");
     }
-    const approved = await transaction.queryOne<{ id: string }>(
-      `
-          UPDATE meeting_report_action_items
-          SET status = 'APPROVED',
-              approved_by_user_id = $2,
-              approved_at = now(),
-              updated_by_user_id = $2,
-              updated_at = now()
-          WHERE id = $1
-            AND status = 'DELIVERING'
-          RETURNING id
-      `,
-      [actionItemId, currentUserId]
-    );
-    if (!approved) {
-      throw new Error("Action item approval completion was lost");
-    }
   }
 
   private async failDelivery(
     deliveryId: string,
-    actionItemId: string,
     claimToken: string,
     errorCode: string
   ): Promise<void> {
@@ -496,14 +483,6 @@ export class MeetingActionItemDeliveryService {
       if (!failed) {
         return;
       }
-      await transaction.execute(
-        `
-          UPDATE meeting_report_action_items
-          SET status = 'DELIVERY_FAILED', updated_at = now()
-          WHERE id = $1 AND status = 'DELIVERING'
-        `,
-        [actionItemId]
-      );
     });
   }
 
