@@ -82,11 +82,13 @@ class FakeRedisClient {
       const session = JSON.parse(value);
       if (
         session.sessionId !== options.arguments[0] ||
-        session.livekitRoomName !== options.arguments[1] ||
-        session.status !== "starting"
+        session.livekitRoomName !== options.arguments[1]
       ) {
         return null;
       }
+      if (this.values.get(roomKey) !== session.workspaceId) return null;
+      if (session.status === "active") return value;
+      if (session.status !== "starting") return null;
       const active = {
         ...session,
         status: "active",
@@ -218,14 +220,15 @@ try {
   });
   assert.equal(activated?.status, "active");
   assert.equal(activated?.startedAt, "2026-07-18T00:00:01.000Z");
-  assert.equal(
+  assert.deepEqual(
     await state.activate({
       workspaceId: session.workspaceId,
       sessionId: session.sessionId,
       livekitRoomName: session.livekitRoomName,
       startedAt: "2026-07-18T00:00:02.000Z"
     }),
-    null
+    activated,
+    "redelivered track_published must recover the same active session"
   );
   assert.equal(
     (await state.getCurrent(session.workspaceId))?.startedAt,

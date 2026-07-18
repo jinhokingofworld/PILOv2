@@ -50,6 +50,16 @@ type RuntimePolicySession = {
   startedAt: string;
 };
 
+type StartedPayload = {
+  event: "workspace-screen-share:started";
+  session: RuntimePolicySession;
+};
+
+type EndedPayload = {
+  event: "workspace-screen-share:ended";
+  sessionId: string;
+};
+
 export function reconcileStartedScreenShare({
   notifiedSessionIds,
   session
@@ -80,6 +90,35 @@ export function reconcileEndedScreenShare({
     activeSession: activeSession?.id === sessionId ? null : activeSession,
     shouldDisconnectViewer: viewerSessionId === sessionId
   };
+}
+
+export function reconcileStartedScreenSharePayload({
+  notifiedSessionIds,
+  payload
+}: {
+  notifiedSessionIds: Set<string>;
+  payload: StartedPayload;
+}) {
+  return reconcileStartedScreenShare({
+    notifiedSessionIds,
+    session: payload.session
+  });
+}
+
+export function reconcileEndedScreenSharePayload({
+  activeSession,
+  payload,
+  viewerSessionId
+}: {
+  activeSession: RuntimePolicySession | null;
+  payload: EndedPayload;
+  viewerSessionId: string | null;
+}) {
+  return reconcileEndedScreenShare({
+    activeSession,
+    sessionId: payload.sessionId,
+    viewerSessionId
+  });
 }
 
 export function getWorkspaceScreenShareCleanup({
@@ -116,16 +155,6 @@ export function isCurrentScreenShareRequest({
   );
 }
 // </screen-share-runtime-pure>
-
-type StartedPayload = {
-  workspaceId: string;
-  session: PublicScreenShareSession;
-};
-
-type EndedPayload = {
-  workspaceId: string;
-  sessionId: string;
-};
 
 type ScreenShareRuntimeContextValue = {
   activeSession: PublicScreenShareSession | null;
@@ -440,11 +469,10 @@ export function ScreenShareRuntimeProvider({
     if (!socket || !workspaceId) return;
 
     const handleStarted = (payload: StartedPayload) => {
-      if (payload.workspaceId !== workspaceId) return;
       reloadAttemptRef.current += 1;
-      const result = reconcileStartedScreenShare({
+      const result = reconcileStartedScreenSharePayload({
         notifiedSessionIds: notifiedSessionIdsRef.current,
-        session: payload.session
+        payload
       });
       notifiedSessionIdsRef.current = result.notifiedSessionIds;
       setActiveSession(result.activeSession);
@@ -458,11 +486,10 @@ export function ScreenShareRuntimeProvider({
       }
     };
     const handleEnded = (payload: EndedPayload) => {
-      if (payload.workspaceId !== workspaceId) return;
       reloadAttemptRef.current += 1;
-      const result = reconcileEndedScreenShare({
+      const result = reconcileEndedScreenSharePayload({
         activeSession: activeSessionRef.current,
-        sessionId: payload.sessionId,
+        payload,
         viewerSessionId: viewerTargetSessionIdRef.current
       });
       setActiveSession(result.activeSession);

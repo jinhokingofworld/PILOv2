@@ -11,7 +11,7 @@
     "test:board-membership-revocation": "node src/board/board-membership-revocation.test.mjs",
     "test:github-source-membership-revocation": "node src/github-source/github-source-membership-revocation.test.mjs",
     "test:page-cursor-membership-revocation": "node src/page-cursor/page-cursor-membership-revocation.test.mjs",
-    "test:screen-share": "npm run build && node src/screen-share/screen-share-fan-out.test.mjs",
+    "test:screen-share": "npm run build && node --test src/screen-share/screen-share-fan-out.test.mjs src/screen-share/screen-share-subscription.test.mjs",
     "test:workspace-presence": "node src/workspace-presence/workspace-presence.service.test.mjs && node src/workspace-presence/workspace-presence-socket-lifecycle.test.mjs"
   },
   "dependencies": {

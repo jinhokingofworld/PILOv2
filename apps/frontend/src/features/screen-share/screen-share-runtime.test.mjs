@@ -97,6 +97,36 @@ test("ended reconciliation removes only matching state and viewer", async () => 
   assert.doesNotMatch(provider, /toast\.(success|info)\([^)]*종료/);
 });
 
+test("Task 4 browser payloads activate and close the matching screen share", async () => {
+  const {
+    reconcileEndedScreenSharePayload,
+    reconcileStartedScreenSharePayload,
+  } = await loadPurePolicy(provider, "screen-share-runtime-pure");
+  const session = screenShareSession("session-wire");
+  const started = reconcileStartedScreenSharePayload({
+    notifiedSessionIds: new Set(),
+    payload: {
+      event: "workspace-screen-share:started",
+      session,
+    },
+  });
+
+  assert.equal(started.activeSession, session);
+  assert.equal(started.shouldToast, true);
+  assert.deepEqual(
+    reconcileEndedScreenSharePayload({
+      activeSession: started.activeSession,
+      payload: {
+        event: "workspace-screen-share:ended",
+        sessionId: "session-wire",
+      },
+      viewerSessionId: "session-wire",
+    }),
+    { activeSession: null, shouldDisconnectViewer: true },
+  );
+  assert.doesNotMatch(provider, /payload\.workspaceId/);
+});
+
 test("Workspace changes clean up publisher and viewer independently", async () => {
   const {
     getWorkspaceScreenShareCleanup,

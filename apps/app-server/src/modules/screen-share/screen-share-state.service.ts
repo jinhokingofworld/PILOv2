@@ -50,11 +50,17 @@ if not encoded then
   return false
 end
 local session = cjson.decode(encoded)
-if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] or session.status ~= "starting" then
+if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] then
   return false
 end
 local workspaceId = redis.call("GET", KEYS[2])
 if workspaceId ~= session.workspaceId then
+  return false
+end
+if session.status == "active" then
+  return encoded
+end
+if session.status ~= "starting" then
   return false
 end
 session.status = "active"

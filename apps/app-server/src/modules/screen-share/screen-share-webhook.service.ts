@@ -62,19 +62,17 @@ export class ScreenShareWebhookService {
     }
 
     if (this.isExpectedEndEvent(event, session)) {
-      const ended = await this.state.endIfCurrent({
+      await this.publisher.publish({
+        version: 1,
+        event: "workspace-screen-share:ended",
+        workspaceId: session.workspaceId,
+        sessionId: session.sessionId
+      });
+      await this.state.endIfCurrent({
         workspaceId: session.workspaceId,
         sessionId: session.sessionId,
         livekitRoomName: session.livekitRoomName
       });
-      if (ended) {
-        await this.publisher.publish({
-          version: 1,
-          event: "workspace-screen-share:ended",
-          workspaceId: ended.workspaceId,
-          sessionId: ended.sessionId
-        });
-      }
       return this.delivery(event, "received");
     }
 

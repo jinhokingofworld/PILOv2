@@ -49,8 +49,9 @@ const webhookEvent = (event, overrides = {}) => ({
 });
 
 class FakeStateService {
-  constructor(current) {
+  constructor(current, order = []) {
     this.current = current;
+    this.order = order;
   }
 
   getByRoomCalls = [];
@@ -71,13 +72,14 @@ class FakeStateService {
   async activate(input) {
     this.activateCalls.push(input);
     if (
-      this.current?.status !== "starting" ||
       this.current.workspaceId !== input.workspaceId ||
       this.current.sessionId !== input.sessionId ||
       this.current.livekitRoomName !== input.livekitRoomName
     ) {
       return null;
     }
+    if (this.current.status === "active") return this.current;
+    if (this.current.status !== "starting") return null;
     this.current = {
       ...this.current,
       status: "active",
@@ -87,6 +89,7 @@ class FakeStateService {
   }
 
   async endIfCurrent(input) {
+    this.order.push("end");
     this.endCalls.push(input);
     if (
       this.current?.workspaceId !== input.workspaceId ||
@@ -102,18 +105,33 @@ class FakeStateService {
 }
 
 class FakeRealtimePublisher {
+  constructor(order = []) {
+    this.order = order;
+  }
+
+  attempts = [];
   events = [];
+  failures = 0;
+  beforePublish = null;
 
   async publish(event) {
+    this.order.push("publish");
+    this.attempts.push(event);
+    this.beforePublish?.(event);
+    if (this.failures > 0) {
+      this.failures -= 1;
+      throw new Error("screen-share publish failed");
+    }
     this.events.push(event);
   }
 }
 
 const createWebhookHarness = current => {
-  const state = new FakeStateService(current);
-  const publisher = new FakeRealtimePublisher();
+  const order = [];
+  const state = new FakeStateService(current, order);
+  const publisher = new FakeRealtimePublisher(order);
   const handler = new ScreenShareWebhookService(state, publisher);
-  return { handler, publisher, state };
+  return { handler, order, publisher, state };
 };
 
 {
@@ -143,6 +161,22 @@ const createWebhookHarness = current => {
   ]);
 
   await harness.handler.handleVerifiedEvent(event);
+  assert.equal(harness.publisher.events.length, 2);
+}
+
+{
+  const harness = createWebhookHarness(startingSession());
+  const event = webhookEvent("track_published");
+  harness.publisher.failures = 1;
+  await assert.rejects(() => harness.handler.handleVerifiedEvent(event));
+  assert.equal(harness.state.current?.status, "active");
+  assert.equal(harness.publisher.events.length, 0);
+
+  assert.equal(
+    (await harness.handler.handleVerifiedEvent(event)).status,
+    "received"
+  );
+  assert.equal(harness.publisher.attempts.length, 2);
   assert.equal(harness.publisher.events.length, 1);
 }
 
@@ -175,9 +209,41 @@ for (const eventName of [
   assert.equal(harness.state.current, null);
   assert.equal(harness.publisher.events.length, 1);
   assert.equal(harness.publisher.events[0].event, "workspace-screen-share:ended");
+  assert.deepEqual(harness.order.slice(0, 2), ["publish", "end"]);
 
   await harness.handler.handleVerifiedEvent(event);
   assert.equal(harness.publisher.events.length, 1);
+}
+
+{
+  const harness = createWebhookHarness(activeSession());
+  const event = webhookEvent("track_unpublished");
+  harness.publisher.failures = 1;
+  await assert.rejects(() => harness.handler.handleVerifiedEvent(event));
+  assert.equal(harness.state.current?.sessionId, sessionId);
+
+  assert.equal(
+    (await harness.handler.handleVerifiedEvent(event)).status,
+    "received"
+  );
+  assert.equal(harness.state.current, null);
+  assert.equal(harness.publisher.attempts.length, 2);
+}
+
+{
+  const replacement = activeSession({
+    sessionId: nextSessionId,
+    sharerLiveKitIdentity: `screen-share:${nextSessionId}:${otherUserId}`,
+    livekitRoomName: `pilo-screen-share-${nextSessionId}`,
+    sharerUserId: otherUserId
+  });
+  const harness = createWebhookHarness(activeSession());
+  harness.publisher.beforePublish = () => {
+    harness.state.current = replacement;
+  };
+  await harness.handler.handleVerifiedEvent(webhookEvent("track_unpublished"));
+  assert.deepEqual(harness.state.current, replacement);
+  assert.deepEqual(harness.order, ["publish", "end"]);
 }
 
 {

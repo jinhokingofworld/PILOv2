@@ -76,9 +76,7 @@ import { createWorkspacePresenceMembershipRevocationHandler } from "../workspace
 import { createWorkspacePresenceService } from "../workspace-presence/workspace-presence.service";
 import { registerWorkspacePresenceSocketHandlers } from "../workspace-presence/workspace-presence-socket-handlers";
 import { createScreenShareFanOut } from "../screen-share/screen-share-fan-out";
-import {
-  WORKSPACE_SCREEN_SHARE_REDIS_CHANNEL,
-} from "../screen-share/screen-share-events";
+import { createScreenShareSubscription } from "../screen-share/screen-share-subscription";
 import {
   isMeetingNotificationRedisEvent,
   isMeetingReportRedisEvent,
@@ -680,15 +678,14 @@ export async function createRealtimeSocketServer({
         },
       )
     : null;
-  const unsubscribeScreenShareEvents = redisAdapter
-    ? await redisAdapter.subscribe(
-        WORKSPACE_SCREEN_SHARE_REDIS_CHANNEL,
-        (payload) => {
-          if (!screenShareFanOut.fanOut(payload)) {
-            console.error("Workspace screen share Redis payload is invalid");
-          }
+  const screenShareSubscription = redisAdapter
+    ? await createScreenShareSubscription({
+        fanOut: screenShareFanOut,
+        onInvalid() {
+          console.error("Workspace screen share Redis payload is invalid");
         },
-      )
+        redisAdapter,
+      })
     : null;
   const unsubscribeChatEvents = redisAdapter
     ? await redisAdapter.subscribe(CHAT_REDIS_CHANNEL, (payload) => {
@@ -1399,7 +1396,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardInvalidations?.();
       await unsubscribeBoardSourceEvents?.();
       await unsubscribeGithubSourceInvalidations?.();
-      await unsubscribeScreenShareEvents?.();
+      await screenShareSubscription?.close();
       await unsubscribeChatEvents?.();
       await unsubscribeWorkspaceMembershipRevocations?.();
       await chatSubscriptionWork.drain();

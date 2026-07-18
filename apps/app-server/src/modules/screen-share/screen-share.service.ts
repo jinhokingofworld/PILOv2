@@ -84,7 +84,7 @@ export class ScreenShareService {
 
     const candidate = this.createSession(member, workspaceId);
     if (await this.state.reserve(candidate)) {
-      return this.issuePublisherToken(candidate, HttpStatus.CREATED);
+      return this.issueNewPublisherToken(candidate);
     }
 
     const current = await this.state.getCurrent(workspaceId);
@@ -104,7 +104,7 @@ export class ScreenShareService {
     }
 
     if (await this.state.reserve(candidate)) {
-      return this.issuePublisherToken(candidate, HttpStatus.CREATED);
+      return this.issueNewPublisherToken(candidate);
     }
 
     return this.resolveReservationWinner(userId, workspaceId);
@@ -154,6 +154,7 @@ export class ScreenShareService {
       throw forbidden("Only the screen sharer can end this session");
     }
 
+    await this.publishEnded(current);
     const ended = await this.state.endIfCurrent({
       workspaceId,
       sessionId,
@@ -161,7 +162,6 @@ export class ScreenShareService {
     });
     if (!ended) return payload;
 
-    await this.publishEnded(ended);
     await this.cleanupRoom(ended);
     return payload;
   }
@@ -173,7 +173,7 @@ export class ScreenShareService {
     const current = await this.state.getCurrent(workspaceId);
     if (!current || current.sharerUserId !== userId) return false;
 
-    await this.rooms.removeParticipantForRevocation(current);
+    await this.publishEnded(current);
     const ended = await this.state.endIfCurrent({
       workspaceId,
       sessionId: current.sessionId,
@@ -181,7 +181,11 @@ export class ScreenShareService {
     });
     if (!ended) return false;
 
-    await this.publishEnded(ended);
+    try {
+      await this.rooms.removeParticipantForRevocation(ended);
+    } catch {
+      // Redis no longer exposes the revoked publisher session.
+    }
     try {
       await this.rooms.deleteRoom(ended);
     } catch {
@@ -269,6 +273,25 @@ export class ScreenShareService {
     return payload;
   }
 
+  private async issueNewPublisherToken(
+    session: WorkspaceScreenShareSession
+  ): Promise<StartWorkspaceScreenSharePayload> {
+    try {
+      return await this.issuePublisherToken(session, HttpStatus.CREATED);
+    } catch (error) {
+      try {
+        await this.state.endIfCurrent({
+          workspaceId: session.workspaceId,
+          sessionId: session.sessionId,
+          livekitRoomName: session.livekitRoomName
+        });
+      } catch {
+        // Preserve the publisher token failure as the API cause.
+      }
+      throw error;
+    }
+  }
+
   private toPublicSession(
     session: WorkspaceScreenShareSession
   ): PublicWorkspaceScreenShareSession {
@@ -289,13 +312,13 @@ export class ScreenShareService {
   private async endStaleSession(
     session: WorkspaceScreenShareSession
   ): Promise<boolean> {
+    await this.publishEnded(session);
     const ended = await this.state.endIfCurrent({
       workspaceId: session.workspaceId,
       sessionId: session.sessionId,
       livekitRoomName: session.livekitRoomName
     });
     if (!ended) return false;
-    await this.publishEnded(ended);
     await this.cleanupRoom(ended);
     return true;
   }
