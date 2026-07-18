@@ -99,6 +99,10 @@ terminal 상태를 기다린다. App Server는 사용자의 최신 원문 prompt
 완료되면 Canvas Agent의 `resultSummary`를 두 번째 LLM 호출 없이 일반 Agent의 `finalAnswer`에 그대로
 복사한다. 실패·취소도 child 상태에 맞춰 일반 Agent run을 terminal 상태로 정리한다.
 
+일반 Agent run 조회는 연결된 Canvas Agent child run이 `executing`이면 해당 run의 대기 중 action을
+명시적으로 진행한 뒤 terminal 결과를 즉시 정산한다. 주기적인 완료 감시는 유실·재시작 복구용으로
+계속 유지하지만, PILO AI의 응답 완료가 새로운 Canvas AI 요청에 의존해서는 안 된다.
+
 `search_meeting_transcript`는 read-only tool이지만 일반 formatter로 즉시 완료하지 않는다. App Server가
 현재 사용자 권한으로 query embedding과 pgvector 검색을 수행한다. 검색 대상은 current transcript chunk와
 `meeting_report_activity_evidence`의 안전한 snapshot(`occurredAt`, `action`, `summary`) chunk다. raw
