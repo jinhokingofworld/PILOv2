@@ -40,6 +40,7 @@ export class SqlErdFrameShapeUtil extends ShapeUtil<SqlErdFrameShape> {
   static override type = SQLTOERD_FRAME_SHAPE_TYPE;
   static override props = { w: T.number, h: T.number, frameId: T.string, title: T.string, color: T.string, isLocked: T.boolean };
   override canBind() { return false; }
+  override canRotate() { return false; }
   override canResize(shape: SqlErdFrameShape) { return !shape.props.isLocked; }
   override onResize(shape: SqlErdFrameShape, info: TLResizeInfo<SqlErdFrameShape>) {
     return resizeBox(shape, info, { minWidth: 200, minHeight: 120 });
@@ -48,7 +49,7 @@ export class SqlErdFrameShapeUtil extends ShapeUtil<SqlErdFrameShape> {
     if (!prev.props.isLocked) return;
     return { ...next, x: prev.x, y: prev.y, props: { ...next.props, w: prev.props.w, h: prev.props.h } };
   }
-  override getDefaultProps(): SqlErdFrameShape["props"] { return { w: 640, h: 420, frameId: "", title: "프레임", color: "blue", isLocked: true }; }
+  override getDefaultProps(): SqlErdFrameShape["props"] { return { w: 640, h: 420, frameId: "", title: "프레임", color: "blue", isLocked: false }; }
   override getGeometry(shape: SqlErdFrameShape) { return new Rectangle2d({ width: shape.props.w, height: shape.props.h, isFilled: false }); }
   override component(shape: SqlErdFrameShape) {
     return <SqlErdFrameBox shape={shape} />;

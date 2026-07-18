@@ -318,6 +318,8 @@ export class SqlErdAnnotationShapeUtil extends ShapeUtil<SqlErdAnnotationShape> 
     return false;
   }
 
+  override canRotate() { return false; }
+
   override canResize() {
     return false;
   }

@@ -2937,6 +2937,31 @@ assert.equal(
   false
 );
 assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, []);
+const runtimeResizeOverlayEditor = {
+  getShapeAtPoint() {
+    return null;
+  },
+  overlays: {
+    getOverlayAtPoint() {
+      return { id: "selection_fg:bottom_right" };
+    }
+  }
+};
+assert.equal(
+  canvasSelectionRuntime.isSqlErdCanvasBackgroundPoint(
+    runtimeResizeOverlayEditor,
+    { x: 20, y: 20 }
+  ),
+  false
+);
+runtimeResizeOverlayEditor.overlays.getOverlayAtPoint = () => null;
+assert.equal(
+  canvasSelectionRuntime.isSqlErdCanvasBackgroundPoint(
+    runtimeResizeOverlayEditor,
+    { x: 20, y: 20 }
+  ),
+  true
+);
 runtimeInteractiveSelectionEditor.selectedShapeIds = [
   "shape:sqltoerd-table-current"
 ];
@@ -8080,6 +8105,8 @@ assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
 assert.match(frameShape, /editor\.select\(shape\.id\)/);
 assert.match(frameShape, /resizeBox/);
 assert.match(frameShape, /onResize/);
+assert.match(frameShape, /isLocked: false/);
+assert.match(canvasSurface, /isLocked: false/);
 assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
 assert.match(noteShape, /useEditor/);
 assert.match(noteShape, /data-sqltoerd-note-id/);
@@ -8094,6 +8121,17 @@ assert.match(textShape, /onResize/);
 assert.match(strokeShape, /SQLTOERD_STROKE_SHAPE_TYPE/);
 assert.match(strokeShape, /stroke-linecap="round"/);
 assert.match(strokeShape, /canResize\(\)/);
+for (const shapeSource of [
+  annotationShape,
+  frameShape,
+  noteShape,
+  relationShape,
+  strokeShape,
+  tableShape,
+  textShape
+]) {
+  assert.match(shapeSource, /override canRotate\(\) \{ return false; \}/);
+}
 assert.match(annotationToolbar, /export function SqlErdCanvasToolbar/);
 assert.match(annotationToolbar, /aria-label="선택\/드래그"/);
 assert.match(annotationToolbar, /aria-label="메모 추가"/);

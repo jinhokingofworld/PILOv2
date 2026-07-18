@@ -102,6 +102,8 @@ export class SqlErdStrokeShapeUtil extends ShapeUtil<SqlErdStrokeShape> {
     return false;
   }
 
+  override canRotate() { return false; }
+
   override canResize() {
     return false;
   }
