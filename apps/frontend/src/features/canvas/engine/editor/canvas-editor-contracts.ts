@@ -1,6 +1,7 @@
 import type { PointerEvent } from "react";
 import type { PiloCanvasFreeformShape } from "../canvas-engine-types";
 import type { PiloInsertableTool } from "../shapes/pilo-canvas-shape-factory";
+import type { CanvasDriveFileReference } from "../../integrations/drive/canvas-drive-file";
 
 export type CanvasAiChatAnchor = {
   x: number;
@@ -108,6 +109,7 @@ export type PiloCanvasActions = {
   setOpacity: (opacity: number) => void;
   getStyleState: () => PiloCanvasStyleState;
   createInsertableShape: (tool: PiloInsertableTool, url: string) => void;
+  createDriveFileShape: (file: CanvasDriveFileReference) => void;
   groupSelection: () => void;
   performSelectionAction: (action: PiloCanvasSelectionAction) => void;
   exportCanvas: (

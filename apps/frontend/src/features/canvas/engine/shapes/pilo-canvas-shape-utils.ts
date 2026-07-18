@@ -2,10 +2,10 @@
 
 import { PiloCodeBlockShapeUtil } from "./code-block/PiloCodeBlockShapeUtil";
 import { PiloFrameShapeUtil } from "./frame/PiloFrameShapeUtil";
+import { PiloFileNodeShapeUtil } from "./file-node/PiloFileNodeShapeUtil";
 
 export const piloCanvasShapeUtils = [
   PiloFrameShapeUtil,
   PiloCodeBlockShapeUtil,
-  // TODO(file_node): register the file_node ShapeUtil here after it has
-  // rendering, props, geometry, and creation actions.
+  PiloFileNodeShapeUtil,
 ];

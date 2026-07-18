@@ -177,6 +177,9 @@ class CanvasAgentProcessor:
                         model_name = self.html_generator.model
                         message = "선택한 영역의 정적 HTML/CSS 초안을 만들었습니다."
                         result_reason = "canvas_agent_html_generated"
+                elif classification.intent == "import_drive_file":
+                    query = arguments.get("query")
+                    arguments = {"query": query.strip()[:120] if isinstance(query, str) else ""}
                 else:
                     arguments = {}
 

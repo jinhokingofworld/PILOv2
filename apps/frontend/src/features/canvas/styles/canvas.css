@@ -18,6 +18,132 @@
   --pilo-shadow-soft: 0 2px 8px rgba(15, 20, 34, 0.055);
 }
 
+.pilo-file-node-shape {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 10%);
+  color: #0f172a;
+}
+
+.pilo-file-node-header {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 12px;
+  background: #f8fafc;
+}
+
+.pilo-file-node-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilo-file-node-type {
+  max-width: 45%;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilo-file-node-preview {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+
+.pilo-file-node-preview > img,
+.pilo-file-node-preview > iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.pilo-file-node-preview > img {
+  display: block;
+  object-fit: contain;
+  user-select: none;
+}
+
+.pilo-file-node-preview > iframe {
+  pointer-events: none;
+  background: #ffffff;
+}
+
+.pilo-file-node-code {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  margin: 0;
+  padding: 14px 16px;
+  background: #111827;
+  color: #e5e7eb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pilo-file-node-status {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  color: #64748b;
+  font-size: 12px;
+  text-align: center;
+}
+
+.pilo-file-node-status > svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.pilo-file-node-status.is-error {
+  flex-direction: column;
+  color: #b91c1c;
+}
+
+.pilo-file-node-status button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  padding: 5px 9px;
+  background: #ffffff;
+  color: #b91c1c;
+  cursor: pointer;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+.pilo-file-node-status button > svg {
+  width: 13px;
+  height: 13px;
+}
+
 .pilo-canvas-screen {
   position: relative;
   display: block;

@@ -14,13 +14,14 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 - 현재 폴더의 폴더/문서/파일 목록 조회
 - 빈 네이티브 문서 생성
 - S3 presigned URL 기반 파일 업로드
-- S3 presigned URL 기반 파일 다운로드와 PDF 앱 내 미리보기 URL 발급
+- S3 presigned URL 기반 파일 다운로드와 안전한 파일 형식의 앱 내 미리보기 URL 발급
 - 폴더/문서/파일 이름 변경과 이동
 - 폴더/문서/파일 soft delete
 
 검색, 복구, public link share, 문서별 권한과 장기 버전 관리 UI는 이 문서의 MVP 범위가
 아니다. native 문서는 `/sync/documents` Yjs WebSocket room에서 Workspace 멤버끼리 동시 편집하며,
-병합된 본문은 최신 snapshot 조회와 자동 저장으로 보존한다. 파일 미리보기는 ready PDF만 지원한다.
+병합된 본문은 최신 snapshot 조회와 자동 저장으로 보존한다. 파일 미리보기는 ready 상태의
+PDF, raster 이미지와 허용된 텍스트 형식만 지원한다.
 
 ## 데이터 규칙
 
@@ -70,7 +71,7 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 | `POST` | `/workspaces/{workspaceId}/drive/files/upload-url` | 파일 metadata 생성과 presigned upload URL 발급 |
 | `POST` | `/workspaces/{workspaceId}/drive/files/{fileId}/complete` | S3 업로드 완료 확인과 파일 ready 전환 |
 | `GET` | `/workspaces/{workspaceId}/drive/files/{fileId}/download-url` | 파일 다운로드용 presigned URL 발급 |
-| `GET` | `/workspaces/{workspaceId}/drive/files/{fileId}/preview-url` | PDF 앱 내 미리보기용 presigned URL 발급 |
+| `GET` | `/workspaces/{workspaceId}/drive/files/{fileId}/preview-url` | 지원 파일 앱 내 미리보기용 presigned URL 발급 |
 | `PATCH` | `/workspaces/{workspaceId}/drive/items/{itemId}` | 폴더/문서/파일 이름 변경 또는 이동 |
 | `DELETE` | `/workspaces/{workspaceId}/drive/items/{itemId}` | 폴더/문서/파일 soft delete |
 
@@ -625,7 +626,7 @@ GET /api/v1/workspaces/{workspaceId}/drive/files/{fileId}/download-url
 - 다운로드 응답은 원본 파일명을 `Content-Disposition` filename으로 사용할 수 있게
   발급한다.
 
-## PDF 미리보기 URL 발급
+## 파일 미리보기 URL 발급
 
 ```http
 GET /api/v1/workspaces/{workspaceId}/drive/files/{fileId}/preview-url
@@ -652,9 +653,15 @@ GET /api/v1/workspaces/{workspaceId}/drive/files/{fileId}/preview-url
 
 서버 규칙:
 
-- `fileId`는 같은 Workspace의 활성 `ready` file이며 MIME type이 정확히
-  `application/pdf`여야 한다.
-- presigned URL은 `Content-Disposition: inline`과 PDF content type으로 발급한다.
+- `fileId`는 같은 Workspace의 활성 `ready` file이어야 한다.
+- 허용 MIME type은 `application/pdf`, `application/json`, raster 이미지
+  (`image/avif`, `image/gif`, `image/jpeg`, `image/png`, `image/webp`)와 제한된 텍스트
+  형식(`text/plain`, `text/markdown`, `text/css`, `text/csv`, `text/xml`, 코드 MIME)이다.
+- `text/html`, `image/svg+xml`처럼 브라우저에서 실행 가능한 형식은 미리보기 URL을
+  발급하지 않는다.
+- MIME type은 매개변수를 제거하고 소문자로 정규화한 뒤 allowlist와 비교한다.
+- presigned URL은 `Content-Disposition: inline`과 원본의 정규화된 content type으로
+  발급한다.
 - bucket name, S3 object key는 응답에 포함하지 않는다.
 - URL 기본 만료 시간은 `10분`이며, 미리보기 요청은 Activity Log를 남기지 않는다.
 

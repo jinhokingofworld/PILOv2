@@ -128,6 +128,7 @@ import type {
   PiloDrawingPreset,
 } from "./canvas-editor-contracts";
 import { resetClassicCanvasCamera } from "./canvas-initial-camera";
+import { CanvasDriveFileProvider } from "../../integrations/drive/CanvasDriveFileContext";
 
 export type { PiloCanvasFreeformShape } from "../canvas-engine-types";
 export type { PiloInsertableTool } from "../shapes/pilo-canvas-shape-factory";
@@ -1117,11 +1118,32 @@ export function CanvasEditor({
       zoom: editor.getCamera().z,
     });
   }, [onViewportBoundsChange]);
+  const handleCanvasAgentDriveFileInsert = useCallback(
+    (file: { fileId: string; fileName: string; mimeType: string }) => {
+      const editor = editorRef.current;
+      if (!editor) return false;
+
+      editor.cancel();
+      editor.setCurrentTool("select.idle");
+      const result = placePiloCanvasShapeInEmptyViewport({
+        editor,
+        index: createdLocalCardsRef.current + 1,
+        placementRequest: { type: "drive-file", file },
+      });
+      if (!result.placed) return false;
+
+      createdLocalCardsRef.current += result.createdCount;
+      onOneShotToolCreatedRef.current?.();
+      return true;
+    },
+    [],
+  );
   const canvasAgent = useCanvasAgent({
     canvasId: board.id,
     editor: canvasEditor,
     enabled: canvasAgentEnabled,
     onApplied: handleCanvasAgentApplied,
+    onDriveFileInsert: handleCanvasAgentDriveFileInsert,
     onFrameSubtreeRequest,
     workspaceId: board.workspaceId,
   });
@@ -1996,6 +2018,22 @@ export function CanvasEditor({
           onOneShotToolCreatedRef.current?.();
         }
       },
+      createDriveFileShape(file) {
+        deactivatePiloEraser(editor);
+        returnToSelectAfterPlacementRef.current = false;
+        editor.cancel();
+        editor.setCurrentTool("select.idle");
+        const result = placePiloCanvasShapeInEmptyViewport({
+          editor,
+          index: createdLocalCardsRef.current + 1,
+          placementRequest: { type: "drive-file", file },
+        });
+
+        if (result.placed) {
+          createdLocalCardsRef.current += result.createdCount;
+          onOneShotToolCreatedRef.current?.();
+        }
+      },
       groupSelection() {
         const selectedShapeIds = editor.getSelectedShapeIds();
 
@@ -2518,6 +2556,7 @@ export function CanvasEditor({
   }
 
   return (
+    <CanvasDriveFileProvider workspaceId={board.workspaceId}>
     <div
       className={`h-full${isPiloEraserActive ? " is-pilo-eraser-active" : ""}`}
       onPointerDownCapture={handleCanvasPointerDownCapture}
@@ -2610,6 +2649,7 @@ export function CanvasEditor({
         progress={canvasAgent.progress}
       />
     </div>
+    </CanvasDriveFileProvider>
   );
 }
 

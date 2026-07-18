@@ -2,6 +2,7 @@ import { forwardRef, Module } from "@nestjs/common";
 import { CommonModule } from "../../../common/common.module";
 import { DatabaseModule } from "../../../database/database.module";
 import { WorkspaceModule } from "../../workspace/workspace.module";
+import { DriveModule } from "../../drive/drive.module";
 import { CanvasModule } from "../canvas.module";
 import { CanvasAgentActionService } from "./canvas-agent-action.service";
 import { CanvasAgentDraftService } from "./canvas-agent-draft.service";
@@ -13,6 +14,7 @@ import { CanvasAgentService } from "./canvas-agent.service";
   imports: [
     CommonModule,
     DatabaseModule,
+    DriveModule,
     WorkspaceModule,
     forwardRef(() => CanvasModule)
   ],

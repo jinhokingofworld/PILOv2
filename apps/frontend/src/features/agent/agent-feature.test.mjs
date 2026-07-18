@@ -5,6 +5,10 @@ import {
   didAgentRunAcceptInput,
   getLatestAgentRunMessageSequence
 } from "./run-input-recovery.ts";
+import {
+  presentCanvasAgentDelegationRunOnce,
+  registerCanvasAgentDelegationAdapter
+} from "./canvas-delegation-context.ts";
 import { readAgentRequestContext } from "./request-context.ts";
 import {
   getAgentResourceLinks,
@@ -213,6 +217,34 @@ assert.equal(
   "function",
   "waiting SQLtoERD clarification candidates need a validated parser"
 );
+
+const presentedCanvasRuns = [];
+const unregisterCanvasDelegationAdapter = registerCanvasAgentDelegationAdapter({
+  canvasId: "canvas-once",
+  buildRequestContext: async () => null,
+  presentRun: (run) => presentedCanvasRuns.push(run.id)
+});
+const delegatedCanvasRun = { id: "canvas-run-once" };
+
+assert.equal(
+  presentCanvasAgentDelegationRunOnce({
+    canvasId: "canvas-once",
+    run: delegatedCanvasRun,
+    selectedScene: null
+  }),
+  true
+);
+assert.equal(
+  presentCanvasAgentDelegationRunOnce({
+    canvasId: "canvas-once",
+    run: delegatedCanvasRun,
+    selectedScene: null
+  }),
+  false,
+  "remounting a completed Canvas artifact must not replay its client action"
+);
+assert.deepEqual(presentedCanvasRuns, ["canvas-run-once"]);
+unregisterCanvasDelegationAdapter();
 
 const previousMessages = [
   {

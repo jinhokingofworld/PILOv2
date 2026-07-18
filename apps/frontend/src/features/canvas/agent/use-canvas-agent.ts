@@ -44,6 +44,7 @@ export function useCanvasAgent({
   editor,
   enabled,
   onApplied,
+  onDriveFileInsert,
   onFrameSubtreeRequest,
   workspaceId,
 }: {
@@ -51,6 +52,11 @@ export function useCanvasAgent({
   editor: Editor | null;
   enabled: boolean;
   onApplied: () => void;
+  onDriveFileInsert: (file: {
+    fileId: string;
+    fileName: string;
+    mimeType: string;
+  }) => boolean;
   onFrameSubtreeRequest?: (frameId: string) => Promise<void> | void;
   workspaceId: string;
 }) {
@@ -62,6 +68,7 @@ export function useCanvasAgent({
   const runIdRef = useRef<string | null>(null);
   const selectedSceneByRunIdRef = useRef(new Map<string, CanvasAgentSelectedScene>());
   const insertedHtmlArtifactRunIdsRef = useRef(new Set<string>());
+  const insertedDriveFileRunIdsRef = useRef(new Set<string>());
   const focusRetryTimerRef = useRef<number | null>(null);
   const progressHideTimerRef = useRef<number | null>(null);
   const longRunningTimerRef = useRef<number | null>(null);
@@ -88,6 +95,13 @@ export function useCanvasAgent({
   const presentRun = useCallback(
     (nextRun: CanvasAgentRun) => {
       setRun(nextRun);
+      if (
+        nextRun.clientAction?.type === "insert_drive_file" &&
+        !insertedDriveFileRunIdsRef.current.has(nextRun.id) &&
+        onDriveFileInsert(nextRun.clientAction.file)
+      ) {
+        insertedDriveFileRunIdsRef.current.add(nextRun.id);
+      }
       if (
         editor &&
         nextRun.artifact?.kind === "html" &&
@@ -144,7 +158,13 @@ export function useCanvasAgent({
         }
       }
     },
-    [clearFocusRetryTimer, clearLongRunningTimer, clearProgressHideTimer, editor],
+    [
+      clearFocusRetryTimer,
+      clearLongRunningTimer,
+      clearProgressHideTimer,
+      editor,
+      onDriveFileInsert,
+    ],
   );
 
   const submit = useCallback(
@@ -195,6 +215,7 @@ export function useCanvasAgent({
                 }
               : null,
             artifact: null,
+            clientAction: null,
             createdAt: now,
             completedAt: now,
             expiresAt: now,
@@ -217,6 +238,7 @@ export function useCanvasAgent({
             canvasRevision: null,
             progress: null,
             artifact: null,
+            clientAction: null,
             createdAt: now,
             completedAt: now,
             expiresAt: now,
@@ -239,6 +261,7 @@ export function useCanvasAgent({
           canvasRevision: null,
           progress: null,
           artifact: null,
+          clientAction: null,
           createdAt: now,
           completedAt: now,
           expiresAt: now,

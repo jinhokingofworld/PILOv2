@@ -61,8 +61,9 @@ def test_user_prompt_exposes_only_current_canvas_intents() -> None:
     normal_intents = {intent["name"] for intent in normal_payload["allowedIntents"]}
     tool_help_intents = {intent["name"] for intent in tool_help_payload["allowedIntents"]}
 
-    assert normal_intents == {"find_shapes", "generate_html", "unsupported"}
-    assert tool_help_intents == {"find_shapes", "generate_html", "unsupported"}
+    expected = {"find_shapes", "generate_html", "import_drive_file", "unsupported"}
+    assert normal_intents == expected
+    assert tool_help_intents == expected
     assert "allowedActions" not in normal_payload
     assert "availableCanvasTools" not in normal_payload
     assert "intent classifier" in system_prompt()
@@ -83,6 +84,21 @@ def test_parse_intent_classification_accepts_html_generation() -> None:
 
     assert result.intent == "generate_html"
     assert result.arguments == {}
+
+
+def test_parse_intent_classification_accepts_drive_image_import() -> None:
+    result = parse_canvas_agent_intent_classification(
+        json.dumps(
+            {
+                "intent": "import_drive_file",
+                "message": "팀에서 올린 로고 이미지를 찾습니다.",
+                "arguments": {"query": "PILO 로고", "shapeIds": []},
+            }
+        )
+    )
+
+    assert result.intent == "import_drive_file"
+    assert result.arguments == {"query": "PILO 로고"}
 
 
 def test_classifier_prompt_redacts_full_selected_scene() -> None:

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CanvasHtmlArtifactPreview } from "@/components/canvas-html-artifact-preview";
-import { getCanvasAgentDelegationAdapter } from "@/features/agent/canvas-delegation-context";
+import { presentCanvasAgentDelegationRunOnce } from "@/features/agent/canvas-delegation-context";
 import type { AgentRun } from "@/features/agent/types";
 import { createCanvasAgentClient } from "@/features/canvas/api/canvas-agent-client";
 import type {
@@ -23,16 +23,14 @@ export function AgentCanvasArtifact({ run }: { run: AgentRun }) {
       .then((detail) => {
         if (cancelled) return;
         setArtifact(detail.run.artifact);
-        const adapter = getCanvasAgentDelegationAdapter();
-        if (adapter?.canvasId === delegation.canvasId) {
-          const selectedScene = run.requestContext?.surface === "canvas"
-            ? run.requestContext.canvasContext.selectedScene ?? null
-            : null;
-          adapter.presentRun(
-            detail.run,
-            selectedScene as CanvasAgentSelectedScene | null,
-          );
-        }
+        const selectedScene = run.requestContext?.surface === "canvas"
+          ? run.requestContext.canvasContext.selectedScene ?? null
+          : null;
+        presentCanvasAgentDelegationRunOnce({
+          canvasId: delegation.canvasId,
+          run: detail.run,
+          selectedScene: selectedScene as CanvasAgentSelectedScene | null,
+        });
       })
       .catch(() => {
         if (!cancelled) setArtifact(null);

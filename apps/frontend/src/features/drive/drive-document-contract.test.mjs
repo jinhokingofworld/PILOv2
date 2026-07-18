@@ -80,6 +80,7 @@ assert.match(editorStyles, /max-width: 60rem/);
 assert.match(attachment, /driveFileAttachment/);
 assert.match(attachment, /driveItemId/);
 assert.match(attachment, /createDownloadUrl/);
+assert.match(attachment, /getPreviewFileKind/);
 assert.match(attachment, /PdfPreviewDialog/);
 assert.ok(attachment.includes("사용할 수 없는 파일"));
 assert.match(picker, /itemType === "file"/);
@@ -88,12 +89,19 @@ assert.match(preview, /previewUrl/);
 assert.match(preview, /createPreviewUrl/);
 assert.match(preview, /PdfCollaborationSurface/);
 assert.match(preview, /pdf-collaboration/);
+assert.match(preview, /image\/jpeg/);
+assert.match(preview, /image\/png/);
+assert.match(preview, /image\/webp/);
+assert.match(preview, /image\/gif/);
+assert.match(preview, /mimeType: string \| null/);
 assert.match(preview, /h-dvh/);
 assert.match(preview, /w-dvw/);
 assert.match(pdfCollaborationSurface, /PDF_STROKE_COLORS/);
 assert.match(pdfCollaborationSurface, /erasedStrokeIdsRef/);
 assert.match(pdfCollaborationSurface, /ArrowLeft/);
 assert.match(pdfCollaborationSurface, /ArrowRight/);
+assert.match(pdfCollaborationSurface, /isPdf/);
+assert.match(pdfCollaborationSurface, /<img/);
 assert.match(slashMenu, /role="listbox"/);
 assert.match(slashMenu, /filterSlashCommands/);
 assert.match(slashMenu, /query/);
@@ -124,10 +132,10 @@ assert.match(panel, /DriveDocumentEditor/);
 assert.match(panel, /PdfPreviewDialog/);
 assert.match(
   panel,
-  /const isPdf = item\.itemType === "file" && item\.mimeType === "application\/pdf"/
+  /const isPreviewableFile = item\.itemType === "file" && getPreviewFileKind\(item\.mimeType\) !== null/
 );
-assert.match(panel, /onOpenPdf: \(item: DriveItem\) => void/);
-assert.match(panel, /onOpenPdf=\{setPreviewFile\}/);
+assert.match(panel, /onOpenPreview: \(item: DriveItem\) => void/);
+assert.match(panel, /onOpenPreview=\{setPreviewFile\}/);
 assert.match(panel, /function MoveItemSheet\(/);
 assert.match(panel, /onOpenMove/);
 assert.match(

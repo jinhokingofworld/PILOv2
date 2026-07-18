@@ -43,12 +43,97 @@ class FakeRepository {
   }
 }
 
+class FakeDriveService {
+  constructor(matches = []) {
+    this.matches = matches;
+    this.searchCalls = [];
+  }
+
+  async searchReadyImagesForCanvas(currentUserId, workspaceId, query, limit) {
+    this.searchCalls.push({ currentUserId, workspaceId, query, limit });
+    return this.matches;
+  }
+}
+
 function run(prompt = "인증 메모 찾아줘", context = {}) {
   return {
     canvas_id: "canvas-1",
+    requested_by_user_id: "user-1",
+    workspace_id: "workspace-1",
     prompt,
     context_json: { selectedShapeIds: [], shapeSummaries: [], viewport: null, ...context },
   };
+}
+
+{
+  const repository = new FakeRepository();
+  const driveService = new FakeDriveService([
+    {
+      fileId: "file-logo",
+      fileName: "PILO 로고.png",
+      mimeType: "image/png",
+      path: "브랜드/PILO 로고.png",
+      score: 1100,
+    },
+  ]);
+  const service = new CanvasAgentActionService(repository, driveService);
+
+  const result = await service.execute(
+    run("팀에서 올린 PILO 로고를 여기 넣어줘"),
+    step({
+      intent: "import_drive_file",
+      arguments: { query: "PILO 로고" },
+    }, "route_intent"),
+  );
+
+  assert.deepEqual(driveService.searchCalls, [{
+    currentUserId: "user-1",
+    workspaceId: "workspace-1",
+    query: "PILO 로고",
+    limit: 5,
+  }]);
+  assert.deepEqual(result.clientAction, {
+    type: "insert_drive_file",
+    file: {
+      fileId: "file-logo",
+      fileName: "PILO 로고.png",
+      mimeType: "image/png",
+    },
+  });
+  assert.deepEqual(result.resourceRefs, ["file-logo"]);
+}
+
+{
+  const repository = new FakeRepository();
+  const driveService = new FakeDriveService([
+    {
+      fileId: "file-a",
+      fileName: "로고-a.png",
+      mimeType: "image/png",
+      path: "로고-a.png",
+      score: 100,
+    },
+    {
+      fileId: "file-b",
+      fileName: "로고-b.png",
+      mimeType: "image/png",
+      path: "로고-b.png",
+      score: 100,
+    },
+  ]);
+  const service = new CanvasAgentActionService(repository, driveService);
+
+  const result = await service.execute(
+    run("로고 이미지를 넣어줘"),
+    step({
+      intent: "import_drive_file",
+      arguments: { query: "로고" },
+    }, "route_intent"),
+  );
+
+  assert.equal(result.clientAction, null);
+  assert.match(result.summary, /비슷한 이미지가 여러 개/);
+  assert.deepEqual(result.resourceRefs, ["file-a", "file-b"]);
 }
 
 function step(input, actionName = "find_shapes") {

@@ -3,9 +3,11 @@
 import type { Editor, TLShapeId } from "tldraw";
 import {
   createCodeBlockShape,
+  createDriveFileNodeShape,
   createInsertableShape,
   type PiloInsertableTool,
 } from "../shapes/pilo-canvas-shape-factory";
+import type { CanvasDriveFileReference } from "../../integrations/drive/canvas-drive-file";
 import { findPiloCanvasEmptyPlacementForEditor } from "./pilo-canvas-empty-placement";
 
 export type PiloPlacementRequest =
@@ -15,6 +17,10 @@ export type PiloPlacementRequest =
   | {
       type: PiloInsertableTool;
       url: string;
+    }
+  | {
+      type: "drive-file";
+      file: CanvasDriveFileReference;
     };
 
 const piloPlacementSizeByType: Record<
@@ -23,6 +29,7 @@ const piloPlacementSizeByType: Record<
 > = {
   bookmark: { height: 160, width: 320 },
   code: { height: 260, width: 420 },
+  "drive-file": { height: 280, width: 420 },
   embed: { height: 260, width: 420 },
   image: { height: 200, width: 320 },
   video: { height: 220, width: 360 },
@@ -41,6 +48,18 @@ export function placePiloCanvasShapeAt({
 }) {
   if (placementRequest.type === "code") {
     const shape = createCodeBlockShape(index, point);
+
+    editor.createShapes([shape]);
+    editor.select(shape.id as TLShapeId);
+    return { placed: true, createdCount: 1 };
+  }
+
+  if (placementRequest.type === "drive-file") {
+    const shape = createDriveFileNodeShape(
+      index,
+      point,
+      placementRequest.file,
+    );
 
     editor.createShapes([shape]);
     editor.select(shape.id as TLShapeId);

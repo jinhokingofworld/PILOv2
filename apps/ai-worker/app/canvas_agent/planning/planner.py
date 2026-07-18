@@ -104,6 +104,13 @@ def parse_canvas_agent_intent_classification(
             if isinstance(shape_ids, list)
             else []
         )
+    elif intent == "import_drive_file":
+        query = sanitized_arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise CanvasAgentIntentClassifierError(
+                "Canvas Agent import_drive_file query is required"
+            )
+        sanitized_arguments = {"query": query.strip()[:120]}
     elif intent == "generate_html":
         sanitized_arguments = {}
     elif intent == "unsupported":
@@ -147,6 +154,9 @@ def _restrict_shape_ids_to_context(
     classification: CanvasAgentIntentClassification,
     context: CanvasAgentRunContext,
 ) -> CanvasAgentIntentClassification:
+    if classification.intent != "find_shapes":
+        return classification
+
     summaries = context.request_context.get("shapeSummaries")
     allowed_ids = (
         {
