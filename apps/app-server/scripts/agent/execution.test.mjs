@@ -640,6 +640,20 @@ class SmokeCalendarService {
 
 {
   const answer = buildAgentReadResultAnswer({
+    toolName: "list_meeting_rooms",
+    outputSummary: {
+      count: 0,
+      hasMore: false,
+      rooms: []
+    },
+    resourceRefs: []
+  });
+
+  assert.equal(answer, "조회 가능한 회의방이 없습니다.");
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
     toolName: "get_active_meeting",
     timezone: "Asia/Seoul",
     outputSummary: {
@@ -664,6 +678,21 @@ class SmokeCalendarService {
 
 {
   const answer = buildAgentReadResultAnswer({
+    toolName: "get_active_meeting",
+    outputSummary: {
+      active: false,
+      meeting: null,
+      meetingRoom: null,
+      durationSec: null
+    },
+    resourceRefs: []
+  });
+
+  assert.equal(answer, "현재 참여 중인 회의가 없습니다.");
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
     toolName: "get_meeting_participants",
     outputSummary: {
       count: 2,
@@ -679,6 +708,20 @@ class SmokeCalendarService {
   assert.match(answer, /참여자 2명/);
   assert.match(answer, /진호 · 참여 중/);
   assert.match(answer, /은재 · 퇴장/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_meeting_participants",
+    outputSummary: {
+      count: 0,
+      hasMore: false,
+      participants: []
+    },
+    resourceRefs: []
+  });
+
+  assert.equal(answer, "참여자가 없습니다.");
 }
 
 class SmokeMeetingService {
