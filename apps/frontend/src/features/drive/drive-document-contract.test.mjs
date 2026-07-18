@@ -13,7 +13,8 @@ const [
   slashMenu,
   bubbleMenu,
   blockHandle,
-  inlineTitle
+  inlineTitle,
+  pdfCollaborationSurface
 ] = await Promise.all([
   readFile(new URL("./api/client.ts", import.meta.url), "utf8"),
   readFile(new URL("./components/document-editor.tsx", import.meta.url), "utf8"),
@@ -26,7 +27,8 @@ const [
   readFile(new URL("./components/document-slash-menu.tsx", import.meta.url), "utf8"),
   readFile(new URL("./components/document-bubble-menu.tsx", import.meta.url), "utf8"),
   readFile(new URL("./components/document-block-handle.tsx", import.meta.url), "utf8"),
-  readFile(new URL("./components/document-inline-title.tsx", import.meta.url), "utf8")
+  readFile(new URL("./components/document-inline-title.tsx", import.meta.url), "utf8"),
+  readFile(new URL("./components/pdf-collaboration-surface.tsx", import.meta.url), "utf8")
 ]);
 
 assert.match(types, /DriveItemType = "folder" \| "file" \| "document"/);
@@ -86,6 +88,12 @@ assert.match(preview, /previewUrl/);
 assert.match(preview, /createPreviewUrl/);
 assert.match(preview, /PdfCollaborationSurface/);
 assert.match(preview, /pdf-collaboration/);
+assert.match(preview, /h-dvh/);
+assert.match(preview, /w-dvw/);
+assert.match(pdfCollaborationSurface, /PDF_STROKE_COLORS/);
+assert.match(pdfCollaborationSurface, /erasedStrokeIdsRef/);
+assert.match(pdfCollaborationSurface, /ArrowLeft/);
+assert.match(pdfCollaborationSurface, /ArrowRight/);
 assert.match(slashMenu, /role="listbox"/);
 assert.match(slashMenu, /filterSlashCommands/);
 assert.match(slashMenu, /query/);
