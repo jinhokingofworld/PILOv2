@@ -901,7 +901,8 @@ function CalendarEventDetailDialog({
   onClose,
   onOpenEdit,
   onRetryGoogleSync,
-  onRequestDelete
+  onRequestDelete,
+  selectedDate
 }: {
   event: CalendarEvent | null;
   isSubmitting: boolean;
@@ -912,6 +913,7 @@ function CalendarEventDetailDialog({
     event: CalendarEvent,
     returnTo: Extract<CalendarSheetMode, { type: "delete" }>["returnTo"]
   ) => void;
+  selectedDate: string;
 }) {
   if (!event) {
     return null;
@@ -959,7 +961,12 @@ function CalendarEventDetailDialog({
           style={{ backgroundColor: event.color }}
         />
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div
+          className="flex-1 overflow-y-auto p-4"
+          data-workspace-follow-event-id={event.id}
+          data-workspace-follow-selected-date={selectedDate}
+          data-workspace-follow-surface="calendar-event-detail"
+        >
           <div className="flex items-start gap-3">
             <span
               className="mt-1 size-3 shrink-0 rounded-full"
@@ -1105,7 +1112,11 @@ function CalendarEventsDialog({
           </DialogPrimitive.Close>
         </div>
 
-        <ul className="grid gap-2 overflow-y-auto p-4">
+        <ul
+          className="grid gap-2 overflow-y-auto p-4"
+          data-workspace-follow-selected-date={dialog.date}
+          data-workspace-follow-surface="calendar-events-dialog"
+        >
           {dialog.events.map((event) => (
             <li key={event.id}>
               <button
@@ -1218,6 +1229,10 @@ export function CalendarPanel() {
       ),
     [calendarEvents.events, gridDates]
   );
+  const calendarEventsRef = useRef(calendarEvents.events);
+  const eventsByDateRef = useRef(eventsByDate);
+  calendarEventsRef.current = calendarEvents.events;
+  eventsByDateRef.current = eventsByDate;
   const calendarWeeks = useMemo(
     () => getCalendarWeekEventBars(calendarEvents.events, gridDates),
     [calendarEvents.events, gridDates]
@@ -1394,6 +1409,33 @@ export function CalendarPanel() {
     setEventsDialog({ date, events });
   }, []);
 
+  const openWorkspaceEventById = useCallback(
+    (eventId: string) => {
+      const event = calendarEventsRef.current.find(
+        (candidate) => String(candidate.id) === eventId
+      );
+      if (!event) return false;
+      openDetailDialog(event);
+      return true;
+    },
+    [openDetailDialog]
+  );
+
+  const openWorkspaceEventsByDate = useCallback(
+    (date: string) => {
+      const events = eventsByDateRef.current.get(date) ?? [];
+      if (!events.length) return false;
+      openEventsDialog(date, events);
+      return true;
+    },
+    [openEventsDialog]
+  );
+
+  const closeWorkspaceReadOnlySurfaces = useCallback(() => {
+    setDetailEvent(null);
+    setEventsDialog(null);
+  }, []);
+
   const updateFormField = useCallback(
     <Field extends keyof CalendarFormState>(
       field: Field,
@@ -1531,8 +1573,10 @@ export function CalendarPanel() {
     >
       <CalendarWorkspaceLocationAdapter
         gridRef={calendarGridRef}
+        onCloseReadOnlySurfaces={closeWorkspaceReadOnlySurfaces}
+        onOpenEventById={openWorkspaceEventById}
+        onOpenEventsByDate={openWorkspaceEventsByDate}
         onSelectDate={handleWorkspaceLocationDate}
-        selectedDate={selectedDate}
       />
       <section id="month" className="flex min-h-0 flex-1 flex-col gap-4">
         <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
@@ -1627,7 +1671,12 @@ export function CalendarPanel() {
           </p>
         ) : null}
 
-        <div ref={calendarGridRef} className="min-h-0 flex-1 overflow-x-auto">
+        <div
+          ref={calendarGridRef}
+          className="min-h-0 flex-1 overflow-x-auto"
+          data-workspace-follow-selected-date={selectedDate}
+          data-workspace-follow-surface="calendar-grid"
+        >
           <div className="grid min-w-[760px] grid-cols-7">
             {calendarWeekdayLabels.map((weekday) => (
               <div
@@ -1817,6 +1866,7 @@ export function CalendarPanel() {
             .finally(() => setIsSubmitting(false));
         }}
         onRequestDelete={requestDeleteSheet}
+        selectedDate={selectedDate}
       />
 
       <CalendarEventDialog
