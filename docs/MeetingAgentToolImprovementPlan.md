@@ -1499,7 +1499,7 @@ PR Review·Drive도 같은 gate로 순차 등록하고, 각 도메인의 조회 
   섞지 않는다.
 - [ ] grounded answer는 selector의 report/meeting/action item scope를 교차 검증해 다른 resource·stale
   source·직접 연결되지 않은 decision evidence를 제거한다.
-- [ ] source type, bounded citation 수, 빈 근거와 관련성 탈락 사유만 관측하고 raw evidence/provider payload는
+- [x] source type, bounded citation 수, 빈 근거와 관련성 탈락 사유만 관측하고 raw evidence/provider payload는
   저장하지 않는다.
 - [ ] canonical·held-out·counterexample·stateful follow-up에서 section 범위, citation relevance,
   unsupported 오판, 0/1/N clarification, UUID 비노출을 검증한다.
