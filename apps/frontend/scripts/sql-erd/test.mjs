@@ -7259,19 +7259,51 @@ assert.doesNotMatch(
   /CREATE (?:TYPE|DOMAIN)/
 );
 
-const caseSensitivePostgreSqlDomainParseResult =
-  ddlParserRuntime.parseSqlDdlToErdModel({
-    dialect: "postgresql",
-    sourceText: `CREATE DOMAIN "CaseType570" AS TEXT;
+const caseSensitivePostgreSqlDomainSource = `CREATE DOMAIN "CaseType570" AS TEXT;
 CREATE DOMAIN "casetype570" AS TEXT;
 
 CREATE TABLE case_sensitive_values (
   upper_value "CaseType570" NOT NULL,
   lower_value "casetype570" NOT NULL
-);`
+);`;
+const caseSensitivePostgreSqlDomainParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: caseSensitivePostgreSqlDomainSource
   });
 
 assert.equal(caseSensitivePostgreSqlDomainParseResult.ok, true);
+assert.deepEqual(
+  caseSensitivePostgreSqlDomainParseResult.modelJson.schema.tables[0].columns.map(
+    (column) => column.dataType
+  ),
+  ['"CaseType570"', '"casetype570"']
+);
+const caseSensitivePostgreSqlDomainPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: caseSensitivePostgreSqlDomainParseResult.modelJson,
+    resolvedDialect: "postgresql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: caseSensitivePostgreSqlDomainParseResult.modelJson,
+      sourceText: caseSensitivePostgreSqlDomainSource
+    }
+  });
+assert.match(
+  caseSensitivePostgreSqlDomainPreview.generatedSourceText,
+  /"upper_value" "CaseType570" NOT NULL/
+);
+assert.match(
+  caseSensitivePostgreSqlDomainPreview.generatedSourceText,
+  /"lower_value" "casetype570" NOT NULL/
+);
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    caseSensitivePostgreSqlDomainPreview
+  ).ok,
+  true
+);
 
 const commentOnlyPostgreSqlTypeParseResult =
   ddlParserRuntime.parseSqlDdlToErdModel({

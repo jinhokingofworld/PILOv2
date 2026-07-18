@@ -1117,7 +1117,9 @@ function formatColumnDataType(definition: SqlParserAstNode | null) {
   const typeSchema = readString(definition.schema);
   const dataType = typeSchema
     ? `${typeSchema}.${rawDataType}`
-    : rawDataType.toUpperCase();
+    : rawDataType.startsWith('"') && rawDataType.endsWith('"')
+      ? rawDataType
+      : rawDataType.toUpperCase();
   const length = readPrimitive(definition.length);
   const scale = readPrimitive(definition.scale);
   const suffix = readStringArray(definition.suffix)
