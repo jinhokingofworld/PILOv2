@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
@@ -18,6 +19,9 @@ const {
 } = require(
   "../../dist/modules/agent/agent-tool-capability-catalog.js"
 );
+const {
+  AGENT_TOOL_INVENTORY_VERSION
+} = require("../../dist/modules/agent/agent-tool-inventory.js");
 const { CalendarAgentToolsService } = require(
   "../../dist/modules/agent/tools/calendar-agent-tools.service.js"
 );
@@ -33,12 +37,21 @@ const { SqlErdAgentToolsService } = require(
 const { DriveAgentToolsService } = require(
   "../../dist/modules/agent/tools/drive-agent-tools.service.js"
 );
+const { PrReviewAgentToolsService } = require(
+  "../../dist/modules/agent/tools/pr-review-agent-tools.service.js"
+);
+const { CanvasAgentDelegationToolsService } = require(
+  "../../dist/modules/agent/tools/canvas-agent-delegation-tools.service.js"
+);
 
 const originalEnv = {
   AWS_REGION: process.env.AWS_REGION,
   SQS_AGENT_JOBS_QUEUE_URL: process.env.SQS_AGENT_JOBS_QUEUE_URL,
   SQS_ENDPOINT: process.env.SQS_ENDPOINT
 };
+
+const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
+  "e59386f0bbe4e45767137a2e001f2a5e25d34c5c6c6bfd309e3e1aefeb9a2045";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -167,6 +180,87 @@ const payload = {
     )
   );
   assert.ok(updateActionItem?.mustNotUseFor.includes("후속 작업 승인 또는 반려 요청"));
+
+  const fullRegistry = new AgentToolRegistryService(
+    new CalendarAgentToolsService({}),
+    new MeetingAgentToolsService({}),
+    new BoardAgentToolsService({}),
+    new SqlErdAgentToolsService({}),
+    new PrReviewAgentToolsService({}),
+    new CanvasAgentDelegationToolsService({}, {}),
+    new DriveAgentToolsService({})
+  );
+  const inventory = fullRegistry.listToolInventory();
+  const legacyFixtureToolNames = new Set(suite.tools.map((tool) => tool.name));
+  const legacyExpectedToolSelections = Object.fromEntries(
+    suite.cases
+      .filter((candidate) => candidate.expected?.toolName)
+      .reduce((counts, candidate) => {
+        const toolName = candidate.expected.toolName;
+        counts.set(toolName, (counts.get(toolName) ?? 0) + 1);
+        return counts;
+      }, new Map())
+      .entries()
+  );
+  const legacyToolSchemaBytes = Buffer.byteLength(JSON.stringify(suite.tools));
+  const legacySuiteSha256 = createHash("sha256")
+    .update(JSON.stringify(suite))
+    .digest("hex");
+  const missingLegacyFixtureToolNames = inventory.tools
+    .filter((tool) => !legacyFixtureToolNames.has(tool.toolName))
+    .map((tool) => tool.toolName);
+  assert.equal(inventory.version, AGENT_TOOL_INVENTORY_VERSION);
+  assert.equal(
+    inventory.sha256,
+    AGENT_TOOL_INVENTORY_BASELINE_SHA256,
+    "registered tool inventory drift must update the recorded legacy baseline"
+  );
+  assert.equal(inventory.totalTools, 36);
+  assert.equal(inventory.tools.length, 36);
+  assert.equal(
+    inventory.tools.filter((tool) => tool.operation === "write").length,
+    16
+  );
+  assert.deepEqual(missingLegacyFixtureToolNames, [
+    "delegate_canvas_agent",
+    "recommend_pr_review_focus"
+  ]);
+  assert.ok(
+    inventory.tools.every(
+      (tool) =>
+        tool.domain &&
+        tool.action &&
+        (tool.operation === "read" || tool.operation === "write") &&
+        tool.riskLevel &&
+        tool.executionMode &&
+        Number.isInteger(tool.schemaBytes) &&
+        tool.schemaBytes > 0 &&
+        Number.isInteger(tool.estimatedSchemaTokens) &&
+        tool.estimatedSchemaTokens > 0 &&
+        tool.capabilityIds.length > 0
+    )
+  );
+  console.info(
+    "Agent tool inventory baseline",
+    JSON.stringify({
+      inventoryVersion: inventory.version,
+      inventorySha256: inventory.sha256,
+      catalogVersion: inventory.catalogVersion,
+      catalogSha256: inventory.catalogSha256,
+      totalTools: inventory.totalTools,
+      totalSchemaBytes: inventory.totalSchemaBytes,
+      totalEstimatedSchemaTokens: inventory.totalEstimatedSchemaTokens,
+      legacyPlannerBaseline: {
+        suiteSha256: legacySuiteSha256,
+        catalogSha256: capabilityCatalog.sha256,
+        toolCount: legacyFixtureToolNames.size,
+        toolSchemaBytes: legacyToolSchemaBytes,
+        estimatedToolSchemaTokens: Math.ceil(legacyToolSchemaBytes / 4),
+        expectedToolSelections: legacyExpectedToolSelections
+      },
+      missingLegacyFixtureToolNames
+    })
+  );
 
   const calendarDefinition = registry.getDefinition("list_calendar_events");
   const changedSelectorSchema = buildAgentToolCapabilityCatalog([

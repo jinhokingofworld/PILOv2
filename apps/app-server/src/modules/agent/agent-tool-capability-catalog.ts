@@ -4,10 +4,13 @@ import type { AgentToolDefinition } from "./types/agent-tool.types";
 export const AGENT_TOOL_CAPABILITY_CATALOG_VERSION =
   "agent-tool-capabilities:v1";
 
+export type AgentToolOperation = "read" | "write";
+
 export interface AgentToolCapabilityDescriptor {
   toolName: string;
   domain: string;
   action: string;
+  operation: AgentToolOperation;
   capabilityIds: string[];
   whenToUse: string;
   mustNotUseFor: string[];
@@ -73,6 +76,45 @@ const TOOL_DOMAIN_BY_NAME: Readonly<Record<string, string>> = {
   summarize_meeting_report: "meeting",
   update_calendar_event: "calendar",
   update_meeting_report_action_item: "meeting"
+};
+
+const TOOL_OPERATION_BY_NAME: Readonly<Record<string, AgentToolOperation>> = {
+  approve_meeting_report_action_item: "write",
+  assign_board_issue_safely: "write",
+  create_board_issue: "write",
+  create_calendar_event: "write",
+  delegate_canvas_agent: "write",
+  diagnose_board_freshness: "read",
+  dismiss_meeting_report_action_item: "write",
+  end_meeting_recording: "write",
+  find_action_items: "read",
+  focus_sql_erd_tables: "read",
+  generate_sql_erd: "write",
+  get_active_meeting: "read",
+  get_board_briefing: "read",
+  get_board_issue_context: "read",
+  get_meeting_decision_evidence: "read",
+  get_meeting_participants: "read",
+  get_meeting_report: "read",
+  inspect_sql_erd_schema: "read",
+  join_meeting: "write",
+  leave_meeting: "write",
+  list_calendar_events: "read",
+  list_meeting_reports: "read",
+  list_meeting_rooms: "read",
+  move_board_issue_status: "write",
+  recommend_pr_review_focus: "read",
+  regenerate_meeting_report: "write",
+  resolve_board_context: "read",
+  resolve_meeting_resource: "read",
+  search_board_issues: "read",
+  search_meeting_transcript: "read",
+  search_workspace_documents: "read",
+  start_meeting_in_room: "write",
+  start_meeting_recording: "write",
+  summarize_meeting_report: "read",
+  update_calendar_event: "write",
+  update_meeting_report_action_item: "write"
 };
 
 const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
@@ -145,6 +187,12 @@ function toDescriptor(
       `Agent tool capability descriptor is missing for ${definition.name}`
     );
   }
+  const operation = TOOL_OPERATION_BY_NAME[definition.name];
+  if (!operation) {
+    throw new Error(
+      `Agent tool operation inventory is missing for ${definition.name}`
+    );
+  }
 
   const matchingCapabilities = capabilities.filter((capability) =>
     capability.toolNames.includes(definition.name)
@@ -167,6 +215,7 @@ function toDescriptor(
     toolName: definition.name,
     domain,
     action: definition.name,
+    operation,
     capabilityIds: matchingCapabilities.map((capability) => capability.id),
     whenToUse: matchingCapabilities.map((capability) => capability.whenToUse).join(" "),
     mustNotUseFor: [...new Set(matchingCapabilities.flatMap((capability) => capability.mustNotUseFor))],
@@ -233,6 +282,7 @@ export function validateAgentToolCapabilityCatalog(
     descriptors.some(
       (descriptor) =>
         !registeredToolNames.has(descriptor.toolName) ||
+        (descriptor.operation !== "read" && descriptor.operation !== "write") ||
         !descriptor.capabilityIds.length ||
         !descriptor.whenToUse ||
         !descriptor.mustNotUseFor.length ||

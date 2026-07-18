@@ -10,6 +10,10 @@ import {
   buildAgentToolCapabilityCatalog,
   type AgentToolCapabilityCatalogSnapshot
 } from "./agent-tool-capability-catalog";
+import {
+  buildAgentToolInventory,
+  type AgentToolInventorySnapshot
+} from "./agent-tool-inventory";
 import type {
   AgentRunRequestContext,
   AgentToolDefinition
@@ -61,6 +65,10 @@ export class AgentToolRegistryService {
     return [...this.definitions.values()];
   }
 
+  listToolInventory(): AgentToolInventorySnapshot {
+    return buildAgentToolInventory(this.listDefinitions());
+  }
+
   listDefinitionsForContext(
     requestContext: AgentRunRequestContext
   ): AgentToolDefinition<unknown>[] {
@@ -75,6 +83,12 @@ export class AgentToolRegistryService {
     return buildAgentToolCapabilityCatalog(
       this.listDefinitionsForContext(requestContext)
     );
+  }
+
+  listToolInventoryForContext(
+    requestContext: AgentRunRequestContext
+  ): AgentToolInventorySnapshot {
+    return buildAgentToolInventory(this.listDefinitionsForContext(requestContext));
   }
 
   getDefinition(name: string): AgentToolDefinition<unknown> | null {
