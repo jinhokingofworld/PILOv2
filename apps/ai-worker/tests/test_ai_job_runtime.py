@@ -226,11 +226,13 @@ class FakeAgentContextConnection:
         timeline_rows: list[dict[str, object]] | None = None,
         thread_runs: list[dict[str, object]] | None = None,
         resource_refs_by_run: dict[str, list[dict[str, object]]] | None = None,
+        selected_candidate: dict[str, object] | None = None,
     ) -> None:
         self.run_row = run_row
         self.timeline_rows = timeline_rows or []
         self.thread_runs = thread_runs or []
         self.resource_refs_by_run = resource_refs_by_run or {}
+        self.selected_candidate = selected_candidate
         self.executed: list[tuple[str, tuple[object, ...]]] = []
 
     def execute(self, query: str, values: tuple[object, ...]) -> FakeAgentContextCursor:
@@ -241,6 +243,8 @@ class FakeAgentContextConnection:
             return FakeAgentContextCursor(rows=self.timeline_rows)
         if "SELECT resource_refs" in query:
             return FakeAgentContextCursor(rows=self.resource_refs_by_run.get(str(values[0]), []))
+        if "FROM agent_candidate_selections" in query:
+            return FakeAgentContextCursor(row=self.selected_candidate)
         if "AND status = 'completed'" in query:
             return FakeAgentContextCursor(rows=self.thread_runs)
         raise AssertionError(f"Unexpected query: {query}")
@@ -903,7 +907,7 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
         "user: 회의 상태 조회가 끝났나요?",
         "assistant: 현재 회의를 찾았습니다.",
     ]
-    timeline_query, timeline_values = connection.executed[1]
+    timeline_query, timeline_values = connection.executed[-1]
     assert "UNION ALL" in timeline_query
     assert "ORDER BY occurred_at DESC" in timeline_query
     assert "LIMIT 17" in timeline_query
@@ -971,6 +975,49 @@ def test_agent_repository_adds_only_bounded_same_thread_memory() -> None:
     assert "requested_by_user_id = %s" in thread_query
     assert "LIMIT 6" in thread_query
     assert thread_values == ("thread-1", job.run_id, job.workspace_id, job.requested_by_user_id)
+
+
+def test_agent_repository_exposes_only_safe_selected_candidate_context() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-3333-3333-333333333333",
+            "workspace_id": "22222222-2222-2222-2222-222222222222",
+            "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+            "status": "planning",
+            "prompt": "김진호를 선택했어",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 0,
+            "thread_id": None,
+        },
+        selected_candidate={
+            "resource_type": "workspace_member",
+            "label": "김진호",
+            "description": "member · ji***@example.com",
+            "status": None,
+        },
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    assert (
+        "selected meeting resource type=workspace_member label=김진호" in context.planning_context
+    )
+    assert "ji***@example.com" in context.planning_context
+    assert "candidateSelectionId" not in context.planning_context
+    assert "resource_id" not in context.planning_context
 
 
 def test_agent_repository_appends_clarification_only_after_state_transition() -> None:

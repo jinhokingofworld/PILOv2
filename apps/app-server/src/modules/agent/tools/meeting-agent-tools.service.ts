@@ -12,6 +12,13 @@ import {
   MeetingActionItemDeliveryService
 } from "../../meeting/meeting-action-item-delivery.service";
 import { MeetingTranscriptRagService } from "../../meeting/meeting-transcript-rag.service";
+import { AgentCandidateSelectionService } from "../agent-candidate-selection.service";
+import {
+  type MeetingAgentResourceReference,
+  type MeetingAgentResourceResolution,
+  type MeetingAgentResourceType,
+  MeetingAgentResourceResolver
+} from "./meeting-agent-resource-resolver.service";
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
@@ -44,6 +51,12 @@ interface RecordingConsentInput {
 }
 
 interface StartMeetingInput {
+  meetingRoomId?: string;
+  useSelectedMeetingRoomCandidate?: true;
+  recordingConsent?: RecordingConsentInput;
+}
+
+interface ResolvedStartMeetingInput {
   meetingRoomId: string;
   recordingConsent?: RecordingConsentInput;
 }
@@ -61,6 +74,14 @@ interface UpdateActionItemInput extends ActionItemInput {
   description?: string;
   priority?: "LOW" | "MEDIUM" | "HIGH";
   assigneeUserId?: string | null;
+  useSelectedWorkspaceMemberCandidate?: true;
+}
+
+interface ResolvedUpdateActionItemInput extends ActionItemInput {
+  title?: string;
+  description?: string;
+  priority?: "LOW" | "MEDIUM" | "HIGH";
+  assigneeUserId?: string | null;
 }
 
 interface ApproveActionItemInput extends ActionItemInput {
@@ -68,6 +89,14 @@ interface ApproveActionItemInput extends ActionItemInput {
 }
 
 interface DecisionEvidenceInput extends ReportIdInput { decisionIndex?: number }
+
+interface ResolveMeetingResourceInput {
+  resourceType: "meeting_room" | "workspace_member";
+  roomName?: string;
+  displayName?: string;
+  self?: boolean;
+  useLatestCandidate?: boolean;
+}
 
 interface ProjectionOptions {
   sectionTextLimit: number;
@@ -83,7 +112,11 @@ const UUID_PATTERN =
 const LIST_INPUT_FIELDS = ["status", "limit"];
 const REPORT_ID_INPUT_FIELDS = ["reportId"];
 const MEETING_ID_INPUT_FIELDS = ["meetingId"];
-const START_MEETING_INPUT_FIELDS = ["meetingRoomId", "recordingConsent"];
+const START_MEETING_INPUT_FIELDS = [
+  "meetingRoomId",
+  "useSelectedMeetingRoomCandidate",
+  "recordingConsent"
+];
 const JOIN_MEETING_INPUT_FIELDS = ["meetingId", "recordingConsent"];
 const SEARCH_TRANSCRIPT_INPUT_FIELDS = ["query", "reportId"];
 const ACTION_ITEM_INPUT_FIELDS = ["reportId", "actionItemId"];
@@ -93,10 +126,18 @@ const UPDATE_ACTION_ITEM_INPUT_FIELDS = [
   "title",
   "description",
   "priority",
-  "assigneeUserId"
+  "assigneeUserId",
+  "useSelectedWorkspaceMemberCandidate"
 ];
 const APPROVE_ACTION_ITEM_INPUT_FIELDS = ["reportId", "actionItemId", "delivery"];
 const DECISION_EVIDENCE_INPUT_FIELDS = ["reportId", "decisionIndex"];
+const RESOLVE_RESOURCE_INPUT_FIELDS = [
+  "resourceType",
+  "roomName",
+  "displayName",
+  "self",
+  "useLatestCandidate"
+];
 const FORBIDDEN_MEETING_TOOL_FIELDS = [
   "workspaceId",
   "userId",
@@ -115,12 +156,15 @@ export class MeetingAgentToolsService {
   constructor(
     private readonly meetingService: MeetingService,
     private readonly meetingTranscriptRagService: MeetingTranscriptRagService,
-    private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService
+    private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService,
+    private readonly meetingAgentResourceResolver?: MeetingAgentResourceResolver,
+    private readonly agentCandidateSelectionService?: AgentCandidateSelectionService
   ) {}
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
     return [
       this.listMeetingRoomsDefinition(),
+      this.resolveMeetingResourceDefinition(),
       this.getActiveMeetingDefinition(),
       this.getMeetingParticipantsDefinition(),
       this.startMeetingDefinition(),
@@ -141,6 +185,57 @@ export class MeetingAgentToolsService {
     ];
   }
 
+  private resolveMeetingResourceDefinition(): AgentToolDefinition<unknown> {
+    return {
+      name: "resolve_meeting_resource",
+      description:
+        "Meeting 회의방 또는 Workspace 구성원을 이름/self selector로 안전하게 해소합니다. 복수 후보는 사용자가 선택할 후보 버튼으로 반환합니다.",
+      riskLevel: "low",
+      executionMode: "auto",
+      inputSchema: {
+        type: "object",
+        required: ["resourceType"],
+        additionalProperties: false,
+        properties: {
+          resourceType: { type: "string", enum: ["meeting_room", "workspace_member"] },
+          roomName: { type: "string", minLength: 1, maxLength: 100 },
+          displayName: { type: "string", minLength: 1, maxLength: 120 },
+          self: { type: "boolean", const: true },
+          useLatestCandidate: { type: "boolean", const: true }
+        }
+      },
+      validateInput: (input) => this.validateResolveMeetingResourceInput(input),
+      prepareExecution: async (context, input) => {
+        const resolved = await this.resolveMeetingResource(
+          context,
+          this.validateResolveMeetingResourceInput(input)
+        );
+        return resolved.kind === "selected"
+          ? { kind: "execute" }
+          : this.toResourceClarification(context, resolved);
+      },
+      execute: async (context, input) => {
+        const resolved = await this.resolveMeetingResource(
+          context,
+          this.validateResolveMeetingResourceInput(input)
+        );
+        if (resolved.kind !== "selected") {
+          throw badRequest("Meeting resource requires a candidate selection");
+        }
+        return {
+          outputSummary: {
+            resourceType: resolved.reference.resourceType,
+            label: resolved.candidate.label,
+            description: resolved.candidate.description,
+            status: resolved.candidate.status
+          },
+          resourceRefs: [this.toResolvedResourceRef(resolved.reference, resolved.candidate.label)],
+          status: "completed"
+        };
+      }
+    };
+  }
+
   private startMeetingDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "start_meeting_in_room",
@@ -150,21 +245,34 @@ export class MeetingAgentToolsService {
       executionMode: "confirmation_required",
       inputSchema: {
         type: "object",
-        required: ["meetingRoomId"],
+        anyOf: [
+          { required: ["meetingRoomId"] },
+          { required: ["useSelectedMeetingRoomCandidate"] }
+        ],
         additionalProperties: false,
         properties: {
           meetingRoomId: { type: "string", format: "uuid" },
+          useSelectedMeetingRoomCandidate: { type: "boolean", const: true },
           recordingConsent: this.recordingConsentSchema()
         }
       },
       validateInput: (input) => this.validateStartMeetingInput(input),
-      buildConfirmation: (context, input) =>
+      buildConfirmation: async (context, input) =>
         this.buildStartMeetingConfirmation(
           context,
-          this.validateStartMeetingInput(input)
+          await this.resolveSelectedMeetingRoom(
+            context,
+            this.validateStartMeetingInput(input)
+          )
         ),
-      execute: (context, input) =>
-        this.executeStartMeeting(context, this.validateStartMeetingInput(input))
+      execute: async (context, input) =>
+        this.executeStartMeeting(
+          context,
+          await this.resolveSelectedMeetingRoom(
+            context,
+            this.validateStartMeetingInput(input)
+          )
+        )
     };
   }
 
@@ -279,10 +387,25 @@ export class MeetingAgentToolsService {
       description: "저장된 회의 후속작업의 제목, 설명, 우선순위, 담당자를 수정합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
-      inputSchema: { type: "object", required: ["reportId", "actionItemId"], additionalProperties: false, properties: { reportId: { type: "string", format: "uuid" }, actionItemId: { type: "string", format: "uuid" }, title: { type: "string" }, description: { type: "string" }, priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] }, assigneeUserId: { type: ["string", "null"], format: "uuid" } } },
+      inputSchema: { type: "object", required: ["reportId", "actionItemId"], additionalProperties: false, properties: { reportId: { type: "string", format: "uuid" }, actionItemId: { type: "string", format: "uuid" }, title: { type: "string" }, description: { type: "string" }, priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] }, assigneeUserId: { type: ["string", "null"], format: "uuid" }, useSelectedWorkspaceMemberCandidate: { type: "boolean", const: true } } },
       validateInput: (input) => this.validateUpdateActionItemInput(input),
-      buildConfirmation: (context, input) => this.buildActionItemConfirmation(context, "update_meeting_report_action_item", this.validateUpdateActionItemInput(input)),
-      execute: (context, input) => this.executeUpdateActionItem(context, this.validateUpdateActionItemInput(input))
+      buildConfirmation: async (context, input) =>
+        this.buildActionItemConfirmation(
+          context,
+          "update_meeting_report_action_item",
+          await this.resolveSelectedWorkspaceMember(
+            context,
+            this.validateUpdateActionItemInput(input)
+          )
+        ),
+      execute: async (context, input) =>
+        this.executeUpdateActionItem(
+          context,
+          await this.resolveSelectedWorkspaceMember(
+            context,
+            this.validateUpdateActionItemInput(input)
+          )
+        )
     };
   }
 
@@ -716,7 +839,7 @@ export class MeetingAgentToolsService {
 
   private async buildStartMeetingConfirmation(
     context: AgentToolContext,
-    input: StartMeetingInput
+    input: ResolvedStartMeetingInput
   ): Promise<AgentConfirmationPlan | AgentToolClarificationResult> {
     const rooms = await this.meetingService.listMeetingRooms(
       context.currentUserId,
@@ -1018,7 +1141,7 @@ export class MeetingAgentToolsService {
 
   private async executeStartMeeting(
     context: AgentToolContext,
-    input: StartMeetingInput
+    input: ResolvedStartMeetingInput
   ): Promise<AgentToolExecutionResult> {
     const current = await this.meetingService.getCurrentMeetingForRoom(
       context.currentUserId,
@@ -1368,6 +1491,190 @@ export class MeetingAgentToolsService {
     return {};
   }
 
+  private validateResolveMeetingResourceInput(
+    input: unknown
+  ): ResolveMeetingResourceInput {
+    const object = this.requirePlainObject(input, "Meeting resource selector input");
+    this.rejectForbiddenMeetingToolFields(object);
+    this.assertOnlyAllowedFields(
+      object,
+      RESOLVE_RESOURCE_INPUT_FIELDS,
+      "Meeting resource selector input"
+    );
+    if (object.resourceType !== "meeting_room" && object.resourceType !== "workspace_member") {
+      throw badRequest("resourceType must be meeting_room or workspace_member");
+    }
+    const roomName = object.roomName === undefined
+      ? undefined
+      : this.requireBoundedString(object.roomName, "roomName", 100);
+    const displayName = object.displayName === undefined
+      ? undefined
+      : this.requireBoundedString(object.displayName, "displayName", 120);
+    const self = object.self === undefined ? undefined : this.requireBoolean(object.self, "self");
+    const useLatestCandidate = object.useLatestCandidate === undefined
+      ? undefined
+      : this.requireBoolean(object.useLatestCandidate, "useLatestCandidate");
+    if (self === false || useLatestCandidate === false) {
+      throw badRequest("self and useLatestCandidate may only be true when provided");
+    }
+    if (object.resourceType === "meeting_room" && !roomName && !useLatestCandidate) {
+      throw badRequest("meeting_room requires roomName or useLatestCandidate");
+    }
+    if (
+      object.resourceType === "workspace_member" &&
+      !displayName &&
+      !self &&
+      !useLatestCandidate
+    ) {
+      throw badRequest("workspace_member requires displayName, self, or useLatestCandidate");
+    }
+    return {
+      resourceType: object.resourceType,
+      ...(roomName ? { roomName } : {}),
+      ...(displayName ? { displayName } : {}),
+      ...(self ? { self: true } : {}),
+      ...(useLatestCandidate ? { useLatestCandidate: true } : {})
+    };
+  }
+
+  private async resolveMeetingResource(
+    context: AgentToolContext,
+    input: ResolveMeetingResourceInput
+  ): Promise<MeetingAgentResourceResolution> {
+    const resolver = this.requireMeetingResourceResolver();
+    if (input.useLatestCandidate) {
+      const reference = await this.requireAgentCandidateSelectionService().getLatestConsumedMeetingReference(
+        context,
+        input.resourceType
+      );
+      if (!reference) {
+        return {
+          kind: "needs_clarification",
+          reason: "not_found",
+          candidates: [],
+          totalCandidates: 0
+        };
+      }
+      return {
+        kind: "selected",
+        reference,
+        candidate: {
+          resourceType: reference.resourceType,
+          label: "선택한 후보",
+          description: null,
+          status: null
+        },
+        selectionToken: ""
+      };
+    }
+    return input.resourceType === "meeting_room"
+      ? resolver.resolveMeetingRoom(context, input.roomName ?? "")
+      : resolver.resolveMember(context, {
+          ...(input.self ? { self: true } : {}),
+          ...(input.displayName ? { displayName: input.displayName } : {})
+        });
+  }
+
+  private async resolveSelectedMeetingRoom(
+    context: AgentToolContext,
+    input: StartMeetingInput
+  ): Promise<ResolvedStartMeetingInput> {
+    if (input.meetingRoomId) {
+      return {
+        meetingRoomId: input.meetingRoomId,
+        ...(input.recordingConsent ? { recordingConsent: input.recordingConsent } : {})
+      };
+    }
+    const reference = await this.requireAgentCandidateSelectionService().getLatestConsumedMeetingReference(
+      context,
+      "meeting_room"
+    );
+    if (!reference || reference.resourceType !== "meeting_room") {
+      throw badRequest("A selected meeting room candidate is required");
+    }
+    return {
+      meetingRoomId: reference.resourceId,
+      ...(input.recordingConsent ? { recordingConsent: input.recordingConsent } : {})
+    };
+  }
+
+  private async resolveSelectedWorkspaceMember(
+    context: AgentToolContext,
+    input: UpdateActionItemInput
+  ): Promise<ResolvedUpdateActionItemInput> {
+    const { useSelectedWorkspaceMemberCandidate: _selection, ...resolved } = input;
+    if (!input.useSelectedWorkspaceMemberCandidate) return resolved;
+    const reference = await this.requireAgentCandidateSelectionService().getLatestConsumedMeetingReference(
+      context,
+      "workspace_member"
+    );
+    if (!reference || reference.resourceType !== "workspace_member") {
+      throw badRequest("A selected Workspace member candidate is required");
+    }
+    return { ...resolved, assigneeUserId: reference.resourceId };
+  }
+
+  private async toResourceClarification(
+    context: AgentToolContext,
+    resolution: Extract<MeetingAgentResourceResolution, { kind: "needs_clarification" }>
+  ): Promise<AgentToolClarificationResult> {
+    const resolver = this.requireMeetingResourceResolver();
+    const candidateResources = (
+      await Promise.all(
+        resolution.candidates.map(async (candidate) => {
+          if (!candidate.selectionToken) return null;
+          const reference = await resolver.revalidateSelectionToken(
+            context,
+            candidate.selectionToken
+          );
+          return reference ? { reference, candidate } : null;
+        })
+      )
+    ).filter(
+      (
+        candidate
+      ): candidate is NonNullable<typeof candidate> => candidate !== null
+    );
+    return {
+      kind: "needs_clarification",
+      outputSummary: {
+        status: "needs_clarification",
+        question:
+          resolution.reason === "ambiguous"
+            ? "어떤 대상을 선택할지 후보에서 골라주세요."
+            : "조건에 맞는 대상을 찾지 못했습니다. 이름이나 범위를 다시 알려주세요."
+      },
+      resourceRefs: [],
+      ...(candidateResources.length > 0 ? { candidateResources } : {})
+    };
+  }
+
+  private toResolvedResourceRef(
+    reference: MeetingAgentResourceReference,
+    label: string
+  ): AgentResourceRef {
+    return {
+      domain: "meeting",
+      resourceType: reference.resourceType,
+      resourceId: reference.resourceId,
+      label
+    };
+  }
+
+  private requireMeetingResourceResolver(): MeetingAgentResourceResolver {
+    if (!this.meetingAgentResourceResolver) {
+      throw new Error("MeetingAgentResourceResolver is required");
+    }
+    return this.meetingAgentResourceResolver;
+  }
+
+  private requireAgentCandidateSelectionService(): AgentCandidateSelectionService {
+    if (!this.agentCandidateSelectionService) {
+      throw new Error("AgentCandidateSelectionService is required");
+    }
+    return this.agentCandidateSelectionService;
+  }
+
   private validateListInput(input: unknown): ListMeetingReportsInput {
     const draft = input ?? {};
     const object = this.requirePlainObject(draft, "Meeting report list input");
@@ -1420,8 +1727,35 @@ export class MeetingAgentToolsService {
       START_MEETING_INPUT_FIELDS,
       "Meeting start input"
     );
+    const meetingRoomId =
+      object.meetingRoomId === undefined
+        ? undefined
+        : this.requireMeetingId(object.meetingRoomId);
+    const useSelectedMeetingRoomCandidate =
+      object.useSelectedMeetingRoomCandidate === undefined
+        ? undefined
+        : this.requireBoolean(
+            object.useSelectedMeetingRoomCandidate,
+            "useSelectedMeetingRoomCandidate"
+          );
+    if (useSelectedMeetingRoomCandidate === false) {
+      throw badRequest("useSelectedMeetingRoomCandidate may only be true when provided");
+    }
+    if (!meetingRoomId && !useSelectedMeetingRoomCandidate) {
+      throw badRequest(
+        "Meeting start input requires meetingRoomId or useSelectedMeetingRoomCandidate"
+      );
+    }
+    if (meetingRoomId && useSelectedMeetingRoomCandidate) {
+      throw badRequest(
+        "Meeting start input may not combine meetingRoomId and useSelectedMeetingRoomCandidate"
+      );
+    }
     return {
-      meetingRoomId: this.requireMeetingId(object.meetingRoomId),
+      ...(meetingRoomId ? { meetingRoomId } : {}),
+      ...(useSelectedMeetingRoomCandidate
+        ? { useSelectedMeetingRoomCandidate: true }
+        : {}),
       ...(object.recordingConsent === undefined
         ? {}
         : {
@@ -1513,10 +1847,27 @@ export class MeetingAgentToolsService {
     const description = object.description === undefined ? undefined : this.requireBoundedString(object.description, "description", 5000);
     const priority = object.priority === undefined ? undefined : this.requirePriority(object.priority);
     const assigneeUserId = object.assigneeUserId === undefined ? undefined : object.assigneeUserId === null ? null : this.requireActionItemId(object.assigneeUserId);
-    if (title === undefined && description === undefined && priority === undefined && assigneeUserId === undefined) {
+    const useSelectedWorkspaceMemberCandidate =
+      object.useSelectedWorkspaceMemberCandidate === undefined
+        ? undefined
+        : this.requireBoolean(
+            object.useSelectedWorkspaceMemberCandidate,
+            "useSelectedWorkspaceMemberCandidate"
+          );
+    if (useSelectedWorkspaceMemberCandidate === false) {
+      throw badRequest(
+        "useSelectedWorkspaceMemberCandidate may only be true when provided"
+      );
+    }
+    if (assigneeUserId !== undefined && useSelectedWorkspaceMemberCandidate) {
+      throw badRequest(
+        "assigneeUserId may not be combined with useSelectedWorkspaceMemberCandidate"
+      );
+    }
+    if (title === undefined && description === undefined && priority === undefined && assigneeUserId === undefined && !useSelectedWorkspaceMemberCandidate) {
       throw badRequest("Meeting action item update requires at least one change");
     }
-    return { ...base, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...(priority === undefined ? {} : { priority }), ...(assigneeUserId === undefined ? {} : { assigneeUserId }) };
+    return { ...base, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...(priority === undefined ? {} : { priority }), ...(assigneeUserId === undefined ? {} : { assigneeUserId }), ...(useSelectedWorkspaceMemberCandidate ? { useSelectedWorkspaceMemberCandidate: true } : {}) };
   }
 
   private validateApproveActionItemInput(input: unknown): ApproveActionItemInput {

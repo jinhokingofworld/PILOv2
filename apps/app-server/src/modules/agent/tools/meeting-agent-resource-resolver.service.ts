@@ -202,7 +202,7 @@ export class MeetingAgentResourceResolver {
       candidate: {
         resourceType: "workspace_member",
         label: member.user.name ?? "PILO 사용자",
-        description: member.role,
+        description: this.memberDescription(member.role, member.user.email),
         status: null
       }
     }));
@@ -253,55 +253,62 @@ export class MeetingAgentResourceResolver {
     if (payload === null) {
       return null;
     }
+    return this.revalidateReference(context, this.referenceFromPayload(payload));
+  }
+
+  async revalidateReference(
+    context: AgentToolContext,
+    reference: MeetingAgentResourceReference
+  ): Promise<MeetingAgentResourceReference | null> {
     try {
-      switch (payload.resourceType) {
+      switch (reference.resourceType) {
         case "meeting_room": {
           const rooms = await this.meetingService.listMeetingRooms(
             context.currentUserId,
             context.workspaceId
           );
-          return rooms.rooms.some((room) => room.id === payload.resourceId)
-            ? this.referenceFromPayload(payload)
+          return rooms.rooms.some((room) => room.id === reference.resourceId)
+            ? reference
             : null;
         }
         case "meeting": {
           await this.meetingService.getMeeting(
             context.currentUserId,
             context.workspaceId,
-            payload.resourceId
+            reference.resourceId
           );
-          return this.referenceFromPayload(payload);
+          return reference;
         }
         case "meeting_report": {
           await this.meetingService.getReport(
             context.currentUserId,
             context.workspaceId,
-            payload.resourceId
+            reference.resourceId
           );
-          return this.referenceFromPayload(payload);
+          return reference;
         }
         case "workspace_member": {
           const members = await this.workspaceService.listMembers(
             context.currentUserId,
             context.workspaceId
           );
-          return members.some((member) => member.userId === payload.resourceId)
-            ? this.referenceFromPayload(payload)
+          return members.some((member) => member.userId === reference.resourceId)
+            ? reference
             : null;
         }
         case "meeting_report_action_item": {
-          if (!payload.reportId) {
+          if (!reference.reportId) {
             return null;
           }
           const report = await this.meetingService.getReport(
             context.currentUserId,
             context.workspaceId,
-            payload.reportId
+            reference.reportId
           );
           return report.report.actionItems.some(
-            (item) => item.id === payload.resourceId
+            (item) => item.id === reference.resourceId
           )
-            ? this.referenceFromPayload(payload)
+            ? reference
             : null;
         }
       }
@@ -492,5 +499,18 @@ export class MeetingAgentResourceResolver {
 
   private normalize(value: string): string {
     return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ko-KR");
+  }
+
+  private memberDescription(role: string, email: string | null): string {
+    const maskedEmail = this.maskEmail(email);
+    return maskedEmail ? `${role} · ${maskedEmail}` : role;
+  }
+
+  private maskEmail(email: string | null): string | null {
+    if (!email) return null;
+    const [local, domain] = email.trim().split("@");
+    if (!local || !domain) return null;
+    const prefix = [...local].slice(0, 2).join("");
+    return `${prefix}${"*".repeat(Math.max(1, [...local].length - prefix.length))}@${domain}`;
   }
 }

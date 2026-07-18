@@ -16,6 +16,7 @@ import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
 import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
+import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
 import type {
   AgentJsonObject,
   AgentJsonPrimitive,
@@ -104,7 +105,8 @@ export class AgentExecutionService {
     private readonly agentToolRegistryService: AgentToolRegistryService,
     private readonly agentGroundedAnswerService: AgentGroundedAnswerService,
     private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService,
-    private readonly agentOutboxPublisherService: AgentOutboxPublisherService
+    private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
+    private readonly agentCandidateSelectionService: AgentCandidateSelectionService
   ) {}
 
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
@@ -673,7 +675,26 @@ export class AgentExecutionService {
       };
     }
 
-    const outputSummary = this.sanitizeJsonObject(clarification.outputSummary);
+    const candidateSelections = clarification.candidateResources?.length
+      ? await this.agentCandidateSelectionService.createMeetingCandidates(
+          {
+            currentUserId,
+            workspaceId,
+            runId,
+            requestContext: await this.findRunRequestContext(
+              currentUserId,
+              workspaceId,
+              runId
+            )
+          },
+          step.id,
+          clarification.candidateResources
+        )
+      : [];
+    const outputSummary = this.sanitizeJsonObject({
+      ...clarification.outputSummary,
+      ...(candidateSelections.length > 0 ? { candidateSelections } : {})
+    });
     const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
     const answer =
       typeof outputSummary.question === "string" && outputSummary.question.trim()

@@ -156,8 +156,9 @@ def test_planner_prompt_limits_prior_thread_resource_reuse() -> None:
     prompt = _agent_planner_system_prompt()
 
     assert "previous resource" in prompt
-    assert "exact prior resource ID" in prompt
-    assert "different resource type" in prompt
+    assert "Never copy, ask for, or invent a raw resource ID" in prompt
+    assert "useSelectedMeetingRoomCandidate=true" in prompt
+    assert "useSelectedWorkspaceMemberCandidate=true" in prompt
 
 
 class FakeAgentRunRepository:

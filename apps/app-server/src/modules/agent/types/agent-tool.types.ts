@@ -102,6 +102,30 @@ export interface AgentToolClarificationResult {
   kind: "needs_clarification";
   outputSummary: AgentToolOutputSummary;
   resourceRefs: AgentResourceRef[];
+  /** Server-only references. AgentExecution persists opaque candidate IDs before output is stored. */
+  candidateResources?: Array<{
+    reference: {
+      resourceType:
+        | "meeting_room"
+        | "meeting"
+        | "meeting_report"
+        | "workspace_member"
+        | "meeting_report_action_item";
+      resourceId: string;
+      reportId?: string;
+    };
+    candidate: {
+      resourceType:
+        | "meeting_room"
+        | "meeting"
+        | "meeting_report"
+        | "workspace_member"
+        | "meeting_report_action_item";
+      label: string;
+      description: string | null;
+      status: string | null;
+    };
+  }>;
 }
 
 export type AgentToolPreparationResult =

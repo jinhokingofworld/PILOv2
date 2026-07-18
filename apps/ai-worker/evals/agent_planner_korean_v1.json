@@ -150,6 +150,46 @@
       }
     },
     {
+      "name": "resolve_meeting_resource",
+      "description": "Meeting 회의방 또는 Workspace 구성원을 이름/self selector로 안전하게 해소합니다. 복수 후보는 사용자가 선택할 후보 버튼으로 반환합니다.",
+      "riskLevel": "low",
+      "executionMode": "auto",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "resourceType"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "resourceType": {
+            "type": "string",
+            "enum": [
+              "meeting_room",
+              "workspace_member"
+            ]
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "self": {
+            "type": "boolean",
+            "const": true
+          },
+          "useLatestCandidate": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      }
+    },
+    {
       "name": "get_active_meeting",
       "description": "현재 사용자가 참여 중인 active Meeting과 회의방, 시작 후 경과 시간을 조회합니다.",
       "riskLevel": "low",
@@ -186,14 +226,27 @@
       "executionMode": "confirmation_required",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "meetingRoomId"
+        "anyOf": [
+          {
+            "required": [
+              "meetingRoomId"
+            ]
+          },
+          {
+            "required": [
+              "useSelectedMeetingRoomCandidate"
+            ]
+          }
         ],
         "additionalProperties": false,
         "properties": {
           "meetingRoomId": {
             "type": "string",
             "format": "uuid"
+          },
+          "useSelectedMeetingRoomCandidate": {
+            "type": "boolean",
+            "const": true
           },
           "recordingConsent": {
             "type": "object",
@@ -480,6 +533,10 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "useSelectedWorkspaceMemberCandidate": {
+            "type": "boolean",
+            "const": true
           }
         }
       }
