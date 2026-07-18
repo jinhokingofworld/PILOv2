@@ -69,6 +69,7 @@ import type { DriveItem, DriveListPayload } from "@/features/drive/types";
 import { cn } from "@/lib/utils";
 
 import { DriveDocumentEditor } from "./document-editor";
+import { PdfPreviewDialog } from "./pdf-preview-dialog";
 
 type DriveStatus = "idle" | "loading" | "success" | "error";
 
@@ -281,6 +282,7 @@ function DriveItemRow({
   onOpenDocument,
   onOpenFolder,
   onOpenMove,
+  onOpenPdf,
   onOpenRename
 }: {
   activeActionItemId: string | null;
@@ -290,24 +292,39 @@ function DriveItemRow({
   onOpenDocument: (item: DriveItem) => void;
   onOpenFolder: (item: DriveItem) => void;
   onOpenMove: (item: DriveItem) => void;
+  onOpenPdf: (item: DriveItem) => void;
   onOpenRename: (item: DriveItem) => void;
 }) {
   const isFolder = item.itemType === "folder";
   const isDocument = item.itemType === "document";
+  const isPdf = item.itemType === "file" && item.mimeType === "application/pdf";
+  const isOpenable = isFolder || isDocument || isPdf;
   const isBusy = activeActionItemId === item.id;
 
   return (
     <li
       className={cn(
         "grid gap-3 border-b px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1.8fr)_minmax(7rem,0.7fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_3rem] md:items-center",
-        (isFolder || isDocument) && "transition hover:bg-muted/40"
+        isOpenable && "transition hover:bg-muted/40"
       )}
     >
-      {isFolder || isDocument ? (
+      {isOpenable ? (
         <button
           type="button"
           className="flex min-w-0 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => (isFolder ? onOpenFolder(item) : onOpenDocument(item))}
+          onClick={() => {
+            if (isFolder) {
+              onOpenFolder(item);
+              return;
+            }
+
+            if (isDocument) {
+              onOpenDocument(item);
+              return;
+            }
+
+            onOpenPdf(item);
+          }}
         >
           <DriveItemName item={item} />
         </button>
@@ -913,6 +930,7 @@ export function DrivePanel() {
     useState(0);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [isMoving, setIsMoving] = useState(false);
+  const [previewFile, setPreviewFile] = useState<DriveItem | null>(null);
   const [deleteItem, setDeleteItem] = useState<DriveItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -1678,6 +1696,7 @@ export function DrivePanel() {
                         onOpenDocument={(document) => updateDocumentLocation(document.id)}
                         onOpenFolder={(folder) => setCurrentParentId(folder.id)}
                         onOpenMove={openMoveSheet}
+                        onOpenPdf={setPreviewFile}
                         onOpenRename={openRenameSheet}
                       />
                     ))}
@@ -1733,6 +1752,17 @@ export function DrivePanel() {
         item={deleteItem}
         onConfirm={() => void handleConfirmDelete()}
         onOpenChange={handleDeleteOpenChange}
+      />
+
+      <PdfPreviewDialog
+        fileId={previewFile?.id ?? ""}
+        fileName={previewFile?.name ?? ""}
+        open={previewFile !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewFile(null);
+          }
+        }}
       />
     </div>
   );

@@ -113,6 +113,13 @@ assert.match(inlineTitle, /onSave/);
 assert.match(inlineTitle, /onBlur/);
 assert.match(panel, /documentId/);
 assert.match(panel, /DriveDocumentEditor/);
+assert.match(panel, /PdfPreviewDialog/);
+assert.match(
+  panel,
+  /const isPdf = item\.itemType === "file" && item\.mimeType === "application\/pdf"/
+);
+assert.match(panel, /onOpenPdf: \(item: DriveItem\) => void/);
+assert.match(panel, /onOpenPdf=\{setPreviewFile\}/);
 assert.match(panel, /function MoveItemSheet\(/);
 assert.match(panel, /onOpenMove/);
 assert.match(
