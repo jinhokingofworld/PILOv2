@@ -31,8 +31,3 @@ export type PiloCanvasViewportBounds = {
   height: number;
   zoom: number;
 };
-
-export type PiloCanvasShapeDetailRequest = {
-  shapeId: string;
-  zoom: number;
-};

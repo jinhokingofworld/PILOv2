@@ -43,7 +43,6 @@ import { useCanvasShapePersistence } from "./useCanvasShapePersistence";
 import { useCanvasViewportQueries } from "./useCanvasViewportQueries";
 import {
   areViewSettingsEqual,
-  CANVAS_SHAPE_DETAIL_MIN_ZOOM,
   clampZoom,
   DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
   getFreeformShapeId,
@@ -353,8 +352,6 @@ function ClassicCanvasRuntimeInner({
   const shapeDetailCacheRef = useRef(new Map<string, PiloCanvasFreeformShape>());
   const unloadedShapeIdsRef = useRef(new Set<string>());
   const deletedShapeIdsRef = useRef(new Set<string>());
-  const pendingShapeDetailRef = useRef<string | null>(null);
-  const shapeDetailRequestSeqRef = useRef(0);
   const pendingLocalShapeVersionsRef = useRef(new Map<string, number>());
   const pendingRemoteFrameChildrenRequestRef = useRef(new Set<string>());
   const deferredRemoteOperationsRef = useRef(
@@ -1064,12 +1061,10 @@ function ClassicCanvasRuntimeInner({
     board,
     freeformShapesRef,
     pendingLocalShapeVersionsRef,
-    pendingShapeDetailRef,
     setCameraResetVersion,
     setCanvasHydrationVersion,
     setFreeformShapes,
     shapeDetailCacheRef,
-    shapeDetailRequestSeqRef,
     storageMode,
     viewportShapeLoadRequestSeqRef,
   });
@@ -1082,7 +1077,6 @@ function ClassicCanvasRuntimeInner({
     board,
     canvasClient,
     latestViewportBoundsRef,
-    pendingShapeDetailRef,
     queryClient,
     remoteShapeRevisionRef,
     onShapeSyncError: handleShapeSyncError,
@@ -1171,10 +1165,6 @@ function ClassicCanvasRuntimeInner({
       viewportY: nextViewSetting.viewportY,
     };
 
-    if (normalizedViewSetting.zoom < CANVAS_SHAPE_DETAIL_MIN_ZOOM) {
-      pendingShapeDetailRef.current = null;
-    }
-
     setViewSetting((currentViewSetting) =>
       areViewSettingsEqual(currentViewSetting, normalizedViewSetting)
         ? currentViewSetting
@@ -1182,25 +1172,23 @@ function ClassicCanvasRuntimeInner({
     );
   }, []);
 
-  const { loadFrameChildren, loadFrameSubtree, loadShapeDetail, loadViewportShapes } =
+  const { loadFrameChildren, loadFrameSubtree, loadViewportShapes } =
     useCanvasViewportQueries({
-    board,
-    canvasClient,
-    latestViewportBoundsRef,
-    mergeLoadedFreeformShapes,
-    pendingShapeDetailRef,
-    queryClient,
-    remoteShapeContentHashRef,
-    remoteShapeRevisionRef,
-    shapeDetailCacheRef,
-    shapeDetailRequestSeqRef,
-    storageMode,
-    onViewportShapesLoaded: reportLoadedViewport,
-    deletedShapeIdsRef,
-    unloadedShapeIdsRef,
-    viewportShapeLoadRequestSeqRef,
-    viewportShapeLoadTimerRef,
-  });
+      board,
+      canvasClient,
+      latestViewportBoundsRef,
+      mergeLoadedFreeformShapes,
+      queryClient,
+      remoteShapeContentHashRef,
+      remoteShapeRevisionRef,
+      shapeDetailCacheRef,
+      storageMode,
+      onViewportShapesLoaded: reportLoadedViewport,
+      deletedShapeIdsRef,
+      unloadedShapeIdsRef,
+      viewportShapeLoadRequestSeqRef,
+      viewportShapeLoadTimerRef,
+    });
 
   useEffect(() => {
     if (
@@ -1293,7 +1281,6 @@ function ClassicCanvasRuntimeInner({
             getPreservedFreeformShapeSnapshots
           }
           isShapePatchProtected={isCanvasShapePatchProtected}
-          onShapeDetailRequest={loadShapeDetail}
           onHistoryStateChange={
             onHistoryStateChange ?? noopCanvasHistoryStateChange
           }

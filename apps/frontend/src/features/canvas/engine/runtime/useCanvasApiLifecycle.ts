@@ -9,7 +9,6 @@ import type {
   CanvasRuntimeStorageMode,
   CanvasViewSettingApiClient,
 } from "./canvas-runtime-types";
-import { buildShapeDetailQueryKey } from "./canvas-runtime-utils";
 
 type RuntimeRef<T> = {
   current: T;
@@ -20,7 +19,6 @@ type UseCanvasApiLifecycleOptions = {
   canvasClient: CanvasViewSettingApiClient | null;
   latestViewportBoundsRef: RuntimeRef<unknown>;
   onShapeSyncError?: (error: unknown) => void;
-  pendingShapeDetailRef: RuntimeRef<string | null>;
   queryClient: QueryClient;
   remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
   shapeSyncQueueRef: RuntimeRef<CanvasShapeSyncQueue | null>;
@@ -33,7 +31,6 @@ export function useCanvasApiLifecycle({
   canvasClient,
   latestViewportBoundsRef,
   onShapeSyncError,
-  pendingShapeDetailRef,
   queryClient,
   remoteShapeRevisionRef,
   shapeSyncQueueRef,
@@ -54,7 +51,7 @@ export function useCanvasApiLifecycle({
         onShapeSyncError?.(error);
         console.error("Canvas API shape sync failed", error);
       },
-      onSynced(operations, result) {
+      onSynced(_operations, result) {
         result.shapeRevisions.forEach((revision, shapeId) => {
           remoteShapeRevisionRef.current.set(
             shapeId,
@@ -67,15 +64,6 @@ export function useCanvasApiLifecycle({
 
         void queryClient.invalidateQueries({
           queryKey: ["canvas", board.workspaceId, board.id, "viewport-shapes"],
-        });
-
-        operations.forEach((operation) => {
-          void queryClient.invalidateQueries({
-            queryKey: buildShapeDetailQueryKey({
-              shapeId: operation.shapeId,
-              workspaceId: board.workspaceId,
-            }),
-          });
         });
       },
       workspaceId: board.workspaceId,
@@ -100,7 +88,6 @@ export function useCanvasApiLifecycle({
       }
 
       latestViewportBoundsRef.current = null;
-      pendingShapeDetailRef.current = null;
 
       void (async () => {
         await enterPromise;
@@ -130,7 +117,6 @@ export function useCanvasApiLifecycle({
     canvasClient,
     latestViewportBoundsRef,
     onShapeSyncError,
-    pendingShapeDetailRef,
     queryClient,
     remoteShapeRevisionRef,
     shapeSyncQueueRef,

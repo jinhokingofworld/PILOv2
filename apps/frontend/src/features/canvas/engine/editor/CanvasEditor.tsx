@@ -76,7 +76,6 @@ import {
   type PiloArrowBindingSnapshot,
 } from "./canvas-arrow-bindings";
 import type {
-  PiloCanvasShapeDetailRequest,
   PiloCanvasFreeformShape,
   PiloCanvasLocalInteractionState,
   PiloCanvasLocalShapeChange,
@@ -216,7 +215,6 @@ type CanvasEditorProps = {
   getPreservedFreeformShapeSnapshots?: () => PiloCanvasFreeformShape[];
   isShapePatchProtected: (shapeId: string) => boolean;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
-  onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
   onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
   onLocalInteractionStateChange: (
     state: PiloCanvasLocalInteractionState,
@@ -1055,7 +1053,6 @@ export function CanvasEditor({
   getPreservedFreeformShapeSnapshots,
   isShapePatchProtected,
   onViewportBoundsChange,
-  onShapeDetailRequest,
   onHistoryStateChange,
   onLocalInteractionStateChange,
   presence,
@@ -2237,13 +2234,6 @@ export function CanvasEditor({
     });
   }
 
-  function requestShapeDetail(editor: Editor, shapeId: TLShapeId) {
-    onShapeDetailRequest({
-      shapeId: String(shapeId),
-      zoom: editor.getCamera().z,
-    });
-  }
-
   const handleFrameCollapsedChange = useCallback(
     (frame: Extract<TLShape, { type: "frame" }>, nextCollapsed: boolean) => {
       const editor = editorRef.current;
@@ -2410,12 +2400,10 @@ export function CanvasEditor({
         editor.select(pointedShape.id);
       }
 
-      requestShapeDetail(editor, pointedShape.id);
       return;
     }
 
     if (pointedShape && !isPiloFrameShape(pointedShape)) {
-      requestShapeDetail(editor, pointedShape.id as TLShapeId);
       return;
     }
 
@@ -2433,13 +2421,11 @@ export function CanvasEditor({
       !frameShape.isLocked &&
       editor.getSelectedShapeIds().includes(frameShape.id)
     ) {
-      requestShapeDetail(editor, frameShape.id);
       return;
     }
 
     editor.setCurrentTool("select");
     editor.select(frameShape.id);
-    requestShapeDetail(editor, frameShape.id);
 
     if (!frameShape.isLocked) {
       return;

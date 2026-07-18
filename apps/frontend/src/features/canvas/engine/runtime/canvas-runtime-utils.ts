@@ -8,9 +8,7 @@ import type { CanvasViewSetting } from "./canvas-runtime-types";
 export const DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS = 700;
 export const DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN = 320;
 export const CANVAS_VIEWPORT_SHAPE_QUERY_GRID_SIZE = 1_000;
-export const CANVAS_SHAPE_DETAIL_MIN_ZOOM = 0.75;
 export const CANVAS_VIEWPORT_SHAPE_STALE_TIME_MS = 5_000;
-export const CANVAS_SHAPE_DETAIL_STALE_TIME_MS = 30_000;
 
 export function clampZoom(value: number) {
   return Math.min(8, Math.max(0.12, Math.round(value * 100) / 100));
@@ -178,16 +176,6 @@ export function buildViewportShapeQueryKey({
     zoomBucket,
     DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
   ] as const;
-}
-
-export function buildShapeDetailQueryKey({
-  shapeId,
-  workspaceId,
-}: {
-  shapeId: string;
-  workspaceId: string;
-}) {
-  return ["canvas", workspaceId, "shape-detail", shapeId] as const;
 }
 
 export function buildFrameChildrenQueryKey({

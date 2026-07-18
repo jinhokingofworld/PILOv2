@@ -4,7 +4,6 @@ import { normalizeCanvasFreeformShapes } from "@/features/canvas/persistence/can
 import { isPiloFrameCollapsed } from "@/features/canvas/engine/shapes/frame/canvas-frame-collapse";
 import type {
   PiloCanvasFreeformShape,
-  PiloCanvasShapeDetailRequest,
   PiloCanvasViewportBounds,
 } from "../canvas-engine-types";
 import type {
@@ -13,11 +12,8 @@ import type {
   CanvasViewSettingApiClient,
 } from "./canvas-runtime-types";
 import {
-  buildShapeDetailQueryKey,
   buildFrameChildrenQueryKey,
   buildViewportShapeQueryKey,
-  CANVAS_SHAPE_DETAIL_MIN_ZOOM,
-  CANVAS_SHAPE_DETAIL_STALE_TIME_MS,
   DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS,
   DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
 } from "./canvas-runtime-utils";
@@ -46,12 +42,10 @@ type UseCanvasViewportQueriesOptions = {
   canvasClient: CanvasViewSettingApiClient | null;
   latestViewportBoundsRef: RuntimeRef<PiloCanvasViewportBounds | null>;
   mergeLoadedFreeformShapes: (loadedShapes: PiloCanvasFreeformShape[]) => void;
-  pendingShapeDetailRef: RuntimeRef<string | null>;
   queryClient: QueryClient;
   remoteShapeContentHashRef: RuntimeRef<Map<string, string>>;
   remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
-  shapeDetailRequestSeqRef: RuntimeRef<number>;
   storageMode: CanvasRuntimeStorageMode;
   onViewportShapesLoaded?: (bounds: {
     height: number;
@@ -118,12 +112,10 @@ export function useCanvasViewportQueries({
   canvasClient,
   latestViewportBoundsRef,
   mergeLoadedFreeformShapes,
-  pendingShapeDetailRef,
   queryClient,
   remoteShapeContentHashRef,
   remoteShapeRevisionRef,
   shapeDetailCacheRef,
-  shapeDetailRequestSeqRef,
   storageMode,
   onViewportShapesLoaded,
   deletedShapeIdsRef,
@@ -143,15 +135,9 @@ export function useCanvasViewportQueries({
   const loadFrameSubtreeRef = useRef<
     (frameId: string) => Promise<void>
   >(async () => {});
-  const loadShapeDetailRef = useRef<
-    (request: PiloCanvasShapeDetailRequest) => void
-  >(() => {});
   const loadViewportShapesRef = useRef<
     (bounds: PiloCanvasViewportBounds) => void
   >(() => {});
-  const shapeDetailRecoveryTimerRef = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
   const isMountedRef = useRef(true);
   const activeBoardIdRef = useRef(board.id);
   const loadedViewportBoundsRef = useRef<{
@@ -180,11 +166,6 @@ export function useCanvasViewportQueries({
     frameSubtreeRecoveryTimersRef.current.clear();
     loadingFrameChildrenRef.current.clear();
     pendingFrameChildrenReloadRef.current.clear();
-
-    if (shapeDetailRecoveryTimerRef.current) {
-      clearTimeout(shapeDetailRecoveryTimerRef.current);
-      shapeDetailRecoveryTimerRef.current = null;
-    }
   }, [board.id]);
   const rememberPersistedShapeMetadata = useCallback(
     (value: unknown) => {
@@ -644,136 +625,9 @@ export function useCanvasViewportQueries({
   );
   loadViewportShapesRef.current = loadViewportShapes;
 
-  const loadShapeDetail = useCallback(
-    ({ shapeId, zoom }: PiloCanvasShapeDetailRequest) => {
-      if (shapeDetailRecoveryTimerRef.current) {
-        clearTimeout(shapeDetailRecoveryTimerRef.current);
-        shapeDetailRecoveryTimerRef.current = null;
-      }
-
-      if (zoom < CANVAS_SHAPE_DETAIL_MIN_ZOOM) {
-        pendingShapeDetailRef.current = null;
-        shapeDetailRequestSeqRef.current += 1;
-        return;
-      }
-
-      if (deletedShapeIdsRef.current.has(shapeId)) {
-        shapeDetailCacheRef.current.delete(shapeId);
-        return;
-      }
-
-      const cachedDetail = shapeDetailCacheRef.current.get(shapeId);
-
-      if (cachedDetail) {
-        mergeLoadedFreeformShapes([cachedDetail]);
-        return;
-      }
-
-      if (
-        storageMode !== "api" ||
-        !canvasClient ||
-        !canvasClient.getShapeDetail
-      ) {
-        return;
-      }
-
-      const getShapeDetail = canvasClient.getShapeDetail;
-      const requestSeq = shapeDetailRequestSeqRef.current + 1;
-      const queryKey = buildShapeDetailQueryKey({
-        shapeId,
-        workspaceId: board.workspaceId,
-      });
-
-      shapeDetailRequestSeqRef.current = requestSeq;
-      pendingShapeDetailRef.current = shapeId;
-
-      void queryClient
-        .cancelQueries({
-          exact: false,
-          queryKey: ["canvas", board.workspaceId, "shape-detail"],
-        })
-        .then(() =>
-          queryClient.fetchQuery({
-            queryKey,
-            retry: false,
-            staleTime: CANVAS_SHAPE_DETAIL_STALE_TIME_MS,
-            queryFn: ({ signal }) =>
-              runCanvasLazyLoadWithRetry({
-                load: () =>
-                  getShapeDetail(shapeId, {
-                    signal,
-                    workspaceId: board.workspaceId,
-                  }),
-                shouldContinue: () =>
-                  isMountedRef.current &&
-                  activeBoardIdRef.current === board.id &&
-                  pendingShapeDetailRef.current === shapeId &&
-                  shapeDetailRequestSeqRef.current === requestSeq,
-              }),
-          }),
-        )
-        .then((shape) => {
-          if (
-            pendingShapeDetailRef.current !== shapeId ||
-            shapeDetailRequestSeqRef.current !== requestSeq
-          ) {
-            return;
-          }
-
-          rememberPersistedShapeMetadata([shape]);
-
-          const [detailShape] = normalizeCanvasFreeformShapes([
-            shape,
-          ]) as PiloCanvasFreeformShape[];
-
-          if (!detailShape) return;
-          if (deletedShapeIdsRef.current.has(shapeId)) return;
-
-          shapeDetailCacheRef.current.set(shapeId, detailShape);
-          mergeLoadedFreeformShapes([detailShape]);
-        })
-        .catch((error: unknown) => {
-          if (isCanvasLazyLoadAbortError(error)) {
-            return;
-          }
-
-          console.error("Canvas API shape detail load failed", error);
-
-          if (
-            shouldRetryCanvasLazyLoad(error) &&
-            isMountedRef.current &&
-            activeBoardIdRef.current === board.id &&
-            pendingShapeDetailRef.current === shapeId &&
-            shapeDetailRequestSeqRef.current === requestSeq &&
-            !shapeDetailRecoveryTimerRef.current
-          ) {
-            shapeDetailRecoveryTimerRef.current = setTimeout(() => {
-              shapeDetailRecoveryTimerRef.current = null;
-              loadShapeDetailRef.current({ shapeId, zoom });
-            }, CANVAS_LAZY_LOAD_RECOVERY_DELAY_MS);
-          }
-        });
-    },
-    [
-      board.id,
-      board.workspaceId,
-      canvasClient,
-      deletedShapeIdsRef,
-      mergeLoadedFreeformShapes,
-      pendingShapeDetailRef,
-      queryClient,
-      rememberPersistedShapeMetadata,
-      shapeDetailCacheRef,
-      shapeDetailRequestSeqRef,
-      storageMode,
-    ],
-  );
-  loadShapeDetailRef.current = loadShapeDetail;
-
   return {
     loadFrameChildren,
     loadFrameSubtree,
-    loadShapeDetail,
     loadViewportShapes,
   };
 }
