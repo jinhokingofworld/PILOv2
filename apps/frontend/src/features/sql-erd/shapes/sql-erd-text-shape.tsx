@@ -5,10 +5,12 @@ import { useValue } from "@tldraw/state-react";
 import {
   HTMLContainer,
   Rectangle2d,
+  resizeBox,
   ShapeUtil,
   T,
   useEditor,
   type TLBaseShape,
+  type TLResizeInfo,
   type TLShape
 } from "tldraw";
 
@@ -75,6 +77,10 @@ export class SqlErdTextShapeUtil extends ShapeUtil<SqlErdTextShape> {
 
   override canResize() {
     return true;
+  }
+
+  override onResize(shape: SqlErdTextShape, info: TLResizeInfo<SqlErdTextShape>) {
+    return resizeBox(shape, info, { minWidth: 80, minHeight: 40 });
   }
 
   override getDefaultProps(): SqlErdTextShape["props"] {
