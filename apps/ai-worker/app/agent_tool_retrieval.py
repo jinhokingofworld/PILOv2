@@ -12,6 +12,7 @@ _TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣_]+")
 _SUPPORTED_CATALOG_VERSIONS = frozenset(
     {"agent-tool-capabilities:v1", "agent-tool-capabilities:v2"}
 )
+TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v1"
 _KOREAN_PARTICLES = (
     "으로",
     "에서",
@@ -96,6 +97,8 @@ class ToolRetrievalResult:
     selected_capability_ids: tuple[str, ...] = ()
     primary_capability_id: str | None = None
     primary_tool_name: str | None = None
+    candidate_count: int = 0
+    confidence_bucket: str = "none"
 
 
 @dataclass(frozen=True)
@@ -227,26 +230,36 @@ def retrieve_tool_shortlist(
     unsupported_score, unsupported_capability_id = (
         unsupported_ranked[0] if unsupported_ranked else (0.0, None)
     )
+    candidate_count = sum(score > 0 for score, _ in scored) + sum(
+        score > 0 for score, _ in unsupported_ranked
+    )
     if unsupported_score > 0 and unsupported_score > best_metadata_score:
         return ToolRetrievalResult(
             tool_names=tuple(),
             low_confidence=False,
             fallback_reason="unsupported_capability",
             unsupported_capability_id=unsupported_capability_id,
+            candidate_count=candidate_count,
+            confidence_bucket=_confidence_bucket(unsupported_score),
         )
     if best_score <= 0:
         return ToolRetrievalResult(
             tool_names=tuple(),
             low_confidence=True,
             fallback_reason="no_metadata_match",
+            candidate_count=candidate_count,
+            confidence_bucket="none",
         )
 
     selected: list[str] = []
     selected_set: set[str] = set()
     remaining_schema_bytes = schema_token_budget * 4 if schema_token_budget is not None else None
+    minimum_candidate_score = max(1.0, best_score / 2)
 
     selected_capability_ids: list[str] = []
-    for rank, (_, capability_id) in enumerate(ranked[:top_k]):
+    for rank, (score, capability_id) in enumerate(ranked[:top_k]):
+        if score < minimum_candidate_score:
+            break
         required_chain = capability_by_id[capability_id].tool_names
         if any(name not in descriptor_by_tool_name for name in required_chain):
             if rank > 0:
@@ -255,6 +268,8 @@ def retrieve_tool_shortlist(
                 tool_names=tuple(),
                 low_confidence=True,
                 fallback_reason="invalid_tool_chain",
+                candidate_count=candidate_count,
+                confidence_bucket=_confidence_bucket(best_metadata_score),
             )
         chain_schema_bytes = sum(
             tool_schema_bytes.get(name, 0) if tool_schema_bytes else 0
@@ -268,6 +283,8 @@ def retrieve_tool_shortlist(
                 tool_names=tuple(),
                 low_confidence=True,
                 fallback_reason="tool_schema_budget_exceeded",
+                candidate_count=candidate_count,
+                confidence_bucket=_confidence_bucket(best_metadata_score),
             )
         for name in required_chain:
             if name not in selected_set:
@@ -284,6 +301,8 @@ def retrieve_tool_shortlist(
         selected_capability_ids=tuple(selected_capability_ids),
         primary_capability_id=ranked[0][1],
         primary_tool_name=capability_by_id[ranked[0][1]].tool_names[-1],
+        candidate_count=candidate_count,
+        confidence_bucket=_confidence_bucket(best_metadata_score),
     )
 
 
@@ -295,6 +314,7 @@ def select_read_only_tool_shortlist(
     top_k: int = 8,
     schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
 ) -> ReadOnlyToolSelection:
+    """Mirrors the runtime's read-only shortlist and legacy fallback policy."""
     legacy_tool_names = tuple(eligible_tool_schemas)
     try:
         retrieval = retrieve_tool_shortlist(
@@ -345,13 +365,24 @@ def select_read_only_tool_shortlist(
             used_shortlist=False,
         )
 
+    retrieved_tool_names = set(retrieval.tool_names)
     return ReadOnlyToolSelection(
         tool_names=tuple(
-            tool_name for tool_name in legacy_tool_names if tool_name in set(retrieval.tool_names)
+            tool_name for tool_name in legacy_tool_names if tool_name in retrieved_tool_names
         ),
         retrieval=retrieval,
         used_shortlist=True,
     )
+
+
+def _confidence_bucket(score: float) -> str:
+    if score <= 0:
+        return "none"
+    if score < 2:
+        return "low"
+    if score < 4:
+        return "medium"
+    return "high"
 
 
 def _capability_match_score(prompt_tokens: set[str], capability: CapabilityDefinition) -> float:

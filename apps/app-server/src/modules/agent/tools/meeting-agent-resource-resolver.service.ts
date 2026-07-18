@@ -66,6 +66,8 @@ export interface MeetingAgentReportSelector {
   from?: string;
   to?: string;
   status?: "PROCESSING" | "QUEUED" | "TRANSCRIBING" | "SUMMARIZING" | "COMPLETED" | "FAILED";
+  /** Agent-only room-name filter; it is not part of the public Meeting API. */
+  roomName?: string;
 }
 
 export interface MeetingAgentMemberSelector {
@@ -171,10 +173,24 @@ export class MeetingAgentResourceResolver {
     context: AgentToolContext,
     selector: MeetingAgentReportSelector
   ): Promise<MeetingAgentResourceResolution> {
-    const reports = await this.meetingService.listReports(
+    const reports = await this.meetingService.listReportsForAgent(
       context.currentUserId,
       context.workspaceId,
       { ...selector, limit: RESOLUTION_QUERY_LIMIT }
+    );
+    return this.resolveCandidates(context, reports.reports, (report) => ({
+      reference: { resourceType: "meeting_report", resourceId: report.id },
+      candidate: this.reportCandidate(report)
+    }));
+  }
+
+  async resolveLatestReport(
+    context: AgentToolContext
+  ): Promise<MeetingAgentResourceResolution> {
+    const reports = await this.meetingService.listReportsForAgent(
+      context.currentUserId,
+      context.workspaceId,
+      { limit: 1 }
     );
     return this.resolveCandidates(context, reports.reports, (report) => ({
       reference: { resourceType: "meeting_report", resourceId: report.id },

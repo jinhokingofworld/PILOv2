@@ -20,6 +20,7 @@ from app.agent_processor import (
 )
 from app.agent_tool_retrieval import (
     DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
+    TOOL_RETRIEVER_VERSION,
     ToolRetrievalResult,
     parse_tool_capability_catalog,
     select_read_only_tool_shortlist,
@@ -56,6 +57,10 @@ class EvaluationExpectation:
     input_contains: dict[str, object]
     requires_confirmation: bool | None
     missing_fields: tuple[str, ...]
+    domain: str | None = None
+    capability_id: str | None = None
+    required_tool_names: tuple[str, ...] = ()
+    supported: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +69,7 @@ class EvaluationCase:
     prompt: str
     kind: str
     expectation: EvaluationExpectation
+    planning_context: str = ""
 
 
 @dataclass(frozen=True)
@@ -89,6 +95,23 @@ class CaseEvaluationResult:
     retrieval_latency_ms: float
     planner_latency_ms: float
     shortlist_violation: bool
+    expected_domain: str | None
+    expected_capability_id: str | None
+    required_tool_names: tuple[str, ...]
+    expected_supported: bool
+    retrieved_domains: tuple[str, ...]
+    retrieved_capability_ids: tuple[str, ...]
+    model_version: str
+    suite_version: str
+    catalog_version: str | None
+    catalog_sha256: str | None
+    retriever_version: str | None
+    current_date: str
+    timezone: str
+    evaluation_seed: int
+    provider_input_tokens: int | None
+    provider_output_tokens: int | None
+    provider_total_tokens: int | None
 
 
 class PlannerEvaluator(Protocol):
@@ -149,9 +172,9 @@ def load_meeting_regression_suite(
     tool_snapshot_path: Path,
     variant: str,
 ) -> EvaluationSuite:
-    if variant not in {"canonical", "held_out", "counterexample"}:
+    if variant not in {"canonical", "held_out", "counterexample", "context"}:
         raise ValueError(
-            "Meeting regression variant must be canonical, held_out, or counterexample"
+            "Meeting regression variant must be canonical, held_out, counterexample, or context"
         )
 
     try:
@@ -198,7 +221,7 @@ def load_meeting_regression_suite(
             ):
                 raise ValueError("Meeting regression heldOutParaphrases must be a string array")
             prompt_expectations = [(prompt, expectation) for prompt in prompts]
-        else:
+        elif variant == "counterexample":
             counterexamples = capability.get("counterexamples")
             if not isinstance(counterexamples, list):
                 raise ValueError("Meeting regression counterexamples must be an array")
@@ -217,6 +240,14 @@ def load_meeting_regression_suite(
                         _meeting_regression_expectation(expected_capability),
                     )
                 )
+        else:
+            expectation = _meeting_regression_expectation(capability)
+            prompts = capability.get("contextFollowups")
+            if not isinstance(prompts, list) or not all(
+                isinstance(prompt, str) and prompt for prompt in prompts
+            ):
+                raise ValueError("Meeting regression contextFollowups must be a string array")
+            prompt_expectations = [(prompt, expectation) for prompt in prompts]
 
         for index, (prompt, expectation) in enumerate(prompt_expectations, start=1):
             cases.append(
@@ -225,6 +256,9 @@ def load_meeting_regression_suite(
                     prompt=prompt,
                     kind=variant,
                     expectation=expectation,
+                    planning_context=(
+                        _meeting_regression_context(capability_id) if variant == "context" else ""
+                    ),
                 )
             )
 
@@ -247,12 +281,42 @@ def _meeting_regression_expectation(capability: dict[str, object]) -> Evaluation
     tool_name = raw.get("toolName")
     if tool_name is not None and (not isinstance(tool_name, str) or not tool_name):
         raise ValueError("Meeting regression currentExpectation toolName must be a string")
+    target = capability.get("target")
+    if not isinstance(target, dict):
+        raise ValueError("Meeting regression capability must include target")
+    tool_sequence = target.get("toolSequence")
+    if not isinstance(tool_sequence, list) or not all(
+        isinstance(item, str) and item for item in tool_sequence
+    ):
+        raise ValueError("Meeting regression target toolSequence must be a string array")
     return EvaluationExpectation(
         status=_require_string(raw, "status"),
         tool_name=tool_name,
         input_contains={},
         requires_confirmation=None,
         missing_fields=(),
+        domain="meeting",
+        capability_id=_require_string(capability, "id"),
+        required_tool_names=tuple(tool_sequence),
+        supported=True,
+    )
+
+
+def _meeting_regression_context(capability_id: str) -> str:
+    resource_type = (
+        "meeting_room"
+        if capability_id in {"meeting.start", "meeting.join", "meeting.participants"}
+        else (
+            "meeting_report"
+            if capability_id.startswith("meeting_reports")
+            or capability_id.startswith("meeting.action_items")
+            or capability_id == "meeting.decision_evidence"
+            else "meeting"
+        )
+    )
+    return (
+        "previous assistant: 이전 조회 결과에서 사용자가 대상을 선택했습니다.\n"
+        f"previous resource: type={resource_type} label=선택한 후보"
     )
 
 
@@ -264,6 +328,8 @@ def evaluate_suite(
     repetitions: int = 1,
     use_shadow_retrieval: bool = False,
     shadow_top_k: int = 8,
+    model_version: str = "unknown",
+    evaluation_seed: int = 0,
 ) -> tuple[CaseEvaluationResult, ...]:
     if repetitions < 1:
         raise ValueError("Evaluation repetitions must be at least 1")
@@ -278,6 +344,9 @@ def evaluate_suite(
             attempt,
             use_shadow_retrieval=use_shadow_retrieval,
             shadow_top_k=shadow_top_k,
+            model_version=model_version,
+            evaluation_seed=evaluation_seed,
+            suite_version=suite.version,
         )
         for attempt in range(1, repetitions + 1)
         for case in suite.cases
@@ -294,6 +363,9 @@ def evaluate_case(
     *,
     use_shadow_retrieval: bool = False,
     shadow_top_k: int = 8,
+    model_version: str = "unknown",
+    evaluation_seed: int = 0,
+    suite_version: str = "unknown",
 ) -> CaseEvaluationResult:
     tools = job.tools
     retrieval = None
@@ -306,12 +378,18 @@ def evaluate_case(
     planner_started = perf_counter()
     decision = planner.plan(
         AgentPlanningRequest(
-            run_id=str(uuid5(NAMESPACE_URL, f"agent-planner-evaluation:{case.case_id}:{attempt}")),
+            run_id=str(
+                uuid5(
+                    NAMESPACE_URL,
+                    f"agent-planner-evaluation:{evaluation_seed}:{case.case_id}:{attempt}",
+                )
+            ),
             prompt=case.prompt,
             timezone=timezone,
             current_date=current_date,
             tool_schema_version=job.tool_schema_version,
             tools=tools,
+            planning_context=case.planning_context,
         )
     )
     planner_latency_ms = (perf_counter() - planner_started) * 1000
@@ -331,6 +409,27 @@ def evaluate_case(
     failures = _compare(case.expectation, actual)
     if shortlist_violation:
         failures.append("shortlist_tool")
+    descriptor_by_tool_name = (
+        {descriptor.tool_name: descriptor for descriptor in job.tool_capability_catalog.descriptors}
+        if job.tool_capability_catalog
+        else {}
+    )
+    expected_descriptor = (
+        descriptor_by_tool_name.get(case.expectation.tool_name)
+        if case.expectation.tool_name
+        else None
+    )
+    expected_domain = case.expectation.domain or (
+        expected_descriptor.domain if expected_descriptor else None
+    )
+    required_tool_names = case.expectation.required_tool_names or (
+        (case.expectation.tool_name,) if case.expectation.tool_name else ()
+    )
+    retrieved_descriptors = [
+        descriptor_by_tool_name[tool_name]
+        for tool_name in (retrieval.tool_names if retrieval else ())
+        if tool_name in descriptor_by_tool_name
+    ]
     return CaseEvaluationResult(
         case_id=case.case_id,
         attempt=attempt,
@@ -346,6 +445,41 @@ def evaluate_case(
         retrieval_latency_ms=retrieval_latency_ms,
         planner_latency_ms=planner_latency_ms,
         shortlist_violation=shortlist_violation,
+        expected_domain=expected_domain,
+        expected_capability_id=case.expectation.capability_id,
+        required_tool_names=required_tool_names,
+        expected_supported=(
+            case.expectation.supported
+            if case.expectation.supported is not None
+            else case.expectation.status != "unsupported"
+        ),
+        retrieved_domains=tuple(
+            sorted({descriptor.domain for descriptor in retrieved_descriptors})
+        ),
+        retrieved_capability_ids=tuple(
+            sorted(
+                {
+                    capability_id
+                    for descriptor in retrieved_descriptors
+                    for capability_id in descriptor.capability_ids
+                }
+            )
+        ),
+        model_version=model_version,
+        suite_version=suite_version,
+        catalog_version=(
+            job.tool_capability_catalog.version if job.tool_capability_catalog else None
+        ),
+        catalog_sha256=(
+            job.tool_capability_catalog.sha256 if job.tool_capability_catalog else None
+        ),
+        retriever_version=(TOOL_RETRIEVER_VERSION if retrieval else None),
+        current_date=current_date,
+        timezone=timezone,
+        evaluation_seed=evaluation_seed,
+        provider_input_tokens=decision.provider_input_tokens,
+        provider_output_tokens=decision.provider_output_tokens,
+        provider_total_tokens=decision.provider_total_tokens,
     )
 
 
@@ -390,7 +524,12 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
     adjacent_negative_results = [
         result for result in retrieval_tool_cases if result.kind == "counterexample"
     ]
-
+    retrieval_by_kind = {
+        kind: _retrieval_metric_summary(
+            [result for result in retrieval_results if result.kind == kind]
+        )
+        for kind in sorted({result.kind for result in retrieval_results})
+    }
     return {
         "totalCases": len(case_summaries),
         "totalAttempts": len(results),
@@ -407,11 +546,32 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
             "averageEstimatedToolSchemaTokens": _average(
                 [(result.shortlist_schema_bytes + 3) // 4 for result in results]
             ),
+            "providerTokenUsage": {
+                "input": _optional_int_summary(
+                    [result.provider_input_tokens for result in results]
+                ),
+                "output": _optional_int_summary(
+                    [result.provider_output_tokens for result in results]
+                ),
+                "total": _optional_int_summary(
+                    [result.provider_total_tokens for result in results]
+                ),
+            },
         },
         "retrieval": {
             "attempts": len(retrieval_results),
             "toolRecall": _retrieval_recall(retrieval_tool_cases),
+            "domainRecallAtK": _domain_recall(retrieval_results),
+            "capabilityRecallAtK": _capability_recall(retrieval_results),
+            "requiredToolRecallAtK": _required_tool_recall(retrieval_results),
             "adjacentNegativeRoutingAccuracy": _retrieval_recall(adjacent_negative_results),
+            "adjacentIntentMisselectionRate": _inverse_rate(
+                _required_tool_recall(adjacent_negative_results)
+            ),
+            "supportedToUnsupportedMisjudgments": _supported_to_unsupported_count(
+                retrieval_results
+            ),
+            "supportedToUnsupportedRate": _supported_to_unsupported_rate(retrieval_results),
             "averageShortlistSize": _average(
                 [len(result.shortlist_tool_names) for result in retrieval_results]
             ),
@@ -426,7 +586,9 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
             "plannerLatencyMs": _latency_summary(
                 [result.planner_latency_ms for result in retrieval_results]
             ),
+            "byKind": retrieval_by_kind,
         },
+        "retrievalEvents": [_privacy_safe_retrieval_event(result) for result in retrieval_results],
         "flakyCaseIds": [
             summary["id"] for summary in case_summaries if 0.0 < summary["exactRate"] < 1.0
         ],
@@ -447,6 +609,73 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
             for result in results
         ],
     }
+
+
+def build_legacy_shadow_comparison(
+    legacy_results: tuple[CaseEvaluationResult, ...],
+    shadow_results: tuple[CaseEvaluationResult, ...],
+) -> dict[str, object]:
+    legacy_keys = [_comparison_input_signature(result) for result in legacy_results]
+    shadow_keys = [_comparison_input_signature(result) for result in shadow_results]
+    if legacy_keys != shadow_keys:
+        raise ValueError("Legacy and shadow evaluation inputs must match")
+
+    legacy = build_evaluation_report(legacy_results)
+    shadow = build_evaluation_report(shadow_results)
+    return {
+        "legacy": legacy,
+        "shadow": shadow,
+        "comparison": {
+            "pairedAttempts": len(legacy_keys),
+            "sameFixedInputs": True,
+            "shadowMinusLegacy": {
+                "exactAttemptRate": _numeric_delta(
+                    shadow.get("exactAttemptRate"), legacy.get("exactAttemptRate")
+                ),
+                "toolSelectionAccuracy": _numeric_delta(
+                    shadow.get("toolSelectionAccuracy"),
+                    legacy.get("toolSelectionAccuracy"),
+                ),
+                "averagePlannerLatencyMs": _numeric_delta(
+                    _nested_metric(shadow, "planner", "latencyMs", "average"),
+                    _nested_metric(legacy, "planner", "latencyMs", "average"),
+                ),
+                "averageEstimatedToolSchemaTokens": _numeric_delta(
+                    _nested_metric(shadow, "planner", "averageEstimatedToolSchemaTokens"),
+                    _nested_metric(legacy, "planner", "averageEstimatedToolSchemaTokens"),
+                ),
+            },
+        },
+    }
+
+
+def _nested_metric(value: object, *keys: str) -> object:
+    current = value
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _comparison_input_signature(result: CaseEvaluationResult) -> tuple[object, ...]:
+    return (
+        result.case_id,
+        result.attempt,
+        result.model_version,
+        result.suite_version,
+        result.current_date,
+        result.timezone,
+        result.evaluation_seed,
+        result.catalog_version,
+        result.catalog_sha256,
+    )
+
+
+def _numeric_delta(right: object, left: object) -> float | None:
+    if not isinstance(right, int | float) or not isinstance(left, int | float):
+        return None
+    return round(float(right) - float(left), 4)
 
 
 def _parse_case(value: object) -> EvaluationCase:
@@ -470,6 +699,22 @@ def _parse_case(value: object) -> EvaluationCase:
     tool_name = expected.get("toolName")
     if tool_name is not None and (not isinstance(tool_name, str) or not tool_name):
         raise ValueError("Evaluation expected toolName must be a string")
+    domain = expected.get("domain")
+    if domain is not None and (not isinstance(domain, str) or not domain.strip()):
+        raise ValueError("Evaluation expected domain must be a string")
+    capability_id = expected.get("capabilityId")
+    if capability_id is not None and (
+        not isinstance(capability_id, str) or not capability_id.strip()
+    ):
+        raise ValueError("Evaluation expected capabilityId must be a string")
+    required_tool_names = expected.get("requiredToolNames", [])
+    if not isinstance(required_tool_names, list) or not all(
+        isinstance(name, str) and name for name in required_tool_names
+    ):
+        raise ValueError("Evaluation expected requiredToolNames must be a string array")
+    supported = expected.get("supported")
+    if supported is not None and not isinstance(supported, bool):
+        raise ValueError("Evaluation expected supported must be a boolean")
 
     return EvaluationCase(
         case_id=_require_string(value, "id"),
@@ -481,6 +726,10 @@ def _parse_case(value: object) -> EvaluationCase:
             input_contains=dict(input_contains),
             requires_confirmation=requires_confirmation,
             missing_fields=tuple(missing_fields),
+            domain=domain.strip() if isinstance(domain, str) else None,
+            capability_id=(capability_id.strip() if isinstance(capability_id, str) else None),
+            required_tool_names=tuple(required_tool_names),
+            supported=supported,
         ),
     )
 
@@ -578,10 +827,98 @@ def _retrieval_recall(results: list[CaseEvaluationResult]) -> float | None:
     )
 
 
+def _domain_recall(results: list[CaseEvaluationResult]) -> float | None:
+    eligible = [result for result in results if result.expected_domain]
+    return _rate([bool(result.expected_domain in result.retrieved_domains) for result in eligible])
+
+
+def _capability_recall(results: list[CaseEvaluationResult]) -> float | None:
+    eligible = [result for result in results if result.expected_capability_id]
+    return _rate(
+        [
+            bool(result.expected_capability_id in result.retrieved_capability_ids)
+            for result in eligible
+        ]
+    )
+
+
+def _required_tool_recall(results: list[CaseEvaluationResult]) -> float | None:
+    eligible = [result for result in results if result.required_tool_names]
+    return _rate(
+        [
+            bool(
+                result.retrieval
+                and set(result.required_tool_names) <= set(result.retrieval.tool_names)
+            )
+            for result in eligible
+        ]
+    )
+
+
+def _supported_to_unsupported_count(results: list[CaseEvaluationResult]) -> int:
+    return sum(
+        result.expected_supported
+        and result.retrieval is not None
+        and result.retrieval.fallback_reason == "unsupported_capability"
+        for result in results
+    )
+
+
+def _supported_to_unsupported_rate(
+    results: list[CaseEvaluationResult],
+) -> float | None:
+    supported = [result for result in results if result.expected_supported]
+    return _rate(
+        [
+            bool(result.retrieval and result.retrieval.fallback_reason == "unsupported_capability")
+            for result in supported
+        ]
+    )
+
+
+def _retrieval_metric_summary(
+    results: list[CaseEvaluationResult],
+) -> dict[str, object]:
+    return {
+        "attempts": len(results),
+        "domainRecallAtK": _domain_recall(results),
+        "capabilityRecallAtK": _capability_recall(results),
+        "requiredToolRecallAtK": _required_tool_recall(results),
+        "supportedToUnsupportedRate": _supported_to_unsupported_rate(results),
+        "averageShortlistSize": _average([len(result.shortlist_tool_names) for result in results]),
+        "retrievalLatencyMs": _latency_summary([result.retrieval_latency_ms for result in results]),
+    }
+
+
+def _rate(values: list[bool]) -> float | None:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 4)
+
+
+def _inverse_rate(value: float | None) -> float | None:
+    return round(1.0 - value, 4) if value is not None else None
+
+
 def _average(values: list[int]) -> float | None:
     if not values:
         return None
     return round(sum(values) / len(values), 4)
+
+
+def _optional_int_summary(values: list[int | None]) -> dict[str, float | int] | None:
+    available = [value for value in values if value is not None]
+    if not available:
+        return None
+    ordered = sorted(available)
+    p50_index = min(len(ordered) - 1, int((len(ordered) - 1) * 0.5))
+    p95_index = min(len(ordered) - 1, int((len(ordered) - 1) * 0.95))
+    return {
+        "samples": len(ordered),
+        "average": round(sum(ordered) / len(ordered), 4),
+        "p50": ordered[p50_index],
+        "p95": ordered[p95_index],
+    }
 
 
 def _fallback_taxonomy(results: list[CaseEvaluationResult]) -> dict[str, int]:
@@ -616,6 +953,14 @@ def _privacy_safe_expected(expected: EvaluationExpectation) -> dict[str, object]
         output["requiresConfirmation"] = expected.requires_confirmation
     if expected.missing_fields:
         output["missingFields"] = list(expected.missing_fields)
+    if expected.domain:
+        output["domain"] = expected.domain
+    if expected.capability_id:
+        output["capabilityId"] = expected.capability_id
+    if expected.required_tool_names:
+        output["requiredToolNames"] = list(expected.required_tool_names)
+    if expected.supported is not None:
+        output["supported"] = expected.supported
     return output
 
 
@@ -642,6 +987,8 @@ def _retrieval_output(result: CaseEvaluationResult) -> dict[str, object] | None:
             result.expected.tool_name in retrieval.tool_names if result.expected.tool_name else None
         ),
         "lowConfidence": retrieval.low_confidence,
+        "candidateCount": retrieval.candidate_count,
+        "confidenceBucket": retrieval.confidence_bucket,
         "fallbackReason": retrieval.fallback_reason,
         "unsupportedCapabilityId": retrieval.unsupported_capability_id,
         "shortlistViolation": result.shortlist_violation,
@@ -650,6 +997,56 @@ def _retrieval_output(result: CaseEvaluationResult) -> dict[str, object] | None:
         "toolSchemaBytes": result.shortlist_schema_bytes,
         "estimatedToolSchemaTokens": (result.shortlist_schema_bytes + 3) // 4,
     }
+
+
+def _privacy_safe_retrieval_event(
+    result: CaseEvaluationResult,
+) -> dict[str, object]:
+    retrieval = result.retrieval
+    if retrieval is None:
+        raise ValueError("Retrieval event requires a retrieval result")
+    return {
+        "eventVersion": "agent-tool-retrieval-observation:v1",
+        "mode": "shadow",
+        "caseKind": _bounded_case_kind(result.kind),
+        "catalogVersion": result.catalog_version,
+        "catalogSha256": result.catalog_sha256,
+        "modelVersion": result.model_version,
+        "suiteVersion": result.suite_version,
+        "retrieverVersion": result.retriever_version,
+        "candidateCount": min(max(retrieval.candidate_count, 0), 100),
+        "confidenceBucket": retrieval.confidence_bucket,
+        "lowConfidence": retrieval.low_confidence,
+        "fallbackReason": retrieval.fallback_reason,
+        "shortlistSize": min(max(len(result.shortlist_tool_names), 0), 100),
+        "supportedToUnsupportedMisjudgment": bool(
+            result.expected_supported and retrieval.fallback_reason == "unsupported_capability"
+        ),
+        "latencyMs": {
+            "retrieval": _bounded_latency(result.retrieval_latency_ms),
+            "planner": _bounded_latency(result.planner_latency_ms),
+        },
+        "tokenUsage": {
+            "estimatedToolSchemaTokens": min(
+                max((result.shortlist_schema_bytes + 3) // 4, 0), 1_000_000
+            ),
+            "providerInputTokens": _bounded_optional_token_count(result.provider_input_tokens),
+            "providerOutputTokens": _bounded_optional_token_count(result.provider_output_tokens),
+            "providerTotalTokens": _bounded_optional_token_count(result.provider_total_tokens),
+        },
+    }
+
+
+def _bounded_latency(value: float) -> float:
+    return min(max(round(value, 4), 0.0), 600_000.0)
+
+
+def _bounded_optional_token_count(value: int | None) -> int | None:
+    return min(max(value, 0), 10_000_000) if value is not None else None
+
+
+def _bounded_case_kind(value: str) -> str:
+    return value if value in {"canonical", "held_out", "counterexample", "positive"} else "other"
 
 
 def _optional_kind(value: dict[object, object]) -> str:

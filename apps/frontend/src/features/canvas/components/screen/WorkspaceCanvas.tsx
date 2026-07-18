@@ -22,6 +22,7 @@ import {
   Copy,
   Diamond,
   Eraser,
+  Files,
   Group,
   Hand,
   Heart,
@@ -104,6 +105,11 @@ import {
   type PiloDrawingPreset,
 } from "@/features/canvas/engine/editor/canvas-editor-contracts";
 import type { PiloInsertableTool } from "@/features/canvas/engine/shapes/pilo-canvas-shape-factory";
+import { CanvasDriveFilePicker } from "@/features/canvas/integrations/drive/CanvasDriveFilePicker";
+import {
+  shouldReuseLoadedCanvasBoard,
+  type LoadedCanvasBoardIdentity,
+} from "./canvas-board-load-policy";
 import {
   CanvasPopoverMenuButton as PopoverMenuButton,
   CanvasToolButton as ToolButton,
@@ -216,6 +222,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const authSession = useAuthSession();
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   const videoFileInputRef = useRef<HTMLInputElement | null>(null);
+  const loadedBoardIdentityRef = useRef<LoadedCanvasBoardIdentity | null>(null);
   const [boardState, setBoardState] = useState<CanvasBoardState>({
     board: null,
     source: "mock",
@@ -254,6 +261,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     null,
   );
   const [urlInsertValue, setUrlInsertValue] = useState("");
+  const [isDriveFilePickerOpen, setIsDriveFilePickerOpen] = useState(false);
   const [isReturningToClassicCanvas, setIsReturningToClassicCanvas] =
     useState(false);
   const [openPopover, setOpenPopover] = useState<
@@ -340,6 +348,19 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     let cancelled = false;
 
     async function loadCanvasBoard() {
+      if (
+        shouldReuseLoadedCanvasBoard({
+          client: canvasClient,
+          loadedBoard: loadedBoardIdentityRef.current,
+          requestedBoardId: boardId,
+          workspaceId,
+        })
+      ) {
+        return;
+      }
+
+      loadedBoardIdentityRef.current = null;
+
       if (!workspaceId) {
         setBoardState({
           board: null,
@@ -379,6 +400,11 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
         if (cancelled) return;
 
+        loadedBoardIdentityRef.current = {
+          boardId: detail.id,
+          client: canvasClient,
+          workspaceId: detail.workspaceId,
+        };
         setBoardState({
           board: detail,
           source: canvasClientMode,
@@ -625,6 +651,15 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     [canvasActions],
   );
 
+  const createDriveFileShape = useCallback(
+    (file: Parameters<PiloCanvasActions["createDriveFileShape"]>[0]) => {
+      setOpenPopover("insert");
+      setActiveCanvasTool("select");
+      canvasActions?.createDriveFileShape(file);
+    },
+    [canvasActions],
+  );
+
   const openCanvasAiChat = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>) => {
       const buttonBounds = event.currentTarget.getBoundingClientRect();
@@ -796,6 +831,13 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </form>
           </DialogContent>
         </Dialog>
+        <CanvasDriveFilePicker
+          accessToken={authSession?.accessToken.trim() ?? ""}
+          onOpenChange={setIsDriveFilePickerOpen}
+          onSelect={createDriveFileShape}
+          open={isDriveFilePickerOpen}
+          workspaceId={workspaceId}
+        />
         <div
           className="canvas-tool-rail canvas-top-left-controls"
           onPointerDownCapture={markCanvasUiEvent}
@@ -1295,6 +1337,17 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                 onClick={() => openMediaFilePicker("video")}
               >
                 <Video />
+              </ToolButton>
+              <ToolButton
+                label="Drive 파일"
+                nativeTooltip
+                disabled={!shouldUseCanvasApi || !authSession?.accessToken}
+                onClick={() => {
+                  closePopover();
+                  setIsDriveFilePickerOpen(true);
+                }}
+              >
+                <Files />
               </ToolButton>
               <ToolButton
                 label="북마크"

@@ -382,3 +382,196 @@ test("joinSocket은 새 background 탭이 아니라 사용자 대표 foreground�
   assert.equal(representative.focused, true);
   assert.equal(representative.location?.page, "home");
 });
+
+function elementViewport(key) {
+  return { kind: "element", key, xRatio: 0.25, yRatio: 0.5 };
+}
+
+test("Canvas selection 확장은 기존 camera-only payload와 함께 허용한다", () => {
+  const legacy = readWorkspacePresenceUpdatePayload(
+    presenceUpdate({
+      context: { canvasId: "canvas-1" },
+      page: "canvas",
+      route: { pathname: "/canvas", search: "?canvasId=canvas-1" },
+      viewport: { kind: "camera", x: 1, y: 2, z: 1.5 },
+    }),
+  );
+  const selected = readWorkspacePresenceUpdatePayload(
+    presenceUpdate({
+      context: { canvasId: " canvas-1 " },
+      page: "canvas",
+      route: { pathname: "/canvas", search: "?canvasId=canvas-1" },
+      viewport: {
+        kind: "camera",
+        selectedShapeIds: [" shape:one ", "shape:two"],
+        x: 1,
+        y: 2,
+        z: 1.5,
+      },
+    }),
+  );
+
+  assert.deepEqual(legacy?.location?.viewport.selectedShapeIds, []);
+  assert.deepEqual(selected?.location?.viewport.selectedShapeIds, [
+    "shape:one",
+    "shape:two",
+  ]);
+});
+
+test("Canvas selection은 잘못된 ID와 transient 편집 상태를 거부한다", () => {
+  for (const { context, selectedShapeIds } of [
+    { context: { canvasId: "canvas-1" }, selectedShapeIds: ["shape:one", 2] },
+    { context: { canvasId: "canvas-1" }, selectedShapeIds: [" "] },
+    {
+      context: { canvasId: "canvas-1", editingShapeId: "shape:one" },
+      selectedShapeIds: [],
+    },
+    { context: { canvasId: "canvas-1", aiChatOpen: "true" }, selectedShapeIds: [] },
+    { context: { canvasId: "canvas-1", popover: "color" }, selectedShapeIds: [] },
+  ]) {
+    assert.equal(
+      readWorkspacePresenceUpdatePayload(
+        presenceUpdate({
+          context,
+          page: "canvas",
+          route: { pathname: "/canvas", search: "" },
+          viewport: { kind: "camera", selectedShapeIds, x: 0, y: 0, z: 1 },
+        }),
+      ),
+      null,
+    );
+  }
+});
+
+test("Meeting context는 생략 ID를 null로 정규화하고 두 route를 허용한다", () => {
+  const meeting = readWorkspacePresenceUpdatePayload(
+    presenceUpdate({
+      context: { meetingRoomId: " room-1 " },
+      page: "meeting",
+      route: { pathname: "/meeting", search: "?meetingRoomId=room-1" },
+      viewport: elementViewport("meeting-content"),
+    }),
+  );
+  const report = readWorkspacePresenceUpdatePayload(
+    presenceUpdate({
+      context: { reportId: " report-1 " },
+      page: "meeting",
+      route: { pathname: "/report", search: "?reportId=report-1" },
+      viewport: { kind: "document", xRatio: 0, yRatio: 0.5 },
+    }),
+  );
+
+  assert.deepEqual(meeting?.location?.context, {
+    meetingRoomId: "room-1",
+    reportId: null,
+  });
+  assert.deepEqual(report?.location?.context, {
+    meetingRoomId: null,
+    reportId: "report-1",
+  });
+});
+
+test("Meeting route와 context 조합이 어긋나면 거부한다", () => {
+  for (const location of [
+    {
+      context: { meetingRoomId: null, reportId: "report-1" },
+      page: "meeting",
+      route: { pathname: "/meeting", search: "" },
+      viewport: { kind: "document", xRatio: 0, yRatio: 0 },
+    },
+    {
+      context: { meetingRoomId: "room-1", reportId: null },
+      page: "meeting",
+      route: { pathname: "/report", search: "" },
+      viewport: elementViewport("meeting-content"),
+    },
+  ]) {
+    assert.equal(readWorkspacePresenceUpdatePayload(presenceUpdate(location)), null);
+  }
+});
+
+test("Chat message 위치와 message list viewport를 허용한다", () => {
+  const parsed = readWorkspacePresenceUpdatePayload(
+    presenceUpdate({
+      context: { messageId: " message-1 " },
+      page: "chat",
+      route: { pathname: "/chat", search: "?messageId=message-1" },
+      viewport: elementViewport("chat-messages"),
+    }),
+  );
+
+  assert.deepEqual(parsed?.location?.context, {
+    messageId: "message-1",
+    threadId: null,
+  });
+  assert.equal(parsed?.location?.viewport.key, "chat-messages");
+});
+
+test("Chat은 다른 page의 element key와 transient draft를 거부한다", () => {
+  for (const location of [
+    {
+      context: { messageId: "message-1", threadId: null, draft: "secret" },
+      page: "chat",
+      route: { pathname: "/chat", search: "" },
+      viewport: elementViewport("chat-messages"),
+    },
+    {
+      context: {},
+      page: "home",
+      route: { pathname: "/home", search: "" },
+      viewport: elementViewport("chat-messages"),
+    },
+  ]) {
+    assert.equal(readWorkspacePresenceUpdatePayload(presenceUpdate(location)), null);
+  }
+});
+
+test("확인된 2차 surface key와 context 조합을 허용한다", () => {
+  const locations = [
+    {
+      context: { boardId: "board-1", issueId: "issue-1" },
+      page: "board",
+      route: { pathname: "/board", search: "?boardId=board-1&issueId=issue-1" },
+      viewport: elementViewport("board-issue-sheet"),
+    },
+    {
+      context: { eventId: "event-1", selectedDate: "2026-07-18" },
+      page: "calendar",
+      route: { pathname: "/calendar", search: "?date=2026-07-18" },
+      viewport: elementViewport("calendar-event-detail"),
+    },
+    {
+      context: { eventId: null, selectedDate: "2026-07-18" },
+      page: "calendar",
+      route: { pathname: "/calendar", search: "?date=2026-07-18" },
+      viewport: elementViewport("calendar-events-dialog"),
+    },
+    {
+      context: {
+        sessionId: "session-1",
+        sqlErdInspectorOpen: "true",
+        sqlErdSelectionId: "relation-1",
+        sqlErdSelectionTableId: null,
+        sqlErdSelectionType: "relation",
+      },
+      page: "sql-erd",
+      route: { pathname: "/sql-erd/session", search: "?sessionId=session-1" },
+      viewport: elementViewport("sql-erd-inspector"),
+    },
+    {
+      context: {
+        documentId: null,
+        folderId: "folder-1",
+        pdfFileId: "pdf-1",
+        pdfPage: "3",
+      },
+      page: "drive",
+      route: { pathname: "/files", search: "?folderId=folder-1" },
+      viewport: elementViewport("drive-pdf"),
+    },
+  ];
+
+  for (const location of locations) {
+    assert.ok(readWorkspacePresenceUpdatePayload(presenceUpdate(location)));
+  }
+});

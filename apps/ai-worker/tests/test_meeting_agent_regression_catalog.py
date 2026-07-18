@@ -70,6 +70,10 @@ def test_catalog_covers_every_registered_meeting_tool_with_minimum_variants() ->
 
         target = capability["target"]
         assert target["toolSequence"][-1] == capability["toolName"]
+        assert capability["currentExpectation"] == {
+            "status": "tool_candidate",
+            "toolName": target["toolSequence"][0],
+        }
         assert target["intent"]
         assert target["selector"]
         assert capability["currentExpectation"]["status"] in {
@@ -151,13 +155,22 @@ def test_catalog_builds_separate_canonical_and_held_out_planner_suites() -> None
         PLANNER_SUITE_PATH,
         variant="counterexample",
     )
+    context = load_meeting_regression_suite(
+        CATALOG_PATH,
+        PLANNER_SUITE_PATH,
+        variant="context",
+    )
 
     assert canonical.version == "meeting-agent-regression:v1:canonical"
     assert held_out.version == "meeting-agent-regression:v1:held_out"
     assert len(canonical.cases) == 18 * 4 * 3
     assert len(held_out.cases) == 18 * 3
     assert len(counterexamples.cases) == 18 * 4
+    assert len(context.cases) == 18 * 3
     assert {case.kind for case in counterexamples.cases} == {"counterexample"}
+    assert {case.kind for case in context.cases} == {"context"}
+    assert all(case.planning_context.startswith("previous assistant:") for case in context.cases)
+    assert all("-" not in case.planning_context for case in context.cases)
     assert {case.prompt for case in canonical.cases}.isdisjoint(
         {case.prompt for case in held_out.cases}
     )

@@ -325,7 +325,12 @@ export function BoardIssueSheet({
             <X className="size-4" />
           </DialogPrimitive.Close>
 
-          <div className="flex-1 overflow-y-auto px-5 py-5">
+          <div
+            className="flex-1 overflow-y-auto px-5 py-5"
+            data-workspace-follow-board-id={!isEditing ? boardId : undefined}
+            data-workspace-follow-issue-id={!isEditing ? issueId ?? undefined : undefined}
+            data-workspace-follow-surface={!isEditing ? "board-issue-sheet" : undefined}
+          >
           {status === "loading" ? (
             <div className="grid min-h-64 place-items-center text-[21px] text-muted-foreground">
               <span className="inline-flex items-center gap-2">

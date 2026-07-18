@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
-import { useEditor } from "tldraw";
+import { useEditor, type TLShapeId } from "tldraw";
 
 import { useWorkspaceLocationAdapter } from "@/shared/workspace-presence/use-workspace-location-adapter";
 import type { WorkspacePresenceLocation } from "@/shared/workspace-presence/workspace-presence-types";
-import { createCanvasWorkspaceLocation, readCanvasCamera } from "./canvas-workspace-location";
+import {
+  createCanvasWorkspaceLocation,
+  readCanvasWorkspaceTarget,
+} from "./canvas-workspace-location";
 
 export function CanvasWorkspaceLocationAdapter({ canvasId }: { canvasId: string }) {
   const editor = useEditor();
@@ -15,26 +18,39 @@ export function CanvasWorkspaceLocationAdapter({ canvasId }: { canvasId: string 
   const isTargetCanvasLoaded = !requestedCanvasId || requestedCanvasId === canvasId;
   const adapter = useMemo(
     () => ({
-      capture: () => createCanvasWorkspaceLocation(canvasId, editor.getCamera()),
+      capture: () =>
+        createCanvasWorkspaceLocation(
+          canvasId,
+          editor.getCamera(),
+          editor.getSelectedShapeIds().map(String),
+        ),
       page: "canvas" as const,
       ready: Boolean(canvasId && isTargetCanvasLoaded),
       restore(location: WorkspacePresenceLocation) {
-        const camera = readCanvasCamera(location, canvasId);
-        if (!camera) return false;
-        editor.setCamera(camera);
+        const target = readCanvasWorkspaceTarget(location, canvasId);
+        if (!target) return false;
+        editor.setCamera(target.camera);
+        editor.setSelectedShapes(
+          target.selectedShapeIds.filter((shapeId) =>
+            editor.getShape(shapeId as TLShapeId),
+          ) as TLShapeId[],
+        );
         return true;
       },
     }),
     [canvasId, editor, isTargetCanvasLoaded],
   );
-  const { reportInteraction } = useWorkspaceLocationAdapter(adapter);
+  const { reportManualInteraction } = useWorkspaceLocationAdapter(adapter);
   useEffect(() => {
-    window.addEventListener("pointerup", reportInteraction);
-    window.addEventListener("wheel", reportInteraction, { passive: true });
+    const container = editor.getContainer();
+    container.addEventListener("pointerup", reportManualInteraction);
+    container.addEventListener("wheel", reportManualInteraction, {
+      passive: true,
+    });
     return () => {
-      window.removeEventListener("pointerup", reportInteraction);
-      window.removeEventListener("wheel", reportInteraction);
+      container.removeEventListener("pointerup", reportManualInteraction);
+      container.removeEventListener("wheel", reportManualInteraction);
     };
-  }, [reportInteraction]);
+  }, [editor, reportManualInteraction]);
   return null;
 }

@@ -21,6 +21,7 @@ const pageLabels: Record<WorkspacePresencePage, string> = {
   board: "보드",
   calendar: "캘린더",
   canvas: "캔버스",
+  chat: "채팅",
   drive: "파일",
   home: "홈",
   meeting: "음성 회의",

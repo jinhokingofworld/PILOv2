@@ -2125,6 +2125,13 @@ function formatterMeetingReport(index, overrides = {}) {
   const outputSummary = loggingService.calls[1].input.outputSummary;
 
   assert.equal(result.status, "skipped");
+  assert.deepEqual(loggingService.calls[0].input.inputSummary.input, {
+    compatibility: "legacy_persisted_planner_input"
+  });
+  assert.doesNotMatch(
+    JSON.stringify(loggingService.calls[0].input.inputSummary),
+    new RegExp(REPORT_ID)
+  );
   assert.equal(meetingService.calls[0].method, "getReport");
   assert.equal(outputSummary.report.reportId, REPORT_ID);
   assert.equal("transcript" in outputSummary.report, false);

@@ -9,7 +9,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CanvasShapeOperationPayload } from "@/features/canvas/api/canvas-types";
 import type { CanvasRealtimeConfig } from "@/shared/canvas-realtime/canvas-realtime-types";
 import { useCanvasRoom } from "@/features/canvas/collaboration/useCanvasRoom";
-import { isPiloFrameCollapsed } from "@/features/canvas/engine/shapes/frame/canvas-frame-collapse";
 import { normalizeCanvasFreeformShapes } from "@/features/canvas/persistence/canvas-storage";
 import type { CanvasShapeSyncQueue } from "@/features/canvas/persistence/canvas-shape-sync";
 import { CanvasEditor } from "../editor/CanvasEditor";
@@ -43,7 +42,6 @@ import { useCanvasShapePersistence } from "./useCanvasShapePersistence";
 import { useCanvasViewportQueries } from "./useCanvasViewportQueries";
 import {
   areViewSettingsEqual,
-  CANVAS_SHAPE_DETAIL_MIN_ZOOM,
   clampZoom,
   DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
   getFreeformShapeId,
@@ -163,41 +161,6 @@ function isRemoteOperationProtectedByLocalInteraction({
 }) {
   return localInteractionState.activeMutationShapeIds.includes(
     operation.shapeId,
-  );
-}
-
-function isRemoteFrameCollapseProtected({
-  currentShapes,
-  frame,
-  protectedShapeIds,
-  shapeDetailCache,
-}: {
-  currentShapes: PiloCanvasFreeformShape[];
-  frame: PiloCanvasFreeformShape;
-  protectedShapeIds: ReadonlySet<string>;
-  shapeDetailCache: Map<string, PiloCanvasFreeformShape>;
-}) {
-  const frameId = getFreeformShapeId(frame);
-
-  if (
-    !frameId ||
-    !isPiloFrameCollapsed(frame) ||
-    !protectedShapeIds.size
-  ) {
-    return false;
-  }
-
-  if (protectedShapeIds.has(frameId)) {
-    return true;
-  }
-
-  const descendantIds = collectCanvasFrameDescendantShapeIds(
-    [...shapeDetailCache.values(), ...currentShapes],
-    frameId,
-  );
-
-  return [...descendantIds].some((shapeId) =>
-    protectedShapeIds.has(shapeId),
   );
 }
 
@@ -353,8 +316,6 @@ function ClassicCanvasRuntimeInner({
   const shapeDetailCacheRef = useRef(new Map<string, PiloCanvasFreeformShape>());
   const unloadedShapeIdsRef = useRef(new Set<string>());
   const deletedShapeIdsRef = useRef(new Set<string>());
-  const pendingShapeDetailRef = useRef<string | null>(null);
-  const shapeDetailRequestSeqRef = useRef(0);
   const pendingLocalShapeVersionsRef = useRef(new Map<string, number>());
   const pendingRemoteFrameChildrenRequestRef = useRef(new Set<string>());
   const deferredRemoteOperationsRef = useRef(
@@ -491,7 +452,7 @@ function ClassicCanvasRuntimeInner({
         .sort((a, b) => a.opSeq - b.opSeq);
       let nextFreeformShapes = freeformShapesRef.current;
       let hasVisibleShapeChange = false;
-      const expandedFrameIds = new Set<string>();
+      const frameIdsToLoad = new Set<string>();
       const surfaceDeletedShapeIds = new Set<string>();
       const surfaceUpsertShapeIds = new Set<string>();
 
@@ -590,8 +551,8 @@ function ClassicCanvasRuntimeInner({
             operation.contentHash,
           );
         }
-        result.expandedFrameIds.forEach((frameId) => {
-          expandedFrameIds.add(frameId);
+        result.frameIdsToLoad.forEach((frameId) => {
+          frameIdsToLoad.add(frameId);
         });
         result.loadedShapeIds.forEach((shapeId) => {
           unloadedShapeIdsRef.current.delete(shapeId);
@@ -622,7 +583,7 @@ function ClassicCanvasRuntimeInner({
         hasVisibleShapeChange = true;
       });
 
-      queueRemoteFrameChildrenRequests(expandedFrameIds);
+      queueRemoteFrameChildrenRequests(frameIdsToLoad);
 
       if (!hasVisibleShapeChange) {
         return;
@@ -728,7 +689,7 @@ function ClassicCanvasRuntimeInner({
       result.unloadedShapeIds.forEach((shapeId) => {
         unloadedShapeIdsRef.current.add(shapeId);
       });
-      queueRemoteFrameChildrenRequests(result.expandedFrameIds);
+      queueRemoteFrameChildrenRequests(result.frameIdsToLoad);
 
       const surfaceDeletedShapeIds = new Set([
         ...patch.deletedShapeIds,
@@ -850,15 +811,7 @@ function ClassicCanvasRuntimeInner({
           return;
         }
 
-        if (
-          protectedShapeIds.has(shapeId) ||
-          isRemoteFrameCollapseProtected({
-            currentShapes: freeformShapesRef.current,
-            frame: shape,
-            protectedShapeIds,
-            shapeDetailCache: shapeDetailCacheRef.current,
-          })
-        ) {
+        if (protectedShapeIds.has(shapeId)) {
           deferredRoomShapeChangesRef.current.set(shapeId, {
             respectViewport,
             shape,
@@ -917,15 +870,7 @@ function ClassicCanvasRuntimeInner({
         return;
       }
 
-      if (
-        protectedShapeIds.has(shapeId) ||
-        isRemoteFrameCollapseProtected({
-          currentShapes: freeformShapesRef.current,
-          frame: change.shape,
-          protectedShapeIds,
-          shapeDetailCache: shapeDetailCacheRef.current,
-        })
-      ) {
+      if (protectedShapeIds.has(shapeId)) {
         return;
       }
 
@@ -1064,12 +1009,10 @@ function ClassicCanvasRuntimeInner({
     board,
     freeformShapesRef,
     pendingLocalShapeVersionsRef,
-    pendingShapeDetailRef,
     setCameraResetVersion,
     setCanvasHydrationVersion,
     setFreeformShapes,
     shapeDetailCacheRef,
-    shapeDetailRequestSeqRef,
     storageMode,
     viewportShapeLoadRequestSeqRef,
   });
@@ -1082,7 +1025,6 @@ function ClassicCanvasRuntimeInner({
     board,
     canvasClient,
     latestViewportBoundsRef,
-    pendingShapeDetailRef,
     queryClient,
     remoteShapeRevisionRef,
     onShapeSyncError: handleShapeSyncError,
@@ -1171,10 +1113,6 @@ function ClassicCanvasRuntimeInner({
       viewportY: nextViewSetting.viewportY,
     };
 
-    if (normalizedViewSetting.zoom < CANVAS_SHAPE_DETAIL_MIN_ZOOM) {
-      pendingShapeDetailRef.current = null;
-    }
-
     setViewSetting((currentViewSetting) =>
       areViewSettingsEqual(currentViewSetting, normalizedViewSetting)
         ? currentViewSetting
@@ -1182,25 +1120,29 @@ function ClassicCanvasRuntimeInner({
     );
   }, []);
 
-  const { loadFrameChildren, loadFrameSubtree, loadShapeDetail, loadViewportShapes } =
+  const {
+    initialViewportLoadStatus,
+    loadFrameChildren,
+    loadFrameSubtree,
+    loadViewportShapes,
+    loadingFrameIds,
+  } =
     useCanvasViewportQueries({
-    board,
-    canvasClient,
-    latestViewportBoundsRef,
-    mergeLoadedFreeformShapes,
-    pendingShapeDetailRef,
-    queryClient,
-    remoteShapeContentHashRef,
-    remoteShapeRevisionRef,
-    shapeDetailCacheRef,
-    shapeDetailRequestSeqRef,
-    storageMode,
-    onViewportShapesLoaded: reportLoadedViewport,
-    deletedShapeIdsRef,
-    unloadedShapeIdsRef,
-    viewportShapeLoadRequestSeqRef,
-    viewportShapeLoadTimerRef,
-  });
+      board,
+      canvasClient,
+      latestViewportBoundsRef,
+      mergeLoadedFreeformShapes,
+      queryClient,
+      remoteShapeContentHashRef,
+      remoteShapeRevisionRef,
+      shapeDetailCacheRef,
+      storageMode,
+      onViewportShapesLoaded: reportLoadedViewport,
+      deletedShapeIdsRef,
+      unloadedShapeIdsRef,
+      viewportShapeLoadRequestSeqRef,
+      viewportShapeLoadTimerRef,
+    });
 
   useEffect(() => {
     if (
@@ -1223,19 +1165,6 @@ function ClassicCanvasRuntimeInner({
     storageMode,
   ]);
 
-  const handleFrameChildShapesUnload = useCallback(
-    (shapes: PiloCanvasFreeformShape[]) => {
-      shapes.forEach((shape) => {
-        if (typeof shape.id !== "string") return;
-        if (deletedShapeIdsRef.current.has(shape.id)) return;
-
-        unloadedShapeIdsRef.current.add(shape.id);
-        shapeDetailCacheRef.current.set(shape.id, shape);
-        pendingLocalShapeVersionsRef.current.delete(shape.id);
-      });
-    },
-    [],
-  );
   const getPreservedFreeformShapeSnapshots = useCallback(() => {
     const snapshots: PiloCanvasFreeformShape[] = [];
 
@@ -1281,19 +1210,17 @@ function ClassicCanvasRuntimeInner({
           consumeShapePatch={consumeCanvasSurfaceShapePatch}
           freeformShapes={freeformShapes}
           hydrationVersion={canvasHydrationVersion}
+          loadingFrameIds={loadingFrameIds}
           onReady={setCanvasActions}
           onFreeformShapesDraftChange={captureDraftFreeformShapes}
           onFreeformShapesChange={persistFreeformShapes}
           onViewChange={handleViewChange}
-          onFrameChildShapesUnload={handleFrameChildShapesUnload}
           onViewportBoundsChange={loadViewportShapes}
-          onFrameChildrenRequest={loadFrameChildren}
           onFrameSubtreeRequest={loadFrameSubtree}
           getPreservedFreeformShapeSnapshots={
             getPreservedFreeformShapeSnapshots
           }
           isShapePatchProtected={isCanvasShapePatchProtected}
-          onShapeDetailRequest={loadShapeDetail}
           onHistoryStateChange={
             onHistoryStateChange ?? noopCanvasHistoryStateChange
           }
@@ -1304,12 +1231,17 @@ function ClassicCanvasRuntimeInner({
           shapePatchVersion={canvasShapePatchVersion}
           canvasAgentEnabled={storageMode === "api"}
         />
-        {canvasSyncNotice ? (
+        {canvasSyncNotice ||
+        initialViewportLoadStatus === "loading" ||
+        initialViewportLoadStatus === "retrying" ? (
           <div
-            className={`canvas-sync-notice canvas-sync-notice--${canvasSyncNotice.tone}`}
+            className={`canvas-sync-notice canvas-sync-notice--${canvasSyncNotice?.tone ?? "info"}`}
             role="status"
           >
-            {canvasSyncNotice.message}
+            {canvasSyncNotice?.message ??
+              (initialViewportLoadStatus === "retrying"
+                ? "Canvas Shape를 다시 불러오는 중이에요."
+                : "Canvas Shape를 불러오는 중이에요.")}
           </div>
         ) : null}
       </section>

@@ -186,8 +186,8 @@ const canvasShapeSync = await readFile(
   new URL("../src/features/canvas/persistence/canvas-shape-sync.ts", import.meta.url),
   "utf8"
 );
-const canvasCollapse = await readFile(
-  new URL("../src/features/canvas/engine/shapes/frame/canvas-frame-collapse.ts", import.meta.url),
+const canvasShapeMetadata = await readFile(
+  new URL("../src/features/canvas/engine/shapes/canvas-shape-metadata.ts", import.meta.url),
   "utf8"
 );
 const canvasCss = await readFile(
@@ -349,9 +349,9 @@ const piloFrameSelectionToolbar = await readFile(
   ),
   "utf8"
 );
-const piloCollapsedFrameOverlay = await readFile(
+const canvasFrameLazyLoadingOverlay = await readFile(
   new URL(
-    "../src/features/canvas/engine/editor/overlays/PiloCollapsedFrameOverlay.tsx",
+    "../src/features/canvas/engine/editor/overlays/CanvasFrameLazyLoadingOverlay.tsx",
     import.meta.url
   ),
   "utf8"
@@ -695,7 +695,7 @@ assert.match(canvasStorage, /delete props\.assetId/);
 assert.match(canvasRuntime, /@tanstack\/react-query/);
 assert.match(canvasRuntime, /QueryClientProvider/);
 assert.match(canvasRuntime, /viewportShapeLoadRequestSeqRef/);
-assert.match(canvasRuntime, /shapeDetailRequestSeqRef/);
+assert.doesNotMatch(canvasRuntime, /shapeDetailRequestSeqRef/);
 assert.match(canvasRuntime, /pendingLocalShapeVersionsRef/);
 assert.match(canvasRuntime, /useCanvasRuntimeHydration/);
 assert.match(canvasRuntime, /useCanvasApiLifecycle/);
@@ -743,15 +743,20 @@ assert.match(canvasViewportQueries, /queryClient\.removeQueries\(\{ exact: true,
 assert.match(canvasViewportQueries, /listShapesInViewport/);
 assert.match(canvasViewportQueries, /parentShapeId: frameId/);
 assert.match(canvasViewportQueries, /staleTime: 0/);
-assert.match(canvasViewportQueries, /isPiloFrameCollapsed/);
+assert.doesNotMatch(canvasViewportQueries, /isPiloFrameCollapsed/);
+assert.match(canvasViewportQueries, /shouldLoadFrameChildren/);
 assert.match(canvasViewportQueries, /mergeFrameChildren/);
-assert.match(canvasViewportQueries, /getShapeDetail/);
-assert.match(canvasViewportQueries, /CANVAS_SHAPE_DETAIL_MIN_ZOOM/);
+assert.doesNotMatch(canvasViewportQueries, /getShapeDetail/);
+assert.doesNotMatch(canvasViewportQueries, /shape-detail/);
 assert.match(canvasViewportQueries, /createViewportShapeLoadBounds/);
 assert.match(canvasViewportQueries, /doesLoadedViewportCoverBounds/);
 assert.match(canvasViewportQueries, /MAX_LOADED_VIEWPORT_BOUNDS = 24/);
 assert.match(canvasViewportQueries, /loadedViewportBoundsRef/);
 assert.match(canvasViewportQueries, /currentLoadedViewport\.bounds\.some/);
+assert.match(canvasViewportQueries, /initialViewportLoadStatus/);
+assert.match(canvasViewportQueries, /setInitialViewportLoadStatus\("retrying"\)/);
+assert.match(canvasViewportQueries, /loadingFrameIds/);
+assert.match(canvasViewportQueries, /setFrameLoading\(frameId, true\)/);
 assert.match(canvasRuntimeUtils, /DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN/);
 assert.match(canvasInitialCamera, /CLASSIC_CANVAS_INITIAL_ZOOM = 1/);
 assert.match(canvasInitialCamera, /editor\.centerOnPoint\(CLASSIC_CANVAS_ORIGIN/);
@@ -886,6 +891,8 @@ assert.match(canvasRuntime, /canvasClient,\s*[\r\n]\s*latestViewportBoundsRef/);
 assert.doesNotMatch(canvasRuntime, /persistenceCanvasClient/);
 assert.doesNotMatch(canvasRuntime, /commitShapeOperations/);
 assert.match(canvasRuntime, /canvas-sync-notice/);
+assert.match(canvasRuntime, /Canvas Shape를 불러오는 중이에요\./);
+assert.match(canvasRuntime, /Canvas Shape를 다시 불러오는 중이에요\./);
 assert.doesNotMatch(canvasRuntime, /getShapeSyncErrorNoticeMessage/);
 assert.match(canvasRuntime, /onShapeSyncError: handleShapeSyncError/);
 assert.match(canvasRuntime, /catchUpCanvasOperations/);
@@ -930,16 +937,16 @@ assert.match(canvasRuntime, /onRoomShapePatch: sendRoomShapePatch/);
 assert.match(canvasRuntime, /persistThroughRoomState,\s*[\r\n]\s*remoteShapeRevisionRef/);
 assert.match(canvasRuntime, /checkpointStatus\?\.status !== "delayed"/);
 assert.match(canvasRuntime, /저장이 지연되고 있어요/);
-assert.match(canvasRuntime, /shapeDetailCacheRef\.current\.set\(shape\.id, shape\)/);
+assert.match(canvasViewportQueries, /shapeDetailCacheRef\.current\.set\(shape\.id, shape\)/);
 assert.match(canvasRemoteOperations, /applyCanvasRemoteOperation/);
 assert.match(canvasRemoteOperations, /PILO_ARROW_BINDINGS_META_KEY/);
 assert.match(canvasRemoteOperations, /preserveArrowBindingMeta/);
 assert.match(canvasRemoteOperations, /shapeDetailCache\.set/);
 assert.match(canvasRemoteOperations, /shapeDetailCache\.delete/);
 assert.match(canvasRemoteOperations, /intersectsViewport/);
-assert.match(canvasRemoteOperations, /isPiloFrameCollapsed/);
+assert.doesNotMatch(canvasRemoteOperations, /isPiloFrameCollapsed/);
 assert.match(canvasRemoteOperations, /getPiloChildShapeCount/);
-assert.match(canvasRemoteOperations, /expandedFrameIds/);
+assert.match(canvasRemoteOperations, /frameIdsToLoad/);
 assert.match(canvasRemoteOperations, /applyCanvasRoomShapePatch/);
 assert.match(canvasRemoteOperations, /respectViewport = true/);
 assert.match(canvasRuntime, /respectViewport: false/);
@@ -952,13 +959,13 @@ assert.match(canvasRemoteOperations, /parentId\.startsWith\("shape:"\)/);
 assert.match(canvasRemoteOperations, /shapeDetailCache\.get\(parentId\)/);
 assert.match(canvasRemoteOperations, /parentId/);
 assert.match(canvasRuntime, /pendingRemoteFrameChildrenRequestRef/);
-assert.match(canvasRuntime, /result\.expandedFrameIds/);
+assert.match(canvasRuntime, /result\.frameIdsToLoad/);
 assert.match(canvasRuntime, /result\.loadedShapeIds/);
 assert.match(canvasRuntime, /result\.unloadedShapeIds/);
 assert.match(canvasRuntime, /loadFrameChildren\(frameId\)/);
 assert.match(canvasRuntime, /applyCanvasRoomShapePatch/);
 assert.match(canvasRuntime, /deferredRoomShapeChangesRef/);
-assert.match(canvasRuntime, /isRemoteFrameCollapseProtected/);
+assert.doesNotMatch(canvasRuntime, /isRemoteFrameCollapseProtected/);
 assert.match(canvasRuntime, /isRemoteShapeDeletionProtected/);
 assert.match(canvasRuntime, /flushDeferredRoomShapeChanges/);
 assert.match(canvasRuntime, /pendingRoomShapeAckCountsRef/);
@@ -1278,7 +1285,7 @@ assert.match(piloTldrawCanvas, /registerPendingRealtimePreviewGroup/);
 assert.match(piloTldrawCanvas, /acknowledgePendingPreviewGroupShapes/);
 assert.match(piloTldrawCanvas, /presence\?\.lastCommittedShapePatch/);
 assert.match(piloTldrawCanvas, /collectPendingPreviewGroupShapes/);
-assert.match(piloTldrawCanvas, /isShapeHiddenByCollapsedAncestor/);
+assert.doesNotMatch(piloTldrawCanvas, /isShapeHiddenByCollapsedAncestor/);
 assert.match(piloTldrawCanvas, /previewDeleteGraceSinceRef/);
 assert.doesNotMatch(piloTldrawCanvas, /remoteBusyShapeIdsRef/);
 assert.doesNotMatch(piloTldrawCanvas, /remoteDeleteBlockedShapeIdsRef/);
@@ -1329,13 +1336,14 @@ assert.match(piloTldrawCanvas, /uniquePendingArrowBindings/);
 assert.match(piloTldrawCanvas, /shape\.props\.kind !== "elbow"/);
 assert.match(piloTldrawCanvas, /kind: "elbow"/);
 assert.match(piloTldrawCanvas, /editor\.createShapes\(sortFreeformShapesForCreate\(shapes\)\)/);
-assert.match(piloTldrawCanvas, /onShapeDetailRequest/);
-assert.match(piloTldrawCanvas, /onFrameChildrenRequest/);
-assert.match(piloTldrawCanvas, /onFrameChildShapesUnload/);
-assert.match(piloTldrawCanvas, /collectFrameDescendantShapes/);
-assert.match(piloTldrawCanvas, /onFreeformShapesChange\(nextFreeformShapes, frameChange\)/);
+assert.doesNotMatch(piloTldrawCanvas, /onShapeDetailRequest/);
+assert.doesNotMatch(piloTldrawCanvas, /onFrameChildrenRequest/);
+assert.doesNotMatch(piloTldrawCanvas, /onFrameChildShapesUnload/);
+assert.doesNotMatch(piloTldrawCanvas, /collectFrameDescendantShapes/);
 assert.match(piloTldrawCanvas, /registerPendingRealtimePreviewGroup\(freehandShapes, "freehand"\)/);
-assert.match(piloTldrawCanvas, /PiloCollapsedFrameOverlay/);
+assert.doesNotMatch(piloTldrawCanvas, /PiloCollapsedFrameOverlay/);
+assert.match(piloTldrawCanvas, /CanvasFrameLazyLoadingOverlay/);
+assert.match(piloTldrawCanvas, /loadingFrameIds/);
 assert.match(piloTldrawCanvas, /onViewportBoundsChange/);
 assert.match(piloTldrawCanvas, /placePiloCanvasShapeInEmptyViewport/);
 assert.match(piloTldrawCanvas, /createPiloCanvasShapeInEmptyViewport/);
@@ -1387,7 +1395,7 @@ assert.match(piloCanvasTypes, /activeMutationShapeIds: string\[\]/);
 assert.doesNotMatch(piloCanvasTypes, /protectedShapeIds: string\[\]/);
 assert.match(piloCanvasTypes, /export type PiloCanvasViewSetting/);
 assert.match(piloCanvasTypes, /export type PiloCanvasViewportBounds/);
-assert.match(piloCanvasTypes, /export type PiloCanvasShapeDetailRequest/);
+assert.doesNotMatch(piloCanvasTypes, /PiloCanvasShapeDetailRequest/);
 assert.match(canvasRuntime, /localInteractionStateRef/);
 assert.match(canvasRuntime, /isRemoteOperationProtectedByLocalInteraction/);
 assert.match(canvasRuntime, /queueDeferredRemoteOperation\(/);
@@ -1414,11 +1422,11 @@ assert.match(piloCanvasShapeUtils, /frame\/PiloFrameShapeUtil/);
 assert.doesNotMatch(piloCanvasShapeUtils, /frame\/PiloFrameSelectionToolbar/);
 assert.match(piloFrameShapeUtil, /FrameShapeUtil\.configure/);
 assert.match(piloFrameShapeUtil, /resolveNextFrameName/);
-assert.match(piloFrameShapeUtil, /isPiloFrameCollapsed/);
+assert.doesNotMatch(piloFrameShapeUtil, /isPiloFrameCollapsed/);
 assert.match(piloFrameShapeUtil, /shouldClipChild/);
 assert.match(piloFrameShapeUtil, /return false/);
 assert.doesNotMatch(piloFrameSelectionToolbar, /FrameShapeUtil\.configure/);
-assert.match(piloFrameSelectionToolbar, /onFrameCollapsedChange/);
+assert.doesNotMatch(piloFrameSelectionToolbar, /onFrameCollapsedChange/);
 assert.match(piloFrameSelectionToolbar, /FRAME_TOOLBAR_BASE_WIDTH/);
 assert.match(piloFrameSelectionToolbar, /frameViewportWidth/);
 assert.match(piloFrameSelectionToolbar, /scale: toolbarScale/);
@@ -1427,13 +1435,10 @@ assert.match(piloFrameSelectionToolbar, /translateX\(-50%\) scale/);
 assert.match(piloFrameSelectionToolbar, /editor\.getShape\(selectedFrame\.id\)/);
 assert.match(piloFrameSelectionToolbar, /if \(!isPiloFrameShape\(currentFrame\)\) return/);
 assert.match(piloTldrawCanvas, /if \(!frameShape\.isLocked\) \{\s*return;\s*\}/);
-assert.match(piloCollapsedFrameOverlay, /pilo-collapsed-frame-card/);
-assert.match(piloCollapsedFrameOverlay, /pilo-collapsed-frame-expand/);
-assert.match(piloCollapsedFrameOverlay, /is-selected/);
-assert.match(piloCollapsedFrameOverlay, /scale\(\$\{item\.zoom\}\)/);
-assert.match(piloCollapsedFrameOverlay, /handleExpandPointerDown/);
-assert.match(piloCollapsedFrameOverlay, /onFrameCollapsedChange\(frame, false\)/);
-assert.match(piloCollapsedFrameOverlay, /getPiloChildShapeCount/);
+assert.match(canvasFrameLazyLoadingOverlay, /canvas-frame-lazy-loading-layer/);
+assert.match(canvasFrameLazyLoadingOverlay, /canvas-frame-lazy-loading-indicator/);
+assert.match(canvasFrameLazyLoadingOverlay, /pageToViewport/);
+assert.match(canvasFrameLazyLoadingOverlay, /⟳/);
 assert.match(piloCodeBlockShapeUtil, /BaseBoxShapeUtil/);
 assert.match(piloCodeBlockShapeUtil, /isCollapsed: T\.boolean\.optional/);
 assert.doesNotMatch(piloCodeBlockShapeUtil, /BaseFrameLikeShapeUtil/);
@@ -1459,13 +1464,16 @@ assert.doesNotMatch(canvasCss, /is-remotely-edit-locked/);
 assert.match(canvasCss, /is-pilo-eraser-active/);
 assert.match(canvasCss, /pilo-tldraw-canvas \.tl-canvas/);
 assert.match(canvasCss, /crosshair !important/);
+assert.match(canvasCss, /canvas-frame-lazy-loading-indicator/);
+assert.match(canvasCss, /canvas-frame-lazy-loading-spin/);
 assert.match(piloCodeMirrorEditor, /@codemirror\/view/);
 assert.match(piloCodeBlockShapeTypes, /export type PiloCodeBlockShape/);
 assert.match(piloCodeBlockShapeTypes, /isCollapsed\?: boolean/);
-assert.match(canvasCollapse, /piloFrameCollapsed/);
-assert.match(canvasCollapse, /piloCodeBlockCollapsed/);
-assert.match(canvasCollapse, /piloChildShapeCount/);
-assert.match(canvasCollapse, /piloCodeBlockExpandedSize/);
+assert.doesNotMatch(canvasShapeMetadata, /piloFrameCollapsed/);
+assert.doesNotMatch(canvasShapeMetadata, /piloFrameExpandedSize/);
+assert.match(canvasShapeMetadata, /piloCodeBlockCollapsed/);
+assert.match(canvasShapeMetadata, /piloChildShapeCount/);
+assert.match(canvasShapeMetadata, /piloCodeBlockExpandedSize/);
 assert.match(piloCanvasPlacement, /PiloPlacementRequest/);
 assert.match(piloCanvasPlacement, /placePiloCanvasShapeAt/);
 assert.match(piloCanvasPlacement, /placePiloCanvasShapeInEmptyViewport/);
@@ -1733,47 +1741,23 @@ function buildScenarioPersistableShapes(state) {
   return Array.from(nextShapeMap.values());
 }
 
-function createScenarioFrame(id, collapsed, childShapeCount = 1) {
+function createScenarioFrame(id, childShapeCount = 1) {
   return {
     id,
     type: "frame",
     x: 0,
     y: 0,
     props: {
-      h: collapsed ? 144 : 600,
-      w: collapsed ? 144 : 800
+      h: 600,
+      w: 800
     },
     meta: {
-      piloChildShapeCount: childShapeCount,
-      piloFrameCollapsed: collapsed
+      piloChildShapeCount: childShapeCount
     }
   };
 }
 
-function collectScenarioDescendantIds(shapes, frameId) {
-  const descendantIds = new Set();
-  let changed = true;
-
-  while (changed) {
-    changed = false;
-    shapes.forEach((shape) => {
-      if (
-        descendantIds.has(shape.id) ||
-        (shape.parentId !== frameId && !descendantIds.has(shape.parentId))
-      ) {
-        return;
-      }
-
-      descendantIds.add(shape.id);
-      changed = true;
-    });
-  }
-
-  return descendantIds;
-}
-
 function applyScenarioRoomFramePatch(state, incomingShapes) {
-  const incomingShapeMap = shapeMap(incomingShapes);
   const orderedShapes = [
     ...incomingShapes.filter((shape) => shape.type === "frame"),
     ...incomingShapes.filter((shape) => shape.type !== "frame")
@@ -1781,13 +1765,6 @@ function applyScenarioRoomFramePatch(state, incomingShapes) {
 
   orderedShapes.forEach((incomingShape) => {
     const currentShape = state.shapes.find((shape) => shape.id === incomingShape.id);
-    const previousShape = currentShape ?? state.cache.get(incomingShape.id);
-    const isCollapsedFrame =
-      incomingShape.type === "frame" &&
-      incomingShape.meta?.piloFrameCollapsed === true;
-    const wasCollapsedFrame =
-      previousShape?.type === "frame" &&
-      previousShape.meta?.piloFrameCollapsed === true;
 
     state.cache.set(incomingShape.id, incomingShape);
 
@@ -1795,14 +1772,8 @@ function applyScenarioRoomFramePatch(state, incomingShapes) {
       const visibleParent = state.shapes.find(
         (shape) => shape.id === incomingShape.parentId
       );
-      const incomingParent = incomingShapeMap.get(incomingShape.parentId);
-      const parent = visibleParent ?? incomingParent ?? state.cache.get(incomingShape.parentId);
 
-      if (
-        !visibleParent ||
-        !parent ||
-        parent.meta?.piloFrameCollapsed === true
-      ) {
+      if (!visibleParent) {
         state.unloadedShapeIds.add(incomingShape.id);
         state.shapes = state.shapes.filter((shape) => shape.id !== incomingShape.id);
         return;
@@ -1818,39 +1789,11 @@ function applyScenarioRoomFramePatch(state, incomingShapes) {
 
     if (
       incomingShape.type === "frame" &&
-      !isCollapsedFrame &&
-      (wasCollapsedFrame ||
-        (!currentShape && incomingShape.meta?.piloChildShapeCount > 0))
+      !currentShape &&
+      incomingShape.meta?.piloChildShapeCount > 0
     ) {
       state.pendingFrameIds.add(incomingShape.id);
     }
-
-    if (!isCollapsedFrame) return;
-
-    const descendantIds = collectScenarioDescendantIds(
-      state.shapes,
-      incomingShape.id
-    );
-    state.shapes.forEach((shape) => {
-      if (!descendantIds.has(shape.id)) return;
-
-      state.cache.set(shape.id, shape);
-      state.unloadedShapeIds.add(shape.id);
-    });
-    state.shapes = state.shapes.filter(
-      (shape) => !descendantIds.has(shape.id)
-    );
-  });
-}
-
-function restoreScenarioFrameChildren(state, frameId) {
-  const cachedChildren = Array.from(state.cache.values()).filter(
-    (shape) => shape.parentId === frameId && !state.deletedShapeIds.has(shape.id)
-  );
-
-  mergeScenarioLoadedShapes(state, cachedChildren);
-  cachedChildren.forEach((shape) => {
-    state.unloadedShapeIds.delete(shape.id);
   });
 }
 
@@ -1979,39 +1922,20 @@ async function runScenarioBatchFallback(operations, runBatch) {
     cache: new Map(),
     deletedShapeIds: new Set(),
     pendingFrameIds: new Set(),
-    shapes: [createScenarioFrame(frameId, false), child],
+    shapes: [createScenarioFrame(frameId), child],
     unloadedShapeIds: new Set()
   };
 
-  applyScenarioRoomFramePatch(state, [createScenarioFrame(frameId, true)]);
-
-  assert.deepEqual(
-    state.shapes.map((shape) => shape.id),
-    [frameId]
-  );
-  assert.equal(state.cache.get(child.id)?.x, 1);
-  assert.equal(state.unloadedShapeIds.has(child.id), true);
-  assert.equal(state.deletedShapeIds.has(child.id), false);
-
   applyScenarioRoomFramePatch(state, [
     {
-      ...child,
-      x: 2
+      ...createScenarioFrame(frameId),
+      x: 120
     }
   ]);
-  assert.equal(state.cache.get(child.id)?.x, 2);
+
   assert.deepEqual(
     state.shapes.map((shape) => shape.id),
-    [frameId]
-  );
-
-  applyScenarioRoomFramePatch(state, [createScenarioFrame(frameId, false)]);
-  assert.equal(state.pendingFrameIds.has(frameId), true);
-
-  restoreScenarioFrameChildren(state, frameId);
-  assert.equal(
-    state.shapes.find((shape) => shape.id === child.id)?.x,
-    2
+    [frameId, child.id]
   );
   assert.equal(state.unloadedShapeIds.has(child.id), false);
 }
@@ -2019,14 +1943,14 @@ async function runScenarioBatchFallback(operations, runBatch) {
 {
   const frameId = "shape:cold-frame";
   const state = {
-    cache: new Map([[frameId, createScenarioFrame(frameId, true)]]),
+    cache: new Map(),
     deletedShapeIds: new Set(),
     pendingFrameIds: new Set(),
-    shapes: [createScenarioFrame(frameId, true)],
+    shapes: [],
     unloadedShapeIds: new Set()
   };
 
-  applyScenarioRoomFramePatch(state, [createScenarioFrame(frameId, false, 2)]);
+  applyScenarioRoomFramePatch(state, [createScenarioFrame(frameId, 2)]);
 
   assert.equal(state.pendingFrameIds.has(frameId), true);
   assert.equal(
@@ -2041,13 +1965,13 @@ async function runScenarioBatchFallback(operations, runBatch) {
     cache: new Map(),
     deletedShapeIds: new Set(),
     pendingFrameIds: new Set(),
-    shapes: [createScenarioFrame(frameId, false, 2)],
+    shapes: [createScenarioFrame(frameId, 2)],
     unloadedShapeIds: new Set()
   };
 
   applyScenarioRoomFramePatch(state, [
     {
-      ...createScenarioFrame(frameId, false, 2),
+      ...createScenarioFrame(frameId, 2),
       x: 120
     }
   ]);
@@ -2124,15 +2048,15 @@ async function runScenarioBatchFallback(operations, runBatch) {
 }
 
 {
-  const unloadedShapeIds = new Set(["shape:collapsed-child"]);
+  const unloadedShapeIds = new Set(["shape:lazy-child"]);
   const deletedShapeIds = new Set();
 
-  ["shape:collapsed-child"].forEach((shapeId) => {
+  ["shape:lazy-child"].forEach((shapeId) => {
     if (unloadedShapeIds.has(shapeId)) return;
     deletedShapeIds.add(shapeId);
   });
 
-  assert.equal(deletedShapeIds.has("shape:collapsed-child"), false);
+  assert.equal(deletedShapeIds.has("shape:lazy-child"), false);
 }
 
 {
@@ -2142,7 +2066,7 @@ async function runScenarioBatchFallback(operations, runBatch) {
       {
         shapeIds: new Set(["shape:folder-frame", "shape:folder-child"]),
         snapshots: new Map([
-          ["shape:folder-frame", createScenarioFrame("shape:folder-frame", false)],
+          ["shape:folder-frame", createScenarioFrame("shape:folder-frame")],
           [
             "shape:folder-child",
             {
@@ -2173,6 +2097,9 @@ async function runScenarioBatchFallback(operations, runBatch) {
 await import("./calendar/test.mjs");
 await import("../src/features/agent/agent-feature.test.mjs");
 await import("../src/features/canvas/agent/canvas-agent-context.test.mjs");
+await import(
+  "../src/features/canvas/engine/runtime/canvas-lazy-load-retry.test.mjs"
+);
 await import("../src/features/canvas/engine/editor/overlays/canvas-ai-chat-layout.test.mjs");
 await import("./github-integration/test.mjs");
 await import("../src/features/board/board-feature.test.mjs");

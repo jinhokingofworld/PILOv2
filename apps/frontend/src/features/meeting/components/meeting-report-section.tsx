@@ -28,6 +28,8 @@ import {
   type MeetingReportRealtimeEvent
 } from "@/features/meeting/hooks/use-meeting-report-realtime";
 import type { MeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
+import { MeetingReportWorkspaceLocationAdapter } from "@/features/meeting/meeting-workspace-location-adapter";
+import { createMeetingReportRequestGuard } from "@/features/meeting/meeting-workspace-location";
 import type {
   MeetingReportActionItem,
   MeetingReportActionItemDeliveryInput,
@@ -1098,7 +1100,11 @@ function MeetingReportDetailModal({
             <X className="size-4" />
           </DialogPrimitive.Close>
 
-          <div className="flex-1 overflow-y-auto px-5 py-5">
+          <div
+            className="flex-1 overflow-y-auto px-5 py-5"
+            data-workspace-follow-report-id={report?.id}
+            data-workspace-follow-surface="meeting-content"
+          >
             {detailStatus === "loading" && !report ? (
               <div className="grid gap-4">
                 <Skeleton className="h-28 rounded-lg" />
@@ -1484,6 +1490,9 @@ export function MeetingReportSection({
   const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
   const [updatingReportContent, setUpdatingReportContent] = useState(false);
   const openedDeepLinkReportIdRef = useRef<string | null>(null);
+  const reportDetailRequestGuardRef = useRef(
+    createMeetingReportRequestGuard()
+  );
 
   const hasProcessingReport = reports.some((report) =>
     isReportInProgress(report.status)
@@ -1514,6 +1523,7 @@ export function MeetingReportSection({
         silent?: boolean;
       } = {}
     ) => {
+      const request = reportDetailRequestGuardRef.current.begin(reportId);
       if (!options.silent) {
         setDetailStatus("loading");
       }
@@ -1521,10 +1531,16 @@ export function MeetingReportSection({
 
       try {
         const result = await getMeetingReport(reportId);
+        if (!reportDetailRequestGuardRef.current.isCurrent(request)) {
+          return null;
+        }
         setSelectedReport(result.report);
         setDetailStatus("success");
         return result.report;
       } catch (error) {
+        if (!reportDetailRequestGuardRef.current.isCurrent(request)) {
+          return null;
+        }
         const message = getReportRequestErrorMessage(error);
         setDetailError(message);
         setDetailStatus("error");
@@ -1543,6 +1559,15 @@ export function MeetingReportSection({
     [loadReportDetail]
   );
 
+  const handleOpenReportById = useCallback(
+    (reportId: string) => {
+      setSelectedReportId(reportId);
+      setSelectedReport(null);
+      void loadReportDetail(reportId);
+    },
+    [loadReportDetail]
+  );
+
   useEffect(() => {
     if (!canLoad) return;
 
@@ -1556,6 +1581,7 @@ export function MeetingReportSection({
   }, [canLoad, loadReportDetail]);
 
   const handleCloseReport = useCallback(() => {
+    reportDetailRequestGuardRef.current.invalidate();
     setSelectedReportId(null);
     setSelectedReport(null);
     setDetailStatus("idle");
@@ -1790,6 +1816,11 @@ export function MeetingReportSection({
       id="report"
       className="grid min-h-[calc(100vh-8rem)] content-start gap-5 rounded-xl border bg-card p-4 sm:p-6"
     >
+      <MeetingReportWorkspaceLocationAdapter
+        closeReport={handleCloseReport}
+        openReport={handleOpenReportById}
+        selectedReportId={selectedReportId}
+      />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="font-heading text-2xl font-semibold">회의록</h2>

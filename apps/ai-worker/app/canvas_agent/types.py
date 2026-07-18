@@ -7,6 +7,7 @@ CANVAS_AGENT_SCHEMA_VERSION = "canvas-agent:v1"
 CANVAS_AGENT_INTENTS = {
     "find_shapes",
     "generate_html",
+    "import_drive_file",
     "unsupported",
 }
 CANVAS_AGENT_ACTIONS = {

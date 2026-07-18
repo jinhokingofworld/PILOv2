@@ -200,7 +200,7 @@ import {
 import {
   createSqlErdModelSqlHistory,
   createSqlErdNormalizedSqlPreview,
-  createSqlErdSqlLineDiff,
+  createSqlErdSplitDiffRows,
   createSqlErdVerifiedNormalizedSnapshot,
   isSqlErdNormalizedSqlPreviewCurrent,
   isSqlErdViewSessionCurrent,
@@ -1894,7 +1894,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setLayoutAutosaveBlockReason(null);
           setSessionLoadState({
             label: "Workspace",
-            message: `Workspace source operation ${sourcePublishResult.latestOpSeq}`,
+            message: "Workspace에 저장되었습니다.",
             tone: "success"
           });
           return;
@@ -2112,7 +2112,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setLayoutAutosaveRetryAttempt(0);
           setSessionLoadState({
             label: "Workspace",
-            message: `Workspace operation ${operationResult.latestOpSeq}`,
+            message: "Workspace에 저장되었습니다.",
             tone: "success"
           });
           return;
@@ -2520,6 +2520,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           layoutJson={sqlErdViewSession.layoutJson}
           modelJson={sqlErdViewSession.modelJson}
           committedTableMoves={committedTableMoves}
+          onDeleteForeignKey={({ relationId }) => {
+            handlePreviewForeignKeyDelete({ relationId });
+          }}
           onLayoutPatch={handleLayoutPatch}
           onSchemaDelete={handleDeleteSchemaSelection}
           onReloadSession={handleReloadPausedSession}
@@ -2533,7 +2536,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           pinnedTableId={tablePinState.pinnedTableId}
           realtimeConfig={realtimeConfig}
           isReadOnly={isWriteProtocolMismatch}
+          isInspectorOpen={isInspectorOpen}
           isSqlSourceOpen={isSourceOpen}
+          onInspectorOpenChange={setIsInspectorOpen}
           selectedSqlErdObject={selectedSqlErdObject}
           sessionId={sessionId}
         />
@@ -2602,6 +2607,16 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           (sqlErdViewSession.writeProtocol === "operations_v1" &&
             !sourceLock.canEdit)
         }
+        readOnlyMessage={
+          isWriteProtocolMismatch
+            ? "이 탭의 저장 방식이 현재 세션과 달라 새로고침이 필요합니다."
+            : sqlErdViewSession.writeProtocol === "operations_v1" &&
+                !sourceLock.canEdit
+              ? sourceLock.status === "read_only"
+                ? sourceLock.message
+                : "SQL 편집 잠금을 확인하는 중입니다. 잠시 후 적용할 수 있습니다."
+              : null
+        }
         onApply={handleApplyNormalizedSql}
         onOpenChange={(open) => {
           if (!open && !isNormalizedSqlApplying) {
@@ -2621,7 +2636,8 @@ function NormalizedSqlPreviewDialog({
   isReadOnly,
   onApply,
   onOpenChange,
-  preview
+  preview,
+  readOnlyMessage
 }: {
   error: string | null;
   isApplying: boolean;
@@ -2629,6 +2645,7 @@ function NormalizedSqlPreviewDialog({
   onApply: () => void;
   onOpenChange: (open: boolean) => void;
   preview: SqlErdNormalizedSqlPreview | null;
+  readOnlyMessage: string | null;
 }) {
   return (
     <Dialog open={preview !== null} onOpenChange={onOpenChange}>
@@ -2668,6 +2685,11 @@ function NormalizedSqlPreviewDialog({
             {error}
           </p>
         ) : null}
+        {isReadOnly && readOnlyMessage ? (
+          <p className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm leading-6 text-blue-900">
+            {readOnlyMessage}
+          </p>
+        ) : null}
         <div className="flex justify-end gap-2">
           <button
             className="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium disabled:pointer-events-none disabled:opacity-50"
@@ -2698,34 +2720,64 @@ function SqlPreviewDiff({
   afterSourceText: string;
   beforeSourceText: string;
 }) {
-  const lines = createSqlErdSqlLineDiff(beforeSourceText, afterSourceText);
-  const visibleLines = lines.slice(0, 1200);
+  const rows = createSqlErdSplitDiffRows(beforeSourceText, afterSourceText);
+  const visibleRows = rows.slice(0, 1200);
 
   return (
     <div className="min-h-0 overflow-hidden rounded-md border">
       <p className="border-b bg-muted/30 px-3 py-2 text-sm font-medium">
         SQL diff
       </p>
-      <pre className="max-h-72 overflow-auto bg-slate-950 py-3 font-mono text-xs leading-5 text-slate-100">
-        {visibleLines.map((line, index) => (
-          <span
-            className={cn(
-              "block min-h-5 whitespace-pre-wrap break-words px-3",
-              line.kind === "added" && "bg-emerald-500/20 text-emerald-100",
-              line.kind === "removed" && "bg-rose-500/20 text-rose-100"
-            )}
-            key={`${line.kind}-${index}-${line.value}`}
-          >
-            {line.kind === "added" ? "+ " : line.kind === "removed" ? "- " : "  "}
-            {line.value}
-          </span>
-        ))}
-      </pre>
-      {lines.length > visibleLines.length ? (
+      <div className="grid grid-cols-2 border-b bg-slate-900 text-xs font-medium text-slate-200">
+        <p className="border-r px-3 py-2">변경 전</p>
+        <p className="px-3 py-2">변경 후</p>
+      </div>
+      <div className="max-h-80 overflow-auto bg-slate-950 font-mono text-xs leading-5 text-slate-100">
+        <div className="min-w-[760px]">
+          {visibleRows.map((row, index) => (
+            <div
+              className="grid grid-cols-2"
+              key={`${index}-${row.before.lineNumber}-${row.after.lineNumber}`}
+            >
+              <SqlPreviewDiffCell cell={row.before} side="before" />
+              <SqlPreviewDiffCell cell={row.after} side="after" />
+            </div>
+          ))}
+        </div>
+      </div>
+      {rows.length > visibleRows.length ? (
         <p className="border-t px-3 py-2 text-xs text-muted-foreground">
-          Showing the first {visibleLines.length.toLocaleString()} changed lines.
+          처음 {visibleRows.length.toLocaleString()}개 비교 행만 표시합니다.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function SqlPreviewDiffCell({
+  cell,
+  side
+}: {
+  cell: ReturnType<typeof createSqlErdSplitDiffRows>[number]["before"];
+  side: "after" | "before";
+}) {
+  return (
+    <div
+      className={cn(
+        "grid min-h-5 grid-cols-[3.5rem_minmax(0,1fr)]",
+        side === "before" && "border-r border-slate-700",
+        cell.kind === "added" && "bg-emerald-500/20 text-emerald-100",
+        cell.kind === "removed" && "bg-rose-500/20 text-rose-100",
+        cell.kind === "empty" && "bg-slate-900/60"
+      )}
+    >
+      <span className="select-none border-r border-slate-700 px-2 text-right text-slate-500">
+        {cell.lineNumber ?? ""}
+      </span>
+      <code className="whitespace-pre px-2">
+        {cell.kind === "added" ? "+ " : cell.kind === "removed" ? "- " : "  "}
+        {cell.value}
+      </code>
     </div>
   );
 }
@@ -3348,6 +3400,7 @@ type CanvasShellProps = {
   enableTableMovePreview: boolean;
   layoutJson: SqltoerdSessionPayload["layoutJson"];
   modelJson: SqltoerdSessionPayload["modelJson"];
+  onDeleteForeignKey: (input: { relationId: string }) => void;
   onLayoutPatch: (
     patch: SqltoerdLayoutPatch,
     context?: SqlErdLayoutPatchContext
@@ -3363,7 +3416,9 @@ type CanvasShellProps = {
   pinnedTableId: string | null;
   realtimeConfig: SqlErdRealtimeConfig;
   isReadOnly: boolean;
+  isInspectorOpen: boolean;
   isSqlSourceOpen: boolean;
+  onInspectorOpenChange: (isOpen: boolean) => void;
   selectedSqlErdObject: SqlErdSelection;
   sessionId: string;
 };
@@ -3375,6 +3430,7 @@ function CanvasShell({
   enableTableMovePreview,
   layoutJson,
   modelJson,
+  onDeleteForeignKey,
   onLayoutPatch,
   onSchemaDelete,
   onReloadSession,
@@ -3385,7 +3441,9 @@ function CanvasShell({
   pinnedTableId,
   realtimeConfig,
   isReadOnly,
+  isInspectorOpen,
   isSqlSourceOpen,
+  onInspectorOpenChange,
   selectedSqlErdObject,
   sessionId
 }: CanvasShellProps) {
@@ -3397,6 +3455,7 @@ function CanvasShell({
         enableTableMovePreview={enableTableMovePreview}
         layoutJson={layoutJson}
         modelJson={modelJson}
+        onDeleteForeignKey={(relationId) => onDeleteForeignKey({ relationId })}
         onLayoutPatch={onLayoutPatch}
         onSchemaDelete={onSchemaDelete}
         onSelectionChange={onSelectionChange}
@@ -3404,7 +3463,9 @@ function CanvasShell({
         pinnedTableId={pinnedTableId}
         realtimeConfig={realtimeConfig}
         isReadOnly={isReadOnly}
+        isInspectorOpen={isInspectorOpen}
         isSqlSourceOpen={isSqlSourceOpen}
+        onInspectorOpenChange={onInspectorOpenChange}
         sessionId={sessionId}
         selectedSqlErdObject={selectedSqlErdObject}
         tableFocus={agentTableFocus}
@@ -3614,7 +3675,10 @@ function InspectorPanel({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
+      <div
+        className="flex flex-1 flex-col gap-6 overflow-auto p-6"
+        data-workspace-follow-surface="sql-erd-inspector"
+      >
         <InspectorContent
           canAddForeignKey={canAddForeignKey}
           canEditSchema={canEditSchema}

@@ -1,10 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import { badRequest } from "../../../common/api-error";
+import { DriveService } from "../../drive/drive.service";
 import { CanvasAgentRepository } from "./canvas-agent.repository";
 import { findCanvasAgentToolTarget } from "./canvas-agent-tool-targets";
 import { CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE } from "./canvas-agent.constants";
 import type {
   CanvasAgentHtmlArtifact,
+  CanvasAgentClientAction,
   CanvasAgentProgressPayload,
   CanvasAgentRunRow,
   CanvasAgentShapeSummary,
@@ -15,6 +17,7 @@ import type {
 
 export type CanvasAgentActionResult = {
   artifact?: CanvasAgentHtmlArtifact | null;
+  clientAction?: CanvasAgentClientAction | null;
   progress: CanvasAgentProgressPayload | null;
   resourceRefs: string[];
   shouldContinue: boolean;
@@ -23,7 +26,10 @@ export type CanvasAgentActionResult = {
 
 @Injectable()
 export class CanvasAgentActionService {
-  constructor(private readonly repository: CanvasAgentRepository) {}
+  constructor(
+    private readonly repository: CanvasAgentRepository,
+    private readonly driveService: DriveService
+  ) {}
 
   async execute(
     run: CanvasAgentRunRow,
@@ -102,8 +108,13 @@ export class CanvasAgentActionService {
           progress: this.progress(summary, [], null)
         };
       }
+      case "import_drive_file": {
+        const query = this.readText(intentArguments.query).slice(0, 120);
+        if (!query) throw badRequest("Canvas Agent import_drive_file intent query is required");
+        return this.importDriveFile(run, query);
+      }
       case "unsupported": {
-        const summary = "현재 Canvas AI는 기존 도형 찾기와 선택 영역의 정적 HTML/CSS 생성만 지원합니다.";
+        const summary = "현재 Canvas AI는 기존 도형 찾기, Drive 이미지 가져오기, 선택 영역의 정적 HTML/CSS 생성을 지원합니다.";
         return {
           artifact: null,
           summary,
@@ -115,6 +126,66 @@ export class CanvasAgentActionService {
       default:
         throw badRequest("Canvas Agent intent is not supported");
     }
+  }
+
+  private async importDriveFile(
+    run: CanvasAgentRunRow,
+    query: string
+  ): Promise<CanvasAgentActionResult> {
+    const matches = await this.driveService.searchReadyImagesForCanvas(
+      run.requested_by_user_id,
+      run.workspace_id,
+      query,
+      5
+    );
+    if (!matches.length) {
+      const summary = `공유 드라이브에서 “${query}” 관련 이미지를 찾지 못했습니다.`;
+      return {
+        clientAction: null,
+        summary,
+        resourceRefs: [],
+        shouldContinue: false,
+        progress: this.progress(summary, [], null)
+      };
+    }
+
+    const [bestMatch, nextMatch] = matches;
+    const confident = Boolean(
+      bestMatch
+      && (
+        matches.length === 1
+        || bestMatch.score >= 500
+        || !nextMatch
+        || bestMatch.score - nextMatch.score >= 100
+      )
+    );
+    if (!bestMatch || !confident) {
+      const candidates = matches.slice(0, 3).map((match) => match.fileName).join(", ");
+      const summary = `공유 드라이브에서 비슷한 이미지가 여러 개 발견됐습니다: ${candidates}. 파일명을 더 구체적으로 알려주세요.`;
+      return {
+        clientAction: null,
+        summary,
+        resourceRefs: matches.map((match) => match.fileId),
+        shouldContinue: false,
+        progress: this.progress(summary, [], null)
+      };
+    }
+
+    const summary = `공유 드라이브의 “${bestMatch.fileName}” 이미지를 Canvas에 추가합니다.`;
+    return {
+      clientAction: {
+        type: "insert_drive_file",
+        file: {
+          fileId: bestMatch.fileId,
+          fileName: bestMatch.fileName,
+          mimeType: bestMatch.mimeType
+        }
+      },
+      summary,
+      resourceRefs: [bestMatch.fileId],
+      shouldContinue: false,
+      progress: this.progress(summary, [], null)
+    };
   }
 
   private findCanvasTool(input: Record<string, unknown>): CanvasAgentActionResult {

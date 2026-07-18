@@ -47,7 +47,7 @@ import {
 import { CanvasAgentVisualOverlay } from "./overlays/CanvasAgentVisualOverlay";
 import { CanvasRemoteConnectionPreviewOverlay } from "./overlays/CanvasRemoteConnectionPreviewOverlay";
 import { CanvasRemoteFreehandPreviewOverlay } from "./overlays/CanvasRemoteFreehandPreviewOverlay";
-import { PiloCollapsedFrameOverlay } from "./overlays/PiloCollapsedFrameOverlay";
+import { CanvasFrameLazyLoadingOverlay } from "./overlays/CanvasFrameLazyLoadingOverlay";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
 import { SelectedGroupToolbar } from "../interactions/PiloCanvasGroupToolbar";
 import {
@@ -76,7 +76,6 @@ import {
   type PiloArrowBindingSnapshot,
 } from "./canvas-arrow-bindings";
 import type {
-  PiloCanvasShapeDetailRequest,
   PiloCanvasFreeformShape,
   PiloCanvasLocalInteractionState,
   PiloCanvasLocalShapeChange,
@@ -100,14 +99,6 @@ import {
   importCodeFilesFromDataTransfer,
   type PiloCodeFileImportResult,
 } from "../../imports/canvas-code-file-import";
-import {
-  PILO_CHILD_SHAPE_COUNT_META_KEY,
-  PILO_FRAME_EXPANDED_SIZE_META_KEY,
-  PILO_FRAME_COLLAPSED_META_KEY,
-  getPiloFrameExpandedSize,
-  getPiloChildShapeCount,
-  isPiloFrameCollapsed,
-} from "../shapes/frame/canvas-frame-collapse";
 import type {
   CanvasAiChatAnchor,
   PiloCanvasActions,
@@ -128,6 +119,7 @@ import type {
   PiloDrawingPreset,
 } from "./canvas-editor-contracts";
 import { resetClassicCanvasCamera } from "./canvas-initial-camera";
+import { CanvasDriveFileProvider } from "../../integrations/drive/CanvasDriveFileContext";
 
 export type { PiloCanvasFreeformShape } from "../canvas-engine-types";
 export type { PiloInsertableTool } from "../shapes/pilo-canvas-shape-factory";
@@ -200,6 +192,7 @@ type CanvasEditorProps = {
   consumeShapePatch: () => PiloCanvasShapePatch;
   hydrationVersion: number;
   freeformShapes: PiloCanvasFreeformShape[];
+  loadingFrameIds: ReadonlySet<string>;
   onReady: (actions: PiloCanvasActions | null) => void;
   onFreeformShapesDraftChange: (
     shapes: PiloCanvasFreeformShape[],
@@ -210,13 +203,10 @@ type CanvasEditorProps = {
     change?: PiloCanvasLocalShapeChange,
   ) => void;
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
-  onFrameChildShapesUnload: (shapes: PiloCanvasFreeformShape[]) => void;
-  onFrameChildrenRequest: (frameId: string) => void;
   onFrameSubtreeRequest: (frameId: string) => Promise<void>;
   getPreservedFreeformShapeSnapshots?: () => PiloCanvasFreeformShape[];
   isShapePatchProtected: (shapeId: string) => boolean;
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
-  onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
   onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
   onLocalInteractionStateChange: (
     state: PiloCanvasLocalInteractionState,
@@ -232,7 +222,6 @@ const tldrawComponents = {
   Background: PiloCanvasBackground,
 };
 
-const PILO_COLLAPSED_FRAME_SIZE = 144;
 const CANVAS_AI_CHAT_HOLD_MS = 500;
 const CANVAS_PENDING_PREVIEW_GROUP_TTL_MS = 30_000;
 const CANVAS_PENDING_PREVIEW_HEARTBEAT_MS = 1_500;
@@ -248,11 +237,6 @@ const emptyRemoteShapePreviewStore: CanvasRemoteShapePreviewStore = {
 const CANVAS_PRESENCE_CURSOR_MIN_DISTANCE = 2;
 const CANVAS_PRESENCE_CURSOR_THROTTLE_MS = 60;
 const connectionTools = new Set<PiloCanvasTool>(["arrow", "line"]);
-const PILO_FRAME_EXPANDED_FALLBACK_SIZE = {
-  h: 180,
-  w: 320,
-};
-
 type PendingRealtimePreviewGroup = {
   createdAt: number;
   expiresAt: number;
@@ -388,34 +372,6 @@ function acknowledgePendingPreviewGroupShapes(
   });
 }
 
-function isShapeHiddenByCollapsedAncestor({
-  currentShapesById,
-  shape,
-  snapshots,
-}: {
-  currentShapesById: Map<string, PiloCanvasFreeformShape>;
-  shape: PiloCanvasFreeformShape;
-  snapshots: Map<string, PiloCanvasFreeformShape>;
-}) {
-  let parentId = typeof shape.parentId === "string" ? shape.parentId : null;
-  const visitedParentIds = new Set<string>();
-
-  while (parentId) {
-    if (visitedParentIds.has(parentId)) return false;
-    visitedParentIds.add(parentId);
-
-    const parentShape = currentShapesById.get(parentId) ?? snapshots.get(parentId);
-
-    if (!parentShape) return false;
-    if (isPiloFrameCollapsed(parentShape)) return true;
-
-    parentId =
-      typeof parentShape.parentId === "string" ? parentShape.parentId : null;
-  }
-
-  return false;
-}
-
 function collectPendingPreviewGroupShapeIds(
   groups: Map<string, PendingRealtimePreviewGroup>,
 ) {
@@ -443,17 +399,6 @@ function collectPendingPreviewGroupShapes({
       const snapshot = currentShape ?? group.snapshots.get(shapeId);
 
       if (!snapshot) return;
-      if (
-        !currentShape &&
-        isShapeHiddenByCollapsedAncestor({
-          currentShapesById,
-          shape: snapshot,
-          snapshots: group.snapshots,
-        })
-      ) {
-        return;
-      }
-
       previewShapesById.set(shapeId, snapshot);
     });
   });
@@ -797,30 +742,6 @@ function applyFreeformShapePatchIncrementally(
   });
 }
 
-function collectFrameDescendantShapes(editor: Editor, frameId: TLShapeId) {
-  const shapes = editor.getCurrentPageShapes();
-  const descendantIds = new Set<TLShapeId>();
-  let didAddShape = true;
-
-  while (didAddShape) {
-    didAddShape = false;
-
-    shapes.forEach((shape) => {
-      if (shape.id === frameId || descendantIds.has(shape.id)) return;
-
-      const parentId = shape.parentId as TLShapeId | undefined;
-      if (parentId !== frameId && !descendantIds.has(parentId as TLShapeId)) {
-        return;
-      }
-
-      descendantIds.add(shape.id);
-      didAddShape = true;
-    });
-  }
-
-  return shapes.filter((shape) => descendantIds.has(shape.id));
-}
-
 function registerCanvasEditorSideEffects(
   editor: Editor,
   piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
@@ -1012,11 +933,7 @@ function shouldPreserveMissingFrameChildShape({
     return false;
   }
 
-  return !isShapeHiddenByCollapsedAncestor({
-    currentShapesById: incomingShapeMap,
-    shape: preservedShape,
-    snapshots: preservedShapeMap,
-  });
+  return true;
 }
 
 function deleteSelectedShapes(editor: Editor) {
@@ -1045,17 +962,15 @@ export function CanvasEditor({
   consumeShapePatch,
   freeformShapes,
   hydrationVersion,
+  loadingFrameIds,
   onReady,
   onFreeformShapesDraftChange,
   onFreeformShapesChange,
   onViewChange,
-  onFrameChildShapesUnload,
-  onFrameChildrenRequest,
   onFrameSubtreeRequest,
   getPreservedFreeformShapeSnapshots,
   isShapePatchProtected,
   onViewportBoundsChange,
-  onShapeDetailRequest,
   onHistoryStateChange,
   onLocalInteractionStateChange,
   presence,
@@ -1094,8 +1009,6 @@ export function CanvasEditor({
   const remotePreviewShapeIdsRef = useRef(new Set<string>());
   const canvasWheelCleanupRef = useRef<(() => void) | null>(null);
   const lastHydratedSeedKeyRef = useRef<string | null>(null);
-  const frameChildrenRequestTimerRef =
-    useRef<ReturnType<typeof setTimeout> | null>(null);
   const seedKey = board.id;
   const [canvasAiChatAnchor, setCanvasAiChatAnchor] =
     useState<CanvasAiChatAnchor | null>(null);
@@ -1117,11 +1030,32 @@ export function CanvasEditor({
       zoom: editor.getCamera().z,
     });
   }, [onViewportBoundsChange]);
+  const handleCanvasAgentDriveFileInsert = useCallback(
+    (file: { fileId: string; fileName: string; mimeType: string }) => {
+      const editor = editorRef.current;
+      if (!editor) return false;
+
+      editor.cancel();
+      editor.setCurrentTool("select.idle");
+      const result = placePiloCanvasShapeInEmptyViewport({
+        editor,
+        index: createdLocalCardsRef.current + 1,
+        placementRequest: { type: "drive-file", file },
+      });
+      if (!result.placed) return false;
+
+      createdLocalCardsRef.current += result.createdCount;
+      onOneShotToolCreatedRef.current?.();
+      return true;
+    },
+    [],
+  );
   const canvasAgent = useCanvasAgent({
     canvasId: board.id,
     editor: canvasEditor,
     enabled: canvasAgentEnabled,
     onApplied: handleCanvasAgentApplied,
+    onDriveFileInsert: handleCanvasAgentDriveFileInsert,
     onFrameSubtreeRequest,
     workspaceId: board.workspaceId,
   });
@@ -1408,11 +1342,6 @@ export function CanvasEditor({
     () => () => {
       if (canvasAiChatHoldFrameRef.current !== null) {
         window.cancelAnimationFrame(canvasAiChatHoldFrameRef.current);
-      }
-
-      if (frameChildrenRequestTimerRef.current) {
-        clearTimeout(frameChildrenRequestTimerRef.current);
-        frameChildrenRequestTimerRef.current = null;
       }
 
       if (shapePreviewSendTimerRef.current) {
@@ -1996,6 +1925,22 @@ export function CanvasEditor({
           onOneShotToolCreatedRef.current?.();
         }
       },
+      createDriveFileShape(file) {
+        deactivatePiloEraser(editor);
+        returnToSelectAfterPlacementRef.current = false;
+        editor.cancel();
+        editor.setCurrentTool("select.idle");
+        const result = placePiloCanvasShapeInEmptyViewport({
+          editor,
+          index: createdLocalCardsRef.current + 1,
+          placementRequest: { type: "drive-file", file },
+        });
+
+        if (result.placed) {
+          createdLocalCardsRef.current += result.createdCount;
+          onOneShotToolCreatedRef.current?.();
+        }
+      },
       groupSelection() {
         const selectedShapeIds = editor.getSelectedShapeIds();
 
@@ -2237,123 +2182,6 @@ export function CanvasEditor({
     });
   }
 
-  function requestShapeDetail(editor: Editor, shapeId: TLShapeId) {
-    onShapeDetailRequest({
-      shapeId: String(shapeId),
-      zoom: editor.getCamera().z,
-    });
-  }
-
-  const handleFrameCollapsedChange = useCallback(
-    (frame: Extract<TLShape, { type: "frame" }>, nextCollapsed: boolean) => {
-      const editor = editorRef.current;
-
-      if (!editor) return;
-
-      const currentFrame = editor.getShape(frame.id);
-
-      if (!isPiloFrameShape(currentFrame)) return;
-
-      const frameShape = currentFrame;
-      const descendantShapes = nextCollapsed
-        ? collectFrameDescendantShapes(editor, frameShape.id)
-        : [];
-      const descendantShapeIds = descendantShapes.map(
-        (shape) => shape.id as TLShapeId,
-      );
-
-      const descendantSnapshots = descendantShapes.map((shape) =>
-        withSerializedArrowBindings(editor, shape),
-      );
-      const childShapeCount = Math.max(
-        getPiloChildShapeCount(frameShape),
-        descendantSnapshots.length,
-      );
-      const expandedSize = getPiloFrameExpandedSize(frameShape);
-      const currentFrameSize = {
-        h: frameShape.props.h,
-        w: frameShape.props.w,
-      };
-      const nextFrameProps = nextCollapsed
-        ? {
-            h: PILO_COLLAPSED_FRAME_SIZE,
-            w: PILO_COLLAPSED_FRAME_SIZE,
-          }
-        : expandedSize
-          ? {
-              h: expandedSize.h,
-              w: expandedSize.w,
-            }
-          : {
-              h: Math.max(frameShape.props.h, PILO_FRAME_EXPANDED_FALLBACK_SIZE.h),
-              w: Math.max(frameShape.props.w, PILO_FRAME_EXPANDED_FALLBACK_SIZE.w),
-            };
-
-      if (nextCollapsed && descendantSnapshots.length) {
-        onFrameChildShapesUnload(descendantSnapshots);
-      }
-
-      editor.run(
-        () => {
-          if (nextCollapsed && descendantShapes.length) {
-            editor.deleteShapes(descendantShapeIds);
-          }
-
-          editor.updateShapes([
-            {
-              id: frameShape.id,
-              type: frameShape.type,
-              ...(nextFrameProps ? { props: nextFrameProps } : {}),
-              meta: {
-                ...(frameShape.meta ?? {}),
-                [PILO_FRAME_COLLAPSED_META_KEY]: nextCollapsed,
-                [PILO_CHILD_SHAPE_COUNT_META_KEY]: childShapeCount,
-                ...(nextCollapsed
-                  ? {
-                      [PILO_FRAME_EXPANDED_SIZE_META_KEY]: currentFrameSize,
-                    }
-                  : {}),
-              },
-            },
-          ]);
-
-          editor.select(frameShape.id);
-        },
-        { history: "ignore" },
-      );
-
-      const nextFreeformShapes = editor
-        .getCurrentPageShapes()
-        .map((shape) => withSerializedArrowBindings(editor, shape));
-
-      const frameChange: PiloCanvasLocalShapeChange = {
-        changedShapeIds: [String(frameShape.id)],
-        deletedShapeIds: [],
-        isFreehandDrawing: false,
-      };
-
-      onFreeformShapesDraftChange(nextFreeformShapes, frameChange);
-      onFreeformShapesChange(nextFreeformShapes, frameChange);
-
-      if (!nextCollapsed) {
-        if (frameChildrenRequestTimerRef.current) {
-          clearTimeout(frameChildrenRequestTimerRef.current);
-        }
-
-        frameChildrenRequestTimerRef.current = setTimeout(() => {
-          frameChildrenRequestTimerRef.current = null;
-          onFrameChildrenRequest(String(frameShape.id));
-        }, 0);
-      }
-    },
-    [
-      onFrameChildShapesUnload,
-      onFrameChildrenRequest,
-      onFreeformShapesChange,
-      onFreeformShapesDraftChange,
-    ],
-  );
-
   function handleCanvasPointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     if (
       event.target instanceof Element &&
@@ -2410,12 +2238,10 @@ export function CanvasEditor({
         editor.select(pointedShape.id);
       }
 
-      requestShapeDetail(editor, pointedShape.id);
       return;
     }
 
     if (pointedShape && !isPiloFrameShape(pointedShape)) {
-      requestShapeDetail(editor, pointedShape.id as TLShapeId);
       return;
     }
 
@@ -2433,13 +2259,11 @@ export function CanvasEditor({
       !frameShape.isLocked &&
       editor.getSelectedShapeIds().includes(frameShape.id)
     ) {
-      requestShapeDetail(editor, frameShape.id);
       return;
     }
 
     editor.setCurrentTool("select");
     editor.select(frameShape.id);
-    requestShapeDetail(editor, frameShape.id);
 
     if (!frameShape.isLocked) {
       return;
@@ -2529,6 +2353,7 @@ export function CanvasEditor({
   }
 
   return (
+    <CanvasDriveFileProvider workspaceId={board.workspaceId}>
     <div
       className={`h-full${isPiloEraserActive ? " is-pilo-eraser-active" : ""}`}
       onPointerDownCapture={handleCanvasPointerDownCapture}
@@ -2589,12 +2414,10 @@ export function CanvasEditor({
           <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
           <SelectedShapeStackingManager />
           <SelectedGroupToolbar />
-          <PiloCollapsedFrameOverlay
-            onFrameCollapsedChange={handleFrameCollapsedChange}
-          />
-          <FrameSelectionToolbar
-            onFrameCollapsedChange={handleFrameCollapsedChange}
-          />
+          {loadingFrameIds.size ? (
+            <CanvasFrameLazyLoadingOverlay loadingFrameIds={loadingFrameIds} />
+          ) : null}
+          <FrameSelectionToolbar />
         </TldrawSurface>
       </CanvasRemotePresenceProvider>
       <CanvasAiChatOverlay
@@ -2618,6 +2441,7 @@ export function CanvasEditor({
         progress={canvasAgent.progress}
       />
     </div>
+    </CanvasDriveFileProvider>
   );
 }
 

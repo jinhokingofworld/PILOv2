@@ -2,7 +2,7 @@
 
 ## Scope
 
-Canvas Agent API creates and tracks asynchronous, non-mutating AI work that is
+Canvas Agent API creates and tracks asynchronous server-side AI work that is
 limited to one Workspace Canvas. It explains Canvas functionality, finds
 existing Canvas shapes, moves the current user's viewport, and can generate a
 copyable static HTML/CSS artifact from an explicit Canvas selection. New runs
@@ -15,8 +15,10 @@ not read, create, update, delete, or represent them as Canvas shapes.
 ## Ownership and boundaries
 
 - Canvas domain owns this API and `canvas_agent_*` tables.
-- App Server validates Workspace and Canvas access and validates each non-mutating
-  action. Canvas Agent does not perform persisted Canvas mutations.
+- App Server validates Workspace and Canvas access and validates each action.
+  Canvas Agent does not directly perform persisted Canvas mutations; a validated
+  Drive import may return a client action that the active Canvas applies through
+  its normal realtime shape path.
 - AI Worker classifies the request into a bounded Canvas intent and extracts
   typed arguments. It must not choose an arbitrary executable action, mutate
   Canvas tables, or call Canvas domain services.
@@ -98,10 +100,22 @@ Structured GPT intent classification over a bounded client shape summary
 - The default pgvector shape-result thresholds are shape similarity `0.78` and
   winner margin `0.08`. A missing or ambiguous embedding match produces an
   empty `find_shapes` result after the structured intent classification.
-- Normal mode exposes `find_shapes`, `generate_html`, and `unsupported`. The classifier
+- Normal mode exposes `find_shapes`, `generate_html`, `import_drive_file`, and `unsupported`. The classifier
   returns `{ intent, arguments }`; App Server stores it in a `route_intent`
-  step and maps it to the registered `find_shapes` handler. Adding a future
+  step and maps it to the registered handler. Adding a future
   intent also requires an App Server handler and validation.
+
+For `import_drive_file`, the classifier extracts only a bounded natural-language
+query. App Server searches active `ready` image files under the run's own
+`workspaceId`; it never trusts a Workspace id produced by the model and never
+lists S3 objects. The initial retrieval uses normalized Drive file names and
+folder paths. A single confident result produces an `insert_drive_file` client
+action containing only `fileId`, `fileName`, and `mimeType`. Missing results
+return a bounded explanation, while ambiguous results list up to three file
+names and require a more specific request. The Frontend applies a confident
+action through the normal Classic Canvas `file_node` placement path. The shape
+stores the stable Drive file id and obtains a fresh authorized preview URL when
+rendered, so roomState, history, and checkpoint synchronization remain intact.
 
 For `generate_html`, the Frontend sends only a bounded, normalized
 `selectedScene`; it never sends raw tldraw records. A selected frame includes
@@ -147,8 +161,10 @@ must not add JavaScript behavior or contradict user-authored content.
 - Deterministic toolbar-help actions skip AI Worker classification only when the
   request explicitly uses tool-help mode.
 - In normal mode the bounded classifier can select `find_shapes`, `generate_html`,
-  or `unsupported`. Only `generate_html` with a complete explicit selection can
-  produce a static artifact; mutation wording cannot enable Canvas shape writes.
+  `import_drive_file`, or `unsupported`. Only `generate_html` with a complete
+  explicit selection can produce a static artifact. Only a validated
+  `import_drive_file` result can request the reversible insertion of an existing
+  authorized Drive image.
 
 ## Disabled legacy generation contract
 
@@ -537,7 +553,7 @@ Request:
 | `selectedSceneError` | No | Bounded client-side selection/hydration error. A `generate_html` intent returns this message without producing partial HTML. |
 | `viewport` | No | Current visible Canvas bounds used only to create minimal planning context. |
 | `presentationMode` | No | `interactive` shows requester-only progress, pointer, highlight, and viewport focus on the Canvas surface. `background` creates the same read-only run without Canvas-local playback. Defaults to `interactive`. |
-| `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, classify among existing-shape search, selected-scene HTML generation, and unsupported requests. Defaults to `false`. |
+| `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, classify among existing-shape search, Workspace Drive image import, selected-scene HTML generation, and unsupported requests. Defaults to `false`. |
 | `conversationContext` | No | Short-lived same-panel chat memory. `messages` contains up to 10 recent user/assistant messages, and `lastTask` can describe the previous Canvas Agent run for follow-up prompts. Legacy draft id/title fields remain nullable for compatibility. |
 | `clientRequestId` | No | Stable retry idempotency key, up to 128 bytes. |
 
@@ -608,6 +624,7 @@ resource ids, not raw shape payloads or AI provider output.
       "summary": "임베딩 검색으로 ‘로그인 메모’ 관련 도형 2개를 찾았습니다.",
       "canvasRevision": 103,
       "artifact": null,
+      "clientAction": null,
       "createdAt": "2026-07-10T00:00:00.000Z",
       "completedAt": null
     },
@@ -643,6 +660,23 @@ bounds. A real selected frame is preferred as the connector target; for a
 multi-selection without a frame, the first selected root is used. If the source
 records are no longer loaded, the artifact remains available in chat for preview
 and copy, but no partial Canvas insertion is attempted.
+
+For a completed and unambiguous `import_drive_file` run, `run.clientAction` is:
+
+```json
+{
+  "type": "insert_drive_file",
+  "file": {
+    "fileId": "drive_item_uuid",
+    "fileName": "PILO 로고.png",
+    "mimeType": "image/png"
+  }
+}
+```
+
+The action never contains an S3 bucket, object key, credential, or presigned
+URL. The requesting Canvas client deduplicates by run id and creates the
+`file_node` through its ordinary editor/realtime path.
 
 Main errors: `401 UNAUTHORIZED`, `403 FORBIDDEN`, `404 CANVAS_AGENT_RUN_NOT_FOUND`.
 
@@ -756,6 +790,7 @@ does not depend on another Canvas Agent request waking the executor.
 AI Worker intent:
   find_shapes
   generate_html
+  import_drive_file
   unsupported
 
 App Server executor actions:

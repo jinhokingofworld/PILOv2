@@ -450,6 +450,12 @@ export function ChatMessageList({
     <div
       aria-label="Workspace 채팅 메시지"
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-3 sm:px-4"
+      data-workspace-follow-surface="chat-messages"
+      data-workspace-follow-target-ready={
+        targetMessageId && targetPositionedRef.current
+          ? targetMessageId
+          : undefined
+      }
       ref={scrollContainerRef}
       role="log"
     >

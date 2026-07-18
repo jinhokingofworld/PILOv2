@@ -424,6 +424,20 @@ class FakeMeetingService {
     };
   }
 
+  async listReportsForAgent(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listReportsForAgent",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return {
+      reports: this.reports.slice(0, query.limit ?? this.reports.length).map((report) =>
+        toSummaryReport(report)
+      )
+    };
+  }
+
   async listMeetingsForAgent(currentUserId, workspaceId, query) {
     this.calls.push({
       method: "listMeetingsForAgent",
@@ -501,7 +515,12 @@ class FakeWorkspaceService {
 
 function createRegistry() {
   const meetingService = new FakeMeetingService();
-  const meetingTools = new MeetingAgentToolsService(meetingService, new FakeMeetingTranscriptRagService());
+  const meetingTools = new MeetingAgentToolsService(
+    meetingService,
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService())
+  );
   const registry = new AgentToolRegistryService(undefined, meetingTools);
 
   return {
@@ -515,6 +534,8 @@ const context = {
   workspaceId: WORKSPACE_ID,
   runId: RUN_ID
 };
+
+process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
 
 {
   const { registry } = createRegistry();
@@ -861,6 +882,9 @@ class FakeCandidateSelectionDatabase {
     );
     meetingService.staleReportIds.clear();
     meetingService.reports.push(createReport({ id: SECOND_REPORT_ID }));
+    const latestReport = await resolver.resolveLatestReport(context);
+    assert.equal(latestReport.kind, "selected");
+    assert.equal(latestReport.reference.resourceId, REPORT_ID);
     const ambiguousReport = await resolver.resolveReport(context, {});
     assert.equal(ambiguousReport.kind, "needs_clarification");
     assert.equal(ambiguousReport.reason, "ambiguous");
@@ -1027,7 +1051,7 @@ function errorCode(error) {
 {
   const { registry } = createRegistry();
   const tool = registry.getDefinition("start_meeting_in_room");
-  const input = tool.validateInput({ meetingRoomId: SECOND_MEETING_ROOM_ID });
+  const input = tool.validateInput({ roomName: "디자인 회의실" });
   const plan = await tool.buildConfirmation(context, input);
   assert.equal(plan.toolName, "start_meeting_in_room");
   assert.match(plan.summary, /현재 회의에서 나간 뒤/);
@@ -1039,7 +1063,7 @@ function errorCode(error) {
   const tool = registry.getDefinition("join_meeting");
   const clarification = await tool.buildConfirmation(
     context,
-    tool.validateInput({ meetingId: MEETING_ID })
+    tool.validateInput({ roomName: "기본 회의실" })
   );
   assert.equal(clarification.kind, "needs_clarification");
   assert.equal(clarification.outputSummary.policyVersion, "v1");
@@ -1050,7 +1074,7 @@ function errorCode(error) {
   const tool = registry.getDefinition("join_meeting");
   const result = await tool.execute(
     context,
-    tool.validateInput({ meetingId: MEETING_ID })
+    tool.validateConfirmationInput({ meetingId: MEETING_ID })
   );
   assert.equal(result.outputSummary.clientAction.type, "connect_meeting");
   assert.equal(result.outputSummary.clientAction.expiresInSec, 20);
@@ -1060,10 +1084,9 @@ function errorCode(error) {
 {
   const { registry } = createRegistry();
   const tool = registry.getDefinition("leave_meeting");
-  const result = await tool.execute(
-    context,
-    tool.validateInput({ meetingId: MEETING_ID })
-  );
+  const preparation = await tool.prepareExecution(context, tool.validateInput({}));
+  assert.equal(preparation.kind, "execute");
+  const result = await tool.execute(context, tool.validateInput({}));
   assert.equal(result.status, "left");
 }
 
@@ -1073,11 +1096,11 @@ function errorCode(error) {
   const end = registry.getDefinition("end_meeting_recording");
   const startResult = await start.execute(
     context,
-    start.validateInput({ meetingId: MEETING_ID })
+    start.validateConfirmationInput({ meetingId: MEETING_ID })
   );
   const endResult = await end.execute(
     context,
-    end.validateInput({ meetingId: MEETING_ID })
+    end.validateConfirmationInput({ meetingId: MEETING_ID })
   );
   assert.equal(startResult.status, "recording_started");
   assert.equal(endResult.status, "recording_ended");
@@ -1123,10 +1146,7 @@ function errorCode(error) {
 {
   const { meetingService, registry } = createRegistry();
   const tool = registry.getDefinition("get_meeting_participants");
-  const result = await tool.execute(
-    context,
-    tool.validateInput({ meetingId: MEETING_ID })
-  );
+  const result = await tool.execute(context, tool.validateInput({}));
 
   assert.deepEqual(result.outputSummary, {
     meetingId: MEETING_ID,
@@ -1144,6 +1164,10 @@ function errorCode(error) {
     ]
   });
   assert.deepEqual(meetingService.calls, [
+    {
+      method: "getCurrentUserActiveMeeting",
+      currentUserId: USER_ID
+    },
     {
       method: "listParticipants",
       currentUserId: USER_ID,
@@ -1176,7 +1200,7 @@ function errorCode(error) {
   assert.equal(result.resourceRefs[0].domain, "meeting");
   assert.equal(result.resourceRefs[0].resourceType, "meeting_report");
   assert.deepEqual(meetingService.calls[0], {
-    method: "listReports",
+    method: "listReportsForAgent",
     currentUserId: USER_ID,
     workspaceId: WORKSPACE_ID,
     query: {
@@ -1204,10 +1228,7 @@ function errorCode(error) {
   assert.equal(result.outputSummary.reports[0].reportId, REPORT_ID);
   assert.equal(result.resourceRefs.length, 1);
   assert.equal(result.resourceRefs[0].resourceId, REPORT_ID);
-  assert.deepEqual(meetingService.calls[0].query, {
-    status: undefined,
-    limit: 1
-  });
+  assert.deepEqual(meetingService.calls[0].query, { limit: 1 });
 }
 
 {
@@ -1240,10 +1261,7 @@ function errorCode(error) {
 {
   const { registry } = createRegistry();
   const tool = registry.getDefinition("summarize_meeting_report");
-  const input = tool.validateInput({
-    reportId: REPORT_ID
-  });
-  const result = await tool.execute(context, input);
+  const result = await tool.execute(context, tool.validateInput({}));
   const report = result.outputSummary.report;
   const serialized = JSON.stringify(result.outputSummary);
 
@@ -1265,10 +1283,7 @@ function errorCode(error) {
 {
   const { registry } = createRegistry();
   const tool = registry.getDefinition("get_meeting_report");
-  const input = tool.validateInput({
-    reportId: REPORT_ID
-  });
-  const result = await tool.execute(context, input);
+  const result = await tool.execute(context, tool.validateInput({}));
 
   assert.equal(result.status, "completed");
   assert.equal(result.outputSummary.report.sections[0].title, "요약");
@@ -1287,7 +1302,7 @@ function errorCode(error) {
     })
   ];
   const tool = registry.getDefinition("summarize_meeting_report");
-  const result = await tool.execute(context, { reportId: REPORT_ID });
+  const result = await tool.execute(context, tool.validateInput({}));
   const report = result.outputSummary.report;
 
   assert.equal(report.status, "PROCESSING");
@@ -1315,7 +1330,7 @@ function errorCode(error) {
     })
   ];
   const tool = registry.getDefinition("summarize_meeting_report");
-  const result = await tool.execute(context, { reportId: REPORT_ID });
+  const result = await tool.execute(context, tool.validateInput({}));
   const serialized = JSON.stringify(result.outputSummary);
 
   assert.equal(result.outputSummary.report.status, "FAILED");
@@ -1371,6 +1386,49 @@ function errorCode(error) {
       assert.match(error.getResponse().error.message, /meetingId/);
       return true;
     }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  for (const toolName of [
+    "get_meeting_participants",
+    "join_meeting",
+    "leave_meeting",
+    "start_meeting_recording",
+    "end_meeting_recording"
+  ]) {
+    const tool = registry.getDefinition(toolName);
+    assert.throws(
+      () => tool.validateInput({ meetingId: MEETING_ID }),
+      (error) => {
+        assert.match(error.getResponse().error.message, /meetingId/);
+        return true;
+      },
+      `${toolName} must not expose a raw meetingId in the planner input`
+    );
+  }
+  for (const toolName of ["get_meeting_report", "summarize_meeting_report"]) {
+    const tool = registry.getDefinition(toolName);
+    assert.throws(
+      () => tool.validateInput({ reportId: REPORT_ID }),
+      (error) => {
+        assert.match(error.getResponse().error.message, /reportId/);
+        return true;
+      },
+      `${toolName} must not expose a raw reportId in the planner input`
+    );
+  }
+  assert.throws(
+    () =>
+      registry
+        .getDefinition("start_meeting_in_room")
+        .validateInput({ meetingRoomId: MEETING_ROOM_ID }),
+    (error) => {
+      assert.match(error.getResponse().error.message, /meetingRoomId/);
+      return true;
+    },
+    "start_meeting_in_room must resolve a room selector instead of accepting a raw ID"
   );
 }
 

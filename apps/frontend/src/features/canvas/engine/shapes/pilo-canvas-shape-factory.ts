@@ -17,6 +17,8 @@ import {
   type PiloMediaAsset,
 } from "../assets/pilo-canvas-assets";
 import type { PiloCanvasFreeformShape } from "../canvas-engine-types";
+import type { CanvasDriveFileReference } from "../../integrations/drive/canvas-drive-file";
+import type { PiloFileNodeShape } from "./file-node/PiloFileNodeShapeTypes";
 
 export type PiloInsertableTool = "image" | "video" | "bookmark" | "embed";
 
@@ -24,6 +26,10 @@ type PiloCodeBlockPartial = TLCreateShapePartial<PiloCodeBlockShape> & {
   id: TLShapeId;
 };
 type PiloFramePartial = TLCreateShapePartial<TLFrameShape> & {
+  id: TLShapeId;
+};
+
+type PiloFileNodePartial = TLCreateShapePartial<PiloFileNodeShape> & {
   id: TLShapeId;
 };
 
@@ -435,6 +441,29 @@ export function createInsertableShape(
         url: request.url,
       },
     } as TLCreateShapePartial<TLShape> & { id: TLShapeId },
+  };
+}
+
+export function createDriveFileNodeShape(
+  index: number,
+  position: { x: number; y: number },
+  file: CanvasDriveFileReference,
+): PiloFileNodePartial {
+  const width = 420;
+  const height = 280;
+
+  return {
+    id: createShapeId(`pilo-drive-file-${Date.now()}-${index}`),
+    type: "file_node",
+    x: position.x - width / 2,
+    y: position.y - height / 2,
+    props: {
+      w: width,
+      h: height,
+      fileId: file.fileId,
+      fileName: file.fileName,
+      mimeType: file.mimeType,
+    },
   };
 }
 

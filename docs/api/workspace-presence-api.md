@@ -56,6 +56,7 @@ type WorkspacePresenceLocation = {
     | "sql-erd"
     | "pr-review"
     | "meeting"
+    | "chat"
     | "canvas"
     | "drive";
   route: { pathname: string; search: string };
@@ -66,20 +67,75 @@ type WorkspacePresenceLocation = {
         kind: "element";
         key:
           | "board-kanban"
+          | "board-issue-sheet"
           | "calendar-grid"
+          | "calendar-event-detail"
+          | "calendar-events-dialog"
+          | "chat-messages"
           | "drive-list"
+          | "drive-pdf"
           | "meeting-content"
           | "pr-review-diff"
-          | "pr-review-inspector";
+          | "pr-review-inspector"
+          | "sql-erd-inspector";
         xRatio: number;
         yRatio: number;
       }
-    | { kind: "camera"; x: number; y: number; z: number };
+    | {
+        kind: "camera";
+        x: number;
+        y: number;
+        z: number;
+        selectedShapeIds?: string[];
+      };
 };
 
 type PrReviewPresenceContext = {
   reviewSessionId: string | null;
   reviewFileId: string | null;
+};
+
+type BoardPresenceContext = {
+  boardId: string;
+  issueId: string | null;
+};
+
+type CalendarPresenceContext = {
+  selectedDate: string | null;
+  eventId: string | null;
+};
+
+type SqlErdPresenceContext = {
+  sessionId: string;
+  sqlErdInspectorOpen: "true" | "false";
+  sqlErdSelectionType:
+    | "none"
+    | "table"
+    | "column"
+    | "relation"
+    | "annotation"
+    | "note"
+    | "frame"
+    | "text";
+  sqlErdSelectionId: string | null;
+  sqlErdSelectionTableId: string | null;
+};
+
+type MeetingPresenceContext = {
+  meetingRoomId: string | null;
+  reportId: string | null;
+};
+
+type ChatPresenceContext = {
+  messageId: string | null;
+  threadId: string | null;
+};
+
+type DrivePresenceContext = {
+  folderId: string | null;
+  documentId: string | null;
+  pdfFileId: string | null;
+  pdfPage: string | null;
 };
 ```
 
@@ -91,23 +147,32 @@ type PrReviewPresenceContext = {
 | page | route | context | viewport |
 | --- | --- | --- | --- |
 | `home` | `/home` | 없음 | document |
-| `calendar` | `/calendar?date=...` | `selectedDate: string \| null` | calendar-grid 또는 document |
-| `board` | `/board` | `boardId: string` | board-kanban |
-| `sql-erd` | `/sql-erd/session?sessionId=...` | `sessionId: string` | camera |
+| `calendar` grid | `/calendar?date=...` | `selectedDate: string \| null`, `eventId: null` | calendar-grid 또는 document |
+| `calendar` event detail | `/calendar?date=...` | `selectedDate: string`, `eventId: string` | calendar-event-detail |
+| `calendar` events dialog | `/calendar?date=...` | `selectedDate: string`, `eventId: null` | calendar-events-dialog |
+| `board` kanban | `/board?boardId=...` | `boardId: string`, `issueId: null` | board-kanban |
+| `board` issue sheet | `/board?boardId=...&issueId=...` | `boardId: string`, `issueId: string` | board-issue-sheet |
+| `sql-erd` canvas | `/sql-erd/session?sessionId=...` | `SqlErdPresenceContext`, `sqlErdInspectorOpen: "false"` | camera |
+| `sql-erd` inspector | `/sql-erd/session?sessionId=...` | `SqlErdPresenceContext`, `sqlErdInspectorOpen: "true"` | sql-erd-inspector |
 | `pr-review` 목록 | `/pr-review` | `reviewSessionId: null`, `reviewFileId: null` | document |
 | `pr-review` canvas | `/pr-review?reviewSessionId=...` | `reviewSessionId: string`, `reviewFileId: null` | camera |
 | `pr-review` diff | `/pr-review?reviewSessionId=...` | `reviewSessionId: string`, `reviewFileId: string` | pr-review-diff |
 | `pr-review` inspector | `/pr-review?reviewSessionId=...` | `reviewSessionId: string`, `reviewFileId: string` | pr-review-inspector |
-| `meeting` | `/meeting?meetingRoomId=...` | `meetingRoomId: string \| null` | document 또는 meeting-content |
-| `canvas` | `/canvas?canvasId=...` | `canvasId: string` | camera |
-| `drive` | `/files?folderId=...` | `folderId: string \| null` | drive-list 또는 document |
+| `meeting` room | `/meeting?meetingRoomId=...` | `meetingRoomId: string \| null`, `reportId: null` | document 또는 meeting-content |
+| `meeting` report | `/report?reportId=...` | `meetingRoomId: null`, `reportId: string \| null` | document 또는 meeting-content |
+| `chat` | `/chat` | `messageId: string \| null`, `threadId: string \| null` | chat-messages |
+| `canvas` | `/canvas?canvasId=...` | `canvasId: string` | camera와 optional `selectedShapeIds` |
+| `drive` list | `/files?folderId=...` | `folderId: string \| null`, 나머지 Drive ID는 null | drive-list |
+| `drive` document | `/files?documentId=...` | `documentId: string`, PDF ID/page는 null | document |
+| `drive` PDF | `/files?folderId=...` | `pdfFileId: string`, `pdfPage: positive-integer string`, `documentId: null` | drive-pdf |
 
-location에는 modal, popover, sheet, 입력값, 미저장 draft, comment, conflict
-draft, raw diff/content, 선택 중인 transient object를 넣지 않는다. 단, PR Review
+location에는 입력값, 미저장 draft, comment, conflict draft, raw diff/content와
+AI chat, popover, 편집 중인 shape 같은 transient state를 넣지 않는다. 단, PR Review
 drawer의 opaque `reviewFileId`와 활성 diff/inspector scroll ratio는 읽기 전용
 탐색 상태이므로 durable location에 포함할 수 있다. 파일명이나 diff 본문은
 포함하지 않는다. Meeting restore는 회의방만 선택하며 회의 시작, 참여, LiveKit
-연결을 실행하지 않는다. Drive, SQL ERD, PR Review, Canvas는 목적지 resource가
+연결을 실행하지 않는다. Canvas의 `selectedShapeIds`는 읽기 전용 선택 위치이며
+editing shape나 AI 상태를 포함하지 않는다. Drive, SQL ERD, PR Review, Canvas는 목적지 resource가
 실제로 로드된 뒤 viewport를 복원한다.
 
 ## Validation
@@ -124,6 +189,16 @@ drawer의 opaque `reviewFileId`와 활성 diff/inspector scroll ratio는 읽기 
 - PR Review camera는 session ID만, document는 두 ID 모두 null, diff/inspector는
   두 ID 모두 있어야 한다. file ID만 있는 조합과 다른 page의 PR element key는
   거부한다.
+- 새 nullable context key를 생략한 기존 payload는 server output에서 null로
+  정규화한다. 기존 Canvas camera payload의 생략된 `selectedShapeIds`는 빈 배열로
+  정규화한다.
+- Board issue sheet는 `issueId`, Calendar event detail은 `eventId`가 있어야 한다.
+  Calendar date는 `YYYY-MM-DD` 형식이다.
+- SQL ERD selection type은 `none`, `table`, `column`, `relation`, `annotation`,
+  `note`, `frame`, `text`만 허용한다. `column`만 table ID를 함께 요구한다.
+- `/meeting`은 `reportId: null`, `/report`는 `meetingRoomId: null`이어야 한다.
+- Drive document/PDF identity는 동시에 설정할 수 없고 `pdfPage`는 양의 정수
+  문자열이어야 한다.
 - camera의 `x`, `y`, `z`는 finite number여야 한다.
 - scroll ratio는 finite number여야 하며 server가 `0..1`로 clamp한다.
 - update 전에 같은 socket이 해당 Workspace room에 join해야 한다.

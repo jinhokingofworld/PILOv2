@@ -18,6 +18,132 @@
   --pilo-shadow-soft: 0 2px 8px rgba(15, 20, 34, 0.055);
 }
 
+.pilo-file-node-shape {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 10%);
+  color: #0f172a;
+}
+
+.pilo-file-node-header {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 12px;
+  background: #f8fafc;
+}
+
+.pilo-file-node-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilo-file-node-type {
+  max-width: 45%;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilo-file-node-preview {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+
+.pilo-file-node-preview > img,
+.pilo-file-node-preview > iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.pilo-file-node-preview > img {
+  display: block;
+  object-fit: contain;
+  user-select: none;
+}
+
+.pilo-file-node-preview > iframe {
+  pointer-events: none;
+  background: #ffffff;
+}
+
+.pilo-file-node-code {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  margin: 0;
+  padding: 14px 16px;
+  background: #111827;
+  color: #e5e7eb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pilo-file-node-status {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  color: #64748b;
+  font-size: 12px;
+  text-align: center;
+}
+
+.pilo-file-node-status > svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.pilo-file-node-status.is-error {
+  flex-direction: column;
+  color: #b91c1c;
+}
+
+.pilo-file-node-status button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  padding: 5px 9px;
+  background: #ffffff;
+  color: #b91c1c;
+  cursor: pointer;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+.pilo-file-node-status button > svg {
+  width: 13px;
+  height: 13px;
+}
+
 .pilo-canvas-screen {
   position: relative;
   display: block;
@@ -614,6 +740,35 @@
   color: #92400e;
 }
 
+.canvas-frame-lazy-loading-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 32;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.canvas-frame-lazy-loading-indicator {
+  position: absolute;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  color: #2563eb;
+  font-size: 27px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 2px 8px rgba(37, 99, 235, 0.24);
+  animation: canvas-frame-lazy-loading-spin 900ms linear infinite;
+}
+
+@keyframes canvas-frame-lazy-loading-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
 .pilo-tldraw-canvas {
   position: absolute;
   inset: 0;
@@ -940,117 +1095,6 @@
 .pilo-frame-toolbar button svg {
   width: 21px;
   height: 21px;
-}
-
-.pilo-collapsed-frame-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 31;
-  pointer-events: none;
-}
-
-.pilo-collapsed-frame-card {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  border: 2px solid rgba(37, 99, 235, 0.42);
-  border-radius: 8px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.95)),
-    #ffffff;
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.1),
-    0 12px 28px rgba(37, 99, 235, 0.16);
-  color: #172033;
-  font-family:
-    Pretendard,
-    Inter,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-  letter-spacing: 0;
-  padding: 12px;
-  pointer-events: none;
-  transform-origin: 0 0;
-}
-
-.pilo-collapsed-frame-card:hover {
-  border-color: rgba(37, 99, 235, 0.42);
-  background:
-    linear-gradient(145deg, #ffffff, #dcecff),
-    #ffffff;
-  box-shadow:
-    0 2px 4px rgba(15, 23, 42, 0.12),
-    0 16px 38px rgba(37, 99, 235, 0.28);
-}
-
-.pilo-collapsed-frame-expand {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border: 0;
-  border-radius: 6px;
-  background: #2563eb;
-  color: #ffffff;
-  cursor: pointer;
-  font-size: 18px;
-  font-weight: 900;
-  line-height: 1;
-  opacity: 0;
-  padding: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-}
-
-.pilo-collapsed-frame-card.is-selected .pilo-collapsed-frame-expand {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.pilo-collapsed-frame-expand:hover {
-  background: #1d4ed8;
-}
-
-.pilo-collapsed-frame-card strong {
-  overflow: hidden;
-  max-width: calc(100% - 34px);
-  color: #0f172a;
-  font-size: 13px;
-  font-weight: 900;
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pilo-collapsed-frame-card span {
-  width: fit-content;
-  border: 1px solid rgba(37, 99, 235, 0.16);
-  border-radius: 999px;
-  background: rgba(37, 99, 235, 0.08);
-  color: #1d4ed8;
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 1;
-  margin-top: 8px;
-  padding: 5px 7px;
-}
-
-.pilo-collapsed-frame-card small {
-  overflow: hidden;
-  margin-top: 8px;
-  color: #64748b;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .pilo-frame-toolbar-ratio {
