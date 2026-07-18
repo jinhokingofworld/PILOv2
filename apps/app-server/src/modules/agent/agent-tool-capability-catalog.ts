@@ -121,15 +121,15 @@ export function buildAgentToolCapabilityCatalog(
     .map((definition) => toDescriptor(definition, capabilities))
     .sort((left, right) => left.toolName.localeCompare(right.toolName));
   validateCapabilityCatalog(capabilities, descriptors, definitions);
-  const canonical = JSON.stringify({
+  const canonical = {
     version: AGENT_TOOL_CAPABILITY_CATALOG_VERSION,
     capabilities,
     descriptors
-  });
+  };
 
   return {
     version: AGENT_TOOL_CAPABILITY_CATALOG_VERSION,
-    sha256: createHash("sha256").update(canonical).digest("hex"),
+    sha256: hashCanonicalJson(canonical),
     capabilities,
     descriptors
   };
