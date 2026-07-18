@@ -157,7 +157,7 @@ export function createWorkspaceJumpCoordinator({
   }
 
   function finishWithError(requestId: number) {
-    if (!isCurrentRequest(requestId) || pending?.source !== "jump") return;
+    if (!isCurrentRequest(requestId) || pending?.source === "follow") return;
     abortRestore();
     clearPending();
     onError(WORKSPACE_JUMP_ERROR_MESSAGE);
@@ -170,14 +170,6 @@ export function createWorkspaceJumpCoordinator({
     onFollowError();
   }
 
-  function finishFollowStart(requestId: number) {
-    if (!isCurrentRequest(requestId) || pending?.source !== "follow-start") {
-      return;
-    }
-    abortRestore();
-    clearPending();
-  }
-
   function scheduleTimeout(
     requestId: number,
     phase: WorkspacePendingJump["phase"],
@@ -186,10 +178,6 @@ export function createWorkspaceJumpCoordinator({
     timeout = setTimer(() => {
       if (pending?.source === "follow") {
         finishFollowWithError(requestId);
-        return;
-      }
-      if (pending?.source === "follow-start") {
-        finishFollowStart(requestId);
         return;
       }
       if (phase === "target") {
@@ -203,7 +191,7 @@ export function createWorkspaceJumpCoordinator({
     if (
       !isCurrentRequest(requestId, "target") ||
       !pending ||
-      pending.source !== "jump"
+      pending.source === "follow"
     ) {
       return false;
     }
@@ -264,7 +252,7 @@ export function createWorkspaceJumpCoordinator({
         return false;
       }
       if (current.source === "follow-start") {
-        finishFollowStart(requestId);
+        await beginRollback(requestId);
         return false;
       }
       await beginRollback(requestId);
@@ -392,7 +380,7 @@ export function createWorkspaceJumpCoordinator({
         return true;
       } catch {
         if (source === "follow-start") {
-          finishFollowStart(requestId);
+          await beginRollback(requestId);
           return false;
         }
         await beginRollback(requestId);

@@ -176,7 +176,7 @@ Follow 중에는 대상 사용자의 최신 대표 location만 적용하는 late
 이동한다. 최초 이동을 8초 안에 복원하지 못하면 Follow 시작 전 route로
 rollback하고 shadcn Sonner로 `해당 팀원의 화면으로 이동할 수 없습니다`를
 표시한다. Follow가 이미 시작된 뒤 연속 update 복원에 실패하면 rollback하지 않고
-현재 화면을 유지한 채 다음 update를 기다린다.
+현재 화면을 유지한 채 Follow를 종료한다.
 
 이 변경은 기존 event를 유지하는 public optional location 계약 확장이다. PR Review
 위치 계약은 PR Review 담당자 은재, 검증·broadcast 동작은 Infra/Realtime 담당자
