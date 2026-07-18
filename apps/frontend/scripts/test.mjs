@@ -2097,6 +2097,7 @@ async function runScenarioBatchFallback(operations, runBatch) {
 await import("./calendar/test.mjs");
 await import("../src/features/agent/agent-feature.test.mjs");
 await import("../src/features/canvas/agent/canvas-agent-context.test.mjs");
+await import("../src/features/canvas/integrations/drive/canvas-drive-file.test.mjs");
 await import(
   "../src/features/canvas/engine/runtime/canvas-lazy-load-retry.test.mjs"
 );
