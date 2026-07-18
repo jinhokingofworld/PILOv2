@@ -1331,6 +1331,14 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                 <Image />
               </ToolButton>
               <ToolButton
+                label="비디오"
+                agentTarget="toolbar.more.video"
+                nativeTooltip
+                onClick={() => openMediaFilePicker("video")}
+              >
+                <Video />
+              </ToolButton>
+              <ToolButton
                 label="Drive 파일"
                 nativeTooltip
                 disabled={!shouldUseCanvasApi || !authSession?.accessToken}
@@ -1340,14 +1348,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                 }}
               >
                 <Files />
-              </ToolButton>
-              <ToolButton
-                label="비디오"
-                agentTarget="toolbar.more.video"
-                nativeTooltip
-                onClick={() => openMediaFilePicker("video")}
-              >
-                <Video />
               </ToolButton>
               <ToolButton
                 label="북마크"
