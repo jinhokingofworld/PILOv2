@@ -1,11 +1,15 @@
-const DRIVE_INLINE_PREVIEW_MIME_TYPES = new Set([
-  "application/json",
-  "application/pdf",
+export const DRIVE_INLINE_IMAGE_MIME_TYPES = [
   "image/avif",
   "image/gif",
   "image/jpeg",
   "image/png",
-  "image/webp",
+  "image/webp"
+] as const;
+
+const DRIVE_INLINE_PREVIEW_MIME_TYPES = new Set([
+  "application/json",
+  "application/pdf",
+  ...DRIVE_INLINE_IMAGE_MIME_TYPES,
   "text/css",
   "text/csv",
   "text/markdown",

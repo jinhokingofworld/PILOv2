@@ -71,6 +71,21 @@ export interface DrivePreviewUrlPayload {
   expiresAt: string;
 }
 
+export interface CanvasDriveFileSearchMatch {
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  path: string;
+  score: number;
+}
+
+export interface CanvasDriveFileSearchRow extends QueryResultRow {
+  id: string;
+  name: string;
+  mime_type: string;
+  path_text: string;
+}
+
 export interface DriveItemRow extends QueryResultRow {
   id: string;
   workspace_id: string;

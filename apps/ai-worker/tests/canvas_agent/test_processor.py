@@ -259,3 +259,38 @@ def test_canvas_agent_processor_requests_selection_before_html_generation() -> N
     assert repository.classified[0] == "generate_html"
     assert repository.classified[1] == {"missingSelection": True}
     assert repository.classified[2] == "HTML로 만들 캔버스 영역을 먼저 선택해주세요."
+
+
+class FakeDriveImportIntentClassifier:
+    model = "classifier-model"
+
+    def classify(self, _context) -> CanvasAgentIntentClassification:
+        return CanvasAgentIntentClassification(
+            intent="import_drive_file",
+            arguments={"query": "PILO 로고"},
+            message="팀에서 올린 로고 이미지를 찾습니다.",
+        )
+
+
+def test_canvas_agent_processor_preserves_drive_import_query() -> None:
+    repository = FakeRepository()
+    processor = CanvasAgentProcessor(repository, FakeDriveImportIntentClassifier())
+
+    result = processor.process_payload(
+        {
+            "jobType": "canvas_agent_step_requested",
+            "runId": "11111111-1111-1111-1111-111111111111",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "canvasId": "33333333-3333-3333-3333-333333333333",
+            "requestedByUserId": "44444444-4444-4444-4444-444444444444",
+            "schemaVersion": "canvas-agent:v1",
+        }
+    )
+
+    assert result.reason == "canvas_agent_intent_classified"
+    assert repository.classified == (
+        "import_drive_file",
+        {"query": "PILO 로고"},
+        "팀에서 올린 로고 이미지를 찾습니다.",
+        "classifier-model",
+    )

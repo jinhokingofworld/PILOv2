@@ -1118,11 +1118,32 @@ export function CanvasEditor({
       zoom: editor.getCamera().z,
     });
   }, [onViewportBoundsChange]);
+  const handleCanvasAgentDriveFileInsert = useCallback(
+    (file: { fileId: string; fileName: string; mimeType: string }) => {
+      const editor = editorRef.current;
+      if (!editor) return false;
+
+      editor.cancel();
+      editor.setCurrentTool("select.idle");
+      const result = placePiloCanvasShapeInEmptyViewport({
+        editor,
+        index: createdLocalCardsRef.current + 1,
+        placementRequest: { type: "drive-file", file },
+      });
+      if (!result.placed) return false;
+
+      createdLocalCardsRef.current += result.createdCount;
+      onOneShotToolCreatedRef.current?.();
+      return true;
+    },
+    [],
+  );
   const canvasAgent = useCanvasAgent({
     canvasId: board.id,
     editor: canvasEditor,
     enabled: canvasAgentEnabled,
     onApplied: handleCanvasAgentApplied,
+    onDriveFileInsert: handleCanvasAgentDriveFileInsert,
     onFrameSubtreeRequest,
     workspaceId: board.workspaceId,
   });

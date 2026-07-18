@@ -12,7 +12,12 @@ export const CANVAS_AGENT_ACTION_NAMES = [
   "finish"
 ] as const;
 
-export const CANVAS_AGENT_INTENT_NAMES = ["find_shapes", "generate_html", "unsupported"] as const;
+export const CANVAS_AGENT_INTENT_NAMES = [
+  "find_shapes",
+  "generate_html",
+  "import_drive_file",
+  "unsupported"
+] as const;
 export type CanvasAgentIntentName = (typeof CANVAS_AGENT_INTENT_NAMES)[number];
 
 export type CanvasAgentActionName = (typeof CANVAS_AGENT_ACTION_NAMES)[number];
@@ -177,6 +182,17 @@ export interface CanvasAgentHtmlArtifact {
   sourceShapeIds: string[];
 }
 
+export interface CanvasAgentDriveFileReference {
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+}
+
+export type CanvasAgentClientAction = {
+  type: "insert_drive_file";
+  file: CanvasAgentDriveFileReference;
+};
+
 export interface CreateCanvasAgentRunRequest {
   prompt?: unknown;
   selectedShapeIds?: unknown;
@@ -296,6 +312,7 @@ export interface CanvasAgentRunPayload {
   canvasRevision: number | null;
   progress: CanvasAgentProgressPayload | null;
   artifact: CanvasAgentHtmlArtifact | null;
+  clientAction: CanvasAgentClientAction | null;
   createdAt: string;
   completedAt: string | null;
   expiresAt: string;

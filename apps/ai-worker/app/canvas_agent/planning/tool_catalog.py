@@ -166,6 +166,13 @@ ALLOWED_INTENTS: list[dict[str, object]] = [
         },
     },
     {
+        "name": "import_drive_file",
+        "arguments": {
+            "query": "concise name or description of an existing Workspace Drive image",
+            "shapeIds": "empty array",
+        },
+    },
+    {
         "name": "unsupported",
         "arguments": {
             "query": "concise unsupported request",
@@ -177,7 +184,7 @@ ALLOWED_INTENTS: list[dict[str, object]] = [
 
 def allowed_intents_for_context(context: CanvasAgentRunContext) -> list[dict[str, object]]:
     # Tool-help mode is handled deterministically by App Server. Every request
-    # reaching the AI Worker is currently a read-only Canvas content search.
+    # reaching the AI Worker is classified before an App Server handler runs.
     return ALLOWED_INTENTS
 
 

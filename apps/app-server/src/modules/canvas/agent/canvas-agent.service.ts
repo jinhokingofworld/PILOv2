@@ -302,7 +302,8 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
         const output = {
           progress: result.progress,
           summary: result.summary,
-          ...(result.artifact ? { artifact: result.artifact } : {})
+          ...(result.artifact ? { artifact: result.artifact } : {}),
+          ...(result.clientAction ? { clientAction: result.clientAction } : {})
         };
         await this.repository.completeStep(claimed.step.id, output, result.resourceRefs);
         if (result.shouldContinue) {
@@ -413,6 +414,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       canvasRevision: row.canvas_revision === null ? null : Number(row.canvas_revision),
       progress,
       artifact: this.readHtmlArtifact(row.result_json),
+      clientAction: this.readClientAction(row.result_json),
       createdAt: this.iso(row.created_at),
       completedAt: row.completed_at === null ? null : this.iso(row.completed_at),
       expiresAt: this.iso(row.expires_at)
@@ -497,6 +499,37 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       ? payload.sourceShapeIds.filter((item): item is string => typeof item === "string").slice(0, 160)
       : [];
     return { kind: "html" as const, title: payload.title, html: payload.html, sourceShapeIds };
+  }
+
+  private readClientAction(value: Record<string, unknown>) {
+    const action = value.clientAction;
+    if (!action || typeof action !== "object" || Array.isArray(action)) return null;
+    const payload = action as Record<string, unknown>;
+    const file = payload.file;
+    if (payload.type !== "insert_drive_file"
+      || !file
+      || typeof file !== "object"
+      || Array.isArray(file)) {
+      return null;
+    }
+    const filePayload = file as Record<string, unknown>;
+    if (typeof filePayload.fileId !== "string"
+      || typeof filePayload.fileName !== "string"
+      || typeof filePayload.mimeType !== "string") {
+      return null;
+    }
+    const fileId = filePayload.fileId.trim();
+    const fileName = filePayload.fileName.trim().slice(0, 255);
+    const mimeType = filePayload.mimeType.trim().slice(0, 255);
+    if (!fileId || !fileName || !mimeType) return null;
+    return {
+      type: "insert_drive_file" as const,
+      file: {
+        fileId,
+        fileName,
+        mimeType
+      }
+    };
   }
 
   private readContextViewport(value: unknown) {

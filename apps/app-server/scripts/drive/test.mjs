@@ -64,6 +64,7 @@ assert.match(driveServiceSource, /INSERT INTO drive_uploads/);
 assert.match(driveServiceSource, /createUploadUrl/);
 assert.match(driveServiceSource, /completeUpload/);
 assert.match(driveServiceSource, /createDownloadUrl/);
+assert.match(driveServiceSource, /searchReadyImagesForCanvas/);
 assert.match(driveServiceSource, /drive_items\.item_type = 'document'/);
 assert.match(driveServiceSource, /drive\/workspaces\/\$\{workspaceId\}\/items/);
 assert.match(driveServiceSource, /WITH RECURSIVE target_tree/);
@@ -229,6 +230,47 @@ function uploadRow(overrides = {}) {
     updated_at: updatedAt,
     ...overrides
   };
+}
+
+{
+  const database = new FakeDatabase({
+    queryRows: [[
+      {
+        id: "55555555-5555-4555-8555-555555555551",
+        name: "로고-보조.png",
+        mime_type: "image/png",
+        path_text: "브랜드/로고-보조.png"
+      },
+      {
+        id: "55555555-5555-4555-8555-555555555552",
+        name: "PILO 로고.png",
+        mime_type: "image/png",
+        path_text: "브랜드/PILO 로고.png"
+      }
+    ]]
+  });
+  const { service, workspaceService } = createSubject(database);
+
+  const result = await service.searchReadyImagesForCanvas(
+    currentUserId,
+    workspaceId,
+    "PILO 로고",
+    5
+  );
+
+  assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.equal(database.queries[0].values[0], workspaceId);
+  assert.deepEqual(database.queries[0].values[1], [
+    "image/avif",
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/webp"
+  ]);
+  assert.match(database.queries[0].text, /drive_items\.workspace_id = \$1/);
+  assert.match(database.queries[0].text, /drive_items\.upload_status = 'ready'/);
+  assert.equal(result[0].fileName, "PILO 로고.png");
+  assert.ok(result[0].score >= 1000);
 }
 
 async function assertApiError(action, status, code, messagePattern) {
