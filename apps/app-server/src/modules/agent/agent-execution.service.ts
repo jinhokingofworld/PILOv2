@@ -74,6 +74,7 @@ interface AgentPlannerStepRow extends QueryResultRow {
 
 interface PlannedToolCandidate {
   toolName: string;
+  toolSchemaVersion: string;
   input: AgentJsonObject;
   riskLevel: AgentRiskLevel;
   executionMode: AgentToolExecutionMode;
@@ -82,6 +83,7 @@ interface PlannedToolCandidate {
 
 const RISK_LEVELS = ["low", "medium", "high"] as const;
 const EXECUTION_MODES = ["auto", "confirmation_required", "contextual"] as const;
+const LEGACY_MEETING_REPORT_SCHEMA_VERSION = "agent-tools:v6";
 const FORBIDDEN_JSON_KEY_PARTS = [
   "authorization",
   "cookie",
@@ -209,10 +211,11 @@ export class AgentExecutionService {
       });
     }
 
-    if (
-      !this.matchesRegistry(candidate, definition) &&
-      !this.isLegacyMeetingReportPlan(candidate, definition)
-    ) {
+    const isLegacyMeetingReportPlan = this.isLegacyMeetingReportPlan(
+      candidate,
+      definition
+    );
+    if (!this.matchesRegistry(candidate, definition) && !isLegacyMeetingReportPlan) {
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_PLAN_MISMATCH",
         errorMessage: "Agent tool plan does not match registry metadata",
@@ -233,7 +236,8 @@ export class AgentExecutionService {
       workspaceId,
       runId,
       definition,
-      candidate.input
+      candidate.input,
+      isLegacyMeetingReportPlan
     );
     if (!validatedInput.ok) {
       return validatedInput.result;
@@ -385,6 +389,10 @@ export class AgentExecutionService {
     }
 
     const toolName = this.readNonEmptyString(output.toolName, "toolName");
+    const toolSchemaVersion = this.readNonEmptyString(
+      output.toolSchemaVersion,
+      "toolSchemaVersion"
+    );
     const riskLevel = this.readRiskLevel(output.riskLevel);
     const executionMode = this.readExecutionMode(output.executionMode);
     const requiresConfirmation = this.readConfirmationRequirement(
@@ -402,6 +410,7 @@ export class AgentExecutionService {
 
     return {
       toolName,
+      toolSchemaVersion,
       input: this.readPlainObject(output.input, "input"),
       riskLevel,
       executionMode,
@@ -425,15 +434,26 @@ export class AgentExecutionService {
     definition: AgentToolDefinition<unknown>
   ): boolean {
     if (
-      (definition.name !== "get_meeting_report" &&
-        definition.name !== "summarize_meeting_report") ||
-      candidate.toolName !== definition.name ||
-      candidate.riskLevel !== "low" ||
-      candidate.executionMode !== "auto" ||
-      candidate.requiresConfirmation !== false
+      candidate.toolSchemaVersion !== LEGACY_MEETING_REPORT_SCHEMA_VERSION ||
+      candidate.toolName !== definition.name
     ) {
       return false;
     }
+    const matchesLegacyMetadata =
+      definition.name === "regenerate_meeting_report"
+        ? candidate.riskLevel === "medium" &&
+          candidate.executionMode === "confirmation_required" &&
+          candidate.requiresConfirmation === true
+        : [
+              "get_meeting_report",
+              "summarize_meeting_report",
+              "find_action_items",
+              "get_meeting_decision_evidence"
+            ].includes(definition.name) &&
+          candidate.riskLevel === "low" &&
+          candidate.executionMode === "auto" &&
+          candidate.requiresConfirmation === false;
+    if (!matchesLegacyMetadata) return false;
     return definition.adaptLegacyPlannerInput?.(candidate.input) !== null;
   }
 
@@ -442,7 +462,8 @@ export class AgentExecutionService {
     workspaceId: string,
     runId: string,
     definition: AgentToolDefinition<unknown>,
-    input: AgentJsonObject
+    input: AgentJsonObject,
+    allowLegacyAdapter: boolean
   ): Promise<
     | {
         ok: true;
@@ -463,7 +484,9 @@ export class AgentExecutionService {
         isLegacyAdapter: false
       };
     } catch (error) {
-      const legacyInput = definition.adaptLegacyPlannerInput?.(input);
+      const legacyInput = allowLegacyAdapter
+        ? definition.adaptLegacyPlannerInput?.(input)
+        : null;
       if (legacyInput !== null && legacyInput !== undefined) {
         return {
           ok: true,

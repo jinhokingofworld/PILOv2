@@ -22,7 +22,7 @@ from app.meeting_report_processor import InfrastructureError
 
 AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
 AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE = "agent_grounded_answer_requested"
-AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v6"
+AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v7"
 AGENT_PLANNER_TURN_LIMIT_MESSAGE = (
     "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. "
     "다음 요청에서 계속 진행할 내용을 알려주세요."

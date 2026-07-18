@@ -1213,6 +1213,8 @@ def test_agent_repository_redacts_credentials_from_prior_thread_text() -> None:
         "ghp_" + "privatevalue123",
         ".".join(("eyJhbGciOiJIUzI1NiJ9", "payload", "signature")),
         "private-assignment-value",
+        "natural-language-key-value",
+        "natural-language-token-value",
     ]
     connection = FakeAgentContextConnection(
         run_row={
@@ -1229,7 +1231,13 @@ def test_agent_repository_redacts_credentials_from_prior_thread_text() -> None:
             {
                 "id": "run-1",
                 "prompt": " ".join(sensitive_values[:3]),
-                "final_answer": f"API_KEY={sensitive_values[3]}",
+                "final_answer": " ".join(
+                    (
+                        f"API_KEY={sensitive_values[3]}",
+                        f"API key: {sensitive_values[4]}",
+                        f"access token = {sensitive_values[5]}",
+                    )
+                ),
             }
         ],
         resource_refs_by_run={"run-1": []},

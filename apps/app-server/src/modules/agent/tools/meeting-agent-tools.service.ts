@@ -75,6 +75,10 @@ interface LegacyPersistedReportReferenceInput extends ReportIdInput {
   legacyPersistedPlannerInput: true;
 }
 
+interface LegacyPersistedDecisionEvidenceInput extends DecisionEvidenceInput {
+  legacyPersistedPlannerInput: true;
+}
+
 interface RecordingConsentInput {
   accepted: true;
   policyVersion: string;
@@ -231,6 +235,7 @@ const DECISION_EVIDENCE_SELECTOR_INPUT_FIELDS = [
   ...REPORT_SELECTOR_INPUT_FIELDS,
   "decisionIndex"
 ];
+const LEGACY_DECISION_EVIDENCE_INPUT_FIELDS = ["reportId", "decisionIndex"];
 const RESOLVE_RESOURCE_INPUT_FIELDS = [
   "resourceType",
   "roomName",
@@ -507,12 +512,19 @@ export class MeetingAgentToolsService {
         properties: this.meetingReportSelectorSchema()
       },
       validateInput: (input) => this.validateMeetingReportSelectorInput(input),
+      adaptLegacyPlannerInput: (input) =>
+        this.adaptLegacyReportReferenceInput(input),
       prepareExecution: async (context, input) =>
         this.prepareMeetingReportSelectorExecution(
           context,
           this.validateMeetingReportSelectorInput(input)
         ),
       execute: async (context, input) => {
+        if (this.isLegacyPersistedReportReferenceInput(input)) {
+          return this.executeFindActionItems(context, {
+            reportId: input.reportId
+          });
+        }
         const resolved = await this.requireResolvedReport(
           context,
           this.validateMeetingReportSelectorInput(input)
@@ -539,12 +551,17 @@ export class MeetingAgentToolsService {
         }
       },
       validateInput: (input) => this.validateDecisionEvidenceSelectorInput(input),
+      adaptLegacyPlannerInput: (input) =>
+        this.adaptLegacyDecisionEvidenceInput(input),
       prepareExecution: async (context, input) =>
         this.prepareMeetingReportSelectorExecution(
           context,
           this.validateDecisionEvidenceSelectorInput(input)
         ),
       execute: async (context, input) => {
+        if (this.isLegacyPersistedDecisionEvidenceInput(input)) {
+          return this.executeDecisionEvidence(context, input);
+        }
         const draft = this.validateDecisionEvidenceSelectorInput(input);
         const resolved = await this.requireResolvedReport(context, draft);
         return this.executeDecisionEvidence(context, {
@@ -625,11 +642,19 @@ export class MeetingAgentToolsService {
         properties: this.meetingReportSelectorSchema()
       },
       validateInput: (input) => this.validateMeetingReportSelectorInput(input),
-      buildConfirmation: async (context, input) =>
-        this.buildRegenerateContextConfirmation(
+      adaptLegacyPlannerInput: (input) =>
+        this.adaptLegacyReportReferenceInput(input),
+      buildConfirmation: async (context, input) => {
+        if (this.isLegacyPersistedReportReferenceInput(input)) {
+          return this.buildRegenerateConfirmation(context, {
+            reportId: input.reportId
+          });
+        }
+        return this.buildRegenerateContextConfirmation(
           context,
           this.validateMeetingReportSelectorInput(input)
-        ),
+        );
+      },
       buildConfirmationInput: (plan) => this.confirmationPlanInput(plan),
       validateConfirmationInput: (input) => this.validateReportIdInput(input),
       execute: (context, input) =>
@@ -2307,6 +2332,39 @@ export class MeetingAgentToolsService {
     }
   }
 
+  private adaptLegacyDecisionEvidenceInput(
+    input: unknown
+  ): LegacyPersistedDecisionEvidenceInput | null {
+    try {
+      const object = this.requirePlainObject(
+        input,
+        "Legacy Meeting decision evidence input"
+      );
+      this.rejectForbiddenMeetingToolFields(object);
+      this.assertOnlyAllowedFields(
+        object,
+        LEGACY_DECISION_EVIDENCE_INPUT_FIELDS,
+        "Legacy Meeting decision evidence input"
+      );
+      const decisionIndex = object.decisionIndex;
+      if (
+        decisionIndex !== undefined &&
+        (!Number.isInteger(decisionIndex) || (decisionIndex as number) < 0)
+      ) {
+        return null;
+      }
+      return {
+        legacyPersistedPlannerInput: true,
+        reportId: this.requireReportId(object.reportId),
+        ...(decisionIndex === undefined
+          ? {}
+          : { decisionIndex: decisionIndex as number })
+      };
+    } catch {
+      return null;
+    }
+  }
+
   private isLegacyPersistedReportReferenceInput(
     input: unknown
   ): input is LegacyPersistedReportReferenceInput {
@@ -2318,6 +2376,17 @@ export class MeetingAgentToolsService {
     } catch {
       return false;
     }
+  }
+
+  private isLegacyPersistedDecisionEvidenceInput(
+    input: unknown
+  ): input is LegacyPersistedDecisionEvidenceInput {
+    if (!this.isLegacyPersistedReportReferenceInput(input)) return false;
+    const decisionIndex = (input as { decisionIndex?: unknown }).decisionIndex;
+    return (
+      decisionIndex === undefined ||
+      (Number.isInteger(decisionIndex) && (decisionIndex as number) >= 0)
+    );
   }
 
   private validateReportIdInput(input: unknown): ReportIdInput {

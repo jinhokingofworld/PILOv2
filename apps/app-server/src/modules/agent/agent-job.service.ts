@@ -9,7 +9,7 @@ import type {
 } from "./types/agent-tool.types";
 import type { AgentToolCapabilityCatalogSnapshot } from "./agent-tool-capability-catalog";
 
-export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v6";
+export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v7";
 
 export interface AgentToolSchemaSnapshotItem {
   name: string;

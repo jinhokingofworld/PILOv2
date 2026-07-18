@@ -211,7 +211,8 @@ SENSITIVE_TEXT_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b"),
     re.compile(r"\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
     re.compile(
-        r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|credential)"
+        r"\b(?:api(?:[\s_-]+)?key|access(?:[\s_-]+)?token|"
+        r"refresh(?:[\s_-]+)?token|password|secret|credential)"
         r"\s*[:=]\s*[\"']?[^\s\"',;]{4,}",
         re.IGNORECASE,
     ),
