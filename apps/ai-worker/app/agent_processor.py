@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from hashlib import sha256
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
@@ -567,7 +568,7 @@ class AgentRunProcessor:
             output_summary["toolRetrieval"] = _tool_retrieval_observation(
                 self.tool_retrieval_mode,
                 planner_selection,
-                job.tool_capability_catalog.sha256 if job.tool_capability_catalog else None,
+                job,
             )
             planner_step_completed = self.repository.complete_planner_step(
                 job.run_id,
@@ -1531,7 +1532,7 @@ def _retrieval_clarification_summary(
         "toolRetrieval": _tool_retrieval_observation(
             mode,
             selection,
-            job.tool_capability_catalog.sha256 if job.tool_capability_catalog else None,
+            job,
         ),
     }
 
@@ -1539,9 +1540,10 @@ def _retrieval_clarification_summary(
 def _tool_retrieval_observation(
     mode: str,
     selection: AgentPlannerToolSelection,
-    catalog_sha256: str | None,
+    job: AgentRunJob,
 ) -> dict[str, object]:
     retrieval = selection.retrieval
+    catalog = job.tool_capability_catalog
     return {
         "mode": mode,
         "usedShortlist": selection.used_shortlist,
@@ -1549,8 +1551,20 @@ def _tool_retrieval_observation(
         "fallbackReason": retrieval.fallback_reason if retrieval else None,
         "candidateCount": retrieval.candidate_count if retrieval else 0,
         "confidenceBucket": retrieval.confidence_bucket if retrieval else "none",
-        "catalogSha256": catalog_sha256,
+        "catalogVersion": catalog.version if catalog else None,
+        "catalogSha256": catalog.sha256 if catalog else None,
+        "eligibleSnapshotSha256": _eligible_snapshot_sha256(job.tools),
     }
+
+
+def _eligible_snapshot_sha256(tools: tuple[AgentToolSchema, ...]) -> str:
+    canonical = json.dumps(
+        {tool.name: tool.input_schema for tool in tools},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return sha256(canonical).hexdigest()
 
 
 def _current_date_for_timezone(timezone: str) -> date:

@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from app.agent_tool_retrieval import (
@@ -5,12 +8,18 @@ from app.agent_tool_retrieval import (
     compute_tool_capability_catalog_sha,
     parse_tool_capability_catalog,
     retrieve_tool_shortlist,
+    select_tool_shortlist,
 )
 
 TOOL_SCHEMAS = {
     "list_calendar_events": {"type": "object", "required": ["start", "end"]},
     "list_meeting_reports": {"type": "object", "properties": {"status": {"type": "string"}}},
 }
+QUALITY_FIXTURE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "evals"
+    / "tool_retrieval_quality_gate_v1.json"
+)
 
 
 def examples(utterance: str) -> list[dict[str, str]]:
@@ -167,6 +176,22 @@ def test_metadata_retrieval_prefers_matching_domain_and_returns_low_confidence_f
     assert unknown.fallback_reason == "no_metadata_match"
     assert unknown.candidate_count == 0
     assert unknown.confidence_bucket == "none"
+
+
+def test_full_catalog_shortlists_current_meeting_leave_without_adjacent_actions() -> None:
+    fixture = json.loads(QUALITY_FIXTURE_PATH.read_text(encoding="utf-8"))
+    schemas = fixture["eligibleToolSchemas"]
+    catalog = parse_tool_capability_catalog(fixture["toolCapabilityCatalog"], schemas)
+    assert catalog is not None
+
+    leave = select_tool_shortlist("회의 나가줘", catalog, schemas)
+    reports = select_tool_shortlist("최근 3건 회의록", catalog, schemas)
+
+    assert leave.used_shortlist is True
+    assert leave.retrieval.selected_capability_ids == ("meeting.control.leave",)
+    assert leave.tool_names == ("get_active_meeting", "leave_meeting")
+    assert reports.retrieval.selected_capability_ids == ("meeting.reports.list",)
+    assert reports.tool_names == ("list_meeting_reports",)
 
 
 def test_catalog_rejects_descriptor_digest_that_does_not_match_the_tool_schema() -> None:

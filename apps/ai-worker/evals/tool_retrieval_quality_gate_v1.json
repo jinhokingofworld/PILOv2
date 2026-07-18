@@ -4,8 +4,8 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "3a06adebb66cbc2e618fe0ebbc7530e7c90c9134e60c7828b07f822085d90f1a",
-    "catalogSha256": "670bd2a3912d0f41dd3e159f50c4a0fe906f3547f1a059df65dc3f8e10b39438",
+    "inventorySha256": "f6e59474201de19feddbd879930ff84819ac6d8f7d41c2e396db5adca0e4c4d6",
+    "catalogSha256": "9c7b08edb08540ffb27eced228b59c5ac7efaa515a2864d93f6dc2853f5c7d11",
     "eligibleSnapshotSha256": "1118cefcebd6057251efe61e501dc4c288a49cf247ce385fda68cba60e1faad1"
   },
   "privacySensitiveValues": [
@@ -1322,7 +1322,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "670bd2a3912d0f41dd3e159f50c4a0fe906f3547f1a059df65dc3f8e10b39438",
+    "sha256": "9c7b08edb08540ffb27eced228b59c5ac7efaa515a2864d93f6dc2853f5c7d11",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -1475,28 +1475,28 @@
           "다른 회의 참여 또는 회의 시작 요청"
         ],
         "positiveExamples": [
-          "현재 참여 중인 회의에서 나갈 때",
-          "현재 참여 중인 회의에서 나갈 때 알려줘",
-          "현재참여중인회의에서나갈때",
-          "현재 참여 중인 회의에서 나갈 때 부탁드려요",
+          "현재 회의에서 나가줘",
+          "회의 나가줘",
+          "현재회의에서나가줘",
+          "현재 회의에서 나가줘 부탁드려요",
           "meeting leave 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "현재 참여 중인 회의에서 나갈 때"
+            "utterance": "현재 회의에서 나가줘"
           },
           {
             "kind": "paraphrase",
-            "utterance": "현재 참여 중인 회의에서 나갈 때 알려줘"
+            "utterance": "회의 나가줘"
           },
           {
             "kind": "typo",
-            "utterance": "현재참여중인회의에서나갈때"
+            "utterance": "현재회의에서나가줘"
           },
           {
             "kind": "honorific",
-            "utterance": "현재 참여 중인 회의에서 나갈 때 부탁드려요"
+            "utterance": "현재 회의에서 나가줘 부탁드려요"
           },
           {
             "kind": "abbreviation",
@@ -1661,28 +1661,28 @@
           "단일 회의록 상세 또는 요약 요청"
         ],
         "positiveExamples": [
-          "최근, 상태별 회의록 목록을 조회할 때",
-          "최근, 상태별 회의록 목록을 조회할 때 알려줘",
-          "최근,상태별회의록목록을조회할때",
-          "최근, 상태별 회의록 목록을 조회할 때 부탁드려요",
+          "최근 회의록 목록",
+          "최근 3건 회의록",
+          "최근회의록목록",
+          "최근 회의록 목록 부탁드려요",
           "meeting list 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "최근, 상태별 회의록 목록을 조회할 때"
+            "utterance": "최근 회의록 목록"
           },
           {
             "kind": "paraphrase",
-            "utterance": "최근, 상태별 회의록 목록을 조회할 때 알려줘"
+            "utterance": "최근 3건 회의록"
           },
           {
             "kind": "typo",
-            "utterance": "최근,상태별회의록목록을조회할때"
+            "utterance": "최근회의록목록"
           },
           {
             "kind": "honorific",
-            "utterance": "최근, 상태별 회의록 목록을 조회할 때 부탁드려요"
+            "utterance": "최근 회의록 목록 부탁드려요"
           },
           {
             "kind": "abbreviation",

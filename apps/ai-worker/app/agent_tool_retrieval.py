@@ -261,7 +261,13 @@ def retrieve_tool_shortlist(
     selected: list[str] = []
     selected_set: set[str] = set()
     remaining_schema_bytes = schema_token_budget * 4 if schema_token_budget is not None else None
-    minimum_candidate_score = max(1.0, best_score / 2)
+    # Scores are discrete token overlaps. Preserve a closely matched second
+    # capability only for compound requests, while excluding one-token
+    # adjacent Meeting actions from an otherwise unambiguous shortlist.
+    compound_request = any(marker in prompt for marker in ("와", "및", "그리고", ","))
+    minimum_candidate_score = (
+        max(1.0, best_score - 1.0) if compound_request else best_score
+    )
 
     selected_capability_ids: list[str] = []
     for rank, (score, capability_id) in enumerate(ranked[:top_k]):

@@ -701,8 +701,50 @@ def test_shortlist_mode_keeps_supported_write_chain_and_clarifies_retrieval_fail
         "fallbackReason": "no_metadata_match",
         "candidateCount": 0,
         "confidenceBucket": "none",
+        "catalogVersion": "agent-tool-capabilities:v2",
         "catalogSha256": job.tool_capability_catalog.sha256,
+        "eligibleSnapshotSha256": "d5a810ef126f10a54e783f5799ae3bf726a9226f9e8885926538598b7cdd4fc3",
     }
+
+
+def test_environment_flag_switches_between_shortlist_and_shadow(monkeypatch) -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="create_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
+    ]
+    payload = agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+
+    monkeypatch.setenv("AGENT_TOOL_RETRIEVAL_MODE", "shortlist")
+    shortlist_planner = FakePlannerClient()
+    shortlist_processor = AgentRunProcessor(
+        FakeAgentRunRepository(context=run_context(prompt="일정 조회")),
+        shortlist_planner,
+        FakeExecutionHandoffClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+    )
+    shortlist_processor.process_payload(payload)
+
+    monkeypatch.setenv("AGENT_TOOL_RETRIEVAL_MODE", "shadow")
+    shadow_planner = FakePlannerClient()
+    shadow_processor = AgentRunProcessor(
+        FakeAgentRunRepository(context=run_context(prompt="일정 조회")),
+        shadow_planner,
+        FakeExecutionHandoffClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+    )
+    shadow_processor.process_payload(payload)
+
+    assert [tool.name for tool in shortlist_planner.requests[0].tools] == [
+        "list_calendar_events"
+    ]
+    assert [tool.name for tool in shadow_planner.requests[0].tools] == [
+        "list_calendar_events",
+        "create_calendar_event",
+    ]
 
 
 def test_shared_calendar_list_tool_uses_the_matched_read_only_capability_chain() -> None:
