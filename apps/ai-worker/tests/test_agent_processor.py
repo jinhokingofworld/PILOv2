@@ -8,8 +8,8 @@ import pytest
 from app.agent_processor import (
     AGENT_TOOL_SCHEMA_VERSION,
     TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
-    TOOL_RETRIEVAL_MODE_SHORTLIST,
     TOOL_RETRIEVAL_MODE_SHADOW,
+    TOOL_RETRIEVAL_MODE_SHORTLIST,
     AgentPlannerDecision,
     AgentPlanningRequest,
     AgentRunContext,
@@ -703,7 +703,9 @@ def test_shortlist_mode_keeps_supported_write_chain_and_clarifies_retrieval_fail
         "confidenceBucket": "none",
         "catalogVersion": "agent-tool-capabilities:v2",
         "catalogSha256": job.tool_capability_catalog.sha256,
-        "eligibleSnapshotSha256": "d5a810ef126f10a54e783f5799ae3bf726a9226f9e8885926538598b7cdd4fc3",
+        "eligibleSnapshotSha256": (
+            "d5a810ef126f10a54e783f5799ae3bf726a9226f9e8885926538598b7cdd4fc3"
+        ),
     }
 
 
