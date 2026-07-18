@@ -150,6 +150,24 @@ export function isSqlErdColumnPointerDrag(
   );
 }
 
+export function getSqlErdConnectorPortVisibilityClassName({
+  isHighlighted,
+  isSelected,
+  selectedOpacityClassName
+}: {
+  isHighlighted: boolean;
+  isSelected: boolean;
+  selectedOpacityClassName: "opacity-45" | "opacity-100";
+}) {
+  if (isSelected) {
+    return `pointer-events-auto ${selectedOpacityClassName} hover:opacity-100`;
+  }
+  if (isHighlighted) {
+    return "pointer-events-none opacity-0 pointer-fine:pointer-events-auto pointer-fine:opacity-100";
+  }
+  return "pointer-events-none opacity-0 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100 pointer-fine:group-hover:pointer-events-auto pointer-fine:group-hover:opacity-100";
+}
+
 export function selectSqlErdColumn(detail: SqlErdColumnSelectEventDetail) {
   window.dispatchEvent(
     new CustomEvent(SQLTOERD_COLUMN_SELECT_EVENT, {
@@ -598,11 +616,11 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
               aria-label={`테이블 설명 관계 ${side === "left" ? "시작" : "끝"}`}
               className={`absolute top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded-full transition-opacity ${
                 side === "left" ? "left-[-10px]" : "right-[-10px]"
-              } ${
-                selectedState === "table"
-                  ? "pointer-events-auto opacity-45 hover:opacity-100"
-                  : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100"
-              }`}
+              } ${getSqlErdConnectorPortVisibilityClassName({
+                isHighlighted: false,
+                isSelected: selectedState === "table",
+                selectedOpacityClassName: "opacity-45"
+              })}`}
               data-sqltoerd-table-port={side}
               data-sqltoerd-table-port-hit
               data-sqltoerd-table-id={shape.props.tableId}
@@ -686,23 +704,22 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 tabIndex={isFocusDimmed ? -1 : 0}
               >
                 {(["left", "right"] as const).map((side) => {
-                  const isPortActive =
-                    isSelected || isHighlighted || selectedState === "table";
+                  const isPortSelected =
+                    isSelected || selectedState === "table";
 
                   return (
                     <button
                       aria-hidden="true"
                       className={`absolute top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded-full transition-opacity ${
                         side === "left" ? "left-[-10px]" : "right-[-10px]"
-                      } ${
-                        isPortActive
-                          ? `pointer-events-auto ${
-                              isSelected || isHighlighted
-                                ? "opacity-100"
-                                : "opacity-45"
-                            }`
-                          : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100"
-                      }`}
+                      } ${getSqlErdConnectorPortVisibilityClassName({
+                        isHighlighted,
+                        isSelected: isPortSelected,
+                        selectedOpacityClassName:
+                          isSelected || isHighlighted
+                            ? "opacity-100"
+                            : "opacity-45"
+                      })}`}
                       data-sqltoerd-column-id={column.id}
                       data-sqltoerd-column-port={side}
                       data-sqltoerd-column-port-hit

@@ -2750,6 +2750,30 @@ assert.deepEqual(
   }
 );
 assert.equal(
+  tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({
+    isHighlighted: false,
+    isSelected: false,
+    selectedOpacityClassName: "opacity-45"
+  }),
+  "pointer-events-none opacity-0 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100 pointer-fine:group-hover:pointer-events-auto pointer-fine:group-hover:opacity-100"
+);
+assert.equal(
+  tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({
+    isHighlighted: true,
+    isSelected: false,
+    selectedOpacityClassName: "opacity-100"
+  }),
+  "pointer-events-none opacity-0 pointer-fine:pointer-events-auto pointer-fine:opacity-100"
+);
+assert.equal(
+  tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({
+    isHighlighted: false,
+    isSelected: true,
+    selectedOpacityClassName: "opacity-45"
+  }),
+  "pointer-events-auto opacity-45 hover:opacity-100"
+);
+assert.equal(
   tableShapeRuntime.isSqlErdColumnPointerDrag(
     { x: 10, y: 10 },
     { x: 13, y: 12 }
