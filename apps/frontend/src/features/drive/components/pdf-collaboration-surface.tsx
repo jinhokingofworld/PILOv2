@@ -97,10 +97,14 @@ function StrokePath({ stroke }: { stroke: PdfCollaborationStroke }) {
 
 export function PdfCollaborationSurface({
   fileId,
+  fileName,
+  mimeType,
   previewUrl,
   workspaceId,
 }: {
   fileId: string;
+  fileName: string;
+  mimeType: string | null;
   previewUrl: string;
   workspaceId: string;
 }) {
@@ -113,6 +117,7 @@ export function PdfCollaborationSurface({
   const [penWidth, setPenWidth] = useState<number>(0.7);
   const [highlighterWidth, setHighlighterWidth] = useState<number>(2.8);
   const [draftPoints, setDraftPoints] = useState<PdfCollaborationPoint[]>([]);
+  const [hasImageError, setHasImageError] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const draftPointsRef = useRef<PdfCollaborationPoint[] | null>(null);
   const erasedStrokeIdsRef = useRef<Set<string> | null>(null);
@@ -131,6 +136,7 @@ export function PdfCollaborationSurface({
   const activeColor = tool === "highlighter" ? highlighterColor : penColor;
   const activeWidth = tool === "highlighter" ? highlighterWidth : penWidth;
   const widthOptions = tool === "highlighter" ? HIGHLIGHTER_WIDTHS : PEN_WIDTHS;
+  const isPdf = mimeType === "application/pdf";
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -143,6 +149,10 @@ export function PdfCollaborationSurface({
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    setHasImageError(false);
+  }, [previewUrl]);
+
   const movePage = useCallback(
     (nextPageNumber: number) => {
       if (!numPages || nextPageNumber < 1 || nextPageNumber > numPages) return;
@@ -153,6 +163,8 @@ export function PdfCollaborationSurface({
   );
 
   useEffect(() => {
+    if (!isPdf) return;
+
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target;
       if (
@@ -175,7 +187,7 @@ export function PdfCollaborationSurface({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [movePage, pageNumber]);
+  }, [isPdf, movePage, pageNumber]);
 
   const finishStroke = useCallback(() => {
     const points = draftPointsRef.current;
@@ -267,7 +279,7 @@ export function PdfCollaborationSurface({
   return (
     <div className={styles.pdfCollaborationLayout}>
       <div className={styles.pdfCollaborationToolbar}>
-        <div className={styles.pdfCollaborationControls}>
+        <div className={isPdf ? styles.pdfCollaborationControls : "hidden"}>
           <Button
             type="button"
             variant="ghost"
@@ -388,7 +400,7 @@ export function PdfCollaborationSurface({
           ) : (
             presence.slice(0, 3).map((member) => (
               <span key={member.userId} className={styles.pdfCollaborationMember}>
-                {member.displayName} {member.pageNumber}p
+                {member.displayName}{isPdf ? ` ${member.pageNumber}p` : ""}
               </span>
             ))
           )}
@@ -397,7 +409,8 @@ export function PdfCollaborationSurface({
 
       <div ref={viewportRef} className={styles.pdfCollaborationViewport}>
         <div className={styles.pdfPageFrame} style={{ width: pageWidth }}>
-          <Document
+          {isPdf ? (
+            <Document
             file={previewUrl}
             loading={
               <div className={styles.pdfPreviewState}>
@@ -417,7 +430,18 @@ export function PdfCollaborationSurface({
               renderTextLayer={false}
               width={pageWidth}
             />
-          </Document>
+            </Document>
+          ) : hasImageError ? (
+            <div className={styles.pdfPreviewState}>이미지를 표시하지 못했습니다.</div>
+          ) : (
+            <img
+              alt={fileName}
+              className={styles.pdfPreviewImage}
+              draggable={false}
+              src={previewUrl}
+              onError={() => setHasImageError(true)}
+            />
+          )}
           <svg
             className={styles.pdfAnnotationLayer}
             viewBox="0 0 100 100"
