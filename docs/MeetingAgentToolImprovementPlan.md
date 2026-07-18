@@ -1494,7 +1494,7 @@ PR Review·Drive도 같은 gate로 순차 등록하고, 각 도메인의 조회 
 
 - [ ] 회의방·active meeting·참여자 formatter는 사용자 timezone, 빈 목록·종료됨·녹음 중·권한 없음의
   상태를 일관되게 표시한다.
-- [ ] report 목록/상세는 최신 기본값, 기간·상태·명시 count, 실패 단계와 재시도 가능 여부를 보존한다.
+- [x] report 목록/상세는 최신 기본값, 기간·상태·명시 count, 실패 단계와 재시도 가능 여부를 보존한다.
 - [x] summary/discussion/decision/action-item 요청은 선택한 section만 반환하며 transcript·다른 section을
   섞지 않는다.
 - [ ] grounded answer는 selector의 report/meeting/action item scope를 교차 검증해 다른 resource·stale
