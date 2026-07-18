@@ -1215,6 +1215,8 @@ def test_agent_repository_redacts_credentials_from_prior_thread_text() -> None:
         "private-assignment-value",
         "natural-language-key-value",
         "natural-language-token-value",
+        "plain-secret-value",
+        "plain-token-value",
     ]
     connection = FakeAgentContextConnection(
         run_row={
@@ -1236,6 +1238,11 @@ def test_agent_repository_redacts_credentials_from_prior_thread_text() -> None:
                         f"API_KEY={sensitive_values[3]}",
                         f"API key: {sensitive_values[4]}",
                         f"access token = {sensitive_values[5]}",
+                        f"OPENAI_API_KEY={sensitive_values[6]}",
+                        f"GITHUB_ACCESS_TOKEN={sensitive_values[7]}",
+                        '{"apiKey":"' + sensitive_values[6] + '"}',
+                        "'access_token': '" + sensitive_values[7] + "'",
+                        f"client_secret={sensitive_values[6]}",
                     )
                 ),
             }
