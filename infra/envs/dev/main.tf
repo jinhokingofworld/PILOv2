@@ -120,11 +120,15 @@ module "secrets" {
 module "iam" {
   source = "../../modules/iam"
 
-  name_prefix                         = local.name_prefix
-  aws_region                          = var.aws_region
-  github_owner                        = var.github_owner
-  github_repo                         = var.github_repo
-  ecr_repository_arns                 = module.ecr.repository_arns
+  name_prefix         = local.name_prefix
+  aws_region          = var.aws_region
+  github_owner        = var.github_owner
+  github_repo         = var.github_repo
+  ecr_repository_arns = module.ecr.repository_arns
+  db_migration_publisher_repository_arn = one([
+    for arn in module.ecr.repository_arns : arn
+    if endswith(arn, "/pilo-db-migrations")
+  ])
   s3_bucket_arns                      = [module.s3.frontend_bucket_arn, module.s3.uploads_bucket_arn]
   sqs_queue_arns                      = module.sqs.queue_arns
   ai_worker_queue_arns                = [module.sqs.ai_jobs_queue_arn]

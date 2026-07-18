@@ -23,7 +23,8 @@ schema is verified, record the existing files without executing them:
 ./infra/scripts/run-dev-db-migrations.ps1 `
   -Mode baseline `
   -BaselineThrough 099 `
-  -ConfirmBaseline RDS_SCHEMA_VERIFIED
+  -ConfirmBaseline RDS_SCHEMA_VERIFIED `
+  -ImageTag <dev-merge-commit-sha>
 ```
 
 The confirmation value is intentionally exact. Baseline mode must never be
@@ -40,9 +41,29 @@ before executing baseline mode.
 
 ## Applying later migrations
 
+The `Publish DB Migration Runner` workflow validates migration filenames and
+immutability on pull requests. When a matching change is merged to `dev`, it
+publishes a runner image with the full merge commit SHA and `latest` tags.
+The workflow can push only to this ECR repository; it cannot read the RDS
+secret or start an ECS task.
+
+After the publisher role has been applied, register its Terraform output as the
+repository variable `AWS_DB_MIGRATION_PUBLISH_ROLE_ARN`. Each operator then
+runs the exact image reviewed in the dev merge. The script resolves the tag to
+an ECR digest, registers a one-off task definition revision, and runs that
+revision. It never executes the mutable `latest` tag. If no migration merge
+has happened after the variable is registered, run `Publish DB Migration
+Runner` manually on the `dev` branch once to publish the current runner image.
+
 ```powershell
-./infra/scripts/run-dev-db-migrations.ps1 -Mode apply
+./infra/scripts/run-dev-db-migrations.ps1 `
+  -Mode apply `
+  -ImageTag <dev-merge-commit-sha>
 ```
+
+The operator needs ECS task execution permission. Team members using the
+existing AdministratorAccess role already have it; they do not need the RDS
+password or direct database network access.
 
 Runner-managed files after the baseline must not contain `BEGIN`, `COMMIT`,
 `ROLLBACK`, or `psql` meta-commands. The runner owns the transaction so the SQL
