@@ -185,9 +185,7 @@ export function PrReviewWorkspaceLocationAdapter({
       reviewSessionId,
     ],
   );
-  const { reportInteraction } = useWorkspaceLocationAdapter(
-    adapter as Parameters<typeof useWorkspaceLocationAdapter>[0],
-  );
+  const { reportInteraction } = useWorkspaceLocationAdapter(adapter);
   useEffect(() => {
     window.addEventListener("pointerup", reportInteraction);
     window.addEventListener("wheel", reportInteraction, { passive: true });

@@ -21,7 +21,9 @@ export type WorkspacePresenceViewport =
         | "board-kanban"
         | "calendar-grid"
         | "drive-list"
-        | "meeting-content";
+        | "meeting-content"
+        | "pr-review-diff"
+        | "pr-review-inspector";
       xRatio: number;
       yRatio: number;
     }

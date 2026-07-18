@@ -37,6 +37,10 @@ function readIdentifier(value: unknown): string | null {
     : null;
 }
 
+function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: string[]) {
+  return Object.keys(value).every((key) => allowedKeys.includes(key));
+}
+
 function clampRatio(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.min(Math.max(value, 0), 1);
@@ -88,7 +92,9 @@ function readViewport(value: unknown): WorkspacePresenceViewport | null {
       (value.key !== "board-kanban" &&
         value.key !== "calendar-grid" &&
         value.key !== "drive-list" &&
-        value.key !== "meeting-content")
+        value.key !== "meeting-content" &&
+        value.key !== "pr-review-diff" &&
+        value.key !== "pr-review-inspector")
     ) {
       return null;
     }
@@ -111,38 +117,52 @@ function readContext(
 
   switch (page) {
     case "home":
-      return {};
+      return hasOnlyKeys(value, []) ? {} : null;
     case "calendar": {
+      if (!hasOnlyKeys(value, ["selectedDate"])) return null;
       const selectedDate = readNullableIdentifier("selectedDate");
       return value.selectedDate === null || selectedDate
         ? { selectedDate }
         : null;
     }
     case "board": {
+      if (!hasOnlyKeys(value, ["boardId"])) return null;
       const boardId = readIdentifier(value.boardId);
       return boardId ? { boardId } : null;
     }
     case "sql-erd": {
+      if (!hasOnlyKeys(value, ["sessionId"])) return null;
       const sessionId = readIdentifier(value.sessionId);
       return sessionId ? { sessionId } : null;
     }
     case "pr-review": {
+      if (!hasOnlyKeys(value, ["reviewFileId", "reviewSessionId"])) return null;
+      const reviewFileId = readNullableIdentifier("reviewFileId");
       const reviewSessionId = readNullableIdentifier("reviewSessionId");
-      return value.reviewSessionId === null || reviewSessionId
-        ? { reviewSessionId }
-        : null;
+      const validReviewFileId =
+        value.reviewFileId === undefined || value.reviewFileId === null || reviewFileId;
+      const validReviewSessionId =
+        value.reviewSessionId === undefined ||
+        value.reviewSessionId === null ||
+        reviewSessionId;
+      if (!validReviewFileId || !validReviewSessionId) return null;
+      if (reviewFileId && !reviewSessionId) return null;
+      return { reviewFileId, reviewSessionId };
     }
     case "meeting": {
+      if (!hasOnlyKeys(value, ["meetingRoomId"])) return null;
       const meetingRoomId = readNullableIdentifier("meetingRoomId");
       return value.meetingRoomId === null || meetingRoomId
         ? { meetingRoomId }
         : null;
     }
     case "canvas": {
+      if (!hasOnlyKeys(value, ["canvasId"])) return null;
       const canvasId = readIdentifier(value.canvasId);
       return canvasId ? { canvasId } : null;
     }
     case "drive": {
+      if (!hasOnlyKeys(value, ["folderId"])) return null;
       const folderId = readNullableIdentifier("folderId");
       return value.folderId === null || folderId ? { folderId } : null;
     }
@@ -156,6 +176,7 @@ function isPage(value: unknown): value is WorkspacePresencePage {
 function isViewportAllowed(
   page: WorkspacePresencePage,
   viewport: WorkspacePresenceViewport,
+  context: Record<string, string | null>,
 ) {
   switch (page) {
     case "home":
@@ -170,8 +191,21 @@ function isViewportAllowed(
     case "sql-erd":
     case "canvas":
       return viewport.kind === "camera";
-    case "pr-review":
-      return viewport.kind === "camera" || viewport.kind === "document";
+    case "pr-review": {
+      const { reviewFileId, reviewSessionId } = context;
+      if (viewport.kind === "document") {
+        return reviewSessionId === null && reviewFileId === null;
+      }
+      if (viewport.kind === "camera") {
+        return reviewSessionId !== null && reviewFileId === null;
+      }
+      return (
+        reviewSessionId !== null &&
+        reviewFileId !== null &&
+        (viewport.key === "pr-review-diff" ||
+          viewport.key === "pr-review-inspector")
+      );
+    }
     case "meeting":
       return (
         viewport.kind === "document" ||
@@ -204,7 +238,7 @@ function readLocation(value: unknown): WorkspacePresenceLocation | null {
 
   const context = readContext(value.page, value.context);
   const viewport = readViewport(value.viewport);
-  if (!context || !viewport || !isViewportAllowed(value.page, viewport)) {
+  if (!context || !viewport || !isViewportAllowed(value.page, viewport, context)) {
     return null;
   }
 
