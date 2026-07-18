@@ -44,6 +44,8 @@ assert.match(iamModule, /github_actions_db_migration_publisher_assume_role/);
 assert.match(iamModule, /refs\/heads\/dev/);
 assert.match(iamModule, /github_actions_db_migration_publisher/);
 assert.match(iamModule, /ecr:PutImage/);
+assert.match(iamModule, /ecr:BatchGetImage/);
+assert.match(iamModule, /ecr:GetDownloadUrlForLayer/);
 assert.match(iamModule, /db_migration_publisher_repository_arn/);
 assert.match(iamOutputs, /github_actions_db_migration_publisher_role_arn/);
 assert.match(devOutputs, /db_migration_publisher_role_arn/);
