@@ -351,7 +351,7 @@ export function BoardIssueSheet({
                         <label className="grid gap-1 text-[21px] font-medium">
                           제목
                           <Input
-                            className="h-[54px] text-[21px]"
+                            className="h-[54px] text-[21px] md:text-[21px]"
                             value={draftTitle}
                             disabled={isSaving}
                             onChange={(event) =>

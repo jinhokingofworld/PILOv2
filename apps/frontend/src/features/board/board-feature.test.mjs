@@ -146,13 +146,27 @@ assert.match(boardIssueSheet, /text-\[27px\]/);
 assert.match(boardIssueAssigneeSelector, /text-\[18px\]/);
 assert.match(boardPanel, /text-\[19\.2px\]/);
 assert.match(boardKanban, /text-\[19\.2px\]/);
-assert.match(boardIssueCreateForm, /text-\[19\.2px\]/);
 assert.match(boardIssueSheet, /text-\[19\.2px\]/);
 assert.match(boardIssueAssigneeSelector, /text-\[19\.2px\]/);
-assert.match(boardIssueSheet, /<Input[\s\S]*className="[^"]*text-\[21px\]/);
+assert.match(
+  boardIssueCreateForm,
+  /<Button\s+type="submit"\s+size="lg"\s+className="[^"]*text-\[21px\]/
+);
+assert.match(
+  boardPanel,
+  /<Input\s+className="[^"]*text-\[18\.75px\][^"]*md:text-\[18\.75px\]/
+);
+assert.match(
+  boardIssueCreateForm,
+  /<Input\s+className="[^"]*text-\[18\.75px\][^"]*md:text-\[18\.75px\]/
+);
+assert.match(
+  boardIssueSheet,
+  /<Input\s+className="[^"]*text-\[21px\][^"]*md:text-\[21px\]/
+);
 assert.match(
   boardIssueAssigneeSelector,
-  /<Input[\s\S]*className="[^"]*text-\[21px\]/
+  /<Input\s+className="[^"]*text-\[21px\][^"]*md:text-\[21px\]/
 );
 assert.match(
   boardKanban,

@@ -114,7 +114,7 @@ export function BoardIssueAssigneeSelector({
   return (
     <div className="grid gap-2">
       <Input
-        className="h-[54px] text-[21px]"
+        className="h-[54px] text-[21px] md:text-[21px]"
         value={query}
         disabled={disabled || status !== "success"}
         placeholder="담당자 검색"

@@ -112,7 +112,7 @@ export function BoardIssueCreateForm({
       <label className="grid gap-1.5 text-[18px] font-bold text-slate-500">
         제목
         <Input
-          className="h-[54px] rounded-[11px] border-slate-200 bg-white text-[18.75px] shadow-sm"
+          className="h-[54px] rounded-[11px] border-slate-200 bg-white text-[18.75px] shadow-sm md:text-[18.75px]"
           disabled={submitDisabled}
           placeholder="새 이슈 제목"
           value={title}
@@ -152,7 +152,7 @@ export function BoardIssueCreateForm({
         <Button
           type="submit"
           size="lg"
-          className="h-[54px] text-[19.2px]"
+          className="h-[54px] text-[21px]"
           disabled={submitDisabled}
         >
           {isCreating ? <Loader2 className="animate-spin" /> : <Plus />}

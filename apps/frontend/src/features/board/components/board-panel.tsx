@@ -202,7 +202,7 @@ export function BoardPanel() {
             <span className="sr-only">이슈 검색</span>
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
             <Input
-              className="h-[54px] rounded-[11px] border-slate-200 bg-white pl-9 text-[18.75px] shadow-sm"
+              className="h-[54px] rounded-[11px] border-slate-200 bg-white pl-9 text-[18.75px] shadow-sm md:text-[18.75px]"
               value={query}
               placeholder="Search issues"
               onChange={(event) => {
