@@ -254,9 +254,12 @@ def retrieve_tool_shortlist(
     selected: list[str] = []
     selected_set: set[str] = set()
     remaining_schema_bytes = schema_token_budget * 4 if schema_token_budget is not None else None
+    minimum_candidate_score = max(1.0, best_score / 2)
 
     selected_capability_ids: list[str] = []
-    for rank, (_, capability_id) in enumerate(ranked[:top_k]):
+    for rank, (score, capability_id) in enumerate(ranked[:top_k]):
+        if score < minimum_candidate_score:
+            break
         required_chain = capability_by_id[capability_id].tool_names
         if any(name not in descriptor_by_tool_name for name in required_chain):
             if rank > 0:

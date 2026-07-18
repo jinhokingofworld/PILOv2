@@ -79,3 +79,21 @@ tool schema token usage를 기록한다. `retrievalEvents`는 candidate 수와 c
 raw prompt, UUID/resource reference, tool 이름·payload, token·secret을 포함하지 않는 bounded shadow
 관측 형식이다. 상세 offline 결과도 prompt와 input 값은 제외하고 case ID·field 이름·안전한 tool 이름만
 남긴다.
+
+## Phase 0 deterministic quality gate
+
+CI는 provider를 호출하지 않고 `tool_retrieval_quality_gate_v1.json`을 실행한다. 이 fixture는 strict v2
+catalog와 eligible schema snapshot의 digest 정합성, canonical 필수 tool recall@8 100%, held-out
+domain/capability recall@8 95%, adjacent unsupported intent, schema budget·low-confidence·write capability
+legacy fallback, 그리고 UUID/민감 입력값 비노출을 검증한다.
+
+```bash
+cd apps/ai-worker
+PYTHONPATH=. .venv/bin/python scripts/check_tool_retrieval_quality_gate.py \
+  --output /tmp/agent-tool-retrieval-quality-gate.json
+```
+
+출력 JSON에는 raw prompt나 payload 대신 catalog/suite/eligible snapshot/shortlist의 SHA, retriever version,
+`deterministic:no-provider` model version, topK, schema budget, case 유형, failure taxonomy만 남긴다. App CI는 이 파일을
+`agent-tool-retrieval-quality-baseline` artifact로 업로드한다. provider model/SHA는 실제 provider baseline의
+metadata에 별도로 남기며, deterministic CI gate에는 provider model을 고정하거나 호출하지 않는다.

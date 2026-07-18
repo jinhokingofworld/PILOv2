@@ -609,13 +609,18 @@ Phase 1B의 dev 실행으로 별도 기록한다.
 
 #### 0-6. Phase 0 검증과 완료 기준
 
-- [ ] catalog schema·registry 정합성·canonical/held-out retrieval·인접 intent negative·shortlist
-  token budget·fallback·low-confidence mutation safety·UUID/token 비노출 회귀를 자동화한다.
-- [ ] canonical fixture에서 필수 tool recall@8 100%, held-out fixture에서 domain/capability
-  recall@8 95% 이상을 초기 목표로 기록한다. 미달 시 threshold를 숨기지 않고 failure taxonomy와
-  함께 남긴다.
-- [ ] catalog, suite, eligible snapshot, shortlist, model, retriever version/SHA가 결과마다 재현
-  가능하게 남는다.
+- [x] catalog schema·registry 정합성·canonical/held-out retrieval·인접 intent negative·shortlist
+  token budget·fallback·low-confidence mutation safety·UUID/token 비노출 회귀를 자동화한다. App Server
+  registry snapshot 정합성은 기존 `agent-job.test.mjs`가, Worker retrieval 경계는
+  `tool_retrieval_quality_gate_v1.json`이 CI에서 검증한다.
+- [x] canonical fixture에서 필수 tool recall@8 100%, held-out fixture에서 domain/capability
+  recall@8 95% 이상을 초기 목표로 기록한다. deterministic baseline은 현재 각각 100%이며, 미달 시
+  CI artifact의 failure taxonomy에 threshold와 case 유형을 남긴다.
+- [x] catalog, suite, eligible snapshot, shortlist, model, retriever version/SHA가 결과마다 재현
+  가능하게 남는다. Phase 0 retrieval baseline에는 catalog/suite/eligible snapshot/shortlist SHA와
+  retriever version, `deterministic:no-provider` model version, topK, schema budget을 기록한다. 실제
+  provider model 값은 provider baseline 결과에 별도로 기록하며 CI deterministic gate는 provider를 호출하지
+  않는다.
 
 완료 기준: 모든 현재 등록 tool이 inventory와 descriptor에서 추적되고, DB 없이 재현 가능한
 retrieval baseline과 fallback/shadow 경로가 준비된다. 이 Phase만으로 resource selector 실행,
@@ -635,15 +640,15 @@ candidate 선택 뒤 재개, write confirmation E2E 또는 production rollout을
 4. [x] **0-4 실행 shortlist/fallback 경계를 완결한다.** deterministic metadata filter와 semantic
    adapter, topK=8, 필수 chain/token budget, domain bundle·legacy fallback, shortlist 밖 tool 거부와
    low-confidence mutation 안전을 자동 검증한다.
-5. [ ] **0-6 Phase 0 quality gate를 CI에 고정한다.** canonical 필수 tool recall@8 100%, held-out
-   domain/capability recall@8 95%, privacy·fallback 회귀와 모든 version/SHA 재현성을 release baseline으로
-   남긴다.
+5. [x] **0-6 Phase 0 quality gate를 CI에 고정한다.** canonical 필수 tool recall@8 100%, held-out
+   domain/capability recall@8 95%, privacy·fallback 회귀와 catalog/suite/eligible snapshot/shortlist
+   SHA·retriever version 재현성을 CI artifact baseline으로 남긴다.
 
 완료 이력: [#1398](https://github.com/Developer-EJ/PILO/issues/1398) `Phase 0A` capability catalog →
 [#1399](https://github.com/Developer-EJ/PILO/issues/1399) `Phase 0B` catalog handoff·shadow 기반 →
 `4c8bced2` 0-1 inventory baseline → [#1413](https://github.com/Developer-EJ/PILO/pull/1413) 0-3 전 도메인
-fixture·0-4 안전 경계 순서로 `dev`에 반영됐다. 0-5는 `ac43ebb8`에서 구현 완료됐고, Phase 0의 남은
-작업은 0-6 quality gate 하나다.
+fixture·0-4 안전 경계 순서로 `dev`에 반영됐다. 0-5는 `ac43ebb8`에서 구현 완료됐고, 0-6은
+`tool_retrieval_quality_gate_v1.json` 및 App CI baseline artifact로 완료됐다.
 
 #### Phase 0 구현 전 결정 필요
 
