@@ -4,8 +4,8 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "f6e59474201de19feddbd879930ff84819ac6d8f7d41c2e396db5adca0e4c4d6",
-    "catalogSha256": "9c7b08edb08540ffb27eced228b59c5ac7efaa515a2864d93f6dc2853f5c7d11",
+    "inventorySha256": "9e662367cf94e5ba2acd1694187319bdfa1ae029679cede452d9da706e810ff6",
+    "catalogSha256": "0e82df69e54cd9653dd59e0b5afb1ae7cd16869183aa30f386efa0cb3b7b7ae2",
     "eligibleSnapshotSha256": "1118cefcebd6057251efe61e501dc4c288a49cf247ce385fda68cba60e1faad1"
   },
   "privacySensitiveValues": [
@@ -1322,7 +1322,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "9c7b08edb08540ffb27eced228b59c5ac7efaa515a2864d93f6dc2853f5c7d11",
+    "sha256": "0e82df69e54cd9653dd59e0b5afb1ae7cd16869183aa30f386efa0cb3b7b7ae2",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -1656,21 +1656,21 @@
         "toolNames": [
           "list_meeting_reports"
         ],
-        "whenToUse": "최근, 상태별 회의록 목록을 조회할 때",
+        "whenToUse": "최신 N건 또는 기간별 회의록 목록을 조회할 때",
         "mustNotUseFor": [
           "단일 회의록 상세 또는 요약 요청"
         ],
         "positiveExamples": [
-          "최근 회의록 목록",
+          "최근 회의록 보여줘",
           "최근 3건 회의록",
-          "최근회의록목록",
-          "최근 회의록 목록 부탁드려요",
+          "최근회의록보여줘",
+          "최근 회의록 보여줘 부탁드려요",
           "meeting list 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "최근 회의록 목록"
+            "utterance": "최근 회의록 보여줘"
           },
           {
             "kind": "paraphrase",
@@ -1678,11 +1678,11 @@
           },
           {
             "kind": "typo",
-            "utterance": "최근회의록목록"
+            "utterance": "최근회의록보여줘"
           },
           {
             "kind": "honorific",
-            "utterance": "최근 회의록 목록 부탁드려요"
+            "utterance": "최근 회의록 보여줘 부탁드려요"
           },
           {
             "kind": "abbreviation",
@@ -3742,7 +3742,7 @@
           "meeting.decision.evidence",
           "meeting.report.regenerate"
         ],
-        "whenToUse": "최근, 상태별 회의록 목록을 조회할 때 특정 회의록의 상태나 상세를 확인할 때 회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때 특정 결정사항의 직접 근거를 확인할 때 실패한 회의록을 다시 생성할 때",
+        "whenToUse": "최신 N건 또는 기간별 회의록 목록을 조회할 때 특정 회의록의 상태나 상세를 확인할 때 회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때 특정 결정사항의 직접 근거를 확인할 때 실패한 회의록을 다시 생성할 때",
         "mustNotUseFor": [
           "단일 회의록 상세 또는 요약 요청",
           "회의록 목록만 필요한 요청",

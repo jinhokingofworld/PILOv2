@@ -1472,6 +1472,313 @@ def test_normalizer_keeps_latest_meeting_report_list_candidate() -> None:
 
 
 @pytest.mark.parametrize(
+    ("prompt", "current_date", "expected_input"),
+    [
+        ("최근 회의록 보여줘", "2026-07-15", {}),
+        ("최근 3건 회의록 보여줘", "2026-07-15", {"limit": 3}),
+        (
+            "오늘 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-14T15:00:00.000Z", "to": "2026-07-15T15:00:00.000Z"},
+        ),
+        (
+            "어제 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-13T15:00:00.000Z", "to": "2026-07-14T15:00:00.000Z"},
+        ),
+        (
+            "2026-07-10 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-09T15:00:00.000Z", "to": "2026-07-10T15:00:00.000Z"},
+        ),
+        (
+            "7월 10일부터 7월 12일까지 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-09T15:00:00.000Z", "to": "2026-07-12T15:00:00.000Z"},
+        ),
+        (
+            "지난주 회의록 조회해줘",
+            "2026-07-15",
+            {"from": "2026-07-05T15:00:00.000Z", "to": "2026-07-12T15:00:00.000Z"},
+        ),
+        (
+            "다음 주 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-19T15:00:00.000Z", "to": "2026-07-26T15:00:00.000Z"},
+        ),
+        (
+            "최근 7일 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-08T15:00:00.000Z", "to": "2026-07-15T15:00:00.000Z"},
+        ),
+        (
+            "며칠 전 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-08T15:00:00.000Z", "to": "2026-07-15T15:00:00.000Z"},
+        ),
+        (
+            "다가오는 주말 회의록 보여줘",
+            "2026-07-17",
+            {"from": "2026-07-17T15:00:00.000Z", "to": "2026-07-19T15:00:00.000Z"},
+        ),
+        (
+            "다가오는 주말 회의록 보여줘",
+            "2026-07-18",
+            {"from": "2026-07-24T15:00:00.000Z", "to": "2026-07-26T15:00:00.000Z"},
+        ),
+        (
+            "주말 회의록 보여줘",
+            "2026-07-18",
+            {"from": "2026-07-24T15:00:00.000Z", "to": "2026-07-26T15:00:00.000Z"},
+        ),
+    ],
+)
+def test_normalizer_resolves_meeting_report_defaults_and_relative_dates(
+    prompt: str,
+    current_date: str,
+    expected_input: dict[str, int | str],
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="needs_clarification",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("meetingReport",),
+        ),
+        job,
+        prompt=prompt,
+        current_date=current_date,
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "list_meeting_reports"
+    assert normalized.output_summary["input"] == expected_input
+
+
+def test_normalizer_enforces_latest_one_for_unqualified_meeting_report_list() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={
+                "from": "2026-07-01T00:00:00.000Z",
+                "to": "2026-07-16T00:00:00.000Z",
+                "roomName": "디자인 회의실",
+                "limit": 20,
+            },
+        ),
+        job,
+        prompt="최근 회의록 보여줘",
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {"roomName": "디자인 회의실"}
+
+
+def test_normalizer_prioritizes_explicit_count_over_date_range_and_keeps_room() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                            "roomName": {"type": "string"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={
+                "from": "2026-07-06T15:00:00.000Z",
+                "to": "2026-07-13T15:00:00.000Z",
+                "roomName": "디자인 회의실",
+            },
+        ),
+        job,
+        prompt="디자인 회의실 최근 3건 회의록 보여줘",
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "roomName": "디자인 회의실",
+        "limit": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "그때 회의록 보여줘",
+        "지난달 회의록 보여줘",
+        "지난 주말 회의록 보여줘",
+        "다다음 주 회의록 보여줘",
+        "이번 주 회의록 보여줘",
+        "저저번 주 회의록 보여줘",
+        "작년 회의록 보여줘",
+        "2026-13-40 회의록 보여줘",
+    ],
+)
+def test_normalizer_clarifies_unresolved_meeting_report_dates(prompt: str) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={"limit": 1},
+        ),
+        job,
+        prompt=prompt,
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["meeting_report_date_range"]
+    assert "날짜나 기간" in normalized.final_answer
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    ["회의록 0건 보여줘", "최근 회의록 101건 보여줘", "회의록 101개만 보여줘"],
+)
+def test_normalizer_clarifies_out_of_range_meeting_report_counts(prompt: str) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(tool_name="list_meeting_reports", tool_input={"limit": 1}),
+        job,
+        prompt=prompt,
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["meeting_report_limit"]
+    assert "1건부터 100건" in normalized.final_answer
+
+
+def test_normalizer_preserves_meeting_report_summary_with_relative_date_selector() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="summarize_meeting_report",
+            tool_input={},
+        ),
+        job,
+        prompt="지난주 회의록 요약해줘",
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "summarize_meeting_report"
+    assert normalized.output_summary["input"] == {
+        "from": "2026-07-05T15:00:00.000Z",
+        "to": "2026-07-12T15:00:00.000Z",
+    }
+
+
+@pytest.mark.parametrize(
     ("prompt", "current_date", "decision", "expected_input"),
     [
         (
