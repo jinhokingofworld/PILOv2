@@ -575,3 +575,54 @@ test("확인된 2차 surface key와 context 조합을 허용한다", () => {
     assert.ok(readWorkspacePresenceUpdatePayload(presenceUpdate(location)));
   }
 });
+
+test("Drive document-attached PDFs and regular PDFs are accepted", () => {
+  const attachedPdf = readWorkspacePresenceUpdatePayload(
+    presenceUpdate({
+      context: {
+        documentId: "document-1",
+        folderId: null,
+        pdfFileId: "pdf-1",
+        pdfPage: "3",
+      },
+      page: "drive",
+      route: { pathname: "/files", search: "?documentId=document-1" },
+      viewport: elementViewport("drive-pdf"),
+    }),
+  );
+  const drivePdf = readWorkspacePresenceUpdatePayload(
+    presenceUpdate({
+      context: {
+        documentId: null,
+        folderId: "folder-1",
+        pdfFileId: "pdf-1",
+        pdfPage: "3",
+      },
+      page: "drive",
+      route: { pathname: "/files", search: "?folderId=folder-1" },
+      viewport: elementViewport("drive-pdf"),
+    }),
+  );
+
+  assert.equal(attachedPdf?.location?.context.documentId, "document-1");
+  assert.equal(attachedPdf?.location?.context.folderId, null);
+  assert.ok(drivePdf);
+});
+
+test("Drive PDFs with both document and folder IDs are rejected", () => {
+  const parsed = readWorkspacePresenceUpdatePayload(
+    presenceUpdate({
+      context: {
+        documentId: "document-1",
+        folderId: "folder-1",
+        pdfFileId: "pdf-1",
+        pdfPage: "3",
+      },
+      page: "drive",
+      route: { pathname: "/files", search: "?documentId=document-1" },
+      viewport: elementViewport("drive-pdf"),
+    }),
+  );
+
+  assert.equal(parsed, null);
+});
