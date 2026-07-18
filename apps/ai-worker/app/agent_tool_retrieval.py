@@ -93,6 +93,7 @@ class ToolRetrievalResult:
     low_confidence: bool
     fallback_reason: str | None
     unsupported_capability_id: str | None = None
+    selected_capability_ids: tuple[str, ...] = ()
     primary_capability_id: str | None = None
     primary_tool_name: str | None = None
 
@@ -237,9 +238,12 @@ def retrieve_tool_shortlist(
     selected_set: set[str] = set()
     remaining_schema_bytes = schema_token_budget * 4 if schema_token_budget is not None else None
 
-    for _, capability_id in ranked[:top_k]:
+    selected_capability_ids: list[str] = []
+    for rank, (_, capability_id) in enumerate(ranked[:top_k]):
         required_chain = capability_by_id[capability_id].tool_names
         if any(name not in descriptor_by_tool_name for name in required_chain):
+            if rank > 0:
+                continue
             return ToolRetrievalResult(
                 tool_names=tuple(),
                 low_confidence=True,
@@ -251,6 +255,8 @@ def retrieve_tool_shortlist(
             if name not in selected_set
         )
         if remaining_schema_bytes is not None and chain_schema_bytes > remaining_schema_bytes:
+            if rank > 0:
+                continue
             return ToolRetrievalResult(
                 tool_names=tuple(),
                 low_confidence=True,
@@ -260,6 +266,7 @@ def retrieve_tool_shortlist(
             if name not in selected_set:
                 selected.append(name)
                 selected_set.add(name)
+        selected_capability_ids.append(capability_id)
         if remaining_schema_bytes is not None:
             remaining_schema_bytes -= chain_schema_bytes
 
@@ -267,6 +274,7 @@ def retrieve_tool_shortlist(
         tool_names=tuple(selected),
         low_confidence=False,
         fallback_reason=None,
+        selected_capability_ids=tuple(selected_capability_ids),
         primary_capability_id=ranked[0][1],
         primary_tool_name=capability_by_id[ranked[0][1]].tool_names[-1],
     )

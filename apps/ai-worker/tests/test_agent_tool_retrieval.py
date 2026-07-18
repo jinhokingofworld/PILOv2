@@ -198,6 +198,7 @@ def test_retrieval_expands_required_chain_within_the_schema_budget() -> None:
         schema_token_budget=50,
     )
     assert shortlist.tool_names == ("list_calendar_events", "list_meeting_reports")
+    assert shortlist.selected_capability_ids == ("calendar.list",)
     assert shortlist.low_confidence is False
 
     too_small = retrieve_tool_shortlist(

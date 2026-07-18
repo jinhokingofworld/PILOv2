@@ -219,6 +219,53 @@ def calendar_list_update_catalog(tools: list[dict[str, object]]) -> dict[str, ob
     return catalog
 
 
+def calendar_and_meeting_read_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
+    catalog = tool_capability_catalog(tools)
+    meeting_capability = catalog["capabilities"][1]
+    meeting_descriptor = catalog["descriptors"][1]
+    assert isinstance(meeting_capability, dict)
+    assert isinstance(meeting_descriptor, dict)
+    meeting_examples = [
+        {"kind": "canonical", "utterance": "회의록 조회"},
+        {"kind": "paraphrase", "utterance": "미팅 보고서 확인"},
+        {"kind": "typo", "utterance": "회의록 조희"},
+        {"kind": "honorific", "utterance": "회의록 보여주세요"},
+        {"kind": "abbreviation", "utterance": "회의록"},
+    ]
+    meeting_capability.update(
+        {
+            "id": "meeting.reports.list",
+            "domain": "meeting",
+            "toolNames": ["list_meeting_reports"],
+            "whenToUse": "최근 회의록을 조회할 때",
+            "mustNotUseFor": ["일정 조회 요청"],
+            "positiveExamples": [example["utterance"] for example in meeting_examples],
+            "examples": meeting_examples,
+            "selectorKinds": ["meeting_report"],
+            "requiresConfirmation": False,
+        }
+    )
+    meeting_descriptor.update(
+        {
+            "toolName": "list_meeting_reports",
+            "domain": "meeting",
+            "action": "list_meeting_reports",
+            "operation": "read",
+            "capabilityIds": ["meeting.reports.list"],
+            "whenToUse": "최근 회의록을 조회할 때",
+            "mustNotUseFor": ["일정 조회 요청"],
+            "selectorKinds": ["meeting_report"],
+            "riskLevel": "low",
+            "executionMode": "auto",
+            "requiresConfirmation": False,
+        }
+    )
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
 def test_completed_planner_decision_finishes_multi_tool_run() -> None:
     job = parse_agent_run_job_payload(agent_payload())
     normalized = normalize_agent_planner_decision(
@@ -559,6 +606,7 @@ def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_only_to
         job,
         "이번 주 일정 조회해줘",
         mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        top_k=1,
     )
     mutation = select_agent_planner_tools(
         job,
@@ -574,6 +622,7 @@ def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_only_to
         job,
         "이번 주 일정 조회해줘",
         mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        top_k=1,
         schema_token_budget=1,
     )
 
@@ -616,6 +665,7 @@ def test_shared_calendar_list_tool_uses_the_matched_read_only_capability_chain()
         job,
         "이번 주 일정 조회해줘",
         mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        top_k=1,
     )
     update_fallback = select_agent_planner_tools(
         job,
@@ -627,6 +677,28 @@ def test_shared_calendar_list_tool_uses_the_matched_read_only_capability_chain()
     assert [tool.name for tool in update_fallback] == [
         "list_calendar_events",
         "update_calendar_event",
+    ]
+
+
+def test_read_only_shortlist_passes_all_selected_top_k_capability_chains() -> None:
+    tools = [tool_snapshot(), tool_snapshot(name="list_meeting_reports")]
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=calendar_and_meeting_read_catalog(tools),
+        )
+    )
+
+    shortlist = select_agent_planner_tools(
+        job,
+        "이번 주 일정 조회와 최근 회의록 조회해줘",
+        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        top_k=2,
+    )
+
+    assert [tool.name for tool in shortlist] == [
+        "list_calendar_events",
+        "list_meeting_reports",
     ]
 
 
@@ -653,6 +725,7 @@ def test_read_only_shortlist_rejects_planner_tool_outside_the_shortlist() -> Non
         FakeExecutionHandoffClient(),
         current_date_provider=lambda _timezone: date(2026, 7, 9),
         tool_retrieval_mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        tool_retrieval_top_k=1,
     )
 
     result = processor.process_payload(
