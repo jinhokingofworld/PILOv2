@@ -105,6 +105,10 @@ import {
 } from "@/features/canvas/engine/editor/canvas-editor-contracts";
 import type { PiloInsertableTool } from "@/features/canvas/engine/shapes/pilo-canvas-shape-factory";
 import {
+  shouldReuseLoadedCanvasBoard,
+  type LoadedCanvasBoardIdentity,
+} from "./canvas-board-load-policy";
+import {
   CanvasPopoverMenuButton as PopoverMenuButton,
   CanvasToolButton as ToolButton,
 } from "./toolbar/CanvasToolButtons";
@@ -216,6 +220,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const authSession = useAuthSession();
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   const videoFileInputRef = useRef<HTMLInputElement | null>(null);
+  const loadedBoardIdentityRef = useRef<LoadedCanvasBoardIdentity | null>(null);
   const [boardState, setBoardState] = useState<CanvasBoardState>({
     board: null,
     source: "mock",
@@ -340,6 +345,19 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     let cancelled = false;
 
     async function loadCanvasBoard() {
+      if (
+        shouldReuseLoadedCanvasBoard({
+          client: canvasClient,
+          loadedBoard: loadedBoardIdentityRef.current,
+          requestedBoardId: boardId,
+          workspaceId,
+        })
+      ) {
+        return;
+      }
+
+      loadedBoardIdentityRef.current = null;
+
       if (!workspaceId) {
         setBoardState({
           board: null,
@@ -379,6 +397,11 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
         if (cancelled) return;
 
+        loadedBoardIdentityRef.current = {
+          boardId: detail.id,
+          client: canvasClient,
+          workspaceId: detail.workspaceId,
+        };
         setBoardState({
           board: detail,
           source: canvasClientMode,
