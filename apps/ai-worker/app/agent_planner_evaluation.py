@@ -69,6 +69,7 @@ class EvaluationCase:
     prompt: str
     kind: str
     expectation: EvaluationExpectation
+    planning_context: str = ""
 
 
 @dataclass(frozen=True)
@@ -171,9 +172,9 @@ def load_meeting_regression_suite(
     tool_snapshot_path: Path,
     variant: str,
 ) -> EvaluationSuite:
-    if variant not in {"canonical", "held_out", "counterexample"}:
+    if variant not in {"canonical", "held_out", "counterexample", "context"}:
         raise ValueError(
-            "Meeting regression variant must be canonical, held_out, or counterexample"
+            "Meeting regression variant must be canonical, held_out, counterexample, or context"
         )
 
     try:
@@ -220,7 +221,7 @@ def load_meeting_regression_suite(
             ):
                 raise ValueError("Meeting regression heldOutParaphrases must be a string array")
             prompt_expectations = [(prompt, expectation) for prompt in prompts]
-        else:
+        elif variant == "counterexample":
             counterexamples = capability.get("counterexamples")
             if not isinstance(counterexamples, list):
                 raise ValueError("Meeting regression counterexamples must be an array")
@@ -239,6 +240,14 @@ def load_meeting_regression_suite(
                         _meeting_regression_expectation(expected_capability),
                     )
                 )
+        else:
+            expectation = _meeting_regression_expectation(capability)
+            prompts = capability.get("contextFollowups")
+            if not isinstance(prompts, list) or not all(
+                isinstance(prompt, str) and prompt for prompt in prompts
+            ):
+                raise ValueError("Meeting regression contextFollowups must be a string array")
+            prompt_expectations = [(prompt, expectation) for prompt in prompts]
 
         for index, (prompt, expectation) in enumerate(prompt_expectations, start=1):
             cases.append(
@@ -247,6 +256,9 @@ def load_meeting_regression_suite(
                     prompt=prompt,
                     kind=variant,
                     expectation=expectation,
+                    planning_context=(
+                        _meeting_regression_context(capability_id) if variant == "context" else ""
+                    ),
                 )
             )
 
@@ -287,6 +299,24 @@ def _meeting_regression_expectation(capability: dict[str, object]) -> Evaluation
         capability_id=_require_string(capability, "id"),
         required_tool_names=tuple(tool_sequence),
         supported=True,
+    )
+
+
+def _meeting_regression_context(capability_id: str) -> str:
+    resource_type = (
+        "meeting_room"
+        if capability_id in {"meeting.start", "meeting.join", "meeting.participants"}
+        else (
+            "meeting_report"
+            if capability_id.startswith("meeting_reports")
+            or capability_id.startswith("meeting.action_items")
+            or capability_id == "meeting.decision_evidence"
+            else "meeting"
+        )
+    )
+    return (
+        "previous assistant: 이전 조회 결과에서 사용자가 대상을 선택했습니다.\n"
+        f"previous resource: type={resource_type} label=선택한 후보"
     )
 
 
@@ -359,6 +389,7 @@ def evaluate_case(
             current_date=current_date,
             tool_schema_version=job.tool_schema_version,
             tools=tools,
+            planning_context=case.planning_context,
         )
     )
     planner_latency_ms = (perf_counter() - planner_started) * 1000

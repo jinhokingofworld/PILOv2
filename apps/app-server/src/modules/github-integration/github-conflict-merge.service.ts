@@ -304,7 +304,7 @@ export class GithubConflictMergeService {
     content: string
   ): Promise<void> {
     const repositoryRoot = await realpath(repositoryDirectory);
-    const targetPath = resolve(repositoryDirectory, ...filePath.split("/"));
+    const targetPath = resolve(repositoryRoot, ...filePath.split("/"));
     const targetRelativePath = relative(repositoryRoot, targetPath);
     if (
       !targetRelativePath ||

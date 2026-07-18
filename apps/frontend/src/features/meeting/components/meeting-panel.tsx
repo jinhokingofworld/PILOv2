@@ -1080,12 +1080,14 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
   return (
     <TooltipProvider>
       <div className="flex flex-col gap-6">
-        <MeetingWorkspaceLocationAdapter
-          availableRoomIds={availableMeetingRoomIds}
-          roomsReady={meetingRoomsStatus === "success"}
-          selectedMeetingRoomId={selectedMeetingRoomId || null}
-          selectMeetingRoom={selectMeetingRoom}
-        />
+        {activeSection === "room" ? (
+          <MeetingWorkspaceLocationAdapter
+            availableRoomIds={availableMeetingRoomIds}
+            roomsReady={meetingRoomsStatus === "success"}
+            selectedMeetingRoomId={selectedMeetingRoomId || null}
+            selectMeetingRoom={selectMeetingRoom}
+          />
+        ) : null}
         {toastMessage && (
           <ToastMessage
             message={toastMessage}

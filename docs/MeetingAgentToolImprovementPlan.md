@@ -687,9 +687,9 @@ fixture·0-4 안전 경계 순서로 `dev`에 반영됐다. 0-5는 `ac43ebb8`에
   인접 UUID와 1000자 길이 경계도 회귀로 고정한다.
 - [x] capability contract에 기대 intent, selector, tool 순서, 요청 section, 현재/목표 최종 상태를 기록한다.
 - [x] 0건, 단일 결과, 복수 결과, 동명이인 구조 fixture를 각각 만든다.
-- [ ] context follow-up·인접 intent 반례를 실제 planner 상태/실행 eval로 검증한다.
-- [ ] 0/1/N·동명이인·다른 Workspace resource 거부를 App Server resolver 실행 fixture로 검증한다.
-- [ ] 고정한 기준일·모델로 OpenAI dev baseline을 실행하고 결과 JSON·오인식 분류를 #1371에 기록한다.
+- [x] context follow-up·인접 intent 반례를 실제 planner 상태/실행 eval로 검증한다.
+- [x] 0/1/N·동명이인·다른 Workspace resource 거부를 App Server resolver 실행 fixture로 검증한다.
+- [x] 고정한 기준일·모델로 OpenAI dev baseline을 실행하고 결과 JSON·오인식 분류를 #1371에 기록한다.
 
 완료 기준: 모든 제목의 현재 성공·실패가 baseline에 재현되고 이후 단계가 동일 fixture를 통과시킨다.
 
@@ -700,6 +700,48 @@ AI Worker 로컬 전체 검증은 `black --check app tests`, `ruff check app tes
 (230 passed), `python3.13 -m compileall app`까지 통과했다. 다만 실제 OpenAI dev baseline, stateful
 context/counterexample 평가, resolver의 cross-workspace 실행 검증은 아직 없으므로 Phase 1을 전체 완료로
 표시하지 않는다.
+
+#### Provisional OpenAI 검증 기록 — 2026-07-18
+
+- 실행 조건은 `gpt-5.4-mini`, `currentDate=2026-07-18`, `timezone=Asia/Seoul`,
+  `repetitions=1`, `seed=17`, `agent-tools:v6`이다. canonical은 18 capability × 12건 =
+  **216 attempt**, held-out은 18 capability × 3건 = **54 attempt**를 실행했다.
+- canonical은 정확 일치 **72/216 (33.33%)**, 상태 일치 **77/216 (35.65%)**였다. tool name을
+  기대하는 48건 중 tool 일치는 **34/48 (70.83%)**였다. held-out은 정확 일치 **18/54 (33.33%)**,
+  상태 일치 **20/54 (37.04%)**, tool name 기대 12건 중 **9/12 (75.00%)**였다.
+- canonical failure reason은 `status` **139건**, `tool` **14건**이었고, held-out은 각각
+  **34건**, **3건**이었다. 분류상 `unsafe_candidate`는 canonical **19건**, held-out **3건**이다.
+  `unsafe_candidate`는 status/tool 실패와 겹칠 수 있으므로 failure category의 합계를 전체 실패
+  attempt로 해석하지 않는다.
+- 이 결과는 **품질 하락 또는 catalog 갱신 근거로 사용하지 않는다.** 현재 catalog의
+  `currentExpectation`은 단일 턴에서 ID가 없으면 `needs_clarification` 또는 `unsupported`를
+  기대하지만, 구현 목표는 안전한 lookup → 후보 선택 → 다음 tool 실행이다. 따라서 lookup이 먼저
+  가능한 요청을 현 상태에서 실패로 계산한다.
+- prompt 문구만 추가한 실패 capability 17개의 canonical 재실행은 **204 attempt** 중 정확 일치
+  **60/204 (29.41%)**, 상태 일치 **68/204 (33.33%)**, tool name 기대 36건 중 **25/36 (69.44%)**였다.
+  원 baseline과 동일한 단일 반복 비교에서 개선을 입증하지 못해 변경을 되돌렸다. 이 기록은
+  prompt-only 조치를 재시도하지 않기 위한 evidence로 남긴다.
+- lookup-first catalog 갱신 뒤 shard artifact를 합산해 canonical·held-out·counterexample을 각각
+  3회 실행했다. 평균 정확 일치율은 canonical **41.67%** (89/216, 90/216, 91/216), held-out
+  **40.12%** (22/54, 20/54, 23/54), counterexample **38.89%** (28/72, 31/72, 25/72)였다.
+  shard는 case 순서 `index % 18`로 나눴고, 모든 artifact는 같은 model/date/timezone/seed,
+  suite SHA와 Meeting catalog SHA를 기록했다. 이는 Phase 1B의 재현 baseline이며 rollout 품질
+  gate는 아니다.
+
+#### 구현 후 재검증 목록
+
+- [x] stateful evaluator가 `planningContext`의 안전한 previous-resource projection을 전달한 상태에서
+  context follow-up 54건을 구성·실행한다. raw server-owned reference는 Worker에 전달하지 않고
+  App Server의 candidate 소비·재검증 경계에 남긴다.
+- [x] App Server resolver 실행 fixture로 0/1/N, 동명이인, 다른 Workspace/user/run resource 거부,
+  token 변조·만료와 선택 후보 재검증을 검증한다.
+- [x] lookup → candidate selection → 다음 tool 실행 경계를 확인한 뒤, 18개 capability의
+  `currentExpectation`을 첫 lookup tool 기준으로 갱신하고 catalog test로 고정한다.
+- [x] 갱신된 catalog로 canonical·held-out·counterexample을 같은 model/date/timezone에서 3회
+  반복 실행하고, shard artifact에 status/tool/clarification 및 provider usage를 기록한다.
+- [x] 이전 provisional 결과와 비교해 canonical·held-out의 정확 일치율 상승과 여전히 남은
+  `wrong_status`·`wrong_tool` 변동을 baseline으로 기록했다. 이 결과는 rollout 품질 gate가 아닌
+  Phase 1B 종료 기준의 재현 검증으로 사용한다.
 
 #### Phase 1 세부 구현 계획 — #1371
 

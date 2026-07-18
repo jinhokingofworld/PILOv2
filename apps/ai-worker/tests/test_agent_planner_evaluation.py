@@ -12,6 +12,7 @@ from app.agent_planner_evaluation import (
     build_legacy_shadow_comparison,
     evaluate_suite,
     load_evaluation_suite,
+    load_meeting_regression_suite,
     select_shadow_planner_tools,
 )
 from app.agent_processor import AgentPlannerDecision
@@ -86,6 +87,27 @@ def write_suite(tmp_path, cases):
         encoding="utf-8",
     )
     return path
+
+
+def test_context_regression_case_forwards_safe_planning_context() -> None:
+    root = Path(__file__).parents[1]
+    suite = load_meeting_regression_suite(
+        root / "evals" / "meeting_agent_capability_catalog_v1.json",
+        root / "evals" / "agent_planner_korean_v1.json",
+        variant="context",
+    )
+    case = suite.cases[0]
+    planner = FakePlanner([decision()])
+
+    evaluate_suite(
+        planner,
+        replace(suite, cases=(case,)),
+        current_date="2026-07-18",
+    )
+
+    assert planner.requests[0].planning_context == case.planning_context
+    assert "previous resource:" in planner.requests[0].planning_context
+    assert "00000000-0000-4000-8000-000000000001" not in planner.requests[0].planning_context
 
 
 def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unknown_prompt(
