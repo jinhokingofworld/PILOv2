@@ -120,16 +120,16 @@ export function buildAgentToolCapabilityCatalog(
   const descriptors = definitions
     .map((definition) => toDescriptor(definition, capabilities))
     .sort((left, right) => left.toolName.localeCompare(right.toolName));
-  validateCapabilityCatalog(capabilities, descriptors, definitions);
-  const canonical = JSON.stringify({
+  validateAgentToolCapabilityCatalog(capabilities, descriptors, definitions);
+  const canonical = {
     version: AGENT_TOOL_CAPABILITY_CATALOG_VERSION,
     capabilities,
     descriptors
-  });
+  };
 
   return {
     version: AGENT_TOOL_CAPABILITY_CATALOG_VERSION,
-    sha256: createHash("sha256").update(canonical).digest("hex"),
+    sha256: hashCanonicalJson(canonical),
     capabilities,
     descriptors
   };
@@ -205,7 +205,7 @@ function hashCanonicalJson(value: unknown): string {
     .digest("hex");
 }
 
-function validateCapabilityCatalog(
+export function validateAgentToolCapabilityCatalog(
   capabilities: AgentCapabilityDefinition[],
   descriptors: AgentToolCapabilityDescriptor[],
   definitions: AgentToolDefinition<unknown>[]
@@ -219,6 +219,7 @@ function validateCapabilityCatalog(
     capabilities.some(
       (capability) =>
         !capability.toolNames.length ||
+        new Set(capability.toolNames).size !== capability.toolNames.length ||
         !capability.whenToUse ||
         !capability.mustNotUseFor.length ||
         !capability.positiveExamples.length ||

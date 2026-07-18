@@ -9,6 +9,7 @@ const { GithubProjectOAuthIntegrationService } = require("../../dist/modules/git
 const { GithubOAuthConnectionService } = require("../../dist/modules/github-integration/github-oauth-connection.service.js");
 const { GithubOAuthStateService } = require("../../dist/modules/github-integration/github-oauth-state.service.js");
 const { GithubTokenEncryptionService } = require("../../dist/modules/github-integration/github-token-encryption.service.js");
+const { GithubOAuthInstallationLookupError } = require("../../dist/modules/github-integration/github-oauth-installation-lookup.error.js");
 
 class FakeDatabase {
   constructor(rows = [], handlers = {}) {
@@ -102,6 +103,67 @@ const projectOAuthConnectedRow = {
   connected_at: fixedNow,
   revoked_at: null
 };
+
+{
+  const rawConnectionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const state = stateService.createState({
+    userId: "user-1",
+    returnUrl: null,
+    expectedConnectionGeneration: "opaque-generation"
+  }, baseConfig);
+  const decodedPayload = Buffer.from(state.split(".")[0], "base64url").toString("utf8");
+  assert.doesNotMatch(decodedPayload, new RegExp(rawConnectionId));
+  assert.doesNotMatch(decodedPayload, /expectedConnectionId/);
+  assert.match(decodedPayload, /opaque-generation/);
+}
+
+{
+  const state = stateService.createState({
+    userId: "user-1",
+    returnUrl: "https://pilo.test/workspace/new",
+    expectedConnectionGeneration: "opaque-existing-generation"
+  }, baseConfig);
+  const statePayload = stateService.verifyState(state, baseConfig);
+  const database = new FakeDatabase([], {
+    queryOne(text) {
+      if (/UPDATE github_callback_states/i.test(text)) {
+        return {
+          user_id: "user-1",
+          workspace_id: null,
+          return_url: "https://pilo.test/workspace/new",
+          expires_at: new Date(statePayload.expiresAt)
+        };
+      }
+      return undefined;
+    }
+  });
+  const service = new GithubIntegrationService(
+    database,
+    {
+      async exchangeCodeForAccessToken() {
+        return { accessToken: "new-invalid-token", scope: "" };
+      },
+      async getAuthenticatedUser() {
+        return { id: 42, login: "octocat" };
+      },
+      async assertUserInstallationLookupSupported() {
+        throw new GithubOAuthInstallationLookupError("reconnect_required");
+      }
+    },
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  await assert.rejects(
+    () => service.completeGithubOAuthCallback(
+      { code: "oauth-code", state },
+      "pilo_github_oauth_state=oauth-binding-token"
+    ),
+    (error) => error?.response?.error?.message === "GitHub OAuth reconnection is required"
+  );
+  assert.equal(database.queries.some(({ text }) => /(?:UPDATE|INSERT INTO) github_oauth_connections/i.test(text)), false);
+}
 
 {
   const encrypted = tokenEncryption.encryptToken("plain-access-token", baseConfig);
@@ -199,9 +261,9 @@ const projectOAuthConnectedRow = {
   assert.match(start.stateCookie, /pilo_github_oauth_state=/);
   assert.match(start.stateCookie, /HttpOnly/);
   assert.match(start.stateCookie, /SameSite=Lax/);
-  assert.match(
-    database.queries[0].text,
-    /INSERT INTO github_callback_states/i
+  assert.equal(
+    database.queries.some(({ text }) => /INSERT INTO github_callback_states/i.test(text)),
+    true
   );
 
   const parsedState = stateService.verifyState(start.state, baseConfig);
@@ -523,7 +585,10 @@ const projectOAuthConnectedRow = {
 
 {
   const database = new FakeDatabase([], {
-    queryOne() {
+    queryOne(text) {
+      if (/SELECT id, github_user_id/i.test(text)) {
+        return null;
+      }
       const error = new Error("duplicate GitHub account");
       error.code = "23505";
       throw error;
@@ -621,6 +686,9 @@ const projectOAuthConnectedRow = {
         id: 12345678,
         login: "juhyeong"
       };
+    },
+    async assertUserInstallationLookupSupported({ accessToken }) {
+      assert.equal(accessToken, "plain-access-token");
     }
   };
   const service = new GithubIntegrationService(
@@ -808,6 +876,8 @@ const projectOAuthConnectedRow = {
           id: 12345678,
           login: "juhyeong"
         };
+      },
+      async assertUserInstallationLookupSupported() {
       }
     },
     stateService,
@@ -880,6 +950,8 @@ const projectOAuthConnectedRow = {
         id: 12345678,
         login: "juhyeong"
       };
+    },
+    async assertUserInstallationLookupSupported() {
     }
   };
   const service = new GithubIntegrationService(

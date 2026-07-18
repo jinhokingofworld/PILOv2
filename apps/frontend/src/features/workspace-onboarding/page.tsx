@@ -8,12 +8,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { createWorkspace } from "@/features/auth/api/client";
 import { getStoredAuthSession, saveSelectedWorkspaceId } from "@/features/auth/session-storage";
-import { createGithubIntegrationApiClient } from "@/features/github-integration/api/client";
+import { createGithubIntegrationApiClient, GithubIntegrationApiError } from "@/features/github-integration/api/client";
 import { WorkspaceCenteredStatus, WorkspaceSelectionCard } from "@/features/workspace-onboarding/components/workspace-onboarding-primitives";
 import { createGithubOnboardingReturnUrl, getGithubCallbackErrorMessage, readGithubOnboardingCallback } from "@/features/workspace-onboarding/github-onboarding";
 import { ICON_OPTIONS } from "@/features/workspace-onboarding/mock-data";
 import { getGithubSourceSyncPollingState } from "@/features/workspace-onboarding/source-sync-polling";
 import { createRepositoryPageRequestGate } from "@/features/workspace-onboarding/repository-page-request-gate";
+import { createGithubRecoveryAttemptGate, getGithubRecoveryDecision } from "@/features/workspace-onboarding/github-recovery-gate";
 
 type Stage = "create" | "installation" | "syncing" | "repositories" | "projects";
 const REPOSITORIES_PER_PAGE = 20;
@@ -42,17 +43,19 @@ function WorkspaceCreationPageContent() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(getGithubCallbackErrorMessage(callback.callbackError));
   const repositoryPageRequestGateRef = useRef(createRepositoryPageRequestGate());
+  const recoveryAttemptGateRef = useRef(createGithubRecoveryAttemptGate());
 
   useEffect(() => {
     if (!session) router.replace("/login");
   }, [router, session]);
 
   useEffect(() => {
-    if (!callback.workspaceId || callback.callbackError || callback.step !== "oauth") return;
-    void resumeGithub(callback.workspaceId);
+    if (!callback.workspaceId || callback.step !== "oauth") return;
+    if (callback.callbackError && getGithubRecoveryDecision({ event: "callback_failed", recovery: callback.recovery }).action !== "recover") return;
+    void resumeGithub(callback.workspaceId, false, callback.recovery);
   // The callback query is intentionally consumed only through github-onboarding.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callback.workspaceId, callback.callbackError, callback.step]);
+  }, [callback.workspaceId, callback.callbackError, callback.recovery, callback.step]);
 
   useEffect(() => {
     if (!workspaceId || !installationId || !repositoryId || callback.callbackError || callback.step !== "project-oauth") return;
@@ -120,18 +123,38 @@ function WorkspaceCreationPageContent() {
     return () => requestGate.invalidate();
   }, [api, repositoryPage, stage, workspaceId]);
 
-  async function resumeGithub(existingWorkspaceId: string) {
+  async function resumeGithub(existingWorkspaceId: string, forceOAuth = false, recovery = false) {
+    const requestGate = recoveryAttemptGateRef.current;
+    if (!requestGate.begin()) return;
     setBusy(true); setMessage(null);
     try {
       const oauth = await api.getGithubOAuthStatus();
-      if (!oauth.connected) {
-        const start = await api.startGithubOAuth({ returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "oauth") });
+      if (forceOAuth || !oauth.connected) {
+        const start = await api.startGithubOAuth({ returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "oauth", null, null, recovery) });
         window.location.assign(start.authorizeUrl); return;
       }
-      const install = await api.startGithubAppInstallation(existingWorkspaceId, { returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "installation") });
+      const install = await api.startGithubAppInstallation(existingWorkspaceId, { returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "installation", null, null, recovery) });
       window.location.assign(install.installUrl);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "GitHub 연결을 시작하지 못했습니다."); setStage("installation"); }
-    finally { setBusy(false); }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "GitHub 연결을 시작하지 못했습니다.";
+      const decision = getGithubRecoveryDecision({
+        event: error instanceof GithubIntegrationApiError && error.code === "GITHUB_OAUTH_RECONNECT_REQUIRED"
+          ? "reconnect_required"
+          : "transient_failure",
+        recovery
+      });
+      if (decision.action === "recover") {
+        try {
+          const start = await api.startGithubOAuth({ returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "oauth", null, null, true) });
+          window.location.assign(start.authorizeUrl); return;
+        } catch (recoveryError) {
+          setMessage(recoveryError instanceof Error ? recoveryError.message : "GitHub 복구 연결을 시작하지 못했습니다.");
+          setStage("installation");
+          return;
+        }
+      }
+      setMessage(errorMessage); setStage("installation");
+    } finally { requestGate.complete(); setBusy(false); }
   }
 
   async function createAndConnect(connect: boolean) {
@@ -175,7 +198,7 @@ function WorkspaceCreationPageContent() {
 
   if (!session) return <WorkspaceCenteredStatus icon={<Loader2 className="animate-spin" />} text="세션을 확인하는 중입니다." />;
   if (stage === "create") return <main className="mx-auto grid min-h-screen max-w-xl place-items-center p-6"><Card className="w-full"><CardHeader><CardTitle>workspace 만들기</CardTitle><CardDescription>workspace를 만든 뒤 GitHub 연결을 이어갑니다.</CardDescription></CardHeader><CardContent className="grid gap-4"><Input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="PILO Product Team" /><div className="flex gap-2">{ICON_OPTIONS.map((icon) => <Button key={icon} type="button" variant={workspaceIcon === icon ? "default" : "outline"} onClick={() => setWorkspaceIcon(icon)}>{icon}</Button>)}</div><Button disabled={busy || !workspaceName.trim()} onClick={() => void createAndConnect(true)}>GitHub 연결 후 계속</Button><Button disabled={busy || !workspaceName.trim()} variant="outline" onClick={() => void createAndConnect(false)}>GitHub 없이 workspace 만들기</Button>{message ? <p className="text-sm text-destructive">{message}</p> : null}</CardContent></Card></main>;
-  if (stage === "installation" || stage === "syncing") return <WorkspaceCenteredStatus icon={message ? <TriangleAlert /> : <Loader2 className="animate-spin" />} text={message ?? "GitHub App 설치와 source sync를 기다리는 중입니다. 취소했다면 이 화면에서 다시 연결할 수 있습니다."} action={workspaceId ? <div className="flex gap-2"><Button onClick={() => void resumeGithub(workspaceId)}>GitHub 다시 연결</Button><Button variant="outline" onClick={() => router.replace("/home")}>나중에 연결</Button></div> : undefined} />;
+  if (stage === "installation" || stage === "syncing") return <WorkspaceCenteredStatus icon={message ? <TriangleAlert /> : <Loader2 className="animate-spin" />} text={message ?? "GitHub App 설치와 source sync를 기다리는 중입니다. 취소했다면 이 화면에서 다시 연결할 수 있습니다."} action={workspaceId ? <div className="flex gap-2"><Button disabled={busy} onClick={() => void resumeGithub(workspaceId, true, false)}>GitHub 다시 연결</Button><Button disabled={busy} variant="outline" onClick={() => router.replace("/home")}>나중에 연결</Button></div> : undefined} />;
   if (stage === "repositories") return <main className="mx-auto grid max-w-2xl gap-4 p-6"><h1 className="text-2xl font-semibold">repository 선택</h1>{repositories.length === 0 ? <p>동기화된 repository가 없습니다. source sync가 끝난 뒤 다시 시도해 주세요.</p> : repositories.map((repository) => <WorkspaceSelectionCard key={repository.id} title={repository.fullName} description={repository.archived ? "Archived" : repository.private ? "Private" : "Public"} icon={<GitBranch />} selected={repositoryId === repository.id} onClick={() => void chooseRepository(repository.id)} />)}{repositoriesTotal > 0 ? <div className="flex gap-2"><Button disabled={busy || !(repositoryPage > 1)} variant="outline" onClick={() => setRepositoryPage((page) => page - 1)}>이전</Button><Button disabled={busy || !(repositoriesTotal > repositoryPage * REPOSITORIES_PER_PAGE)} variant="outline" onClick={() => setRepositoryPage((page) => page + 1)}>다음</Button></div> : null}{message ? <p className="text-sm text-destructive">{message}</p> : null}</main>;
   return <main className="mx-auto grid max-w-2xl gap-4 p-6"><h1 className="text-2xl font-semibold">ProjectV2 선택</h1>{projects.length === 0 ? <p>이 repository에서 선택할 ProjectV2가 없습니다.</p> : projects.map((project) => <WorkspaceSelectionCard key={project.id} title={project.title} description={`${project.ownerLogin} · #${project.projectNumber}`} icon={<PanelsTopLeft />} selected={projectIds.includes(project.id)} onClick={() => setProjectIds((ids) => ids.includes(project.id) ? ids.filter((id) => id !== project.id) : [...ids, project.id])} />)}<Button disabled={busy || projectIds.length === 0} onClick={() => void saveProjects()}>선택 저장 후 home으로</Button>{message ? <p className="text-sm text-destructive">{message}</p> : null}</main>;
 }

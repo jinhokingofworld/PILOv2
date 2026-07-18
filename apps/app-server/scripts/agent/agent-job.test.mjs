@@ -12,7 +12,10 @@ const { AgentOutboxPublisherService } = require(
 const { AgentToolRegistryService } = require(
   "../../dist/modules/agent/agent-tool-registry.service.js"
 );
-const { buildAgentToolCapabilityCatalog } = require(
+const {
+  buildAgentToolCapabilityCatalog,
+  validateAgentToolCapabilityCatalog
+} = require(
   "../../dist/modules/agent/agent-tool-capability-catalog.js"
 );
 const { CalendarAgentToolsService } = require(
@@ -179,6 +182,22 @@ const payload = {
     changedSelectorSchema.sha256,
     buildAgentToolCapabilityCatalog([calendarDefinition]).sha256,
     "selector schema constraints must affect the capability catalog SHA"
+  );
+  const oneToolCatalog = buildAgentToolCapabilityCatalog([calendarDefinition]);
+  assert.throws(
+    () =>
+      validateAgentToolCapabilityCatalog(
+        [
+          {
+            ...oneToolCatalog.capabilities[0],
+            toolNames: ["list_calendar_events", "list_calendar_events"]
+          }
+        ],
+        oneToolCatalog.descriptors,
+        [calendarDefinition]
+      ),
+    /invalid capability/,
+    "duplicate tool names in a capability chain must fail closed"
   );
 }
 

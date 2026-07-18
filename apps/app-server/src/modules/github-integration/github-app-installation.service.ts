@@ -20,6 +20,7 @@ import { githubCallbackBadRequest } from "./github-oauth-callback-error";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
+import { GithubOAuthInstallationLookupError, GithubOAuthReconnectRequiredError } from "./github-oauth-installation-lookup.error";
 import { GithubSyncJobEnqueueError } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
 import type {
@@ -75,9 +76,14 @@ export class GithubAppInstallationService {
       currentUserId,
       oauthConfig
     );
-    await this.githubOAuthClient.assertUserInstallationLookupSupported({
-      accessToken
-    });
+    try {
+      await this.githubOAuthClient.assertUserInstallationLookupSupported({ accessToken });
+    } catch (error) {
+      if (error instanceof GithubOAuthInstallationLookupError && error.failure === "reconnect_required") {
+        throw new GithubOAuthReconnectRequiredError();
+      }
+      throw badRequest("GitHub OAuth installation lookup failed");
+    }
     const returnUrl = validateGithubCallbackReturnUrl(
       input?.returnUrl,
       config.frontendUrl
