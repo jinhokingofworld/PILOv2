@@ -870,9 +870,13 @@ Phase 3 작업으로 남긴다.
 - [ ] planner와 runtime이 공유하는 selector schema를 추가한다. room은 `current` 또는 normalized
   `roomName`, Meeting/report는 검증된 server-owned selection reference 또는 명시 selector만 허용하고,
   UUID field는 internal compatibility adapter에서만 받는다.
+- [ ] 회의 제어 요청에 `current`·`roomName`·후보 선택이 모두 없으면 현재 사용자의 active Meeting을
+  먼저 해소한다. 한 사용자는 동시에 하나의 Meeting에만 참여하므로 “회의 나가줘”는 이 active Meeting의
+  leave로 처리하며, active Meeting이 없을 때만 tool 실행 없이 안내 또는 clarification으로 끝낸다.
 - [ ] `from`/`to`는 사용자 timezone의 자연어 날짜를 ISO UTC 범위 `[from, to)`로 정규화하고,
   `status`는 MeetingReport 공개 API의 허용 enum만 받게 한다. `roomName`과 기간·상태가 함께 있을 때는
-  같은 Workspace 범위에서 resolver가 후보를 만들도록 한다.
+  같은 Workspace 범위에서 resolver가 후보를 만들도록 한다. 기간·개수 selector가 모두 없으면
+  `createdAt` 내림차순의 최신 1개를 기본값으로 사용한다.
 - [ ] resolver 결과를 revalidated internal reference로 변환한 뒤 기존 `MeetingService` query/control
   경로로 호출한다. resolver·candidate selection·domain service 어느 단계에서든 실패하면 UUID fallback이나
   추측 실행을 하지 않는다.
@@ -905,16 +909,16 @@ Phase 3 작업으로 남긴다.
 
 #### Phase 3 착수 전 제품 결정 필요
 
-- [ ] **`current`의 의미를 확정한다.** 권장값은 “현재 사용자가 참여 중인 Meeting”으로 한정하고, room의
-  현재 Meeting은 `roomName` selector로 분리한다. 그래야 `current`가 user-active와 room-active 사이에서
-  모호해지지 않는다.
-- [ ] **회의록 `roomName` 필터의 제품 범위를 확정한다.** 권장값은 #1386에서 Agent 내부 resolver로만
-  지원하고, 공개 `GET /meeting-reports` query를 넓히지 않는 것이다. public API 필터가 필요하면 API 계약
-  및 Meeting owner 확인을 같은 PR에 포함한다.
-- [ ] **기간 없는 회의록 조회의 기본값을 확정한다.** 권장값은 공개 API와 같은 `createdAt` 내림차순,
-  `limit` 범위 내 최신 결과이며, 자연어 날짜는 사용자 timezone에서 `[from, to)` UTC 범위로 변환한다.
-- [ ] **후속작업 ordinal의 대상을 확정한다.** 권장값은 “직전 같은 run의 같은 filter/sort 목록”에만
-  허용하고, 목록 문맥이 없거나 달라지면 후보 버튼 clarification으로 되돌리는 것이다.
+- [x] **`current`의 의미를 확정한다.** “현재 사용자가 참여 중인 Meeting”으로 한정한다. 회의 제어 요청에
+  selector가 빠져도 active Meeting을 먼저 확인해 처리하고, room의 현재 Meeting은 `roomName` selector로
+  분리한다. active Meeting이 없을 때만 tool 실행 없이 안내 또는 clarification으로 끝낸다.
+- [x] **회의록 `roomName` 필터의 제품 범위를 확정한다.** #1386에서는 Agent 내부 resolver로만 지원하고,
+  공개 `GET /meeting-reports` query는 넓히지 않는다. public API 필터가 필요해지면 API 계약 및 Meeting owner
+  확인을 같은 PR에 포함한다.
+- [x] **기간 없는 회의록 조회의 기본값을 확정한다.** `createdAt` 내림차순의 최신 1개를 기본값으로 하고,
+  자연어 날짜는 사용자 timezone에서 `[from, to)` UTC 범위로 변환한다.
+- [x] **후속작업 ordinal의 대상을 확정한다.** “직전 같은 run의 같은 filter/sort 목록”에만 허용하고,
+  목록 문맥이 없거나 불확실하면 후보 버튼 clarification으로 확인을 받는다.
 
 #### Phase 3 확정 제품·보안 결정
 
