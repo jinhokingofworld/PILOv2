@@ -14,7 +14,7 @@ export type WorkspacePendingJump = {
   expiresAt: number;
   phase: "rollback" | "target";
   requestId: number;
-  source: "jump";
+  source: "follow-start" | "jump";
   sourceHref: string;
   sourceLocation: WorkspacePresenceLocation | null;
   targetLocation: WorkspacePresenceLocation;
@@ -119,12 +119,21 @@ export function createWorkspaceJumpCoordinator({
   let restoreController: AbortController | null = null;
   let timeout: WorkspaceJumpTimer | null = null;
   let requestSequence = 0;
+  const followStartCompletions = new Map<
+    number,
+    (restored: boolean) => void
+  >();
   const restoresInFlight = new Set<string>();
 
-  function clearPending() {
+  function clearPending(restored = false) {
+    const current = pending;
     if (timeout !== null) clearTimer(timeout);
     timeout = null;
     pending = null;
+    if (current?.source === "follow-start") {
+      followStartCompletions.get(current.requestId)?.(restored);
+      followStartCompletions.delete(current.requestId);
+    }
   }
 
   function abortRestore() {
@@ -161,6 +170,14 @@ export function createWorkspaceJumpCoordinator({
     onFollowError();
   }
 
+  function finishFollowStart(requestId: number) {
+    if (!isCurrentRequest(requestId) || pending?.source !== "follow-start") {
+      return;
+    }
+    abortRestore();
+    clearPending();
+  }
+
   function scheduleTimeout(
     requestId: number,
     phase: WorkspacePendingJump["phase"],
@@ -169,6 +186,10 @@ export function createWorkspaceJumpCoordinator({
     timeout = setTimer(() => {
       if (pending?.source === "follow") {
         finishFollowWithError(requestId);
+        return;
+      }
+      if (pending?.source === "follow-start") {
+        finishFollowStart(requestId);
         return;
       }
       if (phase === "target") {
@@ -224,7 +245,7 @@ export function createWorkspaceJumpCoordinator({
     try {
       restored = await registry.restore(location, {
         signal: controller.signal,
-        source: current.source,
+        source: current.source === "follow" ? "follow" : "jump",
       });
     } catch {
       restored = false;
@@ -242,12 +263,16 @@ export function createWorkspaceJumpCoordinator({
         finishFollowWithError(requestId);
         return false;
       }
+      if (current.source === "follow-start") {
+        finishFollowStart(requestId);
+        return false;
+      }
       await beginRollback(requestId);
       return false;
     }
 
     restoreController = null;
-    clearPending();
+    clearPending(true);
     return true;
   }
 
@@ -289,7 +314,7 @@ export function createWorkspaceJumpCoordinator({
 
   return {
     cancelFollow() {
-      if (pending?.source !== "follow") return;
+      if (!pending || pending.source === "jump") return;
       requestSequence += 1;
       replacePending();
     },
@@ -326,19 +351,28 @@ export function createWorkspaceJumpCoordinator({
       const restored = await destinationReady();
       return restored || isCurrentRequest(requestId);
     },
-    async jump(targetLocation: WorkspacePresenceLocation) {
+    async jump(
+      targetLocation: WorkspacePresenceLocation,
+      { source = "jump" }: { source?: "follow-start" | "jump" } = {},
+    ) {
       replacePending();
       const requestId = ++requestSequence;
       const sourceHref = getCurrentHref();
       const sourceLocation = registry.capture();
       const targetHref = toWorkspaceLocationHref(targetLocation);
+      const followStartCompletion =
+        source === "follow-start"
+          ? new Promise<boolean>((resolve) => {
+              followStartCompletions.set(requestId, resolve);
+            })
+          : null;
 
       restoreController = new AbortController();
       pending = {
         expiresAt: now() + WORKSPACE_JUMP_TIMEOUT_MS,
         phase: "target",
         requestId,
-        source: "jump",
+        source,
         sourceHref,
         sourceLocation,
         targetLocation,
@@ -351,8 +385,16 @@ export function createWorkspaceJumpCoordinator({
 
       try {
         await navigate(targetHref);
+        if (source === "follow-start") {
+          if (isCurrentRequest(requestId)) void destinationReady();
+          return followStartCompletion ?? false;
+        }
         return true;
       } catch {
+        if (source === "follow-start") {
+          finishFollowStart(requestId);
+          return false;
+        }
         await beginRollback(requestId);
         return false;
       }

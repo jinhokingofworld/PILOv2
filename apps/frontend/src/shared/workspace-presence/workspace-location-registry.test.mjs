@@ -6,6 +6,10 @@ import {
   createWorkspaceJumpCoordinator,
   createWorkspaceLocationRegistry,
 } from "./workspace-location-registry.ts";
+import {
+  createWorkspaceFollowController,
+  createWorkspaceFollowSession,
+} from "./workspace-follow-controller.ts";
 
 function location(page, pathname = `/${page}`) {
   return {
@@ -319,6 +323,218 @@ test("cancelFollow는 진행 중인 jump를 취소하지 않는다", async () =>
   restore.resolve(true);
   assert.equal(await pendingJump, true);
   assert.equal(coordinator.getPending(), null);
+});
+
+test("cancelFollow는 지연된 Follow 시작 navigate 후 restore를 실행하지 않는다", async () => {
+  let currentHref = "/home";
+  const navigation = deferred();
+  const restores = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("calendar"),
+    page: "calendar",
+    ready: true,
+    restore: (target) => {
+      restores.push(target);
+      return true;
+    },
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    getCurrentHref: () => currentHref,
+    navigate: async (href) => {
+      await navigation.promise;
+      currentHref = href;
+    },
+    onError: () => {},
+    registry,
+    rollback: () => {},
+  });
+
+  const pendingStart = coordinator.jump(location("calendar"), {
+    source: "follow-start",
+  });
+  await Promise.resolve();
+  coordinator.cancelFollow();
+  navigation.resolve();
+
+  assert.equal(await pendingStart, false);
+  assert.deepEqual(restores, []);
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("cross-route Follow 시작은 target restore 성공까지 완료되지 않는다", async () => {
+  let currentHref = "/home";
+  const restored = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: () => true,
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {},
+    getCurrentHref: () => currentHref,
+    navigate: (href) => {
+      currentHref = href;
+    },
+    onError: () => {},
+    registry,
+    rollback: () => {},
+    setTimer: () => 1,
+  });
+  const pendingStart = coordinator.jump(location("calendar"), {
+    source: "follow-start",
+  });
+  let startResult = "pending";
+  void pendingStart.then((result) => {
+    startResult = result;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(startResult, "pending");
+
+  registry.register({
+    capture: () => location("calendar"),
+    page: "calendar",
+    ready: true,
+    restore: (target) => {
+      restored.push(target);
+      return true;
+    },
+  });
+  assert.equal(await coordinator.destinationReady(), true);
+  assert.equal(await pendingStart, true);
+  assert.deepEqual(restored, [location("calendar")]);
+});
+
+test("cross-route Follow 시작 restore 실패는 rollback과 오류 없이 false로 끝난다", async () => {
+  let currentHref = "/home";
+  const errors = [];
+  const followErrors = [];
+  const followingChanges = [];
+  const rolledBack = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: () => true,
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {},
+    getCurrentHref: () => currentHref,
+    navigate: (href) => {
+      currentHref = href;
+    },
+    onError: (message) => errors.push(message),
+    onFollowError: () => followErrors.push("failed"),
+    registry,
+    rollback: (href) => rolledBack.push(href),
+    setTimer: () => 1,
+  });
+  const session = createWorkspaceFollowSession({
+    cancelFollow: coordinator.cancelFollow,
+    jump: coordinator.jump,
+    onFollowingUserIdChange: (userId) => followingChanges.push(userId),
+  });
+
+  const pendingStart = session.toggle("user-2", location("calendar"));
+  registry.register({
+    capture: () => location("calendar"),
+    page: "calendar",
+    ready: true,
+    restore: () => false,
+  });
+  assert.equal(await coordinator.destinationReady(), false);
+
+  assert.equal(await pendingStart, false);
+  assert.deepEqual(rolledBack, []);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(followErrors, []);
+  assert.equal(followingChanges.includes("user-2"), false);
+  assert.deepEqual(session.getState(), { status: "idle" });
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("cross-route Follow 시작 timeout은 rollback과 오류 없이 false로 끝난다", async () => {
+  let currentHref = "/home";
+  let timerCallback = null;
+  const errors = [];
+  const followErrors = [];
+  const rolledBack = [];
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: () => true,
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    clearTimer: () => {
+      timerCallback = null;
+    },
+    getCurrentHref: () => currentHref,
+    navigate: (href) => {
+      currentHref = href;
+    },
+    onError: (message) => errors.push(message),
+    onFollowError: () => followErrors.push("failed"),
+    registry,
+    rollback: (href) => rolledBack.push(href),
+    setTimer: (callback) => {
+      timerCallback = callback;
+      return 1;
+    },
+  });
+
+  const pendingStart = coordinator.jump(location("calendar"), {
+    source: "follow-start",
+  });
+  await Promise.resolve();
+  timerCallback();
+
+  assert.equal(await pendingStart, false);
+  assert.deepEqual(rolledBack, []);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(followErrors, []);
+  assert.equal(coordinator.getPending(), null);
+});
+
+test("Follow 시작 restore 취소 후 stale 완료는 following을 활성화하지 않는다", async () => {
+  const restore = deferred();
+  const restoreContexts = [];
+  const controller = createWorkspaceFollowController();
+  const registry = createWorkspaceLocationRegistry();
+  registry.register({
+    capture: () => location("home"),
+    page: "home",
+    ready: true,
+    restore: (_target, context) => {
+      restoreContexts.push(context);
+      return restore.promise;
+    },
+  });
+  const coordinator = createWorkspaceJumpCoordinator({
+    getCurrentHref: () => "/home",
+    navigate: () => {},
+    onError: () => {},
+    registry,
+    rollback: () => {},
+  });
+  const requestId = controller.start("user-2");
+  const pendingStart = coordinator.jump(location("home"), {
+    source: "follow-start",
+  });
+  await Promise.resolve();
+
+  controller.stop("escape");
+  coordinator.cancelFollow();
+  assert.equal(restoreContexts[0].signal.aborted, true);
+  restore.resolve(true);
+
+  assert.equal(await pendingStart, false);
+  assert.equal(controller.confirm(requestId), false);
+  assert.deepEqual(controller.getState(), { status: "idle" });
 });
 
 test("Follow restore가 false를 반환하면 rollback 없이 오류 처리한다", async () => {

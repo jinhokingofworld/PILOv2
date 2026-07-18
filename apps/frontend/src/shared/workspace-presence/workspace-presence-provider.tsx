@@ -15,6 +15,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuthSession } from "@/features/auth";
 import { useRealtimeSocket } from "@/shared/realtime/realtime-provider";
 import {
+  createWorkspaceFollowController,
+  createWorkspaceFollowSession,
+  isWorkspaceFollowManualKey,
+  isWorkspaceFollowManualPointer,
+  type WorkspaceFollowStopReason,
+} from "./workspace-follow-controller";
+import {
   createWorkspaceJumpCoordinator,
   createWorkspaceLocationRegistry,
   type WorkspaceJumpCoordinator,
@@ -37,16 +44,26 @@ import type {
 
 type WorkspacePresenceContextValue = {
   clearJumpError: () => void;
+  followingUserId: string | null;
   jumpError: string | null;
   jumpToUser: (userId: string) => Promise<boolean>;
   onlineUsers: WorkspacePresenceState[];
   registerAdapter: (adapter: WorkspaceLocationAdapter) => () => void;
+  reportLocationChange: () => void;
+  reportManualInteraction: () => void;
   reportInteraction: () => void;
+  stopFollowing: (reason: WorkspaceFollowStopReason) => void;
+  toggleFollow: (userId: string) => Promise<boolean>;
 };
 
 const WorkspacePresenceContext = createContext<WorkspacePresenceContextValue | null>(
   null,
 );
+
+const FOLLOW_RESTORE_ERROR_MESSAGE =
+  "팀원의 최신 위치를 불러오지 못해 따라가기를 종료했어요.";
+const FOLLOW_TARGET_LEFT_MESSAGE =
+  "팀원이 워크스페이스를 떠나 따라가기를 종료했어요.";
 
 export function WorkspacePresenceProvider({ children }: { children: ReactNode }) {
   const authSession = useAuthSession();
@@ -59,6 +76,7 @@ export function WorkspacePresenceProvider({ children }: { children: ReactNode })
   const [presenceState, setPresenceState] = useState(
     createWorkspacePresenceState,
   );
+  const [followingUserId, setFollowingUserId] = useState<string | null>(null);
   const [jumpError, setJumpError] = useState<string | null>(null);
   const registryRef = useRef<ReturnType<
     typeof createWorkspaceLocationRegistry
@@ -70,6 +88,17 @@ export function WorkspacePresenceProvider({ children }: { children: ReactNode })
   const currentHrefRef = useRef("/home");
   const sendPresenceRef = useRef<() => void>(() => {});
   const interactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const followControllerRef = useRef<ReturnType<
+    typeof createWorkspaceFollowController
+  > | null>(null);
+  if (!followControllerRef.current) {
+    followControllerRef.current = createWorkspaceFollowController();
+  }
+  const controller = followControllerRef.current;
+  const stopFollowingRef = useRef<
+    (reason: WorkspaceFollowStopReason) => void
+  >(() => {});
+  const followScopeRef = useRef({ currentUserId, workspaceId });
 
   const coordinator = useMemo<WorkspaceJumpCoordinator>(
     () =>
@@ -79,12 +108,26 @@ export function WorkspacePresenceProvider({ children }: { children: ReactNode })
           router.push(href);
         },
         onError: setJumpError,
+        onFollowError: () => {
+          setJumpError(FOLLOW_RESTORE_ERROR_MESSAGE);
+          stopFollowingRef.current("restore-failed");
+        },
         registry,
         rollback: (href) => {
           router.replace(href);
         },
       }),
     [registry, router],
+  );
+  const followSession = useMemo(
+    () =>
+      createWorkspaceFollowSession({
+        cancelFollow: coordinator.cancelFollow,
+        controller,
+        jump: coordinator.jump,
+        onFollowingUserIdChange: setFollowingUserId,
+      }),
+    [controller, coordinator],
   );
 
   const sendPresence = useCallback(() => {
@@ -98,13 +141,28 @@ export function WorkspacePresenceProvider({ children }: { children: ReactNode })
   }, [registry, socket, workspaceId]);
   sendPresenceRef.current = sendPresence;
 
-  const reportInteraction = useCallback(() => {
+  const reportLocationChange = useCallback(() => {
     if (interactionTimerRef.current !== null) return;
     interactionTimerRef.current = setTimeout(() => {
       interactionTimerRef.current = null;
       sendPresenceRef.current();
     }, 100);
   }, []);
+
+  const stopFollowing = useCallback(
+    (reason: WorkspaceFollowStopReason) => {
+      followSession.stop(reason);
+    },
+    [followSession],
+  );
+  stopFollowingRef.current = stopFollowing;
+
+  const reportManualInteraction = useCallback(() => {
+    stopFollowing("manual-interaction");
+    reportLocationChange();
+  }, [reportLocationChange, stopFollowing]);
+
+  const reportInteraction = reportLocationChange;
 
   const registerAdapter = useCallback(
     (adapter: WorkspaceLocationAdapter) => {
@@ -120,26 +178,89 @@ export function WorkspacePresenceProvider({ children }: { children: ReactNode })
     currentHrefRef.current = `${pathname}${
       searchParams.size ? `?${searchParams.toString()}` : ""
     }`;
-    sendPresenceRef.current();
+    reportLocationChange();
     void coordinator.destinationReady();
-  }, [coordinator, pathname, searchParams]);
+  }, [coordinator, pathname, reportLocationChange, searchParams]);
 
   useEffect(() => {
     const sendImmediately = () => sendPresenceRef.current();
-    const reportScroll = () => reportInteraction();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const isFollowTrigger = Boolean(
+        target?.closest("[data-workspace-follow-trigger]"),
+      );
+      if (
+        event.key === "Escape" &&
+        controller.getState().status !== "idle"
+      ) {
+        stopFollowing("escape");
+        return;
+      }
+      const isNavigationKey = isWorkspaceFollowManualKey(event.key, {
+        isFollowTrigger,
+        isNavigationTarget: Boolean(target?.closest("a[href]")),
+      });
+      if (isNavigationKey) {
+        reportManualInteraction();
+      }
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (
+        isWorkspaceFollowManualPointer("down", {
+          buttons: event.buttons,
+          isFollowTrigger: Boolean(
+            target?.closest("[data-workspace-follow-trigger]"),
+          ),
+          isNavigationTarget: Boolean(target?.closest("a[href]")),
+        })
+      ) {
+        reportManualInteraction();
+      }
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (
+        isWorkspaceFollowManualPointer("move", {
+          buttons: event.buttons,
+          isFollowTrigger: Boolean(
+            target?.closest("[data-workspace-follow-trigger]"),
+          ),
+          isNavigationTarget: false,
+        })
+      ) {
+        reportManualInteraction();
+      }
+    };
 
     window.addEventListener("focus", sendImmediately);
     window.addEventListener("blur", sendImmediately);
-    window.addEventListener("scroll", reportScroll, true);
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("pointermove", handlePointerMove, true);
+    window.addEventListener("scroll", reportLocationChange, true);
+    window.addEventListener("touchmove", reportManualInteraction, {
+      capture: true,
+      passive: true,
+    });
+    window.addEventListener("wheel", reportManualInteraction, {
+      capture: true,
+      passive: true,
+    });
     document.addEventListener("visibilitychange", sendImmediately);
 
     return () => {
       window.removeEventListener("focus", sendImmediately);
       window.removeEventListener("blur", sendImmediately);
-      window.removeEventListener("scroll", reportScroll, true);
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("pointermove", handlePointerMove, true);
+      window.removeEventListener("scroll", reportLocationChange, true);
+      window.removeEventListener("touchmove", reportManualInteraction, true);
+      window.removeEventListener("wheel", reportManualInteraction, true);
       document.removeEventListener("visibilitychange", sendImmediately);
     };
-  }, [reportInteraction]);
+  }, [controller, reportLocationChange, reportManualInteraction, stopFollowing]);
 
   useEffect(
     () => () => {
@@ -177,6 +298,14 @@ export function WorkspacePresenceProvider({ children }: { children: ReactNode })
           currentUserId,
         ),
       );
+      const followState = controller.getState();
+      if (
+        followState.status === "following" &&
+        followState.userId === presence.userId &&
+        presence.location
+      ) {
+        void coordinator.follow(presence.location);
+      }
     };
     const handleLeave = (payload: WorkspacePresenceLeavePayload) => {
       if (payload.workspaceId !== workspaceId) return;
@@ -187,8 +316,17 @@ export function WorkspacePresenceProvider({ children }: { children: ReactNode })
           currentUserId,
         ),
       );
+      const followState = controller.getState();
+      if (
+        followState.status !== "idle" &&
+        followState.userId === payload.userId
+      ) {
+        stopFollowing("target-left");
+        setJumpError(FOLLOW_TARGET_LEFT_MESSAGE);
+      }
     };
     const handleDisconnect = () => {
+      stopFollowing("target-left");
       setPresenceState(createWorkspacePresenceState());
     };
 
@@ -209,7 +347,18 @@ export function WorkspacePresenceProvider({ children }: { children: ReactNode })
       socket.off(workspacePresenceServerEvents.update, handleUpdate);
       socket.off(workspacePresenceServerEvents.leave, handleLeave);
     };
-  }, [currentUserId, socket, workspaceId]);
+  }, [controller, coordinator, currentUserId, socket, stopFollowing, workspaceId]);
+
+  useEffect(() => {
+    const previousScope = followScopeRef.current;
+    followScopeRef.current = { currentUserId, workspaceId };
+    if (
+      previousScope.currentUserId !== currentUserId ||
+      previousScope.workspaceId !== workspaceId
+    ) {
+      stopFollowing("workspace-changed");
+    }
+  }, [currentUserId, stopFollowing, workspaceId]);
 
   const jumpToUser = useCallback(
     async (userId: string) => {
@@ -222,21 +371,41 @@ export function WorkspacePresenceProvider({ children }: { children: ReactNode })
     [coordinator, presenceState.onlineUsers],
   );
 
+  const toggleFollow = useCallback(
+    async (userId: string) => {
+      const target = presenceState.onlineUsers.find(
+        (presence) => presence.userId === userId,
+      );
+      return followSession.toggle(userId, target?.location ?? null);
+    },
+    [followSession, presenceState.onlineUsers],
+  );
+
   const value = useMemo<WorkspacePresenceContextValue>(
     () => ({
       clearJumpError: () => setJumpError(null),
+      followingUserId,
       jumpError,
       jumpToUser,
       onlineUsers: presenceState.onlineUsers,
       registerAdapter,
+      reportLocationChange,
+      reportManualInteraction,
       reportInteraction,
+      stopFollowing,
+      toggleFollow,
     }),
     [
+      followingUserId,
       jumpError,
       jumpToUser,
       presenceState.onlineUsers,
       registerAdapter,
+      reportLocationChange,
+      reportManualInteraction,
       reportInteraction,
+      stopFollowing,
+      toggleFollow,
     ],
   );
 
