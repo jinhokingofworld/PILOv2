@@ -81,6 +81,7 @@ class AgentRunJob:
     tools: tuple[AgentToolSchema, ...]
     request_context: dict[str, str] | None = None
     tool_capability_catalog: ToolCapabilityCatalog | None = None
+    tool_capability_catalog_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -150,11 +151,21 @@ def select_agent_planner_tool_selection(
     schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
 ) -> AgentPlannerToolSelection:
     """Returns the planner schema subset and its privacy-safe routing outcome."""
-    if mode not in TOOL_RETRIEVAL_MODES or job.tool_capability_catalog is None:
+    if mode not in TOOL_RETRIEVAL_MODES:
         return AgentPlannerToolSelection(job.tools, None, False)
 
     if mode == TOOL_RETRIEVAL_MODE_SHADOW:
         return AgentPlannerToolSelection(job.tools, None, False)
+    if job.tool_capability_catalog is None:
+        return AgentPlannerToolSelection(
+            tools=tuple(),
+            retrieval=ToolRetrievalResult(
+                tool_names=tuple(),
+                low_confidence=True,
+                fallback_reason=job.tool_capability_catalog_error or "missing_catalog",
+            ),
+            used_shortlist=False,
+        )
     eligible_tool_schemas = {tool.name: tool.input_schema for tool in job.tools}
     selection = (
         select_read_only_tool_shortlist(
@@ -380,6 +391,10 @@ def parse_agent_run_job_payload(payload: dict[str, object]) -> AgentRunJob:
         raise ValueError("Unsupported Agent job type")
 
     tools = _parse_tool_schema_snapshot(payload.get("tools"))
+    catalog, catalog_error = _parse_tool_capability_catalog_for_job(
+        payload.get("toolCapabilityCatalog"),
+        tools,
+    )
     return AgentRunJob(
         run_id=_require_uuid_string(payload, "runId"),
         workspace_id=_require_uuid_string(payload, "workspaceId"),
@@ -388,11 +403,25 @@ def parse_agent_run_job_payload(payload: dict[str, object]) -> AgentRunJob:
         turn_sequence=_optional_positive_int(payload, "turnSequence", default=1),
         tools=tools,
         request_context=_parse_request_context(payload.get("requestContext")),
-        tool_capability_catalog=parse_tool_capability_catalog(
-            payload.get("toolCapabilityCatalog"),
-            {tool.name: tool.input_schema for tool in tools},
-        ),
+        tool_capability_catalog=catalog,
+        tool_capability_catalog_error=catalog_error,
     )
+
+
+def _parse_tool_capability_catalog_for_job(
+    value: object,
+    tools: tuple[AgentToolSchema, ...],
+) -> tuple[ToolCapabilityCatalog | None, str | None]:
+    if value is None:
+        return None, "missing_catalog"
+    try:
+        catalog = parse_tool_capability_catalog(
+            value,
+            {tool.name: tool.input_schema for tool in tools},
+        )
+    except ValueError:
+        return None, "invalid_catalog"
+    return catalog, None
 
 
 class AgentRunProcessor:

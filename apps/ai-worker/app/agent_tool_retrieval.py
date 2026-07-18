@@ -264,10 +264,8 @@ def retrieve_tool_shortlist(
     # Scores are discrete token overlaps. Preserve a closely matched second
     # capability only for compound requests, while excluding one-token
     # adjacent Meeting actions from an otherwise unambiguous shortlist.
-    compound_request = any(marker in prompt for marker in ("와", "및", "그리고", ","))
-    minimum_candidate_score = (
-        max(1.0, best_score - 1.0) if compound_request else best_score
-    )
+    compound_request = _is_compound_request(prompt)
+    minimum_candidate_score = max(1.0, best_score - 1.0) if compound_request else best_score
 
     selected_capability_ids: list[str] = []
     for rank, (score, capability_id) in enumerate(ranked[:top_k]):
@@ -709,3 +707,10 @@ def _tokens(value: str) -> tuple[str, ...]:
                 tokens.append(token[: -len(particle)])
                 break
     return tuple(tokens)
+
+
+def _is_compound_request(prompt: str) -> bool:
+    raw_tokens = _TOKEN_PATTERN.findall(prompt.lower())
+    return any(token in {"및", "그리고"} for token in raw_tokens) or any(
+        len(token) > 1 and token.endswith(("와", "과")) for token in raw_tokens
+    )

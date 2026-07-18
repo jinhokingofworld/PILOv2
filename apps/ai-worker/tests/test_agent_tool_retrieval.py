@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from app.agent_tool_retrieval import (
+    _is_compound_request,
     compute_input_schema_sha256,
     compute_tool_capability_catalog_sha,
     parse_tool_capability_catalog,
@@ -16,9 +17,7 @@ TOOL_SCHEMAS = {
     "list_meeting_reports": {"type": "object", "properties": {"status": {"type": "string"}}},
 }
 QUALITY_FIXTURE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "evals"
-    / "tool_retrieval_quality_gate_v1.json"
+    Path(__file__).resolve().parents[1] / "evals" / "tool_retrieval_quality_gate_v1.json"
 )
 
 
@@ -192,6 +191,12 @@ def test_full_catalog_shortlists_current_meeting_leave_without_adjacent_actions(
     assert leave.tool_names == ("get_active_meeting", "leave_meeting")
     assert reports.retrieval.selected_capability_ids == ("meeting.reports.list",)
     assert reports.tool_names == ("list_meeting_reports",)
+
+
+def test_compound_request_detection_requires_a_conjunction_token() -> None:
+    assert _is_compound_request("일정과 회의록을 보여줘") is True
+    assert _is_compound_request("회의에서 나와줘") is False
+    assert _is_compound_request("대화 내용 보여줘") is False
 
 
 def test_catalog_rejects_descriptor_digest_that_does_not_match_the_tool_schema() -> None:

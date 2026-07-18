@@ -707,6 +707,36 @@ def test_shortlist_mode_keeps_supported_write_chain_and_clarifies_retrieval_fail
     }
 
 
+@pytest.mark.parametrize(
+    ("catalog", "expected_reason"),
+    [
+        (None, "missing_catalog"),
+        ({"version": "agent-tool-capabilities:v3"}, "invalid_catalog"),
+    ],
+)
+def test_shortlist_mode_clarifies_missing_or_invalid_catalog(catalog, expected_reason) -> None:
+    payload = agent_payload()
+    if catalog is not None:
+        payload["toolCapabilityCatalog"] = catalog
+
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient()
+    processor = AgentRunProcessor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+        tool_retrieval_mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
+    )
+
+    result = processor.process_payload(payload)
+
+    assert result.reason == "agent_tool_retrieval_needs_clarification"
+    assert planner_client.requests == []
+    assert repository.waiting_user_input_updates
+    assert repository.completed_steps[0][2]["toolRetrieval"]["fallbackReason"] == expected_reason
+
+
 def test_environment_flag_switches_between_shortlist_and_shadow(monkeypatch) -> None:
     tools = [
         tool_snapshot(),
@@ -738,9 +768,7 @@ def test_environment_flag_switches_between_shortlist_and_shadow(monkeypatch) -> 
     )
     shadow_processor.process_payload(payload)
 
-    assert [tool.name for tool in shortlist_planner.requests[0].tools] == [
-        "list_calendar_events"
-    ]
+    assert [tool.name for tool in shortlist_planner.requests[0].tools] == ["list_calendar_events"]
     assert [tool.name for tool in shadow_planner.requests[0].tools] == [
         "list_calendar_events",
         "create_calendar_event",

@@ -329,6 +329,7 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
     assert write_retrieval is not None
     assert write_retrieval.fallback_reason == "write_capability"
 
+
 def test_legacy_shadow_comparison_requires_paired_inputs_and_reports_deltas(tmp_path) -> None:
     suite = load_evaluation_suite(
         write_suite(
@@ -371,6 +372,7 @@ def test_legacy_shadow_comparison_requires_paired_inputs_and_reports_deltas(tmp_
             legacy,
             (replace(shadow[0], evaluation_seed=18),),
         )
+
 
 def test_evaluate_suite_scores_normalized_planner_output(tmp_path) -> None:
     suite = load_evaluation_suite(
