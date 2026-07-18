@@ -1233,6 +1233,21 @@ function errorCode(error) {
 
 {
   const { meetingService, registry } = createRegistry();
+  const tool = registry.getDefinition("list_meeting_reports");
+  const result = await tool.execute(
+    context,
+    tool.validateInput({ roomName: "디자인 회의실" })
+  );
+
+  assert.equal(result.outputSummary.count, 1);
+  assert.deepEqual(meetingService.calls[0].query, {
+    roomName: "디자인 회의실",
+    limit: 1
+  });
+}
+
+{
+  const { meetingService, registry } = createRegistry();
   meetingService.reports = [
     createReport(),
     createReport({

@@ -1477,6 +1477,26 @@ def test_normalizer_keeps_latest_meeting_report_list_candidate() -> None:
         ("최근 회의록 보여줘", "2026-07-15", {}),
         ("최근 3건 회의록 보여줘", "2026-07-15", {"limit": 3}),
         (
+            "오늘 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-14T15:00:00.000Z", "to": "2026-07-15T15:00:00.000Z"},
+        ),
+        (
+            "어제 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-13T15:00:00.000Z", "to": "2026-07-14T15:00:00.000Z"},
+        ),
+        (
+            "2026-07-10 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-09T15:00:00.000Z", "to": "2026-07-10T15:00:00.000Z"},
+        ),
+        (
+            "7월 10일부터 7월 12일까지 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-09T15:00:00.000Z", "to": "2026-07-12T15:00:00.000Z"},
+        ),
+        (
             "지난주 회의록 조회해줘",
             "2026-07-15",
             {"from": "2026-07-05T15:00:00.000Z", "to": "2026-07-12T15:00:00.000Z"},
@@ -1503,6 +1523,11 @@ def test_normalizer_keeps_latest_meeting_report_list_candidate() -> None:
         ),
         (
             "다가오는 주말 회의록 보여줘",
+            "2026-07-18",
+            {"from": "2026-07-24T15:00:00.000Z", "to": "2026-07-26T15:00:00.000Z"},
+        ),
+        (
+            "주말 회의록 보여줘",
             "2026-07-18",
             {"from": "2026-07-24T15:00:00.000Z", "to": "2026-07-26T15:00:00.000Z"},
         ),
@@ -1571,7 +1596,12 @@ def test_normalizer_enforces_latest_one_for_unqualified_meeting_report_list() ->
     normalized = normalize_agent_planner_decision(
         planner_decision(
             tool_name="list_meeting_reports",
-            tool_input={"limit": 20},
+            tool_input={
+                "from": "2026-07-01T00:00:00.000Z",
+                "to": "2026-07-16T00:00:00.000Z",
+                "roomName": "디자인 회의실",
+                "limit": 20,
+            },
         ),
         job,
         prompt="최근 회의록 보여줘",
@@ -1580,7 +1610,95 @@ def test_normalizer_enforces_latest_one_for_unqualified_meeting_report_list() ->
     )
 
     assert normalized.status == "tool_candidate"
-    assert normalized.output_summary["input"] == {}
+    assert normalized.output_summary["input"] == {"roomName": "디자인 회의실"}
+
+
+def test_normalizer_prioritizes_explicit_count_over_date_range_and_keeps_room() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                            "roomName": {"type": "string"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={
+                "from": "2026-07-06T15:00:00.000Z",
+                "to": "2026-07-13T15:00:00.000Z",
+                "roomName": "디자인 회의실",
+            },
+        ),
+        job,
+        prompt="디자인 회의실 최근 3건 회의록 보여줘",
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "roomName": "디자인 회의실",
+        "limit": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "그때 회의록 보여줘",
+        "지난달 회의록 보여줘",
+        "지난 주말 회의록 보여줘",
+        "2026-13-40 회의록 보여줘",
+    ],
+)
+def test_normalizer_clarifies_unresolved_meeting_report_dates(prompt: str) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={"limit": 1},
+        ),
+        job,
+        prompt=prompt,
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["meeting_report_date_range"]
+    assert "날짜나 기간" in normalized.final_answer
 
 
 def test_normalizer_preserves_meeting_report_summary_with_relative_date_selector() -> None:
