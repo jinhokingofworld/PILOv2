@@ -455,6 +455,23 @@ export function isSqlErdNormalizedSqlPreviewCurrent(
   return isSqlErdViewSessionCurrent(preview.baseSnapshot, session);
 }
 
+export function rebaseSqlErdNormalizedSqlPreviewAfterSave(
+  preview: SqlErdNormalizedSqlPreview,
+  savedSession: SqlErdViewSession
+): SqlErdNormalizedSqlPreview | null {
+  const base = preview.baseSnapshot;
+  const hasSameSourceState =
+    base.id === savedSession.id &&
+    base.dialect === savedSession.dialect &&
+    base.sourceText === savedSession.sourceText &&
+    JSON.stringify(base.modelJson) === JSON.stringify(savedSession.modelJson) &&
+    JSON.stringify(base.settingsJson) === JSON.stringify(savedSession.settingsJson);
+
+  return hasSameSourceState
+    ? { ...preview, baseSnapshot: savedSession }
+    : null;
+}
+
 export function isSqlErdViewSessionCurrent(
   base: SqlErdViewSession,
   session: SqlErdViewSession

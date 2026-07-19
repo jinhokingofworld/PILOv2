@@ -291,6 +291,10 @@ async function compileSqlErdRuntimeModules() {
           'from "./text-shape-stub.mjs"'
         ],
         [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-stroke-shape"/g,
+          'from "./stroke-shape-stub.mjs"'
+        ],
+        [
           /from "@\/features\/sql-erd\/shapes\/sql-erd-relation-shape"/g,
           'from "./relation-shape-stub.mjs"'
         ],
@@ -365,6 +369,10 @@ async function compileSqlErdRuntimeModules() {
     await writeFile(
       join(outputDir, "text-shape-stub.mjs"),
       "export function isSqlErdTextShape(shape) { return shape?.type === 'sqltoerd_text'; }\n"
+    );
+    await writeFile(
+      join(outputDir, "stroke-shape-stub.mjs"),
+      "export function isSqlErdStrokeShape(shape) { return shape?.type === 'sqltoerd_stroke'; }\n"
     );
     await writeFile(
       join(outputDir, "table-shape-stub.mjs"),
@@ -1325,6 +1333,42 @@ assert.deepEqual(
 assert.equal(
   deletedUsersTable.modelJson.schema.tables[0].columns[1].foreignKey,
   false
+);
+const batchDeletedUsers = schemaMutationRuntime.applySqlErdBatchSchemaDelete(
+  runtimeModel,
+  {
+    relationIds: [
+      "relation.orders.user_id.users.id",
+      "relation.orders.user_id.users.id"
+    ],
+    tableIds: ["table.users", "table.users"]
+  }
+);
+assert.equal(batchDeletedUsers.ok, true);
+assert.deepEqual(
+  batchDeletedUsers.modelJson.schema.tables.map((table) => table.id),
+  ["table.orders"]
+);
+assert.deepEqual(batchDeletedUsers.modelJson.schema.relations, []);
+assert.equal(batchDeletedUsers.affectedRelationCount, 2);
+assert.deepEqual(
+  schemaMutationRuntime.applySqlErdBatchSchemaDelete(runtimeModel, {
+    relationIds: [],
+    tableIds: ["table.users", "table.orders"]
+  }),
+  { ok: false, reason: "LAST_TABLE" }
+);
+const batchDeletedRelation = schemaMutationRuntime.applySqlErdBatchSchemaDelete(
+  runtimeModel,
+  {
+    relationIds: ["relation.orders.user_id.users.id"],
+    tableIds: []
+  }
+);
+assert.equal(batchDeletedRelation.ok, true);
+assert.deepEqual(
+  batchDeletedRelation.modelJson.schema.relations.map((relation) => relation.id),
+  ["relation.users.manager_id.users.id"]
 );
 for (const dialect of ["postgresql", "mysql", "sqlite"]) {
   const regeneratedAfterTableDelete =
@@ -2870,6 +2914,30 @@ assert.deepEqual(selectedRelationFromCanvas, {
   type: "relation",
   relationId: "relation.orders.user_id.users.id"
 });
+assert.deepEqual(
+  canvasSelectionRuntime.getSqlErdDeleteBatchFromSelectedShapes([
+    { type: "sqltoerd_table", props: { tableId: "table.users" } },
+    { type: "sqltoerd_table", props: { tableId: "table.users" } },
+    {
+      type: "sqltoerd_relation",
+      props: { relationId: "relation.orders.user_id.users.id" }
+    },
+    { type: "sqltoerd_annotation", props: { annotationId: "link.manual" } },
+    { type: "sqltoerd_note", props: { noteId: "note.todo" } },
+    { type: "sqltoerd_frame", props: { frameId: "frame.scope" } },
+    { type: "sqltoerd_text", props: { textId: "text.title" } },
+    { type: "sqltoerd_stroke", props: { strokeId: "stroke.mark" } }
+  ]),
+  {
+    deleteFrameIds: ["frame.scope"],
+    deleteLinkIds: ["link.manual"],
+    deleteNoteIds: ["note.todo"],
+    deleteStrokeIds: ["stroke.mark"],
+    deleteTextIds: ["text.title"],
+    relationIds: ["relation.orders.user_id.users.id"],
+    tableIds: ["table.users"]
+  }
+);
 const runtimeInteractiveSelectionEditor = {
   selectedShapeIds: ["shape:sqltoerd-note-existing"],
   hitShape: {
@@ -6084,6 +6152,23 @@ assert.equal(
   }),
   false
 );
+const rebasedModelSqlPreview =
+  sqlDiffApplyRuntime.rebaseSqlErdNormalizedSqlPreviewAfterSave(
+    modelSqlPreview,
+    { ...modelSqlPreviewSession, revision: 8 }
+  );
+assert.equal(rebasedModelSqlPreview.baseSnapshot.revision, 8);
+assert.equal(
+  rebasedModelSqlPreview.generatedSourceText,
+  modelSqlPreview.generatedSourceText
+);
+assert.equal(
+  sqlDiffApplyRuntime.rebaseSqlErdNormalizedSqlPreviewAfterSave(
+    modelSqlPreview,
+    { ...modelSqlPreviewSession, revision: 8, sourceText: "SELECT 1;" }
+  ),
+  null
+);
 assert.equal(
   sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(modelSqlPreview, {
     ...modelSqlPreviewSession,
@@ -6155,6 +6240,8 @@ const failedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPrevie
   generatedSourceText: "CREATE TABLE users ("
 });
 assert.equal(failedModelSqlPreview.ok, false);
+assert.doesNotMatch(failedModelSqlPreview.error, /Expected|but\s+".+"\s+found/iu);
+assert.match(failedModelSqlPreview.error, /생성된 MySQL SQL을 검증하지 못했습니다/);
 assert.equal(modelSqlPreviewSession.sourceText, mysqlSourceText);
 let modelSqlHistory = sqlDiffApplyRuntime.createSqlErdModelSqlHistory();
 modelSqlHistory = sqlDiffApplyRuntime.recordSqlErdModelSqlHistory(
@@ -7815,7 +7902,7 @@ assert.match(canvasSurface, /registerBeforeDeleteHandler/);
 assert.match(canvasSurface, /shouldHandleSqlErdSchemaDeleteShortcut/);
 assert.match(
   panel,
-  /disabled=\{isReadOnly \|\| !preview \|\| !preview\.hasChanges \|\| isApplying\}/
+  /disabled=\{[\s\S]*?isReadOnly[\s\S]*?!preview[\s\S]*?!preview\.hasChanges[\s\S]*?isApplying[\s\S]*?isSavePending[\s\S]*?\}/
 );
 assert.match(panel, /handleReloadSession/);
 assert.match(panel, /handleReloadPausedSession/);
@@ -8007,7 +8094,16 @@ assert.match(canvasSurface, /applySqlErdCanvasIncrementalShapeSync/);
 assert.doesNotMatch(canvasSurface, /function shouldResetSqlErdCanvas/);
 assert.match(canvasSurface, /function sendSqlErdCanvasBackgroundShapesToBack/);
 assert.match(canvasSurface, /editor\.sendToBack\(frameShapeIds\)/);
+assert.match(canvasSurface, /editor\.sendToBack\(noteShapeIds\)/);
 assert.match(canvasSurface, /editor\.sendToBack\(relationShapeIds\)/);
+assert.match(
+  canvasSurface,
+  /onTouchStartCapture=\{handleTouchStartCapture\}/
+);
+assert.match(
+  canvasSurface,
+  /const handleTouchStartCapture[\s\S]*?editorRef\.current\?\.markEventAsHandled\(event\)/
+);
 assert.match(canvasSurface, /createSqlErdCanvasContentKey/);
 assert.match(canvasSurface, /createSqlErdCanvasContentSyncState/);
 assert.match(canvasSurface, /invalidateSqlErdCanvasContentSyncFits/);
@@ -8050,6 +8146,12 @@ assert.doesNotMatch(canvasSurface, /onLayoutChange/);
 assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
 assert.match(canvasSurface, /getSqlErdSelectionFromSelectedShapes/);
+assert.match(canvasSurface, /getSqlErdDeleteBatchFromSelectedShapes/);
+assert.match(canvasSurface, /onSchemaDeleteBatch/);
+assert.match(
+  canvasSurface,
+  /const selectedShapes = editor\.getSelectedShapes\(\);[\s\S]*?const deleteBatch = getSqlErdDeleteBatchFromSelectedShapes\(selectedShapes\)/
+);
 assert.match(canvasSurface, /selectSqlErdCanvasShapeAtPoint/);
 assert.match(canvasSurface, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(canvasSurface, /editor\.getSelectedShapes/);
@@ -8063,6 +8165,11 @@ assert.match(canvasSurface, /hashSqlErdShapeSourceId/);
 assert.match(canvasSurface, /zoomToFit/);
 assert.match(canvasSurface, /createSqltoerdAutoLayout/);
 assert.match(canvasSurface, /markHistoryStoppingPoint\("sqltoerd auto layout"\)/);
+const autoLayoutImplementation = canvasSurface.slice(
+  canvasSurface.indexOf("function applySqlErdAutoLayout"),
+  canvasSurface.indexOf("type SqlErdCanvasAnnotationSyncProps")
+);
+assert.doesNotMatch(autoLayoutImplementation, /fitSqlErdCanvas\(editor\)/);
 assert.match(canvasSurface, /data-sqltoerd-auto-layout/);
 assert.match(canvasSurface, /SqlErdTableFocusProvider/);
 assert.match(canvasSurface, /SqlErdTableFocusInteractionGuard/);
@@ -8370,9 +8477,15 @@ assert.match(panel, /관계 의미/);
 assert.doesNotMatch(panel, /Workspace source operation/);
 assert.doesNotMatch(panel, /Workspace operation/);
 assert.match(panel, /Workspace에 저장되었습니다/);
+assert.match(panel, /기존 snapshot 세션에서는 다른 사용자의 캔버스 변경을 실시간으로\s+동기화하지 않습니다/);
 assert.match(panel, /변경 전/);
 assert.match(panel, /변경 후/);
 assert.match(panel, /SQL 편집 잠금을 확인하는 중입니다/);
+assert.match(panel, /handlePreviewSchemaDeleteBatch/);
+assert.match(panel, /setPendingSchemaDeleteLayoutPatch/);
+assert.match(panel, /onSchemaDeleteBatch=\{handlePreviewSchemaDeleteBatch\}/);
+assert.match(panel, /rebaseSqlErdNormalizedSqlPreviewAfterSave/);
+assert.match(panel, /이전 변경 저장 중/);
 assert.match(canvasSurface, /onDeleteForeignKey/);
 assert.match(
   canvasSurface,
@@ -8545,6 +8658,9 @@ assert.deepEqual(
 
 assert.match(canvasSurface, /SqlErdNoteShapeUtil/);
 assert.match(canvasSurface, /SqlErdFrameShapeUtil/);
+assert.match(frameShape, /function getSqlErdFrameControlScale/);
+assert.match(frameShape, /Math\.min\(2, Math\.max\(1,/);
+assert.match(frameShape, /transform: `scale\(\$\{controlScale\}\)`/);
 assert.match(canvasSurface, /SqlErdTextShapeUtil/);
 assert.match(annotationToolbar, /aria-label="메모 추가"/);
 assert.match(annotationToolbar, /aria-label="프레임 추가"/);

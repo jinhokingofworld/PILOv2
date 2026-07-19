@@ -7,7 +7,8 @@ import {
   useRef,
   useState,
   type MouseEvent,
-  type PointerEvent as ReactPointerEvent
+  type PointerEvent as ReactPointerEvent,
+  type TouchEvent as ReactTouchEvent
 } from "react";
 import {
   createShapeId,
@@ -164,11 +165,13 @@ import {
 import {
   areSqlErdSelectionsEqual,
   getSqlErdContextRelationIds,
+  getSqlErdDeleteBatchFromSelectedShapes,
   getSqlErdSelectionFromSelectedShapes,
   isSqlErdCanvasBackgroundPoint,
   resolveSqlErdTableInteractionSelection,
   selectSqlErdCanvasShapeAtPoint,
-  shouldHandleSqlErdSchemaDeleteShortcut
+  shouldHandleSqlErdSchemaDeleteShortcut,
+  type SqlErdDeleteBatch
 } from "@/features/sql-erd/utils/canvas-selection";
 import { cn } from "@/lib/utils";
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
@@ -194,6 +197,7 @@ type SqlErdCanvasProps = {
   onSchemaDelete?: (
     selection: Extract<SqlErdSelection, { type: "table" | "column" }>
   ) => void;
+  onSchemaDeleteBatch?: (batch: SqlErdDeleteBatch) => void;
   onSelectionChange?: (selection: SqlErdSelection) => void;
   onInspectorOpenChange?: (isOpen: boolean) => void;
   pinNavigationRequestId?: number;
@@ -738,12 +742,19 @@ function sendSqlErdCanvasBackgroundShapesToBack(
   const frameShapeIds = shapes
     .filter((shape) => shape.type === SQLTOERD_FRAME_SHAPE_TYPE)
     .map((shape) => shape.id as TLShapeId);
+  const noteShapeIds = shapes
+    .filter((shape) => shape.type === SQLTOERD_NOTE_SHAPE_TYPE)
+    .map((shape) => shape.id as TLShapeId);
   const relationShapeIds = shapes
     .filter((shape) => shape.type === SQLTOERD_RELATION_SHAPE_TYPE)
     .map((shape) => shape.id as TLShapeId);
 
   if (frameShapeIds.length) {
     editor.sendToBack(frameShapeIds);
+  }
+
+  if (noteShapeIds.length) {
+    editor.sendToBack(noteShapeIds);
   }
 
   if (relationShapeIds.length) {
@@ -1321,24 +1332,28 @@ function SqlErdSelectionSync({
 function SqlErdSchemaDeleteBridge({
   onDeleteForeignKey,
   onSchemaDelete,
+  onSchemaDeleteBatch,
   selectedSqlErdObject
 }: {
   onDeleteForeignKey?: (relationId: string) => void;
   onSchemaDelete: (
     selection: Extract<SqlErdSelection, { type: "table" | "column" }>
   ) => void;
+  onSchemaDeleteBatch?: (batch: SqlErdDeleteBatch) => void;
   selectedSqlErdObject: SqlErdSelection;
 }) {
   const editor = useEditor();
   const onDeleteForeignKeyRef = useRef(onDeleteForeignKey);
   const onSchemaDeleteRef = useRef(onSchemaDelete);
+  const onSchemaDeleteBatchRef = useRef(onSchemaDeleteBatch);
   const selectedSqlErdObjectRef = useRef(selectedSqlErdObject);
 
   useEffect(() => {
     onDeleteForeignKeyRef.current = onDeleteForeignKey;
     onSchemaDeleteRef.current = onSchemaDelete;
+    onSchemaDeleteBatchRef.current = onSchemaDeleteBatch;
     selectedSqlErdObjectRef.current = selectedSqlErdObject;
-  }, [onDeleteForeignKey, onSchemaDelete, selectedSqlErdObject]);
+  }, [onDeleteForeignKey, onSchemaDelete, onSchemaDeleteBatch, selectedSqlErdObject]);
 
   useEffect(() => {
     function isEditableTarget(target: EventTarget | null) {
@@ -1372,6 +1387,29 @@ function SqlErdSchemaDeleteBridge({
 
     function handleKeyDown(event: globalThis.KeyboardEvent) {
       const selection = selectedSqlErdObjectRef.current;
+      const selectedShapes = editor.getSelectedShapes();
+      const deleteBatch = getSqlErdDeleteBatchFromSelectedShapes(selectedShapes);
+      const hasBatchTargets =
+        deleteBatch.tableIds.length > 0 ||
+        deleteBatch.relationIds.length > 0 ||
+        deleteBatch.deleteLinkIds.length > 0 ||
+        deleteBatch.deleteNoteIds.length > 0 ||
+        deleteBatch.deleteFrameIds.length > 0 ||
+        deleteBatch.deleteTextIds.length > 0 ||
+        deleteBatch.deleteStrokeIds.length > 0;
+
+      if (
+        selectedShapes.length > 1 &&
+        hasBatchTargets &&
+        onSchemaDeleteBatchRef.current &&
+        (event.key === "Delete" || event.key === "Backspace") &&
+        !isEditableTarget(event.target)
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        onSchemaDeleteBatchRef.current(deleteBatch);
+        return;
+      }
 
       if (
         selection.type !== "table" &&
@@ -2634,7 +2672,6 @@ function applySqlErdAutoLayout({
 
   window.requestAnimationFrame(() => {
     tablePositionChanges.clearSuppressed();
-    fitSqlErdCanvas(editor);
   });
 
   return nextLayoutJson;
@@ -2992,6 +3029,7 @@ export function SqlErdCanvas({
   onLayoutPatch: onLayoutPatchProp,
   onDeleteForeignKey,
   onSchemaDelete,
+  onSchemaDeleteBatch,
   onInspectorOpenChange,
   onSelectionChange,
   pinNavigationRequestId = 0,
@@ -3557,6 +3595,12 @@ export function SqlErdCanvas({
     },
     []
   );
+  const handleTouchStartCapture = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>) => {
+      editorRef.current?.markEventAsHandled(event);
+    },
+    []
+  );
   const handleAutoLayout = useCallback(() => {
     const editor = editorRef.current;
 
@@ -3615,6 +3659,7 @@ export function SqlErdCanvas({
       onPointerLeave={handlePointerLeaveCapture}
       onPointerMoveCapture={handlePointerMoveCapture}
       onPointerUpCapture={handlePointerUpCapture}
+      onTouchStartCapture={handleTouchStartCapture}
     >
       <SqlErdSelectionContextProvider relationIds={contextRelationIds}>
         <SqlErdTableFocusProvider focus={tableFocus}>
@@ -3664,6 +3709,7 @@ export function SqlErdCanvas({
           <SqlErdSchemaDeleteBridge
             onDeleteForeignKey={onDeleteForeignKey}
             onSchemaDelete={onSchemaDelete}
+            onSchemaDeleteBatch={onSchemaDeleteBatch}
             selectedSqlErdObject={selectedSqlErdObject}
           />
         ) : null}
