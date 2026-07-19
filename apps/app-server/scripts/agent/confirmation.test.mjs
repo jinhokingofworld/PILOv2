@@ -246,9 +246,11 @@ class FakeAgentLoggingService {
     });
 
     const run = this.state.runs.find((candidate) => candidate.id === input.runId);
+    const disposition = input.postExecutionDisposition ?? "continue_planning";
     const queuedNextPlannerTurn =
-      input.completeRun !== true && this.state.toolCallLimitReached !== true;
-    run.status = input.completeRun
+      disposition === "continue_planning" &&
+      this.state.toolCallLimitReached !== true;
+    run.status = disposition === "complete_run"
       ? "completed"
       : queuedNextPlannerTurn
         ? "planning"

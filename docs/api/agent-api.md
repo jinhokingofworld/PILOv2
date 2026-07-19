@@ -964,10 +964,14 @@ Status code: `200 OK`
   `SQLtoERD model changed; inspect the schema again` 메시지로 거부해 inspect부터 다시 수행한다.
 - 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`, `modelFingerprint`,
   `featureLabel`, `primaryTableIds`, `relatedTableIds`, `relationIds`, `confidence`를 가진 resource ref다.
-  Frontend는 핵심·관련 table과 그 사이 relation만 선명하게 표시하고 나머지 table/relation을 흐리게
-  하며 선택·transform·delete를 막는다. 최초 적용 시 revision과 model fingerprint를 검증하고,
-  활성화된 뒤에는 layout/annotation revision 증가가 아니라 실제 modelJson 변경 때만 해제한다.
-  `전체 보기`, session 변경, 새로고침으로 집중 상태를 해제한다.
+  도구 성공 시 step의 resource ref와 run을 한 트랜잭션에서 저장하고 run은 `completed`가 된다.
+  Frontend는 완료된 run의 resource ref가 현재 SQLtoERD session과 같을 때 한 번 자동 적용하고,
+  다른 session이면 자동 이동하거나 적용하지 않는다. 자동 적용 여부와 무관하게 `집중 보기 열기`
+  링크를 유지해 사용자가 수동으로 열거나 다시 적용할 수 있게 한다. 적용된 화면은 핵심·관련 table과
+  그 사이 relation만 선명하게 표시하고 나머지 table/relation을 흐리게 하며 선택·transform·delete를
+  막는다. 최초 적용 시 revision과 model fingerprint를 검증하고, 활성화된 뒤에는 layout/annotation
+  revision 증가가 아니라 실제 modelJson 변경 때만 해제한다. `전체 보기`, session 변경, 새로고침으로
+  집중 상태를 해제한다.
 - 이 두 tool과 UI는 session을 저장·수정하지 않는 read-only view다. 따라서 SQLtoERD revision,
   writer lease, autosave와 Activity Log를 만들지 않으며 blur는 접근 제어나 보안 경계가 아니다.
 - 지원 범위를 벗어난 schema 기능은 `unsupportedFeatures`에 명시한다. DB 실행·배포만 요구하는

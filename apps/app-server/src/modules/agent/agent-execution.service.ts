@@ -30,6 +30,7 @@ import type {
   AgentToolClarificationResult,
   AgentToolExecutionMode,
   AgentToolExecutionResult,
+  AgentToolPostExecutionDisposition,
   AgentRunRequestContext,
   AgentToolPreparationResult
 } from "./types/agent-tool.types";
@@ -226,14 +227,16 @@ export class AgentExecutionService {
       candidate.capabilityIds.length > 0
         ? await this.findCompletedToolNames(runId)
         : [];
-    const completesRunAfterExecution =
+    const postExecutionDisposition: AgentToolPostExecutionDisposition =
       candidate.capabilityIds.length > 0
         ? isTerminalAgentCapabilityTool(
             candidate.capabilityIds,
             definition.name,
             completedToolNames
           )
-        : definition.completesRunAfterExecution === true;
+          ? "complete_run"
+          : "continue_planning"
+        : definition.postExecutionDisposition ?? "continue_planning";
 
     const isLegacyMeetingReportPlan = this.isLegacyMeetingReportPlan(
       candidate,
@@ -278,7 +281,7 @@ export class AgentExecutionService {
         requestContext,
         input.prompt,
         input.timezone,
-        completesRunAfterExecution
+        postExecutionDisposition
       );
     }
 
@@ -306,7 +309,7 @@ export class AgentExecutionService {
       requestContext,
       input.prompt,
       input.timezone,
-      completesRunAfterExecution
+      postExecutionDisposition
     );
   }
 
@@ -572,7 +575,8 @@ export class AgentExecutionService {
     requestContext: AgentRunRequestContext,
     prompt?: string,
     timezone?: string,
-    completesRunAfterExecution = false
+    postExecutionDisposition: AgentToolPostExecutionDisposition =
+      "continue_planning"
   ): Promise<AgentExecutionResult> {
     if (!definition.prepareExecution) {
       return this.failRun(currentUserId, workspaceId, runId, {
@@ -631,7 +635,7 @@ export class AgentExecutionService {
         requestContext,
         prompt,
         timezone,
-        completesRunAfterExecution
+        postExecutionDisposition
       );
     } catch (error) {
       if (this.isAgentErrorCode(error, "CONFIRMATION_NOT_PENDING")) {
@@ -870,7 +874,7 @@ export class AgentExecutionService {
         resourceRefs,
         riskLevel: definition.riskLevel,
         waitingMessage: answer,
-        waitForUserInput: true
+        postExecutionDisposition: "wait_for_user_input"
       }
     );
 
@@ -890,7 +894,8 @@ export class AgentExecutionService {
     requestContext: AgentRunRequestContext,
     prompt?: string,
     timezone?: string,
-    completesRunAfterExecution = false
+    postExecutionDisposition: AgentToolPostExecutionDisposition =
+      "continue_planning"
   ): Promise<AgentExecutionResult> {
     const claim = await this.agentLoggingService.startNextToolExecutionClaimIfAbsent(
       currentUserId,
@@ -967,7 +972,7 @@ export class AgentExecutionService {
           outputSummary,
           resourceRefs,
           riskLevel: definition.riskLevel,
-          waitingMessage: completesRunAfterExecution
+          waitingMessage: postExecutionDisposition === "complete_run"
             ? buildAgentReadResultAnswer({
                 toolName: definition.name,
                 outputSummary,
@@ -976,7 +981,7 @@ export class AgentExecutionService {
                 timezone
               })
             : "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.",
-          completeRun: completesRunAfterExecution,
+          postExecutionDisposition,
           executionLease: lease
         }
       );

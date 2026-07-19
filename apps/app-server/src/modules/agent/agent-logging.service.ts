@@ -12,7 +12,8 @@ import type {
   AgentJsonObject,
   AgentResourceRef,
   AgentRiskLevel,
-  AgentRunRequestContext
+  AgentRunRequestContext,
+  AgentToolPostExecutionDisposition
 } from "./types/agent-tool.types";
 
 export type AgentRunStatus =
@@ -120,8 +121,7 @@ export interface CompleteAgentToolStepAndAdvanceInput
   extends CompleteAgentStepInput {
   riskLevel?: AgentRiskLevel | null;
   waitingMessage: string;
-  waitForUserInput?: boolean;
-  completeRun?: boolean;
+  postExecutionDisposition?: AgentToolPostExecutionDisposition;
   executionLease?: AgentExecutionLease;
 }
 
@@ -1057,6 +1057,8 @@ export class AgentLoggingService {
       input.waitingMessage,
       "waiting message"
     );
+    const postExecutionDisposition =
+      input.postExecutionDisposition ?? "continue_planning";
 
     return this.database.transaction(async (transaction) => {
       const lockedRun = await this.findOwnedRunForUpdate(transaction, {
@@ -1118,14 +1120,14 @@ export class AgentLoggingService {
         resourceRefs
       });
 
-      if (input.completeRun) {
+      if (postExecutionDisposition === "complete_run") {
         const completedRun = await transaction.queryOne<AgentRunRow>(
           `
             UPDATE agent_runs
             SET status = 'completed',
                 tool_call_count = LEAST(tool_call_count + 1, 5),
                 risk_level = COALESCE($2, risk_level),
-                message = '요청을 완료했습니다.',
+                message = $3,
                 final_answer = $3,
                 error_code = NULL,
                 error_message = NULL,
@@ -1156,6 +1158,29 @@ export class AgentLoggingService {
         if (!completedRun) {
           throw new Error("Agent run completion was fenced");
         }
+        const nextSequence = await transaction.queryOne<{
+          sequence: number | string;
+        }>(
+          `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+          [input.runId]
+        );
+        await transaction.execute(
+          `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'assistant', $3)`,
+          [input.runId, Number(nextSequence?.sequence ?? 1), waitingMessage]
+        );
+        await this.insertLog(transaction, {
+          workspaceId,
+          runId: input.runId,
+          actorType: "app_server",
+          actorUserId: null,
+          level: "info",
+          eventType: "run_completed",
+          message: "Agent run completed",
+          metadata: {
+            finalAnswerLength: waitingMessage.length
+          },
+          resourceRefs
+        });
         return {
           step: this.mapStep(step),
           run: this.mapRun(completedRun),
@@ -1163,7 +1188,7 @@ export class AgentLoggingService {
         };
       }
 
-      if (!input.waitForUserInput) {
+      if (postExecutionDisposition === "continue_planning") {
         const planningRun = await transaction.queryOne<AgentRunRow>(
           `
             UPDATE agent_runs
@@ -1241,7 +1266,7 @@ export class AgentLoggingService {
           input.runId,
           input.riskLevel ?? null,
           waitingMessage,
-          input.waitForUserInput === true
+          postExecutionDisposition === "wait_for_user_input"
         ]
       );
       if (!waitingRun) {

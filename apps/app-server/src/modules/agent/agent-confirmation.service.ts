@@ -27,6 +27,7 @@ import type {
   AgentRiskLevel,
   AgentToolDefinition,
   AgentToolExecutionResult,
+  AgentToolPostExecutionDisposition,
   AgentRunRequestContext,
   AgentChoiceConfirmationPlan
 } from "./types/agent-tool.types";
@@ -804,14 +805,17 @@ export class AgentConfirmationService {
         capabilityIds.length > 0
           ? await this.findCompletedToolNames(runId)
           : [];
-      const completesRunAfterExecution =
+      const postExecutionDisposition: AgentToolPostExecutionDisposition =
         capabilityIds.length > 0
           ? isTerminalAgentCapabilityTool(
               capabilityIds,
               toolExecution.definition.name,
               completedToolNames
             )
-          : toolExecution.definition.completesRunAfterExecution === true;
+            ? "complete_run"
+            : "continue_planning"
+          : toolExecution.definition.postExecutionDisposition ??
+            "continue_planning";
 
       const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
         currentUserId,
@@ -822,13 +826,13 @@ export class AgentConfirmationService {
           outputSummary,
           resourceRefs,
           riskLevel: confirmation.risk_level,
-          waitingMessage: completesRunAfterExecution
+          waitingMessage: postExecutionDisposition === "complete_run"
             ? this.buildFinalAnswer(
                 toolExecution.definition.name,
                 resourceRefs
               )
             : "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.",
-          completeRun: completesRunAfterExecution,
+          postExecutionDisposition,
           executionLease: lease
         }
       );
