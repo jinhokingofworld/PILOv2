@@ -54,12 +54,12 @@ export const screenShareCaptureOptions = {
   audio: false,
   contentHint: "detail",
   preferCurrentTab: true,
-  resolution: { width: 1280, height: 720, frameRate: 15 },
+  resolution: { width: 1280, height: 720, frameRate: 5 },
   selfBrowserSurface: "include"
 } satisfies ScreenShareCaptureOptions;
 
 export const screenSharePublishOptions = {
-  screenShareEncoding: ScreenSharePresets.h720fps15.encoding
+  screenShareEncoding: ScreenSharePresets.h720fps5.encoding
 } satisfies TrackPublishOptions;
 
 type PublisherApi = Pick<ScreenShareApiClient, "start" | "end">;
