@@ -6010,6 +6010,76 @@ assert.equal(
   sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(uuidModelSqlPreview).ok,
   true
 );
+const aiGeneratedDecimalModel = structuredClone(mysqlParseResult.modelJson);
+aiGeneratedDecimalModel.schema.tables[0].columns[0].dataType =
+  "DECIMAL(12, 2)";
+const aiGeneratedDecimalPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: aiGeneratedDecimalModel,
+    resolvedDialect: "mysql",
+    session: {
+      ...modelSqlPreviewSession,
+      modelJson: aiGeneratedDecimalModel
+    }
+  });
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    aiGeneratedDecimalPreview
+  ).ok,
+  true,
+  "AI-generated DECIMAL precision spacing must survive semantic verification"
+);
+const quotedCommaTypeWithSpace = structuredClone(mysqlParseResult.modelJson);
+quotedCommaTypeWithSpace.schema.tables[0].columns[0].dataType = '"Type, Name"';
+const quotedCommaTypeWithoutSpace = structuredClone(mysqlParseResult.modelJson);
+quotedCommaTypeWithoutSpace.schema.tables[0].columns[0].dataType =
+  '"Type,Name"';
+assert.notEqual(
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    quotedCommaTypeWithSpace
+  ),
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    quotedCommaTypeWithoutSpace
+  ),
+  "quoted data type identifiers must preserve comma-adjacent whitespace"
+);
+const quotedTypeMixedCase = structuredClone(mysqlParseResult.modelJson);
+quotedTypeMixedCase.schema.tables[0].columns[0].dataType = '"MyType"';
+const quotedTypeUpperCase = structuredClone(mysqlParseResult.modelJson);
+quotedTypeUpperCase.schema.tables[0].columns[0].dataType = '"MYTYPE"';
+assert.notEqual(
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(quotedTypeMixedCase),
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(quotedTypeUpperCase),
+  "quoted data type identifiers must preserve case"
+);
+const quotedTypeDoubleSpace = structuredClone(mysqlParseResult.modelJson);
+quotedTypeDoubleSpace.schema.tables[0].columns[0].dataType = '"Type  Name"';
+const quotedTypeSingleSpace = structuredClone(mysqlParseResult.modelJson);
+quotedTypeSingleSpace.schema.tables[0].columns[0].dataType = '"Type Name"';
+assert.notEqual(
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    quotedTypeDoubleSpace
+  ),
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    quotedTypeSingleSpace
+  ),
+  "quoted data type identifiers must preserve repeated whitespace"
+);
+const enumLowerCaseLiterals = structuredClone(mysqlParseResult.modelJson);
+enumLowerCaseLiterals.schema.tables[0].columns[0].dataType =
+  "ENUM('small','large')";
+const enumUpperCaseLiterals = structuredClone(mysqlParseResult.modelJson);
+enumUpperCaseLiterals.schema.tables[0].columns[0].dataType =
+  "ENUM('SMALL','LARGE')";
+assert.notEqual(
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    enumLowerCaseLiterals
+  ),
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    enumUpperCaseLiterals
+  ),
+  "quoted enum literals must preserve case"
+);
 const unsupportedTypeModel = structuredClone(mysqlParseResult.modelJson);
 unsupportedTypeModel.schema.tables[0].columns[0].dataType = "USER_ROLE";
 const unsupportedTypeApplyResult =
@@ -8263,6 +8333,18 @@ const autoLayoutImplementation = canvasSurface.slice(
 );
 assert.doesNotMatch(autoLayoutImplementation, /fitSqlErdCanvas\(editor\)/);
 assert.match(canvasSurface, /data-sqltoerd-auto-layout/);
+const autoLayoutButtonSource = canvasSurface.slice(
+  canvasSurface.lastIndexOf(
+    "<button",
+    canvasSurface.indexOf("data-sqltoerd-auto-layout")
+  ),
+  canvasSurface.indexOf(
+    "</button>",
+    canvasSurface.indexOf("data-sqltoerd-auto-layout")
+  )
+);
+assert.match(autoLayoutButtonSource, /absolute left-4 top-4/);
+assert.doesNotMatch(autoLayoutButtonSource, /right-4/);
 assert.match(canvasSurface, /SqlErdTableFocusProvider/);
 assert.match(canvasSurface, /SqlErdTableFocusInteractionGuard/);
 assert.match(canvasSurface, /editor\.setSelectedShapes\(allowedShapeIds\)/);

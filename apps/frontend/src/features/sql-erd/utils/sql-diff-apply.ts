@@ -394,7 +394,7 @@ export function createSqlErdSchemaSemanticSignature(
     .map((table) => ({
       columns: table.columns
         .map((column) => ({
-          dataType: normalizeSqlSemanticText(column.dataType),
+          dataType: normalizeSqlDataTypeSemanticText(column.dataType),
           defaultValue:
             column.defaultValue === null
               ? null
@@ -443,6 +443,75 @@ export function createSqlErdSchemaSemanticSignature(
     );
 
   return JSON.stringify({ relations, tables });
+}
+
+function normalizeSqlDataTypeSemanticText(value: string) {
+  const normalized = value.trim();
+  let quote: '"' | "'" | null = null;
+  let result = "";
+  let hasPendingWhitespace = false;
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index];
+
+    if (quote) {
+      result += character;
+      if (character === quote) {
+        if (normalized[index + 1] === quote) {
+          result += normalized[index + 1];
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+
+    if (/\s/u.test(character)) {
+      hasPendingWhitespace = true;
+      continue;
+    }
+
+    if (character === '"' || character === "'") {
+      if (
+        hasPendingWhitespace &&
+        result.length > 0 &&
+        result.at(-1) !== "(" &&
+        result.at(-1) !== ","
+      ) {
+        result += " ";
+      }
+      hasPendingWhitespace = false;
+      quote = character;
+      result += character;
+      continue;
+    }
+
+    if (character === "(" || character === ",") {
+      result = `${result.trimEnd()}${character}`;
+      hasPendingWhitespace = false;
+      continue;
+    }
+
+    if (character === ")") {
+      result = `${result.trimEnd()})`;
+      hasPendingWhitespace = false;
+      continue;
+    }
+
+    if (
+      hasPendingWhitespace &&
+      result.length > 0 &&
+      result.at(-1) !== "(" &&
+      result.at(-1) !== ","
+    ) {
+      result += " ";
+    }
+    hasPendingWhitespace = false;
+    result += character.toUpperCase();
+  }
+
+  return result;
 }
 
 function normalizeSqlSemanticText(value: string) {
