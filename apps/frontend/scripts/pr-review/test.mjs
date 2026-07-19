@@ -668,7 +668,7 @@ assert.match(prReviewConflictDraftLock, /setLock\(null\);/);
 assert.match(prReviewCanvasShell, /overlayClassName="z-\[90\]"/);
 assert.match(
   prReviewCanvasSurface,
-  /editor\.createShapes\(shapes\);\s+updatePrReviewRelationGeometry\(editor, internalShapeUpdateRef, true\);/
+  /editor\.createShapes\(shapes\);\s+updatePrReviewDerivedGeometry\(editor, internalShapeUpdateRef, true\);/
 );
 assert.match(prReviewFileNodeShapeUtil, /override onDoubleClick/);
 assert.match(prReviewFileNodeShapeUtil, /activatePrReviewFileNode/);
