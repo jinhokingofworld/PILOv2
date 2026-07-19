@@ -1,5 +1,35 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { getGithubSettingsAccessState } from "./utils/github-settings-access.ts";
+
+const stepsSource = await readFile(
+  new URL("./components/github-connect-steps.tsx", import.meta.url),
+  "utf8"
+);
+
+assert.match(stepsSource, /1\. GitHub 계정 연결/);
+assert.match(stepsSource, /2\. GitHub App 설치/);
+assert.match(stepsSource, /3\. Project 작업 권한/);
+assert.match(stepsSource, /보드 편집 권한 필요/);
+assert.match(stepsSource, /getGithubSettingsAccessState/);
+assert.match(
+  stepsSource,
+  /disabled=\{!access\.canChooseRepository \|\| isSyncing \|\| isLoading\}/
+);
+assert.match(
+  stepsSource,
+  /flex flex-col flex-wrap gap-4 p-4 @\[48rem\]:flex-row/
+);
+assert.equal(
+  (
+    stepsSource.match(
+      /flex flex-col flex-wrap gap-4 p-4 @\[48rem\]:flex-row/g
+    ) ?? []
+  ).length,
+  2
+);
+assert.doesNotMatch(stepsSource, /grid-cols-3/);
+assert.doesNotMatch(stepsSource, /title="현재 작업"/);
 
 assert.deepEqual(
   getGithubSettingsAccessState({
@@ -14,6 +44,22 @@ assert.deepEqual(
     githubStepStatus: "required",
     installationStepStatus: "blocked",
     projectStepStatus: "blocked"
+  }
+);
+
+assert.deepEqual(
+  getGithubSettingsAccessState({
+    connected: true,
+    hasInstallation: true,
+    projectOAuthConnected: true
+  }),
+  {
+    canInstallGithubApp: true,
+    canConnectProjectOAuth: true,
+    canChooseRepository: true,
+    githubStepStatus: "complete",
+    installationStepStatus: "complete",
+    projectStepStatus: "complete"
   }
 );
 
