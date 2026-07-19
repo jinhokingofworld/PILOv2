@@ -2952,6 +2952,12 @@ class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
     def complete_grounded_answer_without_sources(self, run_id: str) -> None:
         self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/no-sources")
 
+    def complete_grounded_answer_security_refusal(self, run_id: str) -> None:
+        self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/security-refusal")
+
+    def fail_grounded_answer_citations(self, run_id: str) -> None:
+        self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/citation-failure")
+
     def _post(self, path: str) -> None:
         request = Request(
             f"{self.base_url}{path}",
