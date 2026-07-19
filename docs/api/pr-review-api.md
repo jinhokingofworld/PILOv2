@@ -817,12 +817,14 @@ Review room의 Canvas에는 다음 시스템 shape 계약을 사용한다.
 
 일반 사용자는 시스템 shape를 생성·삭제할 수 없다. File node의 geometry만 변경할 수
 있고 relation edge는 수정할 수 없다. 분석 성공 시 PR Review가 graph와 같은 transaction
-안에서 시스템 shape를 생성·갱신한다. 최초 빈 Canvas의 node rank는 `workflowOrder`가 유일한
-spine이다. Flow 내부 파일은 `workflowOrder`, file path, stable ID 순으로 정렬하고 ELK에는
-1→2→3 순서의 내부 layout edge만 전달한다. 역할 우선순위와 semantic relation은 rank 계산에
-사용하지 않는다. semantic relation은 배치 뒤 node 아래쪽 orthogonal lane에 route하며, 다음
-Flow 간격에는 사용한 route 높이를 반영한다. 따라서 역방향 또는 순환 semantic edge가 있어도
-첫 파일은 Flow의 가장 왼쪽에 남는다.
+안에서 시스템 shape를 생성·갱신한다. 최초 빈 Canvas에서는 Flow 내부 파일을 `workflowOrder`,
+file path, stable ID 순으로 정렬하고 첫 파일을 layout start로 둔다. `review_order` relation은
+rank에서 제외하며, semantic endpoint pair만 낮은 `workflowOrder`에서 높은 순서로 정규화해
+ELK에 전달한다. 실제 relation 방향과 저장 값은 바꾸지 않는다. semantic root는 첫 파일의
+synthetic anchor로 연결하고, semantic relation이 없는 Flow만 1→2→3 spine을 fallback으로
+사용한다. semantic relation은 배치 뒤 node 아래쪽 orthogonal lane에 route하며, 다음 Flow
+간격에는 사용한 route 높이를 반영한다. 따라서 첫 파일은 가장 왼쪽에 남고 나머지 파일은
+semantic 관계의 branch와 depth에 따라 같은 rank에서 위아래로 배치될 수 있다.
 
 같은 room file은 기존 위치·크기·parent·표시 순서와 저장된 relation edge route를 유지한다.
 즉, 최초 materialization이나 새 revision 분석은 이미 저장된 file node geometry와 route를
@@ -838,11 +840,13 @@ layout을 구성한다. File node 이동은 Canvas 단일 Shape 수정 API에 `b
 클라이언트에서 기본 orthogonal route로 다시 계산한다. `409 CONFLICT` 응답 시 최신 Shape를 다시 조회해 화면을
 저장 상태로 복구한다.
 
-Frontend의 명시적 `현재 Flow 자동 정렬`도 `workflowOrder` spine만 Dagre 입력으로 사용한다.
-semantic relation은 rank를 바꾸지 않는다. 사용자가 자동 정렬을 실행하면 현재 Flow의 pin되지
-않은 모든 node를 새 좌표로 재배치하고 그 geometry를 저장한다. 따라서 pin되지 않은 node의
-기존 저장 geometry는 이 명시적 동작으로 의도적으로 대체되며, pin된 node만 기존 위치를
-유지한다. Canvas를 불러오는 것만으로 기존 좌표를 재배치하지 않는다.
+Frontend의 명시적 `현재 Flow 자동 정렬`도 pin되지 않은 node 사이의 semantic endpoint pair를
+`workflowOrder` 순으로 정규화해 Dagre rank에 사용한다. semantic root는 이동 가능한 첫 node의
+synthetic anchor로 연결하고, semantic relation이 없는 Flow만 review-order spine으로 fallback한다.
+사용자가 자동 정렬을 실행하면 현재 Flow의 pin되지 않은 모든 node를 새 좌표로 재배치하고 그
+geometry를 저장한다. 따라서 pin되지 않은 node의 기존 저장 geometry는 이 명시적 동작으로
+의도적으로 대체되며, pin된 node만 기존 위치를 유지한다. Canvas를 불러오는 것만으로 기존
+좌표를 재배치하지 않는다.
 
 ```json
 {

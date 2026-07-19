@@ -906,8 +906,16 @@ export class AgentExecutionService {
           outputSummary,
           resourceRefs,
           riskLevel: definition.riskLevel,
-          waitingMessage:
-            "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요."
+          waitingMessage: definition.completesRunAfterExecution
+            ? buildAgentReadResultAnswer({
+                toolName: definition.name,
+                outputSummary,
+                resourceRefs,
+                prompt,
+                timezone
+              })
+            : "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.",
+          waitForUserInput: definition.completesRunAfterExecution === true
         }
       );
       if (advanced.queuedNextPlannerTurn) {

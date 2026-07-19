@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
   GithubAppInstallation,
@@ -81,19 +82,19 @@ export function GithubConnectSync({
     projectScopedSyncTargets.has(syncTarget) && !selectedProjectV2Id;
 
   return (
-    <>
-      <GithubConnectPanel
+    <GithubConnectPanel
         icon={<Play className="size-4" />}
-        subtitle="선택한 installation 기준으로 백엔드 동기화 작업을 요청합니다."
-        title="동기화 대상"
+        subtitle="선택한 installation 기준으로 필요한 데이터만 갱신합니다."
+        title="동기화"
+        tone="sync"
       >
-        <div className="flex flex-col gap-3 @[48rem]:flex-row @[48rem]:items-end">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="min-w-0 flex-1">
             <span
               className="text-[12px] font-semibold uppercase tracking-[0.06em] text-muted-foreground"
               id="github-sync-target-label"
             >
-              Target
+              동기화 대상
             </span>
             <Select
               onValueChange={(value) => {
@@ -152,13 +153,13 @@ export function GithubConnectSync({
             Project v2를 먼저 선택해 주세요.
           </p>
         ) : null}
-      </GithubConnectPanel>
-
-      <GithubConnectPanel
-        collapsible
-        subtitle={`${formatGithubConnectNumber(syncRunsTotal)}개 수동 동기화 기록`}
-        title="최근 수동 실행"
-      >
+        <Separator className="my-5 bg-[#edf0f4]" />
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <h3 className="text-[13px] font-semibold text-[#344054]" title="최근 수동 실행">최근 수동 실행</h3>
+          <span className="text-[12px] text-[#7a8497]">
+            {formatGithubConnectNumber(syncRunsTotal)}개 수동 동기화 기록
+          </span>
+        </div>
         {isLoading ? (
           <LoadingStack rows={3} />
         ) : syncRuns.length === 0 ? (
@@ -166,7 +167,7 @@ export function GithubConnectSync({
             아직 수동 동기화 기록이 없습니다. 대상을 선택한 뒤 첫 동기화를 시작할 수 있습니다.
           </GithubConnectEmptyState>
         ) : (
-          <div className="job-list space-y-3">
+          <div className="job-list overflow-hidden rounded-[8px] border border-[#e5e9f2] divide-y divide-[#e5e9f2]">
             {syncRuns.map((syncRun) => {
               const installation = syncRun.installationId
                 ? installations.find((item) => item.id === syncRun.installationId)
@@ -175,7 +176,7 @@ export function GithubConnectSync({
 
               return (
                 <div
-                  className="rounded-[8px] border border-[#e5e9f2] bg-[#fbfcfe] p-3"
+                  className="p-3"
                   key={syncRun.id}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -229,8 +230,7 @@ export function GithubConnectSync({
             })}
           </div>
         )}
-      </GithubConnectPanel>
-    </>
+    </GithubConnectPanel>
   );
 }
 

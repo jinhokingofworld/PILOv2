@@ -209,7 +209,7 @@ export function findMissingPrReviewOrderEdges(
 
 export function createPrReviewFlowLayout(
   nodes: PrReviewGraphNode[],
-  _relations: PrReviewGraphRelation[],
+  relations: PrReviewGraphRelation[],
   flowId: string
 ): Map<string, { x: number; y: number }> {
   const flowNodes = nodes.filter((node) => node.flowId === flowId);
@@ -234,14 +234,17 @@ export function createPrReviewFlowLayout(
   }
 
   const orderedMovableNodes = [...movableNodes].sort(
-    (left, right) =>
-      left.workflowOrder - right.workflowOrder || left.id.localeCompare(right.id)
+    compareLayoutNodes
   );
-  for (let index = 1; index < orderedMovableNodes.length; index += 1) {
+  const layoutEdges = buildRelationDrivenDagreEdges(
+    orderedMovableNodes,
+    relations
+  );
+  for (const [index, edge] of layoutEdges.entries()) {
     graph.setEdge({
-      name: `layout-spine:${index}`,
-      v: orderedMovableNodes[index - 1].id,
-      w: orderedMovableNodes[index].id
+      name: `layout:${index}:${edge.from}->${edge.to}`,
+      v: edge.from,
+      w: edge.to
     });
   }
 
@@ -263,4 +266,68 @@ export function createPrReviewFlowLayout(
   }
 
   return positioned;
+}
+
+type DagreLayoutEdge = {
+  from: string;
+  to: string;
+};
+
+function compareLayoutNodes(
+  left: PrReviewGraphNode,
+  right: PrReviewGraphNode
+) {
+  return (
+    left.workflowOrder - right.workflowOrder || left.id.localeCompare(right.id)
+  );
+}
+
+function buildRelationDrivenDagreEdges(
+  nodes: readonly PrReviewGraphNode[],
+  relations: readonly PrReviewGraphRelation[]
+): DagreLayoutEdge[] {
+  const nodeByRoomFileId = new Map<string, PrReviewGraphNode>();
+  for (const node of nodes) {
+    if (node.roomFileId) {
+      nodeByRoomFileId.set(node.roomFileId, node);
+    }
+  }
+  const semanticPairs = new Map<string, DagreLayoutEdge>();
+
+  for (const relation of relations) {
+    if (!relation.relationTypes.some((type) => type !== "review_order")) {
+      continue;
+    }
+    const left = nodeByRoomFileId.get(relation.fromRoomFileId);
+    const right = nodeByRoomFileId.get(relation.toRoomFileId);
+    if (!left || !right || left.id === right.id) {
+      continue;
+    }
+    const [from, to] = compareLayoutNodes(left, right) <= 0
+      ? [left, right]
+      : [right, left];
+    semanticPairs.set(`${from.id}\u0000${to.id}`, {
+      from: from.id,
+      to: to.id
+    });
+  }
+
+  if (!semanticPairs.size) {
+    return nodes.slice(1).map((node, index) => ({
+      from: nodes[index].id,
+      to: node.id
+    }));
+  }
+
+  const edges = [...semanticPairs.values()];
+  const incoming = new Set(edges.map((edge) => edge.to));
+  const start = nodes[0].id;
+  for (const node of nodes) {
+    if (node.id === start || incoming.has(node.id)) {
+      continue;
+    }
+    edges.push({ from: start, to: node.id });
+  }
+
+  return edges;
 }

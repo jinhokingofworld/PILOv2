@@ -53,6 +53,7 @@ export function GithubConnectRepositories({
       icon={<FolderGit2 className="size-4" />}
       subtitle="Project를 조회하고 동기화할 repository를 선택합니다."
       title="저장소"
+      tone="repository"
     >
       {!enabled ? (
         <GithubConnectEmptyState>
@@ -144,7 +145,7 @@ function RepositoryRow({
 }) {
   return (
     <div
-      className={`repo-row grid grid-cols-1 items-center gap-2 px-3 py-3 text-[13px] @[48rem]:grid-cols-[minmax(180px,1.7fr)_90px_90px_108px_86px] @[48rem]:gap-3 ${
+      className={`repo-row grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-3 text-[13px] @[48rem]:grid-cols-[minmax(180px,1.7fr)_90px_90px_108px_86px] @[48rem]:gap-3 ${
         isSelected ? "bg-[#f5f7ff]" : "bg-white"
       }`}
     >
@@ -168,17 +169,13 @@ function RepositoryRow({
           {formatGithubConnectShortDate(repository.pushedAt)}
         </p>
       </div>
-      <span className="text-[#4d586b]">
-        {repository.private ? "Private" : "Public"}
-      </span>
-      <span className="text-[#4d586b]">
-        {repository.archived ? "Archived" : "Active"}
-      </span>
-      <span className="text-[#4d586b]">
-        {formatGithubConnectDateTime(repository.lastSyncedAt)}
-      </span>
+      <div className="col-span-2 row-start-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-[#4d586b] @[48rem]:row-start-auto @[48rem]:contents">
+        <span>{repository.private ? "Private" : "Public"}</span>
+        <span>{repository.archived ? "Archived" : "Active"}</span>
+        <span>{formatGithubConnectDateTime(repository.lastSyncedAt)}</span>
+      </div>
       <Button
-        className="h-8 rounded-[8px] px-3"
+        className="col-start-2 row-start-1 h-8 rounded-[8px] px-3 @[48rem]:col-start-auto @[48rem]:row-start-auto"
         onClick={onSelect}
         size="sm"
         type="button"

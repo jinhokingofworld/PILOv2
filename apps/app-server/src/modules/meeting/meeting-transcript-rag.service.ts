@@ -41,17 +41,17 @@ export class MeetingTranscriptRagService {
     const [transcriptRows, activityRows] = await Promise.all([
       this.database.query<{ id: string; meeting_report_id: string; started_at_ms: number; ended_at_ms: number; content: string; distance: number }>(`
         SELECT chunk.id, chunk.meeting_report_id, chunk.started_at_ms, chunk.ended_at_ms, chunk.content,
-          chunk.embedding <=> $4::extensions.vector AS distance
+          chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector AS distance
         FROM meeting_report_transcript_chunks chunk
         JOIN meeting_reports report ON report.id = chunk.meeting_report_id
         JOIN meetings meeting ON meeting.id = report.meeting_id
         WHERE ${this.authorizedReportWhere("chunk.embedding IS NOT NULL")}
-        ORDER BY chunk.embedding <=> $4::extensions.vector
+        ORDER BY chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
         LIMIT $5
       `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS]),
       this.database.query<{ id: string; meeting_report_id: string; occurred_at: Date | string; action: string; summary: string; content: string; distance: number; directly_referenced: boolean }>(`
         SELECT chunk.id, chunk.meeting_report_id, chunk.occurred_at, chunk.action, chunk.summary, chunk.content,
-          chunk.embedding <=> $4::extensions.vector AS distance,
+          chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector AS distance,
           EXISTS (
             SELECT 1
             FROM meeting_report_activity_evidence_references reference
@@ -63,7 +63,7 @@ export class MeetingTranscriptRagService {
         JOIN meeting_reports report ON report.id = chunk.meeting_report_id
         JOIN meetings meeting ON meeting.id = report.meeting_id
         WHERE ${this.authorizedReportWhere("chunk.embedding IS NOT NULL")}
-        ORDER BY chunk.embedding <=> $4::extensions.vector
+        ORDER BY chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
         LIMIT $5
       `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS])
     ]);
@@ -164,7 +164,7 @@ export class MeetingTranscriptRagService {
         AND activity.id = ANY($2::uuid[])
         AND transcript.embedding IS NOT NULL
         AND activity.embedding IS NOT NULL
-        AND transcript.embedding <=> activity.embedding <= $3
+        AND transcript.embedding OPERATOR(extensions.<=>) activity.embedding <= $3
     `, [transcriptIds, activityIds, SEMANTIC_DUPLICATE_DISTANCE]);
     return rows.map((row) => ({ transcriptId: row.transcript_id, activityId: row.activity_id }));
   }

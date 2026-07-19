@@ -293,8 +293,36 @@ def test_full_catalog_routes_korean_delete_request_to_unsupported_capability() -
 
 def test_compound_request_detection_requires_a_conjunction_token() -> None:
     assert _is_compound_request("일정과 회의록을 보여줘") is True
+    assert _is_compound_request("회의록 보여주고, 일정에 추가해줘") is True
     assert _is_compound_request("회의에서 나와줘") is False
     assert _is_compound_request("대화 내용 보여줘") is False
+
+
+def test_full_catalog_keeps_meeting_decision_to_calendar_handoff_out_of_unsupported_fallback() -> (
+    None
+):
+    fixture = json.loads(QUALITY_FIXTURE_PATH.read_text(encoding="utf-8"))
+    schemas = fixture["eligibleToolSchemas"]
+    catalog = parse_tool_capability_catalog(fixture["toolCapabilityCatalog"], schemas)
+    assert catalog is not None
+
+    selection = select_tool_shortlist(
+        "최근 회의록에서, 결정사항 알려주고, 그거 일정에 추가해줘",
+        catalog,
+        schemas,
+    )
+
+    assert selection.used_shortlist is True
+    assert selection.retrieval.fallback_reason is None
+    assert selection.retrieval.selected_capability_ids == (
+        "meeting.report.summary",
+        "calendar.events.create",
+    )
+    assert set(selection.tool_names) == {
+        "list_meeting_reports",
+        "summarize_meeting_report",
+        "create_calendar_event",
+    }
 
 
 def test_catalog_rejects_descriptor_digest_that_does_not_match_the_tool_schema() -> None:

@@ -1,6 +1,12 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import {
+  ChevronDown,
+  FolderGit2,
+  GitBranch,
+  PanelsTopLeft,
+  RefreshCcw
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import {
@@ -15,6 +21,7 @@ import { cn } from "@/lib/utils";
 
 type PanelProps = {
   title: string;
+  tone?: "connection" | "repository" | "project" | "sync";
   subtitle?: string;
   icon?: ReactNode;
   action?: ReactNode;
@@ -37,6 +44,7 @@ const pillClassNames: Record<PillTone, string> = {
 
 export function GithubConnectPanel({
   title,
+  tone = "connection",
   subtitle,
   icon,
   action,
@@ -48,12 +56,27 @@ export function GithubConnectPanel({
 }: PanelProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const panelClassName = cn(
-    "gap-0 rounded-lg border border-border bg-card py-0 shadow-sm ring-0",
+    "relative overflow-hidden gap-0 rounded-[10px] border border-[#e2e6ec] bg-white py-0 shadow-[0_10px_28px_rgba(15,20,34,0.08)] ring-0",
     className
   );
   const headerClassName = cn(
-    "flex items-start justify-between gap-4 rounded-lg px-5 py-4",
-    (!collapsible || isOpen) && "rounded-b-none border-b"
+    "relative z-10 flex items-start justify-between gap-4 px-5 py-4",
+    (!collapsible || isOpen) && "border-b border-[#edf0f4]"
+  );
+  const decorationByTone = {
+    connection: <GitBranch className="-right-5 -top-6 size-28 text-[#e8ecfa]" />,
+    repository: <FolderGit2 className="right-3 top-3 size-20 -rotate-6 text-[#edf0f5]" />,
+    project: <PanelsTopLeft className="-right-4 top-5 size-24 text-[#f0eee9]" />,
+    sync: <RefreshCcw className="-bottom-5 -right-4 size-28 text-[#e5f1e9]" />
+  }[tone];
+  const decoration = (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 opacity-90 [&>svg]:absolute"
+      data-github-panel-decoration={tone}
+    >
+      {decorationByTone}
+    </span>
   );
   const header = (
     <CardHeader className={headerClassName}>
@@ -104,11 +127,12 @@ export function GithubConnectPanel({
   if (collapsible) {
     return (
       <Card className={panelClassName}>
+        {decoration}
         <Collapsible onOpenChange={setIsOpen} open={isOpen}>
           {header}
           {isOpen ? (
             <CollapsibleContent>
-              <CardContent className={cn("px-5 py-4", contentClassName)}>
+              <CardContent className={cn("relative z-10 px-5 py-4", contentClassName)}>
                 {children}
               </CardContent>
             </CollapsibleContent>
@@ -120,8 +144,9 @@ export function GithubConnectPanel({
 
   return (
     <Card className={panelClassName}>
+      {decoration}
       {header}
-      <CardContent className={cn("px-5 py-4", contentClassName)}>
+      <CardContent className={cn("relative z-10 px-5 py-4", contentClassName)}>
         {children}
       </CardContent>
     </Card>

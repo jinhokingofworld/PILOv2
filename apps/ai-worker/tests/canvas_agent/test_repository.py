@@ -94,3 +94,12 @@ def test_text_search_is_scoped_to_workspace_and_canvas() -> None:
     assert "shape.canvas_id = %s" in query
     assert parameters[:3] == ("workspace-1", "canvas-1", "canvas-1")
     assert [match.shape_id for match in matches] == ["shape:dashboard"]
+
+
+def test_semantic_search_qualifies_pgvector_operator_schema() -> None:
+    canvas_repository, connection = repository()
+
+    canvas_repository.search_semantic_shapes("workspace-1", "canvas-1", [0.1, 0.2], limit=4)
+
+    query, _ = connection.calls[-1]
+    assert "embedding OPERATOR(extensions.<=>) %s::extensions.vector" in query

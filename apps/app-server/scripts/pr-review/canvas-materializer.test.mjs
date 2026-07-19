@@ -237,9 +237,22 @@ const semanticLaneLayout = await buildPrReviewCanvasGraphLayout({
 assert.ok(semanticLaneLayout);
 const layoutGeometry = semanticLaneLayout.nodeGeometryByRoomFileId;
 assert.ok(layoutGeometry.get("one").x < layoutGeometry.get("two").x);
-assert.ok(layoutGeometry.get("two").x < layoutGeometry.get("three").x);
-assert.ok(layoutGeometry.get("three").x < layoutGeometry.get("four").x);
+assert.ok(layoutGeometry.get("one").x < layoutGeometry.get("three").x);
+assert.equal(
+  layoutGeometry.get("two").x,
+  layoutGeometry.get("three").x,
+  "semantic siblings must share a graph depth instead of forming one review-order row"
+);
+assert.ok(layoutGeometry.get("two").x < layoutGeometry.get("four").x);
 assert.ok(layoutGeometry.get("four").x < layoutGeometry.get("five").x);
+assert.ok(
+  new Set(
+    ["one", "two", "three", "four", "five"].map(
+      (id) => layoutGeometry.get(id).x
+    )
+  ).size < 5,
+  "semantic graph layout must retain branch ranks"
+);
 assert.equal(
   semanticLaneLayout.routePointsByRelationId.has("layout-spine:one->two"),
   false,
@@ -275,9 +288,11 @@ assert.ok(
     reversedRoute[1].y,
     cyclicRoute[1].y,
     overlappingRoute[1].y,
-    adjacentSemanticRoute[1].y
+    adjacentSemanticRoute[1].y,
+    getLayoutRoute(orderedOneToTwo)[1].y,
+    getLayoutRoute(orderedTwoToThree)[1].y
   ].includes(disjointRoute[1].y),
-  "disjoint semantic spans must reuse their lane"
+  "disjoint semantic spans must reuse an available bottom lane"
 );
 assert.ok(
   layoutGeometry.get("next").y >
@@ -292,8 +307,39 @@ assert.ok(
   "adjacent semantic edges must use a bottom lane rather than a direct route"
 );
 const adjacentOrderRoute = getLayoutRoute(orderedOneToTwo);
-assert.equal(adjacentOrderRoute.length, 2);
-assert.equal(adjacentOrderRoute[0].y, adjacentOrderRoute[1].y);
+assert.ok(
+  adjacentOrderRoute.length >= 4,
+  "review-order edges between different rows must use a bottom lane"
+);
+const sameRankOrderRoute = getLayoutRoute(orderedTwoToThree);
+assert.ok(
+  sameRankOrderRoute.length >= 3,
+  "review-order edges between same-rank siblings must use a bottom lane"
+);
+assert.ok(
+  sameRankOrderRoute
+    .slice(1, -1)
+    .every((point) => point.y > firstFlowBottom)
+);
+
+const reviewOrderFallbackLayout = await buildPrReviewCanvasGraphLayout({
+  files: [layoutThree, layoutOne, layoutTwo],
+  relations: [orderedOneToTwo, orderedTwoToThree]
+});
+const reviewOrderFallbackGeometry =
+  reviewOrderFallbackLayout.nodeGeometryByRoomFileId;
+assert.ok(
+  reviewOrderFallbackGeometry.get("one").x <
+    reviewOrderFallbackGeometry.get("two").x
+);
+assert.ok(
+  reviewOrderFallbackGeometry.get("two").x <
+    reviewOrderFallbackGeometry.get("three").x
+);
+const fallbackOrderRoute =
+  reviewOrderFallbackLayout.routePointsByRelationId.get("one-to-two");
+assert.equal(fallbackOrderRoute.length, 2);
+assert.equal(fallbackOrderRoute[0].y, fallbackOrderRoute[1].y);
 
 const flowOneFirst = file(1, { workflowOrder: 1 });
 const flowOneSecond = file(2, { workflowOrder: 2 });
@@ -428,7 +474,8 @@ const coreGeometry = getFileGeometry(layeredFlow, coreFile.roomFileId);
 const stateGeometry = getFileGeometry(layeredFlow, stateFile.roomFileId);
 const apiGeometry = getFileGeometry(layeredFlow, apiFile.roomFileId);
 assert.ok(entryGeometry[0] < coreGeometry[0]);
-assert.ok(coreGeometry[0] < stateGeometry[0]);
+assert.equal(coreGeometry[0], stateGeometry[0]);
+assert.notEqual(coreGeometry[1], stateGeometry[1]);
 assert.ok(stateGeometry[0] < apiGeometry[0]);
 
 const movedRawShape = {

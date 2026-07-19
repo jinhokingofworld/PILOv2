@@ -95,6 +95,8 @@ export function buildAgentReadResultAnswer(
       return formatBoardBriefing(input) ?? buildGenericAnswer(input);
     case "diagnose_board_freshness":
       return formatBoardFreshness(input) ?? buildGenericAnswer(input);
+    case "focus_sql_erd_tables":
+      return formatSqlErdTableFocus(input) ?? buildGenericAnswer(input);
     case "move_board_issue_status":
     case "create_board_issue":
     case "assign_board_issue_safely":
@@ -102,6 +104,38 @@ export function buildAgentReadResultAnswer(
     default:
       return buildGenericAnswer(input);
   }
+}
+
+function formatSqlErdTableFocus(input: AgentReadResultFormatterInput): string | null {
+  if (readString(input.outputSummary.action) !== "focused") {
+    return null;
+  }
+  const title = boundText(input.outputSummary.title, 120);
+  const featureLabel = boundText(input.outputSummary.featureLabel, 100);
+  const primaryTables = readNamedItems(input.outputSummary.primaryTables, 5);
+  const relatedTables = readNamedItems(input.outputSummary.relatedTables, 5);
+  const selectedTables = [...primaryTables, ...relatedTables];
+
+  if (selectedTables.length === 0) {
+    return null;
+  }
+
+  return [
+    `${title ?? "현재 ERD"}에서 ${featureLabel ?? "요청한 기능"} 관련 테이블에 집중 표시했습니다.`,
+    `핵심 테이블: ${primaryTables.join(", ") || "없음"}`,
+    ...(relatedTables.length > 0 ? [`관련 테이블: ${relatedTables.join(", ")}`] : [])
+  ].join("\n");
+}
+
+function readNamedItems(value: unknown, limit: number): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter(isPlainObject)
+    .map((item) => boundText(item.name, 120))
+    .filter((name): name is string => name !== null)
+    .slice(0, limit);
 }
 
 function formatBoardResolution(

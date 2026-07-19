@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FolderGit2 } from "lucide-react";
+import { PanelsTopLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -146,9 +146,10 @@ export function GithubConnectProject({
         </Dialog>
       }
       collapsible
-      icon={<FolderGit2 className="size-4" />}
+      icon={<PanelsTopLeft className="size-4" />}
       subtitle="선택한 Project v2가 Workspace의 활성 Board가 됩니다."
       title="Projects v2"
+      tone="project"
     >
       {!selectedRepository ? (
         <GithubConnectEmptyState>
@@ -163,6 +164,9 @@ export function GithubConnectProject({
           <p className="mt-1 text-[12px] text-[#7a8497]">
             {activeProject.ownerLogin} · #{activeProject.projectNumber}
           </p>
+          <GithubConnectPill className="mt-2" tone="info">
+            {activeProject.ownerType === "Organization" ? "Organization" : "Personal"}
+          </GithubConnectPill>
         </div>
       ) : projects.length === 0 ? (
         <GithubConnectEmptyState>

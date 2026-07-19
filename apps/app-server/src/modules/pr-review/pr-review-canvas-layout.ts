@@ -122,7 +122,7 @@ async function buildFlowGeometry(
         memberIds.has(relation.fromRoomFileId) &&
         memberIds.has(relation.toRoomFileId)
     );
-    const layout = await buildElkFlowLayout(sortedMembers);
+    const layout = await buildElkFlowLayout(sortedMembers, flowRelations);
     const layoutChildren = layout.children ?? [];
     const layoutHeight = Math.max(
       ...layoutChildren.map((child) => (child.y ?? 0) + (child.height ?? 0)),
@@ -160,7 +160,8 @@ async function buildFlowGeometry(
 }
 
 async function buildElkFlowLayout(
-  files: PrReviewCanvasLayoutFile[]
+  files: PrReviewCanvasLayoutFile[],
+  relations: PrReviewCanvasLayoutRelation[]
 ) {
   const elk = new ELK();
   const graph: ElkNode = {
@@ -174,15 +175,74 @@ async function buildElkFlowLayout(
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP"
     },
-    children: files.map((file) => ({
+    children: files.map((file, index) => ({
       id: file.roomFileId,
       width: file.width,
-      height: file.height
+      height: file.height,
+      ...(index === 0
+        ? {
+            layoutOptions: {
+              "elk.layered.layering.layerConstraint": "FIRST"
+            }
+          }
+        : {})
     })),
-    edges: buildReviewOrderSpine(files)
+    edges: buildRelationDrivenLayoutEdges(files, relations)
   };
 
   return elk.layout(graph);
+}
+
+function buildRelationDrivenLayoutEdges(
+  files: readonly PrReviewCanvasLayoutFile[],
+  relations: readonly PrReviewCanvasLayoutRelation[]
+) {
+  const fileById = new Map(files.map((file) => [file.roomFileId, file]));
+  const semanticPairs = new Map<string, { from: string; to: string }>();
+
+  for (const relation of relations) {
+    if (relation.isReviewOrder) {
+      continue;
+    }
+    const left = fileById.get(relation.fromRoomFileId);
+    const right = fileById.get(relation.toRoomFileId);
+    if (!left || !right || left.roomFileId === right.roomFileId) {
+      continue;
+    }
+    const [from, to] = compareFilesInFlow(left, right) <= 0
+      ? [left, right]
+      : [right, left];
+    semanticPairs.set(`${from.roomFileId}\u0000${to.roomFileId}`, {
+      from: from.roomFileId,
+      to: to.roomFileId
+    });
+  }
+
+  if (!semanticPairs.size) {
+    return buildReviewOrderSpine(files);
+  }
+
+  const semanticEdges = [...semanticPairs.values()];
+  const incoming = new Set(semanticEdges.map((edge) => edge.to));
+  const start = files[0].roomFileId;
+  const edges = semanticEdges.map((edge) => ({
+    id: `layout-semantic:${edge.from}->${edge.to}`,
+    sources: [edge.from],
+    targets: [edge.to]
+  }));
+
+  for (const file of files) {
+    if (file.roomFileId === start || incoming.has(file.roomFileId)) {
+      continue;
+    }
+    edges.push({
+      id: `layout-anchor:${start}->${file.roomFileId}`,
+      sources: [start],
+      targets: [file.roomFileId]
+    });
+  }
+
+  return edges;
 }
 
 function buildReviewOrderSpine(files: readonly PrReviewCanvasLayoutFile[]) {
@@ -401,7 +461,9 @@ function isAdjacentReviewOrder(
   return (
     relation.isReviewOrder &&
     from.flowKey === to.flowKey &&
-    to.columnIndex === from.columnIndex + 1
+    to.columnIndex === from.columnIndex + 1 &&
+    to.x >= from.x + from.width &&
+    Math.abs(getCenterY(to) - getCenterY(from)) <= 1
   );
 }
 

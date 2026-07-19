@@ -12,7 +12,7 @@ _TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣_]+")
 _SUPPORTED_CATALOG_VERSIONS = frozenset(
     {"agent-tool-capabilities:v1", "agent-tool-capabilities:v2"}
 )
-TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v2"
+TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v3"
 _KOREAN_PARTICLES = (
     "으로",
     "에서",
@@ -299,7 +299,15 @@ def retrieve_tool_shortlist(
     candidate_count = sum(score > 0 for score, _ in scored) + sum(
         score > 0 for score, _ in unsupported_ranked
     )
-    if unsupported_score > 0 and unsupported_score > best_metadata_score:
+    handoff_capability_ids = _meeting_report_calendar_handoff_capability_ids(
+        prompt_tokens,
+        capability_by_id,
+    )
+    if (
+        not handoff_capability_ids
+        and unsupported_score > 0
+        and unsupported_score > best_metadata_score
+    ):
         return ToolRetrievalResult(
             tool_names=tuple(),
             low_confidence=False,
@@ -325,6 +333,14 @@ def retrieve_tool_shortlist(
     # adjacent Meeting actions from an otherwise unambiguous shortlist.
     compound_request = _is_compound_request(prompt)
     minimum_candidate_score = max(1.0, best_score - 1.0) if compound_request else best_score
+
+    if handoff_capability_ids:
+        score_by_capability_id = {capability_id: score for score, capability_id in ranked}
+        ranked = [
+            (score_by_capability_id[capability_id], capability_id)
+            for capability_id in ("meeting.report.summary", "calendar.events.create")
+        ]
+        minimum_candidate_score = 0.0
 
     selected_capability_ids: list[str] = []
     for rank, (score, capability_id) in enumerate(ranked[:top_k]):
@@ -789,6 +805,31 @@ def _tokens(value: str) -> tuple[str, ...]:
 
 def _is_compound_request(prompt: str) -> bool:
     raw_tokens = _TOKEN_PATTERN.findall(prompt.lower())
-    return any(token in {"및", "그리고"} for token in raw_tokens) or any(
-        len(token) > 1 and token.endswith(("와", "과")) for token in raw_tokens
+    return (
+        "," in prompt
+        or any(token in {"및", "그리고"} for token in raw_tokens)
+        or any(len(token) > 1 and token.endswith(("와", "과")) for token in raw_tokens)
     )
+
+
+def _meeting_report_calendar_handoff_capability_ids(
+    prompt_tokens: set[str],
+    capability_by_id: dict[str, CapabilityDefinition],
+) -> frozenset[str]:
+    """Keeps a Meeting decision -> Calendar creation handoff executable.
+
+    The generic unsupported Meeting action-item creation capability also contains
+    ``회의록`` and ``추가``. It must not preempt a request that explicitly names a
+    Calendar destination. The planner still receives only a read prerequisite and
+    a confirmation-required write candidate; it cannot create an event directly.
+    """
+    has_meeting_report = bool(prompt_tokens & {"회의록", "meeting", "report"})
+    has_decision = bool(prompt_tokens & {"결정", "결정사항", "요약", "후속", "후속작업"})
+    has_calendar = bool(prompt_tokens & {"일정", "캘린더", "calendar"})
+    has_create = "생성" in prompt_tokens
+    required = {"meeting.report.summary", "calendar.events.create"}
+    if not (has_meeting_report and has_decision and has_calendar and has_create):
+        return frozenset()
+    if not required <= set(capability_by_id):
+        return frozenset()
+    return frozenset(required)

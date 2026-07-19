@@ -198,8 +198,9 @@ editing shape나 AI 상태를 포함하지 않는다. Drive, SQL ERD, PR Review,
 - SQL ERD selection type은 `none`, `table`, `column`, `relation`, `annotation`,
   `note`, `frame`, `text`만 허용한다. `column`만 table ID를 함께 요구한다.
 - `/meeting`은 `reportId: null`, `/report`는 `meetingRoomId: null`이어야 한다.
-- Drive document/PDF identity는 동시에 설정할 수 없고 `pdfPage`는 양의 정수
-  문자열이어야 한다.
+- Drive PDF location에서 `documentId`와 `folderId`는 동시에 설정할 수 없고,
+  `pdfPage`는 양의 정수 문자열이어야 한다. 문서에 첨부한 PDF는
+  `documentId`와 PDF ID/page를 함께 사용한다.
 - camera의 `x`, `y`, `z`는 finite number여야 한다.
 - scroll ratio는 finite number여야 하며 server가 `0..1`로 clamp한다.
 - update 전에 같은 socket이 해당 Workspace room에 join해야 한다.

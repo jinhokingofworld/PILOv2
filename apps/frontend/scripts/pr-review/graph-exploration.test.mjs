@@ -101,9 +101,23 @@ const workflowNode = (id, workflowOrder, pinned) => ({
 const orderedNodes = [
   workflowNode("one", 1, false),
   workflowNode("two", 2, false),
-  workflowNode("three", 3, false)
+  workflowNode("three", 3, false),
+  workflowNode("four", 4, false),
+  workflowNode("five", 5, false)
 ];
 const reversedAndCyclicRelations = [
+  {
+    id: "order-one-two",
+    fromRoomFileId: "file-one",
+    toRoomFileId: "file-two",
+    relationTypes: ["review_order"]
+  },
+  {
+    id: "order-two-three",
+    fromRoomFileId: "file-two",
+    toRoomFileId: "file-three",
+    relationTypes: ["review_order"]
+  },
   {
     id: "edge-three-one",
     fromRoomFileId: "file-three",
@@ -117,9 +131,15 @@ const reversedAndCyclicRelations = [
     relationTypes: ["supports"]
   },
   {
-    id: "edge-one-three",
-    fromRoomFileId: "file-one",
-    toRoomFileId: "file-three",
+    id: "edge-two-four",
+    fromRoomFileId: "file-two",
+    toRoomFileId: "file-four",
+    relationTypes: ["imports"]
+  },
+  {
+    id: "edge-three-five",
+    fromRoomFileId: "file-three",
+    toRoomFileId: "file-five",
     relationTypes: ["blocks"]
   }
 ];
@@ -129,7 +149,27 @@ const orderedLayout = createPrReviewFlowLayout(
   "flow-ordered"
 );
 assert.ok(orderedLayout.get("one").x < orderedLayout.get("two").x);
-assert.ok(orderedLayout.get("two").x < orderedLayout.get("three").x);
+assert.ok(orderedLayout.get("one").x < orderedLayout.get("three").x);
+assert.equal(orderedLayout.get("two").x, orderedLayout.get("three").x);
+assert.notEqual(orderedLayout.get("two").y, orderedLayout.get("three").y);
+assert.equal(orderedLayout.get("four").x, orderedLayout.get("five").x);
+assert.ok(orderedLayout.get("two").x < orderedLayout.get("four").x);
+
+const reviewOrderFallbackLayout = createPrReviewFlowLayout(
+  orderedNodes.slice(0, 3),
+  reversedAndCyclicRelations.filter((relation) =>
+    relation.relationTypes.includes("review_order")
+  ),
+  "flow-ordered"
+);
+assert.ok(
+  reviewOrderFallbackLayout.get("one").x <
+    reviewOrderFallbackLayout.get("two").x
+);
+assert.ok(
+  reviewOrderFallbackLayout.get("two").x <
+    reviewOrderFallbackLayout.get("three").x
+);
 
 const allPinnedLayout = createPrReviewFlowLayout(
   [workflowNode("pinned-one", 1, true), workflowNode("pinned-two", 2, true)],
