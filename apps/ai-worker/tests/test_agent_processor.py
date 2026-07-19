@@ -3472,8 +3472,7 @@ def test_sql_erd_planner_workflow_constraint_forces_focus_after_inspection(
         tool_schema_version=request.tool_schema_version,
         tools=request.tools,
         planning_context=(
-            request.planning_context
-            + '\ntool focus_sql_erd_tables: {"action":"focused"}'
+            request.planning_context + '\ntool focus_sql_erd_tables: {"action":"focused"}'
         ),
         context_surface=request.context_surface,
     )
