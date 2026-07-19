@@ -662,7 +662,9 @@ export class CalendarService {
     let endTime = input.endTime;
     if (!endTime && normalizeMissingEndTime) {
       const normalizedEnd = this.addOneHour(input.startDate, input.startTime);
-      endDate = normalizedEnd.endDate;
+      if (input.endDate === input.startDate) {
+        endDate = normalizedEnd.endDate;
+      }
       endTime = normalizedEnd.endTime;
     }
 

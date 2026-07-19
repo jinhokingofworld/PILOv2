@@ -59,6 +59,7 @@ meeting, meeting report를 자동으로 Calendar에 넣지 않는다.
 - `startTime`, `endTime`은 `HH:mm` 형식이며 `isAllDay = false`일 때 사용한다.
 - `isAllDay = false`이고 `endTime`이 생략되면 서버는 `startTime + 1시간`으로 정규화한다.
 - `startTime + 1시간`이 다음 날짜로 넘어가면 서버는 `endDate`도 함께 다음 날짜로 정규화한다.
+- 입력한 `endDate`가 `startDate`보다 늦으면 서버는 해당 종료일을 보존하고, 생략한 `endTime`만 `startTime + 1시간`으로 정규화한다.
 - 기본 `color`는 `#3B82F6`이다.
 - 반복 일정, 알림, 외부 Calendar 연동은 제외한다.
 

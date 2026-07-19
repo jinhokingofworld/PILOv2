@@ -317,6 +317,46 @@ async function assertBadRequest(action, messagePattern) {
 {
   const database = new FakeDatabase({
     queryOneRows: [
+      (text, values) => {
+        assert.match(text, /INSERT INTO calendar_events/);
+        assert.deepEqual(values, [
+          workspaceId,
+          "Conference",
+          null,
+          "#3B82F6",
+          false,
+          "2026-07-03",
+          "2026-07-05",
+          "09:00",
+          "10:00",
+          currentUserId
+        ]);
+        return calendarRow({
+          title: "Conference",
+          end_date: "2026-07-05",
+          start_time: "09:00:00",
+          end_time: "10:00:00"
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const event = await service.createEvent(currentUserId, workspaceId, {
+    title: "Conference",
+    isAllDay: false,
+    startDate: "2026-07-03",
+    endDate: "2026-07-05",
+    startTime: "09:00"
+  });
+
+  assert.equal(event.endDate, "2026-07-05");
+  assert.equal(event.endTime, "10:00");
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
       (text) => {
         assert.match(text, /LEFT JOIN calendar_event_google_syncs/);
         assert.match(text, /FOR UPDATE OF calendar_events/);
