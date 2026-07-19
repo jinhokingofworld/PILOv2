@@ -5,6 +5,10 @@ const require = createRequire(import.meta.url);
 const { embedGroundingQuery } = require(
   "../../dist/modules/agent/grounding/query-embedding.js"
 );
+const {
+  driveRagMinimumSimilarity,
+  meetingRagMinimumSimilarity
+} = require("../../dist/modules/agent/grounding/relevance-policy.js");
 
 const fixtureUrl = new URL("./fixtures/rag-relevance-evaluation.json", import.meta.url);
 const fixtures = JSON.parse(await readFile(fixtureUrl, "utf8"));
@@ -25,18 +29,24 @@ for (const [domain, cases] of Object.entries(fixtures)) {
   const minimumRelevantScore = Math.min(...relevantScores);
   const maximumIrrelevantScore = Math.max(...irrelevantScores);
   const suggestedThreshold = round(maximumIrrelevantScore + 0.01);
+  const configuredThreshold = domain === "meeting"
+    ? meetingRagMinimumSimilarity()
+    : driveRagMinimumSimilarity();
   const valid =
     relevantScores.length > 0 &&
     irrelevantScores.length > 0 &&
     suggestedThreshold <= 1 &&
     relevantScores.every((score) => score >= suggestedThreshold) &&
-    irrelevantScores.every((score) => score < suggestedThreshold);
+    irrelevantScores.every((score) => score < suggestedThreshold) &&
+    relevantScores.every((score) => score >= configuredThreshold) &&
+    irrelevantScores.every((score) => score < configuredThreshold);
 
   console.log(JSON.stringify({
     domain,
     minimumRelevantScore: round(minimumRelevantScore),
     maximumIrrelevantScore: round(maximumIrrelevantScore),
     suggestedThreshold,
+    configuredThreshold,
     valid
   }));
   failed ||= !valid;

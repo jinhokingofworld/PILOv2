@@ -200,7 +200,7 @@ function definition(definitions, name) {
           title: "irrelevant",
           heading_path: "other",
           chunk_text: "unrelated",
-          score: "0.57"
+          score: "0.26"
         }
       ];
     }

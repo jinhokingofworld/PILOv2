@@ -1,5 +1,5 @@
-const DEFAULT_MEETING_MINIMUM_SIMILARITY = 0.55;
-const DEFAULT_DRIVE_MINIMUM_SIMILARITY = 0.58;
+const DEFAULT_MEETING_MINIMUM_SIMILARITY = 0.23;
+const DEFAULT_DRIVE_MINIMUM_SIMILARITY = 0.27;
 
 export function meetingRagMinimumSimilarity(): number {
   return similarityEnvironment(

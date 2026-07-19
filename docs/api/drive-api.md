@@ -1,5 +1,12 @@
 # Drive API
 
+## Agent Drive 근거 검색 안정성
+
+- Agent 문서 검색은 삭제되지 않은 document/Drive item의 `latest_snapshot_id`와 일치하는 embedding chunk만 사용한다.
+- Drive 관련도 임계값 미만 결과는 grounded-answer 근거로 전달하지 않는다. score는 서버 내부 진단용이며 사용자 응답과 resource link에는 포함하지 않는다.
+- Worker에 전달되는 문서 근거는 길이가 제한된 제목·heading path·excerpt와 opaque `citationId`뿐이다. 원문 파일과 전체 문서 본문은 전달하지 않는다.
+- 인덱싱 embedding은 기본 30초 timeout과 SQS 수신 횟수 기준 최대 3회 시도를 사용한다. 일시적인 provider 장애만 재시도하고 잘못된 vector 응답은 즉시 terminal 처리한다.
+
 ## 범위
 
 Drive API는 Workspace 공유 파일 화면의 폴더, 파일, 네이티브 문서 생성과 파일 업로드,

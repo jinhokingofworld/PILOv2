@@ -243,6 +243,9 @@ module "ecs" {
         AGENT_EXECUTION_LEASE_SECONDS         = tostring(local.agent_execution_lease_seconds)
         AGENT_EXECUTION_HEARTBEAT_SECONDS     = tostring(local.agent_execution_heartbeat_seconds)
         AGENT_GROUNDED_ANSWER_TIMEOUT_SECONDS = tostring(local.agent_grounded_answer_timeout_seconds)
+        OPENAI_QUERY_EMBEDDING_TIMEOUT_MS     = "10000"
+        MEETING_RAG_MIN_SIMILARITY            = "0.23"
+        DRIVE_RAG_MIN_SIMILARITY              = "0.27"
         AGENT_DOMAIN_MEETING_READ_ENABLED     = "true"
         AGENT_DOMAIN_MEETING_WRITE_ENABLED    = "true"
         AGENT_DOMAIN_CALENDAR_READ_ENABLED    = "true"
@@ -296,17 +299,18 @@ module "ecs" {
       task_role_arn      = module.iam.ai_worker_task_role_arn
       target_group_arn   = null
       environment = merge({
-        APP_ENV                         = var.environment
-        AWS_REGION                      = var.aws_region
-        DATABASE_SSL                    = "true"
-        S3_UPLOADS_BUCKET               = module.s3.uploads_bucket_name
-        SQS_AI_JOBS_QUEUE_URL           = module.sqs.ai_jobs_queue_url
-        SQS_GITHUB_WEBHOOKS_QUEUE_URL   = module.sqs.github_webhooks_queue_url
-        AGENT_TOOL_RETRIEVAL_MODE       = "llm_router"
-        OPENAI_AGENT_PLANNER_TIMEOUT_MS = tostring(local.agent_planner_timeout_ms)
-        OPENAI_AGENT_ROUTER_TIMEOUT_MS  = tostring(local.agent_router_timeout_ms)
-        LEGACY_MEETING_DRAIN_ENABLED    = tostring(var.legacy_meeting_drain_enabled)
-        LEGACY_AGENT_DRAIN_ENABLED      = tostring(var.legacy_agent_drain_enabled)
+        APP_ENV                                   = var.environment
+        AWS_REGION                                = var.aws_region
+        DATABASE_SSL                              = "true"
+        S3_UPLOADS_BUCKET                         = module.s3.uploads_bucket_name
+        SQS_AI_JOBS_QUEUE_URL                     = module.sqs.ai_jobs_queue_url
+        SQS_GITHUB_WEBHOOKS_QUEUE_URL             = module.sqs.github_webhooks_queue_url
+        AGENT_TOOL_RETRIEVAL_MODE                 = "llm_router"
+        OPENAI_AGENT_PLANNER_TIMEOUT_MS           = tostring(local.agent_planner_timeout_ms)
+        OPENAI_AGENT_ROUTER_TIMEOUT_MS            = tostring(local.agent_router_timeout_ms)
+        OPENAI_INDEXING_EMBEDDING_TIMEOUT_SECONDS = "30"
+        LEGACY_MEETING_DRAIN_ENABLED              = tostring(var.legacy_meeting_drain_enabled)
+        LEGACY_AGENT_DRAIN_ENABLED                = tostring(var.legacy_agent_drain_enabled)
         }, var.legacy_meeting_drain_enabled ? {
         S3_RECORDINGS_BUCKET                 = module.s3.uploads_bucket_name
         MEETING_REPORT_EVENT_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
@@ -415,6 +419,7 @@ module "ecs" {
         DATABASE_SSL                              = "true"
         SQS_WORKSPACE_INDEXING_QUEUE_URL          = module.sqs.workspace_indexing_queue_url
         OPENAI_WORKSPACE_INDEXING_EMBEDDING_MODEL = "text-embedding-3-small"
+        OPENAI_INDEXING_EMBEDDING_TIMEOUT_SECONDS = "30"
         AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS  = "900"
       }
       secrets = module.secrets.workspace_indexer_worker_ecs_secrets

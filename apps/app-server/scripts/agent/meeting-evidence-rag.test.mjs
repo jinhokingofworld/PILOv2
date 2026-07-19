@@ -140,12 +140,12 @@ try {
   assert.match(database.queries[0].text, /job\.status = 'completed'/);
   assert.match(database.queries[1].text, /meeting_report_activity_evidence_embedding_jobs/);
   assert.match(database.queries[0].text, />= \$6/);
-  assert.equal(database.queries[0].values[5], 0.55);
+  assert.equal(database.queries[0].values[5], 0.23);
   assert.match(database.queries[2].text, /transcript\.embedding OPERATOR\(extensions\.<=>\) activity\.embedding <= \$3/);
   assert.equal(workspaceService.calls.length, 1);
 
   const thresholdFirstSources = await new MeetingTranscriptRagService(new FakeDatabase({
-    transcripts: [transcript(TRANSCRIPT_ID, 0.46)],
+    transcripts: [transcript(TRANSCRIPT_ID, 0.78)],
     activities: [activity(ACTIVITY_ID, 0.9, true)]
   }), workspaceService).search(USER_ID, WORKSPACE_ID, {
     query: "관련 없는 직접 참조"
@@ -153,7 +153,7 @@ try {
   assert.deepEqual(thresholdFirstSources, []);
 
   const crowdedDatabase = new FakeDatabase({
-    transcripts: [transcript(TRANSCRIPT_ID, 0.7)],
+    transcripts: [transcript(TRANSCRIPT_ID, 0.78)],
     activities: [
       activity(ACTIVITY_ID, 0.1),
       activity(SECOND_ACTIVITY_ID, 0.11),
