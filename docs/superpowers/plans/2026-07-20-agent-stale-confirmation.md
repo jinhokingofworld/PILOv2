@@ -33,7 +33,7 @@
 - Produces: replace input의 `expectedSessionRevision: number`, `expectedModelFingerprint: string`
 - Consumes: 현재 operations_v1 session row와 기존 agent operation idempotency ledger
 
-- [ ] **Step 1: Agent plan과 domain stale 동작을 기대하는 실패 테스트를 작성한다.**
+- [x] **Step 1: Agent plan과 domain stale 동작을 기대하는 실패 테스트를 작성한다.**
 
 ```js
 assert.equal(plan.call.expectedSessionRevision, session.revision);
@@ -41,13 +41,13 @@ assert.equal(plan.call.expectedModelFingerprint, createSqlErdModelFingerprint(se
 await assert.rejects(() => replace({ expectedSessionRevision: 4 }), /changed/);
 ```
 
-- [ ] **Step 2: 두 SQLtoERD 스크립트를 실행해 token 누락 때문에 실패하는 RED를 확인한다.**
+- [x] **Step 2: 두 SQLtoERD 스크립트를 실행해 token 누락 때문에 실패하는 RED를 확인한다.**
 
 Run: `node apps/app-server/scripts/agent/sql-erd-tools.test.mjs`
 Run: `node apps/app-server/scripts/sqltoerd/schema-mutation.test.mjs`
 Expected: expected token 또는 stale conflict assertion 실패
 
-- [ ] **Step 3: fingerprint helper와 confirmation input을 최소 구현한다.**
+- [x] **Step 3: fingerprint helper와 confirmation input을 최소 구현한다.**
 
 ```ts
 call: {
@@ -58,7 +58,7 @@ call: {
 }
 ```
 
-- [ ] **Step 4: idempotency 조회 뒤 transaction stale guard를 구현한다.**
+- [x] **Step 4: idempotency 조회 뒤 transaction stale guard를 구현한다.**
 
 ```ts
 if (
@@ -69,7 +69,7 @@ if (
 }
 ```
 
-- [ ] **Step 5: 두 SQLtoERD 스크립트를 다시 실행해 GREEN을 확인한다.**
+- [x] **Step 5: 두 SQLtoERD 스크립트를 다시 실행해 GREEN을 확인한다.**
 
 ### Task 2: Calendar updatedAt confirmation guard
 
@@ -83,7 +83,7 @@ if (
 - Produces: resolved update input의 `expectedUpdatedAt: string`
 - Consumes: `CalendarService.updateEvent(..., { expectedUpdatedAt })`
 
-- [ ] **Step 1: Agent plan 전달과 domain stale 거부 실패 테스트를 작성한다.**
+- [x] **Step 1: Agent plan 전달과 domain stale 거부 실패 테스트를 작성한다.**
 
 ```js
 assert.equal(plan.call.expectedUpdatedAt, event.updatedAt);
@@ -93,13 +93,13 @@ await assert.rejects(
 );
 ```
 
-- [ ] **Step 2: 두 Calendar 스크립트를 실행해 expected token 누락 때문에 실패하는 RED를 확인한다.**
+- [x] **Step 2: 두 Calendar 스크립트를 실행해 expected token 누락 때문에 실패하는 RED를 확인한다.**
 
 Run: `node apps/app-server/scripts/agent/calendar-tools.test.mjs`
 Run: `node apps/app-server/scripts/calendar/test.mjs`
 Expected: expectedUpdatedAt 전달 또는 conflict assertion 실패
 
-- [ ] **Step 3: Calendar tool이 저장된 plan에서 token을 복원하도록 구현한다.**
+- [x] **Step 3: Calendar tool이 저장된 plan에서 token을 복원하도록 구현한다.**
 
 ```ts
 buildConfirmationInput: (plan) => ({
@@ -109,7 +109,7 @@ buildConfirmationInput: (plan) => ({
 })
 ```
 
-- [ ] **Step 4: Calendar transaction row lock 직후 updatedAt 비교를 구현한다.**
+- [x] **Step 4: Calendar transaction row lock 직후 updatedAt 비교를 구현한다.**
 
 ```ts
 if (options?.expectedUpdatedAt !== undefined && this.toIsoString(existing.updated_at) !== options.expectedUpdatedAt) {
@@ -117,7 +117,7 @@ if (options?.expectedUpdatedAt !== undefined && this.toIsoString(existing.update
 }
 ```
 
-- [ ] **Step 5: 두 Calendar 스크립트를 다시 실행해 GREEN을 확인한다.**
+- [x] **Step 5: 두 Calendar 스크립트를 다시 실행해 GREEN을 확인한다.**
 
 ### Task 3: 계약 문서와 최소 통합 검증
 
@@ -128,8 +128,8 @@ if (options?.expectedUpdatedAt !== undefined && this.toIsoString(existing.update
 **Interfaces:**
 - Produces: stale confirmation의 server-owned token, fail-closed, no-side-effect 계약
 
-- [ ] **Step 1: Agent와 SQLtoERD API 문서에 재검증 규칙을 반영한다.**
-- [ ] **Step 2: 관련 네 스크립트만 실행한다.**
+- [x] **Step 1: Agent와 SQLtoERD API 문서에 재검증 규칙을 반영한다.**
+- [x] **Step 2: 관련 네 스크립트만 실행한다.**
 
 Run: `node apps/app-server/scripts/agent/sql-erd-tools.test.mjs`
 Run: `node apps/app-server/scripts/sqltoerd/schema-mutation.test.mjs`
@@ -137,8 +137,7 @@ Run: `node apps/app-server/scripts/agent/calendar-tools.test.mjs`
 Run: `node apps/app-server/scripts/calendar/test.mjs`
 Expected: 모두 exit 0
 
-- [ ] **Step 3: App Server build를 한 번 실행한다.**
+- [x] **Step 3: App Server build를 한 번 실행한다.**
 
 Run: `npm run build`
 Expected: exit 0
-
