@@ -195,6 +195,7 @@ def test_agent_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None
     settings = AgentWorkerSettings.from_env()
 
     assert settings.sqs_queue_url == "https://sqs.example.com/agent-jobs"
+    assert settings.visibility_timeout_seconds == 90
 
 
 def test_agent_worker_dispatcher_has_no_meeting_or_pr_review_processor() -> None:

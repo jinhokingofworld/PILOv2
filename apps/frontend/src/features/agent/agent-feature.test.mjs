@@ -181,6 +181,10 @@ assert.match(
 );
 assert.match(agentChatWidget, /const canSend = draft\.trim\(\)\.length > 0 && !hasActiveAgentRequest/);
 assert.match(agentChatWidget, /AGENT_RUN_POLL_INTERVAL_MS/);
+assert.match(agentChatWidget, /AGENT_RUN_POLL_TIMEOUT_MS = 130_000/);
+assert.match(agentChatWidget, /createAgentRunPollingTimeoutError/);
+assert.match(agentChatWidget, /Date\.now\(\) >= deadlineAt/);
+assert.match(agentChatWidget, /forgetAgentRunId\(window\.sessionStorage, currentRun\.workspaceId\)/);
 assert.match(agentChatWidget, /waiting_confirmation/);
 assert.match(agentChatWidget, /waiting_user_input/);
 assert.match(agentChatWidget, /submitRunInput/);

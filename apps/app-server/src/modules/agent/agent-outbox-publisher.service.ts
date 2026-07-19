@@ -21,6 +21,7 @@ import type {
 const OUTBOX_SWEEP_INTERVAL_MS = 60_000;
 const OUTBOX_CLAIM_TIMEOUT_SECONDS = 60;
 const OUTBOX_SWEEP_BATCH_SIZE = 20;
+const AGENT_PLANNING_TIMEOUT_SECONDS = 120;
 const OUTBOX_MAX_RETRIES = 5;
 const OUTBOX_RETRY_DELAYS_MS = [60_000, 120_000, 240_000, 480_000, 960_000];
 const OUTBOX_PUBLISH_FAILURE_CODE = "AGENT_OUTBOX_PUBLISH_FAILED";
@@ -28,6 +29,9 @@ const OUTBOX_PUBLISH_FAILURE_MESSAGE =
   "Agent planning job could not be published";
 const OUTBOX_RUN_FAILURE_MESSAGE =
   "요청을 시작하지 못했습니다. 잠시 후 다시 시도해주세요.";
+const AGENT_PLANNING_TIMEOUT_CODE = "AGENT_PLANNING_TIMEOUT";
+const AGENT_PLANNING_TIMEOUT_MESSAGE =
+  "요청 처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.";
 
 interface AgentOutboxClaimRow extends QueryResultRow {
   id: string;
@@ -84,6 +88,8 @@ export class AgentOutboxPublisherService
   }
 
   async publishDueEvents(): Promise<void> {
+    await this.recoverStalePlanningRuns();
+
     const rows = await this.database.query<{ run_id: string }>(
       `
         SELECT outbox.run_id
@@ -107,6 +113,117 @@ export class AgentOutboxPublisherService
 
     for (const row of rows) {
       await this.publishOne(row.run_id);
+    }
+  }
+
+  /**
+   * The App Server owns this deadline so an unavailable or retrying Worker
+   * cannot leave a user-visible run in `planning` indefinitely.
+   */
+  async recoverStalePlanningRuns(): Promise<void> {
+    const failedRuns = await this.database.query<{
+      id: string;
+      workspace_id: string;
+      turn_sequence: number | string;
+    }>(
+      `
+        WITH stale_runs AS (
+          SELECT
+            run.id,
+            run.workspace_id,
+            outbox.id AS outbox_id,
+            outbox.turn_sequence
+          FROM agent_runs AS run
+          JOIN agent_run_outbox AS outbox
+            ON outbox.run_id = run.id
+            AND outbox.workspace_id = run.workspace_id
+          WHERE run.status = 'planning'
+            AND run.updated_at <= now() - ($1 * INTERVAL '1 second')
+            AND outbox.status IN ('pending', 'publishing', 'delivered', 'failed')
+          ORDER BY run.updated_at ASC, run.id ASC
+          FOR UPDATE OF run, outbox SKIP LOCKED
+          LIMIT $2
+        ), failed_runs AS (
+          UPDATE agent_runs AS run
+          SET status = 'failed',
+              error_code = $3,
+              error_message = $4,
+              message = $4,
+              completed_at = now(),
+              updated_at = now()
+          FROM stale_runs
+          WHERE run.id = stale_runs.id
+            AND run.workspace_id = stale_runs.workspace_id
+            AND run.status = 'planning'
+          RETURNING
+            run.id,
+            run.workspace_id,
+            stale_runs.outbox_id,
+            stale_runs.turn_sequence
+        ), failed_outbox AS (
+          UPDATE agent_run_outbox AS outbox
+          SET status = 'failed',
+              claim_token = NULL,
+              claimed_at = NULL,
+              error_code = $3,
+              error_message = $4
+          FROM failed_runs
+          WHERE outbox.id = failed_runs.outbox_id
+            AND outbox.run_id = failed_runs.id
+            AND outbox.workspace_id = failed_runs.workspace_id
+          RETURNING failed_runs.id
+        ), failed_steps AS (
+          UPDATE agent_steps AS step
+          SET status = 'failed',
+              error_code = $3,
+              error_message = $4,
+              completed_at = now(),
+              updated_at = now()
+          FROM failed_runs
+          WHERE step.run_id = failed_runs.id
+            AND step.status IN ('pending', 'running')
+          RETURNING step.run_id
+        ), logged_runs AS (
+          INSERT INTO agent_logs (
+            workspace_id,
+            run_id,
+            actor_type,
+            level,
+            event_type,
+            message,
+            metadata_json,
+            resource_refs
+          )
+          SELECT
+            workspace_id,
+            id,
+            'system',
+            'error',
+            'planning_timeout',
+            'Agent planning deadline exceeded',
+            jsonb_build_object(
+              'timeoutSeconds', $1,
+              'turnSequence', turn_sequence
+            ),
+            '[]'::jsonb
+          FROM failed_runs
+          RETURNING run_id
+        )
+        SELECT id, workspace_id, turn_sequence
+        FROM failed_runs
+      `,
+      [
+        AGENT_PLANNING_TIMEOUT_SECONDS,
+        OUTBOX_SWEEP_BATCH_SIZE,
+        AGENT_PLANNING_TIMEOUT_CODE,
+        AGENT_PLANNING_TIMEOUT_MESSAGE
+      ]
+    );
+
+    for (const run of failedRuns) {
+      this.logger.warn(
+        `Agent planning deadline exceeded for run ${run.id} turn ${run.turn_sequence}`
+      );
     }
   }
 

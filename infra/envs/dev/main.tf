@@ -326,7 +326,7 @@ module "ecs" {
         AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS  = "10"
         OPENAI_AGENT_PLANNER_TIMEOUT_MS          = "60000"
         AGENT_TOOL_RETRIEVAL_MODE                = "shortlist"
-        AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS = "900"
+        AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS = "90"
       }
       secrets = module.secrets.agent_worker_ecs_secrets
     }
