@@ -939,8 +939,8 @@ Status code: `200 OK`
 | `assign_board_issue_safely` | `medium` | 불가 | `GET .../assignee-options`, Agent 전용 내부 add/remove Board service |
 | `diagnose_board_freshness` | `low` | 가능 | active source, Board/issue/PR cache freshness와 Unmapped 진단 |
 | `generate_sql_erd` | `medium` | 상황별 | `SqlErdSchemaSpecV1`을 검증해 새 session을 만들거나 현재 operations_v1 session의 schema를 교체 |
-| `inspect_sql_erd_schema` | `low` | 가능 | session의 modelJson을 bounded compact projection으로 조회하고 여러 session이면 사용자 선택을 요청 |
-| `focus_sql_erd_tables` | `low` | 가능 | inspect 결과의 compact ref와 `modelFingerprint`를 재검증해 일회성 `table_focus` resource ref 생성 |
+| `inspect_sql_erd_schema` | `low` | 가능 | session의 modelJson과 sourceText에서 bounded table/column/dataType/enum compact projection을 만들고 여러 session이면 사용자 선택을 요청 |
+| `focus_sql_erd_tables` | `low` | 가능 | inspect 결과의 compact ref, `modelFingerprint`, context schema evidence를 재검증해 일회성 `table_focus` resource ref 생성 |
 | `recommend_pr_review_focus` | `low` | 가능 | PR Review context의 immutable revision 안전 projection에서 핵심 검토 파일과 연결 파일을 추천 |
 | `delegate_canvas_agent` | `low` | 가능 | 사용자 원문과 검증된 Canvas context를 별도 Canvas Agent run으로 위임 |
 
@@ -980,27 +980,36 @@ Status code: `200 OK`
   title·수정일·table/relation count로 같은 title 후보를 구분한다. 버튼은 구조화된 `selection`을
   기존 `/inputs` endpoint로 보내며 UUID를 사용자 bubble에 표시하지 않는다.
 - inspect 결과의 table은 `t1`, `t2` 형태의 요청별 compact ref로 표시한다. projection은 최대
-  9,000자이며 내부 table/column ID와 sourceText, DDL, 전체 modelJson을 Agent step에 복제하지 않는다.
+  9,000자이며 bounded column dataType과 보수적으로 확인한 enum 값은 포함할 수 있다. 내부
+  table/column ID와 sourceText, DDL, 전체 modelJson은 Agent step에 복제하지 않는다.
 - inspect 성공 output은 `sessionId`, 진단용 `sessionRevision`, compact ref 검증용
   `modelFingerprint`를 포함한다.
 - `focus_sql_erd_tables`는 inspect 결과의 `sessionId`, `sessionRevision`, `modelFingerprint`, compact
-  `primaryTableRefs`·`relatedTableRefs`, confidence와 선택 table별 짧은 reason을 받는다. primary는
+  `primaryTableRefs`·`relatedTableRefs`·`contextTableRefs`, confidence와 선택 table별 짧은 reason을
+  받는다. primary는
   기능에 직접 해당하는 table이고 related는 primary와 직접 FK로 연결된 의미 있는 1-hop table만
-  허용한다. 기본 2-hop 확장은 하지 않는다.
-- App Server는 현재 model fingerprint와 compact ref, primary/related 중복, primary-related 직접 FK를
-  다시 검증한다. layout/annotation 변경으로 revision만 증가한 경우에는 focus를 허용하고, 실제
+  허용한다. context는 직접 FK가 없어도 table/column 이름, comment, dataType, enum 값의 exact schema
+  evidence가 기능상 관련성을 뒷받침하는 table이다. 기본 2-hop 확장이나 특정 table 이름 하드코딩은
+  하지 않는다.
+- App Server는 현재 model fingerprint와 compact ref, 세 역할의 중복, primary-related 직접 FK와
+  context reason의 schema evidence를 다시 검증한다. 형식 오류·unknown ref·역할 겹침은 요청 전체를
+  거부하고, 선택적 context evidence만 확인되지 않으면 해당 context를 제외한 뒤
+  `ignoredContextTables`에 이유를 명시한다. layout/annotation 변경으로 revision만 증가한 경우에는
+  focus를 허용하고, 실제
   modelJson 변경으로 fingerprint가 달라진 경우에만 `409 CONFLICT`와
   `SQLtoERD model changed; inspect the schema again` 메시지로 거부해 inspect부터 다시 수행한다.
 - 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`, `modelFingerprint`,
   `featureLabel`, `primaryTableIds`, `relatedTableIds`, `relationIds`, `confidence`를 가진 resource ref다.
+  새 결과에는 `contextTableIds`도 포함하며, 이 필드가 없는 기존 metadata는 빈 배열로 해석한다.
   도구 성공 시 step의 resource ref와 run을 한 트랜잭션에서 저장하고 run은 `completed`가 된다.
   Frontend는 완료된 run의 resource ref가 현재 SQLtoERD session과 같을 때 한 번 자동 적용하고,
   다른 session이면 자동 이동하거나 적용하지 않는다. 자동 적용 여부와 무관하게 `집중 보기 열기`
-  링크를 유지해 사용자가 수동으로 열거나 다시 적용할 수 있게 한다. 적용된 화면은 핵심·관련 table과
-  그 사이 relation만 선명하게 표시하고 나머지 table/relation을 흐리게 하며 선택·transform·delete를
+  링크를 유지해 사용자가 수동으로 열거나 다시 적용할 수 있게 한다. 적용된 화면은 핵심·직접 관련·문맥
+  table을 역할별로 강조하고 나머지 table/relation을 흐리게 하며 선택·transform·delete를
   막는다. 최초 적용 시 revision과 model fingerprint를 검증하고, 활성화된 뒤에는 layout/annotation
   revision 증가가 아니라 실제 modelJson 변경 때만 해제한다. `전체 보기`, session 변경, 새로고침으로
-  집중 상태를 해제한다.
+  집중 상태를 해제한다. relationIds는 실제 modelJson의 FK만 포함하며 context 선택은 가짜 관계선이나
+  SQL FK를 만들지 않는다.
 - 이 두 tool과 UI는 session을 저장·수정하지 않는 read-only view다. 따라서 SQLtoERD revision,
   writer lease, autosave와 Activity Log를 만들지 않으며 blur는 접근 제어나 보안 경계가 아니다.
 - 지원 범위를 벗어난 schema 기능은 `unsupportedFeatures`에 명시한다. DB 실행·배포만 요구하는

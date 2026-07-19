@@ -275,7 +275,8 @@ type InspectSqlErdSchemaInput = {
   `sessionSelectionToken`으로 복원하며 raw session ID는 후보 payload에 노출하지 않는다.
 - 선택한 session의 modelJson을 table 선언 순서의 `t1`, `t2` compact ref로 투영한다.
   모든 FK edge를 유지하되 전체 projection은 JSON 직렬화 기준 최대 9,000자다.
-- projection에는 table name, 선택적인 schema/comment와 bounded 주요 column, compact FK만
+- projection에는 table name, 선택적인 schema/comment와 bounded 주요 column, column dataType,
+  sourceText에서 보수적으로 확인한 bounded enum 값, compact FK만
   포함한다. 내부 table/column ID, sourceText, DDL, layoutJson은 포함하지 않는다.
 - 성공 output에는 `sessionId`, 진단용 `sessionRevision`, compact ref 검증용
   `modelFingerprint`(`fnv1a32:{8자리 hex}`)가 포함된다.
@@ -290,18 +291,38 @@ type FocusSqlErdTablesInput = {
   featureLabel: string; // 1~100자
   primaryTableRefs: string[]; // tN, 1~20개
   relatedTableRefs: string[]; // tN, 0~30개
+  contextTableRefs: string[]; // tN, 0~20개
   confidence: "high" | "medium" | "low";
-  reasons: Array<{ tableRef: string; reason: string }>;
+  reasons: Array<{
+    tableRef: string;
+    reason: string;
+    evidence?: Array<{
+      kind:
+        | "table_name"
+        | "table_comment"
+        | "column_name"
+        | "column_comment"
+        | "data_type"
+        | "enum_value";
+      columnName?: string;
+      value: string;
+    }>;
+  }>;
 };
 ```
 
 - primary는 기능과 직접 의미가 맞는 table이다. related는 primary와 직접 FK로 연결된 의미 있는
-  1-hop table만 허용하며 기본 2-hop 확장은 하지 않는다.
+  1-hop table만 허용하며 기본 2-hop 확장은 하지 않는다. context는 직접 FK가 없더라도 table/column
+  이름, comment, dataType, enum 값처럼 inspect projection에 나온 schema evidence로 기능상 관련성을
+  설명할 수 있는 table이다. 특정 table 이름을 고정 규칙으로 선택하지 않는다.
 - App Server는 최신 session을 다시 조회해 `modelFingerprint` 일치, compact ref 존재·중복·역할
   겹침, 각 related와 primary 사이의 직접 FK를 검증한다. layout/annotation만 바뀌어 revision이
   증가했더라도 fingerprint가 같으면 허용하고, 실제 model이 바뀐 stale fingerprint는
   `409 CONFLICT`다. `sessionRevision`은 inspect 시점과 결과 진단을 위해 유지한다.
-- reason은 선택한 각 ref마다 정확히 한 개가 필요하며 1~240자로 제한한다.
+- reason은 선택한 각 ref마다 정확히 한 개가 필요하며 1~240자로 제한한다. context reason에는 현재
+  model/source에서 정확히 다시 확인할 수 있는 evidence가 1~5개 필요하다. 형식이 잘못된 ref, 역할
+  겹침, stale fingerprint는 요청 전체를 거부한다. 선택적인 context evidence만 확인되지 않으면 해당
+  context를 제외하고 `ignoredContextTables`와 `schema_evidence_not_found` 이유를 성공 output에 넣는다.
 
 성공 resource ref:
 
@@ -321,6 +342,7 @@ type SqlErdTableFocusResourceRef = {
     featureLabel: string;
     primaryTableIds: string[];
     relatedTableIds: string[];
+    contextTableIds?: string[]; // 없는 기존 metadata는 []로 해석
     relationIds: string[];
     confidence: "high" | "medium" | "low";
   };
@@ -333,8 +355,10 @@ Frontend는 기존 same-origin URL allowlist와 metadata를 모두 검증한 뒤
 `sessionStorage`와 same-page event로 전달한다. 최초 적용 시 `sessionRevision`과
 `modelFingerprint`를 모두 검증한다. 활성화된 뒤에는 layout/annotation 변경으로 증가한 revision은
 focus를 해제하지 않고, 실제 `modelJson` fingerprint가 바뀔 때만 해제한다. primary는 가장 강하게,
-related는 보조 강조하고 나머지 table과 FK relation은 흐리게 표시하며 선택·transform·delete를
-막는다. annotation은 이 필터 대상이 아니다. `전체 보기`, session 변경, 새로고침으로 해제되며
+related는 직접 FK 역할, context는 문맥 역할로 보조 강조하고 나머지 table과 FK relation은 흐리게
+표시하며 선택·transform·delete를 막는다. relationIds는 항상 실제 modelJson의 FK만 사용하므로
+context 선택만으로 관계선을 만들거나 SQL을 변경하지 않는다. annotation은 이 필터 대상이 아니다.
+`전체 보기`, session 변경, 새로고침으로 해제되며
 DB나 URL에는 저장하지 않는다. blur는 보안 또는 권한 기능이 아니다.
 
 ## Realtime Presence (Phase 1)

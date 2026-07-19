@@ -73,6 +73,8 @@ USER_VISIBLE_UUID_PATTERN = re.compile(
 )
 SQL_ERD_TABLE_REF_PATTERN = re.compile(r"^t[1-9][0-9]*$")
 SQL_ERD_PRIMARY_TABLE_REF_LIMIT = 20
+SQL_ERD_RELATED_TABLE_REF_LIMIT = 30
+SQL_ERD_CONTEXT_TABLE_REF_LIMIT = 20
 SQL_ERD_INSPECTION_TOOL_NAME = "inspect_sql_erd_schema"
 SQL_ERD_FOCUS_TOOL_NAME = "focus_sql_erd_tables"
 TOOL_INPUT_SENSITIVE_KEY_ALLOWLIST = {
@@ -1566,6 +1568,32 @@ def _missing_sql_erd_focus_fields(
     if not primary_refs_are_valid:
         missing.add("primaryTableRefs")
 
+    related_refs = input_value.get("relatedTableRefs")
+    related_refs_are_valid = _sql_erd_optional_table_refs_are_valid(
+        related_refs,
+        SQL_ERD_RELATED_TABLE_REF_LIMIT,
+    )
+    if "relatedTableRefs" in input_value and not related_refs_are_valid:
+        missing.add("relatedTableRefs")
+
+    context_refs = input_value.get("contextTableRefs")
+    context_refs_are_valid = _sql_erd_optional_table_refs_are_valid(
+        context_refs,
+        SQL_ERD_CONTEXT_TABLE_REF_LIMIT,
+    )
+    if "contextTableRefs" in input_value and not context_refs_are_valid:
+        missing.add("contextTableRefs")
+
+    if primary_refs_are_valid and related_refs_are_valid and isinstance(related_refs, list):
+        if set(primary_refs).intersection(related_refs):
+            missing.add("relatedTableRefs")
+    if context_refs_are_valid and isinstance(context_refs, list):
+        other_refs = set(primary_refs) if primary_refs_are_valid else set()
+        if related_refs_are_valid and isinstance(related_refs, list):
+            other_refs.update(related_refs)
+        if other_refs.intersection(context_refs):
+            missing.add("contextTableRefs")
+
     inspection = _latest_sql_erd_inspection(planning_context)
     if inspection is None:
         missing.add("sqlErdInspection")
@@ -1594,7 +1622,33 @@ def _missing_sql_erd_focus_fields(
         missing.add("sqlErdInspection")
     elif primary_refs_are_valid and not set(primary_refs).issubset(inspected_refs):
         missing.add("primaryTableRefs")
+    if (
+        inspected_refs
+        and related_refs_are_valid
+        and isinstance(related_refs, list)
+        and not set(related_refs).issubset(inspected_refs)
+    ):
+        missing.add("relatedTableRefs")
+    if (
+        inspected_refs
+        and context_refs_are_valid
+        and isinstance(context_refs, list)
+        and not set(context_refs).issubset(inspected_refs)
+    ):
+        missing.add("contextTableRefs")
     return tuple(sorted(missing))
+
+
+def _sql_erd_optional_table_refs_are_valid(value: object, limit: int) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) <= limit
+        and all(
+            isinstance(ref, str) and SQL_ERD_TABLE_REF_PATTERN.fullmatch(ref) is not None
+            for ref in value
+        )
+        and len(set(value)) == len(value)
+    )
 
 
 def _latest_sql_erd_inspection(planning_context: str) -> dict[str, object] | None:
@@ -2564,6 +2618,8 @@ def _clarification_answer(
         "calendar_event_end_time": "시작 시각보다 늦은 종료 시각",
         "calendar_event_time_or_all_day": "종일 여부 또는 시작 시각",
         "primaryTableRefs": "집중해서 볼 핵심 테이블",
+        "relatedTableRefs": "직접 연결된 관련 테이블",
+        "contextTableRefs": "스키마 근거가 있는 문맥 테이블",
     }
     fields = [labels.get(field, field) for field in missing_fields]
     if not fields:
@@ -3232,9 +3288,13 @@ def _agent_planner_system_prompt() -> str:
         "title. The inspection projection "
         "uses compact table refs. Classify semantically direct matches as primary tables and only "
         "meaningful direct FK neighbors as related tables; do not expand to two-hop neighbors by "
-        "default. After a completed inspect_sql_erd_schema result, use focus_sql_erd_tables with "
+        "default. Put semantically relevant tables without a direct FK in contextTableRefs only "
+        "when the inspection projection contains exact schema evidence such as a table or column "
+        "name, comment, data type, or enum value. Include that exact schema evidence in the "
+        "context table reason. Context tables do not imply a foreign key, so never invent relation lines. "
+        "After a completed inspect_sql_erd_schema result, use focus_sql_erd_tables with "
         "that exact sessionId, sessionRevision, and modelFingerprint, primaryTableRefs, "
-        "relatedTableRefs, confidence, "
+        "relatedTableRefs, contextTableRefs, confidence, "
         "and one concise reason per selected ref. Do not derive refs from memory or a stale "
         "result. "
         "When contextSurface is pr_review, the App Server has already identified and revalidated "

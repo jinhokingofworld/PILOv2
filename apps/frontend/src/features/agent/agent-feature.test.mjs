@@ -757,6 +757,7 @@ const focusedResourceRef = {
     featureLabel: "결제 기능",
     primaryTableIds: ["table-orders", "table-payments"],
     relatedTableIds: ["table-payment-attempts"],
+    contextTableIds: ["table-activity-logs"],
     relationIds: ["relation-orders-attempts", "relation-payments-attempts"],
     confidence: "medium"
   }
@@ -773,6 +774,7 @@ const expectedFocus = {
   featureLabel: "결제 기능",
   primaryTableIds: ["table-orders", "table-payments"],
   relatedTableIds: ["table-payment-attempts"],
+  contextTableIds: ["table-activity-logs"],
   relationIds: ["relation-orders-attempts", "relation-payments-attempts"],
   confidence: "medium"
 };
@@ -788,6 +790,12 @@ assert.deepEqual(
   parseSqlErdAgentTableFocusResource(focusedResourceRef),
   expectedFocus
 );
+const legacyFocusedResourceRef = structuredClone(focusedResourceRef);
+delete legacyFocusedResourceRef.metadata.contextTableIds;
+assert.deepEqual(parseSqlErdAgentTableFocusResource(legacyFocusedResourceRef), {
+  ...expectedFocus,
+  contextTableIds: []
+});
 assert.deepEqual(
   getAgentResourceLinks({
     ...completedRun,
@@ -909,6 +917,14 @@ for (const invalidMetadata of [
     ...focusedResourceRef.metadata,
     relatedTableIds: ["table-orders"]
   },
+  {
+    ...focusedResourceRef.metadata,
+    contextTableIds: ["table-orders"]
+  },
+  {
+    ...focusedResourceRef.metadata,
+    contextTableIds: ["table-payment-attempts"]
+  },
   { ...focusedResourceRef.metadata, confidence: "certain" },
   { ...focusedResourceRef.metadata, primaryTableIds: ["", "table-orders"] }
 ]) {
@@ -925,6 +941,10 @@ assert.equal(getSqlErdFocusedTableRole(expectedFocus, "table-orders"), "primary"
 assert.equal(
   getSqlErdFocusedTableRole(expectedFocus, "table-payment-attempts"),
   "related"
+);
+assert.equal(
+  getSqlErdFocusedTableRole(expectedFocus, "table-activity-logs"),
+  "context"
 );
 assert.equal(getSqlErdFocusedTableRole(expectedFocus, "table-users"), "dimmed");
 assert.equal(

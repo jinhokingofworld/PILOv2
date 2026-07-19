@@ -558,7 +558,14 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
       style={{
         filter: isFocusDimmed ? "blur(2px) saturate(0.45)" : undefined,
         height: shape.props.h,
-        opacity: isFocusDimmed ? 0.2 : focusRole === "related" ? 0.86 : 1,
+        opacity:
+          isFocusDimmed
+            ? 0.2
+            : focusRole === "related"
+              ? 0.86
+              : focusRole === "context"
+                ? 0.92
+                : 1,
         pointerEvents: isFocusDimmed ? "none" : "all",
         transition: "filter 160ms ease, opacity 160ms ease",
         width: shape.props.w
@@ -576,6 +583,8 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
             ? "outline outline-4 outline-blue-400 outline-offset-4"
             : focusRole === "related"
               ? "outline outline-2 outline-sky-300 outline-offset-2"
+              : focusRole === "context"
+                ? "outline outline-2 outline-amber-300 outline-offset-2"
               : ""
         }`}
         data-sqltoerd-table-focus-role={focusRole ?? undefined}

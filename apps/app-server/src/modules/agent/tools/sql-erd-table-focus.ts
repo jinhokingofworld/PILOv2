@@ -6,10 +6,14 @@ const PROJECTION_MAX_CHARACTERS = 9_000;
 const CATALOG_NAME_LIMITS = [64, 48, 32, 24, 16, 8] as const;
 const OPTIONAL_TEXT_LIMIT = 120;
 const COLUMN_NAME_LIMIT = 80;
+const DATA_TYPE_LIMIT = 120;
+const ENUM_VALUE_LIMIT = 120;
 const MAX_COLUMNS_PER_PROJECTED_TABLE = 12;
+const MAX_ENUM_VALUES_PER_COLUMN = 24;
 
 type SqlErdModelColumn = {
   name: string;
+  dataType: string;
   primaryKey: boolean;
   foreignKey: boolean;
   comment: string | null;
@@ -36,6 +40,8 @@ type ParsedSqlErdModel = {
 
 export type SqlErdAgentProjectedColumn = {
   name: string;
+  dataType: string;
+  enumValues?: string[];
   primaryKey: boolean;
   foreignKey: boolean;
   comment?: string;
@@ -58,25 +64,50 @@ export interface SqlErdAgentSchemaProjection {
 export type SqlErdAgentTableFocusInput = {
   primaryTableRefs: string[];
   relatedTableRefs: string[];
+  contextTableRefs: string[];
+};
+
+export type SqlErdAgentContextEvidence = {
+  kind:
+    | "table_name"
+    | "table_comment"
+    | "column_name"
+    | "column_comment"
+    | "data_type"
+    | "enum_value";
+  columnName?: string;
+  value: string;
 };
 
 export type ResolvedSqlErdAgentTableFocus = {
   primaryTableIds: string[];
   relatedTableIds: string[];
+  contextTableIds: string[];
   relationIds: string[];
   tables: Array<{
     ref: string;
     id: string;
     name: string;
-    role: "primary" | "related";
+    role: "primary" | "related" | "context";
+  }>;
+};
+
+export type SqlErdAgentContextEvidenceResult = {
+  acceptedRefs: string[];
+  ignoredTables: Array<{
+    ref: string;
+    name: string;
+    reason: "schema_evidence_not_found";
   }>;
 };
 
 export function buildSqlErdAgentSchemaProjection(
   modelJson: Record<string, unknown>,
-  featureQuery: string
+  featureQuery: string,
+  sourceText = ""
 ): SqlErdAgentSchemaProjection {
   const model = parseSqlErdModel(modelJson);
+  const enumValuesByType = collectDeclaredEnumValues(sourceText);
   const tableRefById = new Map(
     model.tables.map((table, index) => [table.id, `t${index + 1}`])
   );
@@ -148,9 +179,14 @@ export function buildSqlErdAgentSchemaProjection(
     for (const column of candidates) {
       const projectedColumn: SqlErdAgentProjectedColumn = {
         name: boundText(column.name, COLUMN_NAME_LIMIT),
+        dataType: boundExactText(column.dataType.trim(), DATA_TYPE_LIMIT),
         primaryKey: column.primaryKey,
         foreignKey: column.foreignKey
       };
+      const enumValues = readColumnEnumValues(column.dataType, enumValuesByType)
+        .slice(0, MAX_ENUM_VALUES_PER_COLUMN)
+        .map((value) => boundExactText(value, ENUM_VALUE_LIMIT));
+      if (enumValues.length > 0) projectedColumn.enumValues = enumValues;
       const boundedComment = boundNullableText(column.comment, OPTIONAL_TEXT_LIMIT);
       if (boundedComment) projectedColumn.comment = boundedComment;
 
@@ -198,15 +234,26 @@ export function resolveSqlErdAgentTableFocus(
     "related",
     false
   );
+  const contextRefs = validateUniqueRefs(
+    input.contextTableRefs,
+    "context",
+    false
+  );
   const primaryRefSet = new Set(primaryRefs);
   const relatedRefSet = new Set(relatedRefs);
+  const contextRefSet = new Set(contextRefs);
 
   for (const ref of relatedRefs) {
     if (primaryRefSet.has(ref)) {
       throw badRequest("related table reference overlaps primary table reference");
     }
   }
-  for (const ref of [...primaryRefs, ...relatedRefs]) {
+  for (const ref of contextRefs) {
+    if (primaryRefSet.has(ref) || relatedRefSet.has(ref)) {
+      throw badRequest("context table reference overlaps another table role");
+    }
+  }
+  for (const ref of [...primaryRefs, ...relatedRefs, ...contextRefs]) {
     if (!tableByRef.has(ref)) {
       throw badRequest(`unknown table reference: ${ref}`);
     }
@@ -231,7 +278,11 @@ export function resolveSqlErdAgentTableFocus(
     }
   }
 
-  const selectedRefs = new Set([...primaryRefs, ...relatedRefs]);
+  const selectedRefs = new Set([
+    ...primaryRefs,
+    ...relatedRefs,
+    ...contextRefs
+  ]);
   const relationIds = model.relations.flatMap((relation) => {
     const fromRef = refByTableId.get(relation.fromTableId);
     const toRef = refByTableId.get(relation.toTableId);
@@ -245,7 +296,7 @@ export function resolveSqlErdAgentTableFocus(
 
   const toResolvedTable = (
     ref: string,
-    role: "primary" | "related"
+    role: "primary" | "related" | "context"
   ) => {
     const table = tableByRef.get(ref);
     if (!table) throw badRequest(`unknown table reference: ${ref}`);
@@ -257,13 +308,54 @@ export function resolveSqlErdAgentTableFocus(
   const relatedTables = relatedRefs.map((ref) =>
     toResolvedTable(ref, "related")
   );
+  const contextTables = contextRefs.map((ref) =>
+    toResolvedTable(ref, "context")
+  );
 
   return {
     primaryTableIds: primaryTables.map((table) => table.id),
     relatedTableIds: relatedTables.map((table) => table.id),
+    contextTableIds: contextTables.map((table) => table.id),
     relationIds,
-    tables: [...primaryTables, ...relatedTables]
+    tables: [...primaryTables, ...relatedTables, ...contextTables]
   };
+}
+
+export function partitionSqlErdAgentContextTableRefs(
+  modelJson: Record<string, unknown>,
+  sourceText: string,
+  evidenceByRef: ReadonlyMap<string, readonly SqlErdAgentContextEvidence[]>,
+  contextTableRefs: readonly string[]
+): SqlErdAgentContextEvidenceResult {
+  const model = parseSqlErdModel(modelJson);
+  const tableByRef = new Map(
+    model.tables.map((table, index) => [`t${index + 1}`, table])
+  );
+  const enumValuesByType = collectDeclaredEnumValues(sourceText);
+  const acceptedRefs: string[] = [];
+  const ignoredTables: SqlErdAgentContextEvidenceResult["ignoredTables"] = [];
+
+  for (const ref of contextTableRefs) {
+    const table = tableByRef.get(ref);
+    if (!table) throw badRequest(`unknown table reference: ${ref}`);
+    const evidence = evidenceByRef.get(ref) ?? [];
+    if (
+      evidence.length > 0 &&
+      evidence.every((item) =>
+        matchesContextEvidence(table, item, enumValuesByType)
+      )
+    ) {
+      acceptedRefs.push(ref);
+      continue;
+    }
+    ignoredTables.push({
+      ref,
+      name: table.name,
+      reason: "schema_evidence_not_found"
+    });
+  }
+
+  return { acceptedRefs, ignoredTables };
 }
 
 function parseSqlErdModel(
@@ -291,6 +383,7 @@ function parseSqlErdModel(
       if (
         !isPlainObject(columnValue) ||
         typeof columnValue.name !== "string" ||
+        typeof columnValue.dataType !== "string" ||
         typeof columnValue.primaryKey !== "boolean" ||
         typeof columnValue.foreignKey !== "boolean"
       ) {
@@ -300,6 +393,7 @@ function parseSqlErdModel(
       }
       return {
         name: columnValue.name,
+        dataType: columnValue.dataType,
         primaryKey: columnValue.primaryKey,
         foreignKey: columnValue.foreignKey,
         comment: readNullableString(columnValue.comment)
@@ -371,7 +465,7 @@ function columnPriority(
   let score = 0;
   if (column.primaryKey) score += 4;
   if (column.foreignKey) score += 3;
-  const searchable = `${column.name} ${column.comment ?? ""}`.toLowerCase();
+  const searchable = `${column.name} ${column.dataType} ${column.comment ?? ""}`.toLowerCase();
   if (queryTerms.some((term) => searchable.includes(term))) score += 2;
   return score;
 }
@@ -382,9 +476,253 @@ function normalizedQueryTerms(value: string): string[] {
   );
 }
 
+function matchesContextEvidence(
+  table: SqlErdModelTable,
+  evidence: SqlErdAgentContextEvidence,
+  enumValuesByType: ReadonlyMap<string, readonly string[]>
+): boolean {
+  if (evidence.kind === "table_name") {
+    return evidence.value === table.name;
+  }
+  if (evidence.kind === "table_comment") {
+    return evidence.value === table.comment;
+  }
+  if (evidence.kind === "column_name") {
+    return table.columns.some((column) => column.name === evidence.value);
+  }
+
+  const column = table.columns.find(
+    (candidate) => candidate.name === evidence.columnName
+  );
+  if (!column) return false;
+
+  if (evidence.kind === "column_comment") {
+    return evidence.value === column.comment;
+  }
+  if (evidence.kind === "data_type") {
+    return evidence.value === column.dataType;
+  }
+  return readColumnEnumValues(column.dataType, enumValuesByType).includes(
+    evidence.value
+  );
+}
+
+function readColumnEnumValues(
+  dataType: string,
+  enumValuesByType: ReadonlyMap<string, readonly string[]>
+): string[] {
+  const inlineEnumStart = /^enum\s*\(/i.exec(dataType);
+  if (inlineEnumStart) {
+    const openIndex = dataType.indexOf("(", inlineEnumStart.index);
+    const parsed = readSqlStringList(dataType, openIndex);
+    return parsed?.values ?? [];
+  }
+  return [...(enumValuesByType.get(normalizeSqlTypeKey(dataType)) ?? [])];
+}
+
+function collectDeclaredEnumValues(sourceText: string): Map<string, string[]> {
+  const valuesByType = new Map<string, string[]>();
+  const createTypePattern = /\bCREATE\s+TYPE\s+/giu;
+  const codePositions = collectSqlCodePositions(sourceText);
+  let match: RegExpExecArray | null;
+
+  while ((match = createTypePattern.exec(sourceText)) !== null) {
+    if (codePositions[match.index] !== 1) continue;
+    const typeStart = createTypePattern.lastIndex;
+    const typeName = readQualifiedSqlIdentifier(sourceText, typeStart);
+    if (!typeName) continue;
+    const asEnum = /^\s+AS\s+ENUM\s*/iu.exec(sourceText.slice(typeName.end));
+    if (!asEnum) continue;
+    const openIndex = typeName.end + asEnum[0].length;
+    if (sourceText[openIndex] !== "(") continue;
+    const parsed = readSqlStringList(sourceText, openIndex);
+    if (!parsed) continue;
+    valuesByType.set(normalizeSqlTypeKey(typeName.value), parsed.values);
+    createTypePattern.lastIndex = parsed.end;
+  }
+
+  return valuesByType;
+}
+
+function collectSqlCodePositions(sourceText: string): Uint8Array {
+  const positions = new Uint8Array(sourceText.length);
+  let cursor = 0;
+
+  while (cursor < sourceText.length) {
+    if (sourceText.startsWith("--", cursor)) {
+      const end = sourceText.indexOf("\n", cursor + 2);
+      cursor = end === -1 ? sourceText.length : end;
+      continue;
+    }
+    if (sourceText.startsWith("/*", cursor)) {
+      cursor += 2;
+      let depth = 1;
+      while (cursor < sourceText.length && depth > 0) {
+        if (sourceText.startsWith("/*", cursor)) {
+          depth += 1;
+          cursor += 2;
+        } else if (sourceText.startsWith("*/", cursor)) {
+          depth -= 1;
+          cursor += 2;
+        } else {
+          cursor += 1;
+        }
+      }
+      continue;
+    }
+    if (sourceText[cursor] === "'") {
+      cursor = skipQuotedSqlText(sourceText, cursor, "'");
+      continue;
+    }
+    if (sourceText[cursor] === '"') {
+      cursor = skipQuotedSqlText(sourceText, cursor, '"');
+      continue;
+    }
+    if (sourceText[cursor] === "$") {
+      const tag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/u.exec(
+        sourceText.slice(cursor)
+      )?.[0];
+      if (tag) {
+        const end = sourceText.indexOf(tag, cursor + tag.length);
+        cursor = end === -1 ? sourceText.length : end + tag.length;
+        continue;
+      }
+    }
+    positions[cursor] = 1;
+    cursor += 1;
+  }
+
+  return positions;
+}
+
+function skipQuotedSqlText(
+  sourceText: string,
+  start: number,
+  quote: "'" | '"'
+): number {
+  let cursor = start + 1;
+  while (cursor < sourceText.length) {
+    if (sourceText[cursor] !== quote) {
+      cursor += 1;
+      continue;
+    }
+    if (sourceText[cursor + 1] === quote) {
+      cursor += 2;
+      continue;
+    }
+    return cursor + 1;
+  }
+  return sourceText.length;
+}
+
+function readQualifiedSqlIdentifier(
+  sourceText: string,
+  start: number
+): { value: string; end: number } | null {
+  let cursor = start;
+  const parts: string[] = [];
+
+  while (parts.length < 2) {
+    while (/\s/u.test(sourceText[cursor] ?? "")) cursor += 1;
+    const partStart = cursor;
+    if (sourceText[cursor] === '"') {
+      cursor += 1;
+      while (cursor < sourceText.length) {
+        if (sourceText[cursor] !== '"') {
+          cursor += 1;
+          continue;
+        }
+        if (sourceText[cursor + 1] === '"') {
+          cursor += 2;
+          continue;
+        }
+        cursor += 1;
+        break;
+      }
+    } else {
+      const identifier = /^[A-Za-z_][A-Za-z0-9_$]*/u.exec(
+        sourceText.slice(cursor)
+      );
+      if (!identifier) return null;
+      cursor += identifier[0].length;
+    }
+    parts.push(sourceText.slice(partStart, cursor));
+    const whitespaceStart = cursor;
+    while (/\s/u.test(sourceText[cursor] ?? "")) cursor += 1;
+    if (sourceText[cursor] !== ".") {
+      cursor = whitespaceStart;
+      break;
+    }
+    cursor += 1;
+  }
+
+  return { value: parts.join("."), end: cursor };
+}
+
+function readSqlStringList(
+  sourceText: string,
+  openIndex: number
+): { values: string[]; end: number } | null {
+  if (sourceText[openIndex] !== "(") return null;
+  const values: string[] = [];
+  let cursor = openIndex + 1;
+
+  while (cursor < sourceText.length) {
+    while (/\s/u.test(sourceText[cursor] ?? "")) cursor += 1;
+    if (sourceText[cursor] === ")") {
+      return { values, end: cursor + 1 };
+    }
+    if (sourceText[cursor] !== "'") return null;
+    cursor += 1;
+    let value = "";
+    let closed = false;
+    while (cursor < sourceText.length) {
+      if (sourceText[cursor] !== "'") {
+        value += sourceText[cursor];
+        cursor += 1;
+        continue;
+      }
+      if (sourceText[cursor + 1] === "'") {
+        value += "'";
+        cursor += 2;
+        continue;
+      }
+      cursor += 1;
+      closed = true;
+      break;
+    }
+    if (!closed) return null;
+    values.push(value);
+    while (/\s/u.test(sourceText[cursor] ?? "")) cursor += 1;
+    if (sourceText[cursor] === ",") {
+      cursor += 1;
+      continue;
+    }
+    if (sourceText[cursor] === ")") {
+      return { values, end: cursor + 1 };
+    }
+    return null;
+  }
+
+  return null;
+}
+
+function normalizeSqlTypeKey(value: string): string {
+  return value
+    .trim()
+    .replace(/\s*\.\s*/g, ".")
+    .split(".")
+    .map((part) =>
+      part.startsWith('"') && part.endsWith('"')
+        ? `quoted:${part.slice(1, -1).replace(/""/g, '"')}`
+        : `unquoted:${part.toLowerCase()}`
+    )
+    .join(".");
+}
+
 function validateUniqueRefs(
   value: string[],
-  label: "primary" | "related",
+  label: "primary" | "related" | "context",
   requireOne: boolean
 ): string[] {
   if (!Array.isArray(value) || (requireOne && value.length === 0)) {
@@ -409,6 +747,10 @@ function boundNullableText(value: string | null, limit: number): string | null {
 
 function boundText(value: string, limit: number): string {
   return [...value.trim().replace(/\s+/g, " ")].slice(0, limit).join("");
+}
+
+function boundExactText(value: string, limit: number): string {
+  return [...value].slice(0, limit).join("");
 }
 
 function unicodeLength(value: string): number {

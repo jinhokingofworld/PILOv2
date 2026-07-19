@@ -4,9 +4,9 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "fdc6ba14d197fbc266e308f37e0330e3fd5139d092589bab42e23fb84993c872",
-    "catalogSha256": "804121af3266b8649f6f1c0ffdcecc38b8b1da58954ab0f0bc99ed28aa01add0",
-    "eligibleSnapshotSha256": "04dd22398573e7481e1bceea5c17c18b72649bf468d3c1d92afdf309e13cea46"
+    "inventorySha256": "56d67c492ec7fbad3ac7b9b28918f1223f51eb1d3c0da1196b6f0ec8b8d66a78",
+    "catalogSha256": "4d53f7181f980b7bf262b37fa6bfb832e29879a7d4e4c2146fd9105eeaa1055c",
+    "eligibleSnapshotSha256": "80b190d9e16b1923383b7f3cbc637ae0e49b5d52f09c50fe39cc3267003fb4ec"
   },
   "privacySensitiveValues": [
     "11111111-1111-4111-8111-111111111111",
@@ -321,6 +321,7 @@
         "featureLabel",
         "primaryTableRefs",
         "relatedTableRefs",
+        "contextTableRefs",
         "confidence",
         "reasons"
       ],
@@ -362,6 +363,15 @@
             "pattern": "^t[1-9][0-9]*$"
           }
         },
+        "contextTableRefs": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^t[1-9][0-9]*$"
+          }
+        },
         "confidence": {
           "type": "string",
           "enum": [
@@ -373,7 +383,7 @@
         "reasons": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 50,
+          "maxItems": 70,
           "items": {
             "type": "object",
             "required": [
@@ -390,6 +400,42 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240
+              },
+              "evidence": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 5,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "table_name",
+                        "table_comment",
+                        "column_name",
+                        "column_comment",
+                        "data_type",
+                        "enum_value"
+                      ]
+                    },
+                    "columnName": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "value": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    }
+                  }
+                }
               }
             }
           }
@@ -1349,22 +1395,6 @@
           "type": "string",
           "pattern": "^ctx_[0-9a-f]{24}$"
         },
-        "sections": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 4,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "enum": [
-              "summary",
-              "discussionPoints",
-              "decisions",
-              "actionItems"
-            ]
-          },
-          "description": "반환할 회의록 영역. 생략하면 요약·논의사항·결정사항·후속 작업을 반환합니다."
-        },
         "from": {
           "type": "string",
           "format": "date-time"
@@ -1392,6 +1422,22 @@
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
           "const": true
+        },
+        "sections": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "discussionPoints",
+              "decisions",
+              "actionItems"
+            ]
+          },
+          "description": "반환할 회의록 영역. 생략하면 요약·논의사항·결정사항·후속 작업을 반환합니다."
         }
       }
     },
@@ -1501,7 +1547,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "804121af3266b8649f6f1c0ffdcecc38b8b1da58954ab0f0bc99ed28aa01add0",
+    "sha256": "4d53f7181f980b7bf262b37fa6bfb832e29879a7d4e4c2146fd9105eeaa1055c",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -3603,6 +3649,7 @@
         ],
         "acceptedSelectorFields": [
           "confidence",
+          "contextTableRefs",
           "featureLabel",
           "modelFingerprint",
           "primaryTableRefs",
@@ -3623,7 +3670,7 @@
         "executionMode": "auto",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "c25efe99e934d690063e3473605dbe93c922cc8b2409cdc30df3a06688461f25"
+        "inputSchemaSha256": "db18bb5000a4a93022ee9da59a2fb22e00ecc95dbf5cc5d15fc25eb81e448aec"
       },
       {
         "toolName": "generate_sql_erd",

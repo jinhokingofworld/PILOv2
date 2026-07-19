@@ -4202,6 +4202,9 @@ def test_sql_erd_table_focus_planner_contract_inspects_before_focusing() -> None
     assert "modelFingerprint" in prompt
     assert "primaryTableRefs" in prompt
     assert "relatedTableRefs" in prompt
+    assert "contextTableRefs" in prompt
+    assert "schema evidence" in prompt
+    assert "never invent relation lines" in prompt
 
 
 def sql_erd_inspection_planning_context(*table_refs: str) -> str:
@@ -4342,6 +4345,43 @@ def test_sql_erd_table_focus_rejects_ref_missing_from_latest_inspection() -> Non
     assert normalized.status == "needs_clarification"
     assert normalized.output_summary["missingFields"] == ["primaryTableRefs"]
     assert "toolName" not in normalized.output_summary
+
+
+def test_sql_erd_table_focus_rejects_invalid_or_overlapping_context_refs() -> None:
+    focus_tool = tool_snapshot(
+        name="focus_sql_erd_tables",
+        description="SQLtoERD 테이블 집중 보기를 생성합니다.",
+        inputSchema={
+            "type": "object",
+            "required": ["primaryTableRefs", "contextTableRefs"],
+            "additionalProperties": False,
+            "properties": {
+                "primaryTableRefs": {"type": "array", "minItems": 1},
+                "contextTableRefs": {"type": "array"},
+            },
+        },
+    )
+    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
+
+    for context_refs in (["t999"], ["t1"], ["t2", "t2"]):
+        normalized = normalize_agent_planner_decision(
+            planner_decision(
+                tool_name="focus_sql_erd_tables",
+                tool_input={
+                    "sessionId": SQL_ERD_SESSION_ID,
+                    "sessionRevision": 7,
+                    "modelFingerprint": "fnv1a32:1234abcd",
+                    "primaryTableRefs": ["t1"],
+                    "contextTableRefs": context_refs,
+                },
+            ),
+            job,
+            planning_context=sql_erd_inspection_planning_context("t1", "t2"),
+        )
+
+        assert normalized.status == "needs_clarification"
+        assert normalized.output_summary["missingFields"] == ["contextTableRefs"]
+        assert "toolName" not in normalized.output_summary
 
 
 def test_sql_erd_table_focus_requires_latest_inspection_context() -> None:

@@ -395,12 +395,20 @@ export function parseSqlErdAgentTableFocusResource(
   }
   const primaryTableIds = readUniqueIds(metadata.primaryTableIds, 20, true);
   const relatedTableIds = readUniqueIds(metadata.relatedTableIds, 30, false);
+  const contextTableIds =
+    metadata.contextTableIds === undefined
+      ? []
+      : readUniqueIds(metadata.contextTableIds, 20, false);
   const relationIds = readUniqueIds(metadata.relationIds, 300, false);
-  if (!primaryTableIds || !relatedTableIds || !relationIds) {
+  if (!primaryTableIds || !relatedTableIds || !contextTableIds || !relationIds) {
     return null;
   }
   const primarySet = new Set(primaryTableIds);
-  if (relatedTableIds.some((id) => primarySet.has(id))) {
+  const relatedSet = new Set(relatedTableIds);
+  if (
+    relatedTableIds.some((id) => primarySet.has(id)) ||
+    contextTableIds.some((id) => primarySet.has(id) || relatedSet.has(id))
+  ) {
     return null;
   }
 
@@ -413,6 +421,7 @@ export function parseSqlErdAgentTableFocusResource(
     featureLabel: metadata.featureLabel.trim().replace(/\s+/g, " "),
     primaryTableIds,
     relatedTableIds,
+    contextTableIds,
     relationIds,
     confidence: metadata.confidence as SqlErdAgentTableFocus["confidence"]
   };
