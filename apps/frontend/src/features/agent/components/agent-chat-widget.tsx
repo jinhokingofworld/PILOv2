@@ -163,6 +163,22 @@ function shouldStopPolling(run: AgentRun) {
   );
 }
 
+function isRunAwaitingClarification(run: AgentRun | undefined) {
+  if (run?.status !== "waiting_user_input") {
+    return false;
+  }
+
+  const latestCompletedDecision = [...run.steps]
+    .reverse()
+    .find(
+      (step) =>
+        step.status === "completed" &&
+        (step.type === "planner" || step.type === "tool")
+    );
+
+  return latestCompletedDecision?.outputSummary?.status === "needs_clarification";
+}
+
 function getActivePlannerStepId(run: AgentRun) {
   return (
     [...run.steps]
@@ -389,7 +405,7 @@ export function AgentChatWidget() {
     () =>
       [...messages]
         .reverse()
-        .find((message) => message.run?.status === "waiting_user_input") ??
+        .find((message) => isRunAwaitingClarification(message.run)) ??
       null,
     [messages]
   );

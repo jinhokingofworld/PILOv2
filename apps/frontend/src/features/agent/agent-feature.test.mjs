@@ -202,6 +202,11 @@ assert.doesNotMatch(
 );
 assert.match(agentChatWidget, /waiting_confirmation/);
 assert.match(agentChatWidget, /waiting_user_input/);
+assert.match(agentChatWidget, /isRunAwaitingClarification/);
+assert.match(
+  agentChatWidget,
+  /outputSummary\?\.status === "needs_clarification"/
+);
 assert.match(agentChatWidget, /submitRunInput/);
 assert.match(agentChatWidget, /appendRunInput/);
 assert.match(agentChatWidget, /displayMessage/);
