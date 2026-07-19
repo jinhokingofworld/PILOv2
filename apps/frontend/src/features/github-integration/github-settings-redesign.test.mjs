@@ -134,6 +134,15 @@ assert.doesNotMatch(panelSource, /setPullRequests/);
 
 assert.match(repositorySource, /Project를 조회하고 동기화할 repository/);
 assert.doesNotMatch(repositorySource, /Pull Request 조회 기준/);
+assert.match(
+  repositorySource,
+  /repo-row grid grid-cols-\[minmax\(0,1fr\)_auto\][\s\S]*?@\[48rem\]:grid-cols-\[minmax\(180px,1\.7fr\)_90px_90px_108px_86px\]/
+);
+assert.match(
+  repositorySource,
+  /col-span-2 row-start-2 flex flex-wrap items-center gap-x-2 gap-y-1[\s\S]*?@\[48rem\]:contents/
+);
+assert.match(repositorySource, /col-start-2 row-start-1 h-8/);
 assert.match(projectSource, /@\/components\/ui\/dialog/);
 assert.match(projectSource, /활성 Board 변경/);
 assert.match(projectSource, /await onActivateProjectV2\(project\.id\)/);
