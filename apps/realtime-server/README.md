@@ -65,11 +65,6 @@ realtime-server batches dirty room shapes and calls the existing App Server
 `saving`/`saved`/`delayed` status so clients can show save-delay UX without
 treating a transient checkpoint failure as lost work.
 
-For `tldraw_sync` Canvas, realtime-server owns the multiplayer room lifecycle.
-The room key and validation contract are documented in `src/canvas/README.md`;
-recoverable room snapshots are persisted to the same `canvas_sync_documents`
-boundary used by the App Server fallback API.
-
 Native document collaboration uses Hocuspocus rooms under `/sync/documents`.
 Realtime-server restores the latest Drive document snapshot when a room loads and
 is the only realtime checkpoint writer: Hocuspocus debounces merged Yjs state for
@@ -95,19 +90,6 @@ Optional:
   document snapshot checkpoints.
 - `REALTIME_CANVAS_ACTIVITY_TOKEN` for the internal `/api/v1/internal/canvas/recording-activities/batch`
   handoff. The same server-only secret must be configured on App Server.
-
-## tldraw_sync deployment notes
-
-- Browser clients connect to `/sync/canvas` through
-  `NEXT_PUBLIC_PILO_REALTIME_SERVER_URL`.
-- The load balancer must route `/sync/*` WebSocket upgrades to realtime-server.
-- `canvas_sync_documents` migrations must be applied before enabling
-  `tldraw_sync` Canvas creation/conversion.
-- The current room implementation is in-memory per realtime-server process.
-  Run one realtime-server task or configure sticky routing for `/sync/canvas`
-  and `/sync/documents` before using multiple tasks.
-- `/health` and `/sync/health` include the current `tldraw_sync` room count,
-  active session count, and pending persist count.
 
 ## Verification
 

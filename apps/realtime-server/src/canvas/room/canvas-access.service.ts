@@ -8,12 +8,11 @@ export type CanvasAccessContext = {
 
 export type CanvasRoomAccess = {
   boardType: "freeform" | "review";
-  engineType: string;
   readOnly: boolean;
 };
 
 export function isClassicCanvasRoomAccess(access: CanvasRoomAccess): boolean {
-  return access.boardType === "freeform" && access.engineType === "classic";
+  return access.boardType === "freeform";
 }
 
 export type CanvasAccessService = {
@@ -21,21 +20,11 @@ export type CanvasAccessService = {
     context: CanvasAccessContext,
     room: CanvasRoomRef,
   ) => Promise<CanvasRoomAccess | null>;
-  getCanvasTldrawSyncRoomAccess: (
-    context: CanvasAccessContext,
-    room: CanvasRoomRef,
-  ) => Promise<CanvasRoomAccess | null>;
 };
 
 type CanvasAccessRow = {
   board_type: string;
-  engine_type: string | null;
   review_room_status: string | null;
-};
-
-type CanvasTldrawSyncAccessRow = {
-  board_type: string;
-  engine_type: string;
 };
 
 export function createCanvasAccessService(
@@ -50,7 +39,6 @@ export function createCanvasAccessService(
       if (!database) {
         return {
           boardType: "freeform",
-          engineType: "classic",
           readOnly: false,
         };
       }
@@ -59,7 +47,6 @@ export function createCanvasAccessService(
         `
           SELECT
             c.board_type,
-            c.engine_type,
             review_room.status AS review_room_status
           FROM canvas c
           JOIN workspace_members wm
@@ -71,7 +58,10 @@ export function createCanvasAccessService(
           WHERE c.workspace_id = $1
             AND c.id = $2
             AND (
-              c.board_type = 'freeform'
+              (
+                c.board_type = 'freeform'
+                AND c.engine_type = 'classic'
+              )
               OR (
                 c.board_type = 'review'
                 AND review_room.id IS NOT NULL
@@ -90,7 +80,6 @@ export function createCanvasAccessService(
       if (access.board_type === "freeform") {
         return {
           boardType: "freeform",
-          engineType: access.engine_type ?? "classic",
           readOnly: false,
         };
       }
@@ -99,7 +88,6 @@ export function createCanvasAccessService(
         if (access.review_room_status === "active") {
           return {
             boardType: "review",
-            engineType: access.engine_type ?? "classic",
             readOnly: false,
           };
         }
@@ -107,54 +95,12 @@ export function createCanvasAccessService(
         if (access.review_room_status === "completed") {
           return {
             boardType: "review",
-            engineType: access.engine_type ?? "classic",
             readOnly: true,
           };
         }
       }
 
       return null;
-    },
-    async getCanvasTldrawSyncRoomAccess(context, room) {
-      if (!context.userId || !room.workspaceId || !room.canvasId) {
-        return null;
-      }
-
-      if (!database) {
-        return {
-          boardType: "freeform",
-          engineType: "tldraw_sync",
-          readOnly: false,
-        };
-      }
-
-      const access = await database.queryOne<CanvasTldrawSyncAccessRow>(
-        `
-          SELECT
-            c.board_type,
-            c.engine_type
-          FROM canvas c
-          JOIN workspace_members wm
-            ON wm.workspace_id = c.workspace_id
-           AND wm.user_id = $3
-          WHERE c.workspace_id = $1
-            AND c.id = $2
-            AND c.board_type = 'freeform'
-            AND c.engine_type = 'tldraw_sync'
-          LIMIT 1
-        `,
-        [room.workspaceId, room.canvasId, context.userId],
-      );
-
-      if (!access) {
-        return null;
-      }
-
-      return {
-        boardType: "freeform",
-        engineType: "tldraw_sync",
-        readOnly: false,
-      };
     },
   };
 }

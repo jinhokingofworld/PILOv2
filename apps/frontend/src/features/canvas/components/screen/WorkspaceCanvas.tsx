@@ -34,7 +34,6 @@ import {
   MousePointer2,
   Pencil,
   Redo2,
-  RotateCcw,
   Rows3,
   SendToBack,
   Slash,
@@ -82,7 +81,6 @@ import {
   ClassicCanvasRuntime,
   type CanvasBoardDetail,
 } from "@/features/canvas/engine/runtime/ClassicCanvasRuntime";
-import { TldrawSyncCanvasRuntime } from "@/features/canvas/engine/runtime/TldrawSyncCanvasRuntime";
 import {
   canvasAgentToolTargetEventName,
   getCanvasAgentToolTargetPopover,
@@ -128,7 +126,6 @@ type CanvasGeoDrawingPreset = Exclude<
 >;
 
 const MOCK_CANVAS_WORKSPACE_ID = "pilo-local-workspace";
-const RETURN_TO_CLASSIC_CANVAS_SHORTCUT = "Ctrl+Alt+C";
 
 const canvasColorOptions: {
   label: string;
@@ -262,8 +259,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   );
   const [urlInsertValue, setUrlInsertValue] = useState("");
   const [isDriveFilePickerOpen, setIsDriveFilePickerOpen] = useState(false);
-  const [isReturningToClassicCanvas, setIsReturningToClassicCanvas] =
-    useState(false);
   const [openPopover, setOpenPopover] = useState<
     | "actions"
     | "color"
@@ -673,86 +668,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     },
     [canvasActions, closePopover],
   );
-
-  const returnToSourceClassicCanvas = useCallback(async () => {
-    if (
-      !shouldUseCanvasApi ||
-      !activeBoard ||
-      activeBoard.engineType !== "tldraw_sync" ||
-      !activeBoard.sourceCanvasId ||
-      isReturningToClassicCanvas
-    ) {
-      return;
-    }
-
-    setIsReturningToClassicCanvas(true);
-
-    try {
-      const detail = (await canvasClient.getBoardDetail(
-        activeBoard.sourceCanvasId,
-        {
-          workspaceId,
-        },
-      )) as CanvasBoardDetail;
-
-      setBoardState({
-        board: detail,
-        source: canvasClientMode,
-        status: "ready",
-      });
-      closePopover();
-      setActiveCanvasTool("select");
-    } catch (error) {
-      console.error("Canvas classic source open failed", error);
-      window.alert(
-        "원본 classic Canvas를 열지 못했습니다. Canvas 목록에서 직접 다시 선택해 주세요.",
-      );
-    } finally {
-      setIsReturningToClassicCanvas(false);
-    }
-  }, [
-    activeBoard,
-    canvasClient,
-    canvasClientMode,
-    closePopover,
-    isReturningToClassicCanvas,
-    shouldUseCanvasApi,
-    workspaceId,
-  ]);
-
-  useEffect(() => {
-    function handleReturnToClassicCanvasShortcut(event: KeyboardEvent) {
-      if (
-        !event.ctrlKey ||
-        !event.altKey ||
-        event.key.toLowerCase() !== "c"
-      ) {
-        return;
-      }
-
-      if (
-        activeBoard?.engineType !== "tldraw_sync" ||
-        !activeBoard.sourceCanvasId
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      void returnToSourceClassicCanvas();
-    }
-
-    window.addEventListener("keydown", handleReturnToClassicCanvasShortcut);
-    return () => {
-      window.removeEventListener(
-        "keydown",
-        handleReturnToClassicCanvasShortcut,
-      );
-    };
-  }, [
-    activeBoard?.engineType,
-    activeBoard?.sourceCanvasId,
-    returnToSourceClassicCanvas,
-  ]);
 
   const markCanvasUiEvent = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
@@ -1365,27 +1280,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               >
                 <TvMinimalPlay />
               </ToolButton>
-              {activeBoard?.engineType === "tldraw_sync" ? (
-                <ToolButton
-                  label="원본 classic Canvas"
-                  agentTarget="toolbar.more.classic_canvas"
-                  nativeTooltip
-                  disabled={
-                    !shouldUseCanvasApi ||
-                    !activeBoard.sourceCanvasId ||
-                    isReturningToClassicCanvas
-                  }
-                  onClick={returnToSourceClassicCanvas}
-                >
-                  <RotateCcw />
-                </ToolButton>
-              ) : null}
-              {activeBoard?.engineType === "tldraw_sync" ? (
-                <div className="canvas-realtime-version-hint">
-                  현재 Canvas는 tldraw sync 모드입니다. 원본 classic Canvas는{" "}
-                  {RETURN_TO_CLASSIC_CANVAS_SHORTCUT}로도 열 수 있습니다.
-                </div>
-              ) : null}
             </section>
           ) : null}
 
@@ -1411,26 +1305,16 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           </section>
         </nav>
 
-        {board.engineType === "tldraw_sync" ? (
-          <TldrawSyncCanvasRuntime
-            key={`${board.workspaceId}:${board.id}:tldraw-sync`}
-            board={board}
-            canvasClient={shouldUseCanvasApi ? canvasClient : null}
-            onHistoryStateChange={setCanvasHistoryState}
-            onReady={setCanvasActions}
-          />
-        ) : (
-          <ClassicCanvasRuntime
-            key={`${board.workspaceId}:${board.id}:${shouldUseCanvasApi ? "api" : "local"}`}
-            board={board}
-            canvasClient={shouldUseCanvasApi ? canvasClient : null}
-            onHistoryStateChange={setCanvasHistoryState}
-            onOneShotToolCreated={handleOneShotToolCreated}
-            onReady={setCanvasActions}
-            realtime={canvasRealtimeConfig}
-            storageMode={shouldUseCanvasApi ? "api" : "local"}
-          />
-        )}
+        <ClassicCanvasRuntime
+          key={`${board.workspaceId}:${board.id}:${shouldUseCanvasApi ? "api" : "local"}`}
+          board={board}
+          canvasClient={shouldUseCanvasApi ? canvasClient : null}
+          onHistoryStateChange={setCanvasHistoryState}
+          onOneShotToolCreated={handleOneShotToolCreated}
+          onReady={setCanvasActions}
+          realtime={canvasRealtimeConfig}
+          storageMode={shouldUseCanvasApi ? "api" : "local"}
+        />
       </div>
     </section>
   );

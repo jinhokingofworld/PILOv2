@@ -34,17 +34,14 @@ import {
   CanvasOperationsCatchupPayload,
   CanvasShapePayload,
   CanvasShapeSummaryPayload,
-  CanvasSyncDocumentPayload,
   CanvasUserStatePayload,
   CanvasViewSettingPayload,
-  ConvertCanvasEngineRequest,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
   DeleteCanvasShapeRequest,
   ListCanvasOperationsQuery,
   ListCanvasShapesQuery,
   SyncCanvasShapesBatchRequest,
-  UpdateCanvasSyncDocumentRequest,
   UpdateCanvasViewSettingRequest,
   UpdateCanvasShapeRequest
 } from "./contracts/canvas.types";
@@ -173,23 +170,6 @@ export class CanvasController {
     return apiResponse(canvas);
   }
 
-  @Post("canvases/:canvasId/engine-conversions")
-  async convertCanvasEngine(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("canvasId") canvasId: string,
-    @Body() body: ConvertCanvasEngineRequest
-  ): Promise<ApiSuccessResponse<CanvasBoardPayload>> {
-    const canvas = await this.canvasService.convertCanvasEngine(
-      currentUserId,
-      workspaceId,
-      canvasId,
-      body
-    );
-
-    return apiResponse(canvas);
-  }
-
   @Get("canvases/:canvasId")
   async getCanvas(
     @CurrentUserId() currentUserId: string,
@@ -203,38 +183,6 @@ export class CanvasController {
     );
 
     return apiResponse(canvas);
-  }
-
-  @Get("canvases/:canvasId/sync-document")
-  async getCanvasSyncDocument(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("canvasId") canvasId: string
-  ): Promise<ApiSuccessResponse<CanvasSyncDocumentPayload>> {
-    const document = await this.canvasService.getCanvasSyncDocument(
-      currentUserId,
-      workspaceId,
-      canvasId
-    );
-
-    return apiResponse(document);
-  }
-
-  @Put("canvases/:canvasId/sync-document")
-  async updateCanvasSyncDocument(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("canvasId") canvasId: string,
-    @Body() body: UpdateCanvasSyncDocumentRequest
-  ): Promise<ApiSuccessResponse<CanvasSyncDocumentPayload>> {
-    const document = await this.canvasService.updateCanvasSyncDocument(
-      currentUserId,
-      workspaceId,
-      canvasId,
-      body
-    );
-
-    return apiResponse(document);
   }
 
   @Get("canvases/:canvasId/shapes")

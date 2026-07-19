@@ -366,7 +366,6 @@ test("Canvas 입장은 access 직후 DB baseline을 조회하고 최신 roomStat
           lifecycle.push("access");
           return {
             boardType: "freeform",
-            engineType: "classic",
             readOnly: false,
           };
         },

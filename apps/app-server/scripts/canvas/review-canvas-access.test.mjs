@@ -111,7 +111,7 @@ const listCanvases = readMethod(
 const createCanvas = readMethod(
   canvasBoardService,
   "createCanvas",
-  "convertCanvasEngine"
+  "getCanvas"
 );
 const getCanvas = readMethod(
   canvasBoardService,
@@ -160,10 +160,10 @@ assert.match(
   /const CANVAS_WRITE_ACCESS_SQL = `[\s\S]*review_room\.status = 'active'/
 );
 assert.match(listCanvases, /c\.board_type = 'freeform'/);
+assert.match(listCanvases, /c\.engine_type = 'classic'/);
 assert.doesNotMatch(listCanvases, /CANVAS_READ_ACCESS_SQL/);
-assert.match(createCanvas, /engine_type/);
-assert.match(createCanvas, /engine_version/);
-assert.match(createCanvas, /VALUES \(\$1, \$2, 'freeform', \$3, 1, \$4\)/);
+assert.match(canvasService, /c\.engine_type = 'classic'/);
+assert.match(createCanvas, /VALUES \(\$1, \$2, 'freeform', \$3\)/);
 assert.match(
   getCanvas,
   /canvasAccess\.findCanvas\(\s*workspaceId,\s*canvasId\s*\)/
