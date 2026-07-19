@@ -994,7 +994,7 @@ def normalize_agent_planner_decision(
         job,
         prompt=prompt,
     )
-    decision = _normalize_meeting_candidate_goal_resume(
+    decision = _normalize_candidate_goal_resume(
         decision,
         job,
         planning_context=planning_context,
@@ -1749,6 +1749,18 @@ MEETING_GOAL_TOOLS_BY_RESOURCE_TYPE = {
         "approve_meeting_report_action_item",
     },
 }
+
+
+def _normalize_candidate_goal_resume(
+    decision: AgentPlannerDecision,
+    job: AgentRunJob,
+    *,
+    planning_context: str,
+) -> AgentPlannerDecision:
+    """Apply domain adapters without coupling the planner pipeline to one domain."""
+    for adapter in (_normalize_meeting_candidate_goal_resume,):
+        decision = adapter(decision, job, planning_context=planning_context)
+    return decision
 
 
 def _normalize_meeting_candidate_goal_resume(

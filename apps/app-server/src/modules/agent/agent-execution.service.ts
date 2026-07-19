@@ -733,21 +733,64 @@ export class AgentExecutionService {
       };
     }
 
+    const candidateContext = {
+      currentUserId,
+      workspaceId,
+      runId,
+      requestContext: await this.findRunRequestContext(
+        currentUserId,
+        workspaceId,
+        runId
+      )
+    };
     const candidateSelections = clarification.candidateResources?.length
-      ? await this.agentCandidateSelectionService.createMeetingCandidates(
-          {
-            currentUserId,
-            workspaceId,
-            runId,
-            requestContext: await this.findRunRequestContext(
-              currentUserId,
-              workspaceId,
-              runId
-            )
-          },
-          step.id,
-          clarification.candidateResources
+      ? clarification.candidateResources.every(
+          ({ reference }) => !reference.domain || reference.domain === "meeting"
         )
+        ? await this.agentCandidateSelectionService.createMeetingCandidates(
+            candidateContext,
+            step.id,
+            clarification.candidateResources.map(({ reference, candidate }) => ({
+              reference: {
+                resourceType: reference.resourceType as
+                  | "meeting_room"
+                  | "meeting"
+                  | "meeting_report"
+                  | "workspace_member"
+                  | "meeting_report_action_item",
+                resourceId: reference.resourceId,
+                ...(reference.reportId ? { reportId: reference.reportId } : {})
+              },
+              candidate: {
+                resourceType: reference.resourceType as
+                  | "meeting_room"
+                  | "meeting"
+                  | "meeting_report"
+                  | "workspace_member"
+                  | "meeting_report_action_item",
+                label: candidate.label,
+                description: candidate.description,
+                status: candidate.status
+              }
+            }))
+          )
+        : await this.agentCandidateSelectionService.createCandidates(
+            candidateContext,
+            step.id,
+            clarification.candidateResources.map(({ reference, candidate }) => ({
+              reference: {
+                domain: reference.domain ?? "meeting",
+                resourceType: reference.resourceType,
+                resourceId: reference.resourceId,
+                ...(reference.reportId ? { reportId: reference.reportId } : {})
+              },
+              candidate: {
+                label: candidate.label,
+                description: candidate.description,
+                status: candidate.status
+              }
+            }))
+          )
       : [];
     const outputSummary = this.sanitizeJsonObject({
       ...clarification.outputSummary,

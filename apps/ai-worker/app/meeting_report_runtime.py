@@ -1804,6 +1804,7 @@ class PgAgentRunRepository:
             WHERE candidate.run_id = %s
               AND candidate.workspace_id = %s
               AND candidate.requested_by_user_id = %s
+              AND candidate.domain = 'meeting'
               AND candidate.consumed_at IS NOT NULL
               AND candidate.expires_at > now()
               AND NOT EXISTS (

@@ -8,6 +8,7 @@ import {
 import { WorkspaceService } from "../workspace/workspace.service";
 import { agentStorageUnavailable } from "./agent-api-error";
 import { AgentCanvasDelegationCompletionService } from "./agent-canvas-delegation-completion.service";
+import { AGENT_CANDIDATE_SELECTION_KIND } from "./agent-candidate-input";
 import {
   CreateAgentRunResult as StoredCreateAgentRunResult,
   AgentLoggingService,
@@ -61,6 +62,10 @@ export interface AgentRunInput {
       }
     | {
         kind: typeof MEETING_CANDIDATE_SELECTION_KIND;
+        candidateSelectionId: string;
+      }
+    | {
+        kind: typeof AGENT_CANDIDATE_SELECTION_KIND;
         candidateSelectionId: string;
       };
 }
@@ -253,8 +258,8 @@ const MAX_REQUEST_CONTEXT_BYTES = 196_608;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CANDIDATE_ORDINAL_PATTERN =
-  /^\s*([1-3])\s*번(?:\s*후보)?(?:\s*(?:을|를)?\s*(?:선택(?:할게요|합니다|했어요)?|골라(?:주세요|줘|요)?))?\s*[.!?]*\s*$/;
-const MAX_CANDIDATE_SELECTIONS = 3;
+  /^\s*([1-5])\s*번(?:\s*후보)?(?:\s*(?:을|를)?\s*(?:선택(?:할게요|합니다|했어요)?|골라(?:주세요|줘|요)?))?\s*[.!?]*\s*$/;
+const MAX_CANDIDATE_SELECTIONS = 5;
 const AGENT_RUN_STATUSES: AgentRunStatus[] = [
   "planning",
   "waiting_user_input",
@@ -365,10 +370,42 @@ export class AgentService {
         input.selection ??
         (await this.resolveOrdinalCandidateSelection(
           transaction,
+          {
+            currentUserId,
+            workspaceId,
+            runId,
+            requestContext: run.request_context_json
+          },
           runId,
           input.message
         ));
       let storedMessage = input.message;
+      if (selection?.kind === AGENT_CANDIDATE_SELECTION_KIND) {
+        const selected =
+          await this.agentCandidateSelectionService.consumeCandidateInTransaction(
+            transaction,
+            {
+              currentUserId,
+              workspaceId,
+              runId,
+              requestContext: run.request_context_json
+            },
+            selection.candidateSelectionId
+          );
+        if (selected.reference.domain === "meeting") {
+          storedMessage = buildStoredMeetingCandidateSelectionMessage(selected.label);
+        } else if (
+          selected.reference.domain === "sqltoerd" &&
+          selected.reference.resourceType === "session"
+        ) {
+          storedMessage = buildStoredSqlErdSelectionMessage(
+            selected.reference.resourceId,
+            selected.label
+          );
+        } else {
+          throw badRequest("Agent candidate domain cannot resume this run");
+        }
+      }
       if (selection?.kind === SQL_ERD_SESSION_SELECTION_KIND) {
         const selectionToken = selection.token;
         const latestToolStep = await this.getLatestCompletedToolStep(
@@ -915,6 +952,22 @@ export class AgentService {
       throw badRequest("selection must be a valid Agent selection");
     }
     if (
+      body.selection.kind === AGENT_CANDIDATE_SELECTION_KIND &&
+      Object.keys(body.selection).every((key) =>
+        ["kind", "candidateSelectionId"].includes(key)
+      ) &&
+      typeof body.selection.candidateSelectionId === "string" &&
+      UUID_PATTERN.test(body.selection.candidateSelectionId)
+    ) {
+      return {
+        message,
+        selection: {
+          kind: AGENT_CANDIDATE_SELECTION_KIND,
+          candidateSelectionId: body.selection.candidateSelectionId
+        }
+      };
+    }
+    if (
       body.selection.kind === SQL_ERD_SESSION_SELECTION_KIND &&
       Object.keys(body.selection).every((key) => ["kind", "token"].includes(key)) &&
       isSqlErdSelectionToken(body.selection.token)
@@ -948,11 +1001,29 @@ export class AgentService {
 
   private async resolveOrdinalCandidateSelection(
     transaction: DatabaseTransaction,
+    context: {
+      currentUserId: string;
+      workspaceId: string;
+      runId: string;
+      requestContext: AgentRunRequestContext;
+    },
     runId: string,
     message: string
   ): Promise<AgentRunInput["selection"] | undefined> {
     const ordinal = this.parseCandidateOrdinal(message);
     if (ordinal === null) return undefined;
+    const generatedCandidateSelectionId =
+      await this.agentCandidateSelectionService?.getLatestCandidateSelectionIdByOrdinalInTransaction?.(
+        transaction,
+        context,
+        ordinal
+      );
+    if (generatedCandidateSelectionId) {
+      return {
+        kind: AGENT_CANDIDATE_SELECTION_KIND,
+        candidateSelectionId: generatedCandidateSelectionId
+      };
+    }
     const latestToolStep = await this.getLatestCompletedToolStep(transaction, runId);
     if (!latestToolStep) return undefined;
 

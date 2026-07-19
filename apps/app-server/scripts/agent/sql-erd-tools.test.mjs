@@ -678,7 +678,35 @@ assert.deepEqual(
     }
   ]
 );
-assert.equal(ambiguousPreparation.resourceRefs.length, 2);
+assert.equal(ambiguousPreparation.resourceRefs.length, 0);
+assert.deepEqual(
+  ambiguousPreparation.candidateResources.map(({ reference, candidate }) => ({
+    reference,
+    label: candidate.label
+  })),
+  [
+    {
+      reference: {
+        domain: "sqltoerd",
+        resourceType: "session",
+        resourceId: SESSION_ID
+      },
+      label: "주문 ERD"
+    },
+    {
+      reference: {
+        domain: "sqltoerd",
+        resourceType: "session",
+        resourceId: secondSessionId
+      },
+      label: "결제 ERD"
+    }
+  ]
+);
+assert.equal(
+  JSON.stringify(ambiguousPreparation.outputSummary).includes(SESSION_ID),
+  false
+);
 
 assert.deepEqual(
   await multipleInspect.prepareExecution(
@@ -709,8 +737,8 @@ const duplicateTitlePreparation = await multipleInspect.prepareExecution(
 );
 assert.equal(duplicateTitlePreparation.kind, "needs_clarification");
 assert.deepEqual(
-  duplicateTitlePreparation.outputSummary.candidates.map(
-    (candidate) => candidate.selectionToken
+  duplicateTitlePreparation.candidateResources.map(
+    ({ reference }) => reference.resourceId
   ),
   [SESSION_ID, secondSessionId]
 );

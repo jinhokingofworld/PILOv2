@@ -162,6 +162,9 @@ export type AgentConfirmationApproveInput = {
 };
 
 export type AgentRunInputSelection = {
+  kind: "candidate";
+  candidateSelectionId: string;
+} | {
   kind: "sql_erd_session";
   token: string;
 } | {

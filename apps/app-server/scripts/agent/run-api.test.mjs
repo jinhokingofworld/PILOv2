@@ -895,11 +895,20 @@ class FakeRunInputDatabaseService {
   const publisher = new FakeAgentOutboxPublisherService();
   const candidateSelections = {
     calls: [],
-    async consumeMeetingCandidateInTransaction(_transaction, _context, selectionId) {
-      this.calls.push(selectionId);
+    async getLatestCandidateSelectionIdByOrdinalInTransaction(
+      _transaction,
+      _context,
+      ordinal
+    ) {
+      this.calls.push({ method: "resolveOrdinal", ordinal });
+      return meetingCandidateSelectionId;
+    },
+    async consumeCandidateInTransaction(_transaction, _context, selectionId) {
+      this.calls.push({ method: "consume", selectionId });
       return {
         label: "주간 개발 회의록",
         reference: {
+          domain: "meeting",
           resourceType: "meeting_report",
           resourceId: "77777777-7777-4777-8777-777777777777"
         }
@@ -919,11 +928,57 @@ class FakeRunInputDatabaseService {
     message: "2번 후보를 선택할게요"
   });
 
-  assert.deepEqual(candidateSelections.calls, [meetingCandidateSelectionId]);
+  assert.deepEqual(candidateSelections.calls, [
+    { method: "resolveOrdinal", ordinal: 2 },
+    { method: "consume", selectionId: meetingCandidateSelectionId }
+  ]);
   assert.equal(result.run.messages.at(-1).content, "주간 개발 회의록 후보를 선택했습니다.");
   assert.equal(
     database.messages.at(-1).content.includes(meetingCandidateSelectionId),
     false
+  );
+}
+
+{
+  const candidateSelectionId = "99999999-9999-4999-8999-999999999999";
+  const database = new FakeRunInputDatabaseService();
+  const publisher = new FakeAgentOutboxPublisherService();
+  const candidateSelections = {
+    calls: [],
+    async consumeCandidateInTransaction(_transaction, _context, selectionId) {
+      this.calls.push(selectionId);
+      return {
+        label: "결제 ERD",
+        reference: {
+          domain: "sqltoerd",
+          resourceType: "session",
+          resourceId: SQL_ERD_SECOND_SESSION_ID
+        }
+      };
+    }
+  };
+  const service = new AgentService(
+    database,
+    new FakeWorkspaceService(),
+    new FakeAgentLoggingService(null),
+    publisher,
+    null,
+    candidateSelections
+  );
+
+  const result = await service.submitRunInput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    message: "결제 ERD 후보를 선택했습니다.",
+    selection: {
+      kind: "candidate",
+      candidateSelectionId
+    }
+  });
+
+  assert.deepEqual(candidateSelections.calls, [candidateSelectionId]);
+  assert.equal(result.run.messages.at(-1).content, "결제 ERD 세션을 선택했습니다.");
+  assert.match(
+    database.messages.at(-1).content,
+    new RegExp(`sessionSelectionToken=${SQL_ERD_SECOND_SESSION_ID}`)
   );
 }
 

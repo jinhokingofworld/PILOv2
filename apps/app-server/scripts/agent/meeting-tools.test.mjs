@@ -643,7 +643,11 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
 class FakeCandidateSelectionDatabase {
   constructor() {
     this.id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    this.domain = "meeting";
+    this.resourceType = "meeting_room";
     this.resourceId = MEETING_ROOM_ID;
+    this.label = "기본 회의실";
+    this.description = "기본 회의방";
     this.latestStepId = CANDIDATE_STEP_ID;
     this.consumed = false;
   }
@@ -653,15 +657,28 @@ class FakeCandidateSelectionDatabase {
   }
 
   async queryOne(text, values = []) {
+    if (text.includes("SELECT candidate.id")) {
+      const [workspaceId, userId, runId, ordinal] = values;
+      return !this.consumed &&
+        this.latestStepId === CANDIDATE_STEP_ID &&
+        workspaceId === WORKSPACE_ID &&
+        userId === USER_ID &&
+        runId === RUN_ID &&
+        ordinal === 1
+        ? { id: this.id }
+        : null;
+    }
     if (text.includes("INSERT INTO agent_candidate_selections")) {
       return {
         id: this.id,
         tool_step_id: CANDIDATE_STEP_ID,
-        resource_type: "meeting_room",
+        domain: this.domain,
+        candidate_ordinal: 1,
+        resource_type: this.resourceType,
         resource_id: this.resourceId,
         report_id: null,
-        label: "기본 회의실",
-        description: "기본 회의방",
+        label: this.label,
+        description: this.description,
         status: null
       };
     }
@@ -680,11 +697,13 @@ class FakeCandidateSelectionDatabase {
       return {
         id: this.id,
         tool_step_id: CANDIDATE_STEP_ID,
-        resource_type: "meeting_room",
+        domain: this.domain,
+        candidate_ordinal: 1,
+        resource_type: this.resourceType,
         resource_id: this.resourceId,
         report_id: null,
-        label: "기본 회의실",
-        description: "기본 회의방",
+        label: this.label,
+        description: this.description,
         status: null
       };
     }
@@ -730,6 +749,22 @@ class FakeCandidateSelectionDatabase {
     status: null
   });
   assert.doesNotMatch(JSON.stringify(candidate), new RegExp(MEETING_ROOM_ID));
+  assert.equal(
+    await service.getLatestCandidateSelectionIdByOrdinalInTransaction(
+      database,
+      context,
+      1
+    ),
+    candidate.candidateSelectionId
+  );
+  assert.equal(
+    await service.getLatestCandidateSelectionIdByOrdinalInTransaction(
+      database,
+      context,
+      2
+    ),
+    null
+  );
   assert.deepEqual(
     await service.consumeMeetingCandidate(context, candidate.candidateSelectionId),
     {
@@ -756,6 +791,74 @@ class FakeCandidateSelectionDatabase {
     (error) => error.getStatus?.() === 400,
     "A candidate from an earlier clarification cannot be claimed after a newer tool step"
   );
+}
+
+{
+  const database = new FakeCandidateSelectionDatabase();
+  database.domain = "sqltoerd";
+  database.resourceType = "session";
+  database.resourceId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  database.label = "결제 ERD";
+  database.description = "테이블 4개";
+  const sqlErdCalls = [];
+  const service = new AgentCandidateSelectionService(
+    database,
+    { async revalidateReference() { return null; } },
+    {
+      async getSession(currentUserId, workspaceId, sessionId) {
+        sqlErdCalls.push({ currentUserId, workspaceId, sessionId });
+        return { id: sessionId };
+      }
+    }
+  );
+  const [candidate] = await service.createCandidates(context, CANDIDATE_STEP_ID, [
+    {
+      reference: {
+        domain: "sqltoerd",
+        resourceType: "session",
+        resourceId: database.resourceId
+      },
+      candidate: {
+        label: database.label,
+        description: database.description,
+        status: null
+      }
+    }
+  ]);
+
+  assert.deepEqual(
+    await service.consumeCandidateInTransaction(database, context, candidate.candidateSelectionId),
+    {
+      label: "결제 ERD",
+      reference: {
+        domain: "sqltoerd",
+        resourceType: "session",
+        resourceId: database.resourceId
+      }
+    }
+  );
+  assert.deepEqual(sqlErdCalls, [
+    {
+      currentUserId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      sessionId: database.resourceId
+    }
+  ]);
+}
+
+{
+  const database = new FakeCandidateSelectionDatabase();
+  const service = new AgentCandidateSelectionService(database, {
+    async revalidateReference() {
+      return null;
+    }
+  });
+  await assert.rejects(
+    () => service.consumeMeetingCandidate(context, database.id),
+    (error) => error.getStatus?.() === 400,
+    "Permission loss or stale resources must stop before candidate consumption"
+  );
+  assert.equal(database.consumed, false);
 }
 
 {

@@ -60,6 +60,7 @@ assert.match(agentTypes, /export type AgentRun/);
 assert.match(agentTypes, /export type CreateAgentRunInput/);
 assert.match(agentTypes, /export type SubmitAgentRunInput/);
 assert.match(agentTypes, /kind: "sql_erd_session"/);
+assert.match(agentTypes, /kind: "candidate"/);
 assert.match(agentTypes, /selection\?: AgentRunInputSelection/);
 assert.match(agentTypes, /export type AgentRunMessage/);
 assert.match(agentTypes, /messages: AgentRunMessage\[\]/);
@@ -486,13 +487,53 @@ assert.deepEqual(
   }),
   [
     {
-      key: `meeting:${meetingCandidateSelectionId}`,
+      key: `candidate:${meetingCandidateSelectionId}`,
       label: "주간 개발 회의록",
       description: "2026년 7월 17일",
       status: "completed",
       selection: {
-        kind: "meeting_candidate",
+        kind: "candidate",
         candidateSelectionId: meetingCandidateSelectionId
+      }
+    }
+  ]
+);
+const sqlCandidateSelectionId = "77777777-7777-4777-8777-777777777777";
+assert.deepEqual(
+  agentResourceUtilities.getAgentCandidateSelections({
+    status: "waiting_user_input",
+    steps: [
+      {
+        id: "sql-candidate-step",
+        order: 1,
+        type: "tool",
+        status: "completed",
+        toolName: "inspect_sql_erd_schema",
+        outputSummary: {
+          status: "needs_clarification",
+          candidateSelections: [
+            {
+              candidateSelectionId: sqlCandidateSelectionId,
+              resourceType: "session",
+              label: "결제 ERD",
+              description: "테이블 4개 · 관계 3개",
+              status: null
+            }
+          ]
+        },
+        resourceRefs: []
+      }
+    ]
+  }),
+  [
+    {
+      key: `candidate:${sqlCandidateSelectionId}`,
+      label: "결제 ERD",
+      description: "테이블 4개 · 관계 3개",
+      status: null,
+      selection: {
+        kind: "candidate",
+        candidateSelectionId: sqlCandidateSelectionId
       }
     }
   ]
@@ -559,15 +600,7 @@ assert.deepEqual(
       }
     ]
   }),
-  [
-    {
-      selectionToken: resourceSessionId,
-      title: "결제 ERD",
-      updatedAt: "2026-07-16T00:00:00.000Z",
-      tableCount: 2,
-      relationCount: 1
-    }
-  ]
+  []
 );
 assert.deepEqual(
   agentResourceUtilities.getSqlErdSessionCandidates({

@@ -105,22 +105,14 @@ export interface AgentToolClarificationResult {
   /** Server-only references. AgentExecution persists opaque candidate IDs before output is stored. */
   candidateResources?: Array<{
     reference: {
-      resourceType:
-        | "meeting_room"
-        | "meeting"
-        | "meeting_report"
-        | "workspace_member"
-        | "meeting_report_action_item";
+      /** Omitted only by the legacy Meeting adapter. New adapters must provide a domain. */
+      domain?: string;
+      resourceType: string;
       resourceId: string;
       reportId?: string;
     };
     candidate: {
-      resourceType:
-        | "meeting_room"
-        | "meeting"
-        | "meeting_report"
-        | "workspace_member"
-        | "meeting_report_action_item";
+      resourceType?: string;
       label: string;
       description: string | null;
       status: string | null;
