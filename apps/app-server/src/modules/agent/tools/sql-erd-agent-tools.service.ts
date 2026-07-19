@@ -372,6 +372,7 @@ export class SqlErdAgentToolsService {
         "inspect_sql_erd_schema 결과의 compact table ref를 model fingerprint로 검증하고 핵심 및 직접 관련 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session은 변경하지 않습니다.",
       riskLevel: "low",
       executionMode: "auto",
+      completesRunAfterExecution: true,
       inputSchema: FOCUS_SQL_ERD_INPUT_SCHEMA,
       validateInput: (input) => this.validateFocusInput(input),
       execute: (context, input) =>

@@ -400,6 +400,7 @@ class FakeAgentToolRegistryService {
       description: "fake tool",
       riskLevel,
       executionMode,
+      completesRunAfterExecution: this.state.completesRunAfterExecution === true,
       inputSchema: {},
       validateInput: (input) => {
         this.calls.push({ method: "validateInput", input });
@@ -1115,6 +1116,24 @@ function formatterMeetingReport(index, overrides = {}) {
 }
 
 {
+  const answer = buildAgentReadResultAnswer({
+    toolName: "focus_sql_erd_tables",
+    outputSummary: {
+      action: "focused",
+      title: "PILO",
+      featureLabel: "로그",
+      primaryTables: [{ name: "activity_logs" }],
+      relatedTables: [{ name: "users" }]
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /로그 관련 테이블에 집중 표시했습니다/);
+  assert.match(answer, /핵심 테이블: activity_logs/);
+  assert.match(answer, /관련 테이블: users/);
+}
+
+{
   const events = Array.from({ length: 6 }, (_, index) => ({
     id: index + 1,
     title: `일정 ${index + 1}`,
@@ -1469,6 +1488,27 @@ function formatterMeetingReport(index, overrides = {}) {
     1
   );
   assert.deepEqual(outboxPublisherService.calls, []);
+}
+
+{
+  const { service, loggingService, outboxPublisherService } = createService({
+    registryState: {
+      completesRunAfterExecution: true,
+      name: "focus_sql_erd_tables"
+    },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "waiting_user_input");
+  assert.equal(result.run.status, "waiting_user_input");
+  assert.deepEqual(outboxPublisherService.calls, []);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.waitForUserInput, true);
+  assert.match(completion.input.waitingMessage, /focus_sql_erd_tables 실행을 완료했습니다/);
 }
 
 {

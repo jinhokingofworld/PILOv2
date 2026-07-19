@@ -143,6 +143,11 @@ export interface AgentToolDefinition<TInput> {
   executionMode: AgentToolExecutionMode;
   contextRequirement?: AgentToolContextRequirement;
   requiresGroundedAnswer?: boolean;
+  /**
+   * The tool result is itself the final response for this run. Avoid another
+   * planner pass when no follow-up tool decision is needed.
+   */
+  completesRunAfterExecution?: boolean;
   inputSchema: AgentToolInputSchema;
   validateInput: (input: unknown) => TInput;
   /**
