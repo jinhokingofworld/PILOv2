@@ -2664,7 +2664,9 @@ export function PrReviewCanvasSurface({
         />
         <PrReviewCanvasRealtimeBridge
           presence={canvasPresence}
-          readOnly={readOnly}
+          readOnly={
+            readOnly || !persistedFileShapeEnabled || layoutPreview !== null
+          }
         />
         <PrReviewFileNodeActivationBridge onFileOpen={onFileOpen} />
         <PrReviewCanvasPersistenceBridge

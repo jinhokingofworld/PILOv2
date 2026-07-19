@@ -1,6 +1,6 @@
 "use client";
 
-import { type MouseEvent, useState } from "react";
+import { type MouseEvent, type PointerEvent, useState } from "react";
 import {
   HTMLContainer,
   Polyline2d,
@@ -12,11 +12,13 @@ import {
   useEditor,
   useValue,
   type TLBaseShape,
-  type TLShape
+  type TLShape,
+  type TLShapeId
 } from "tldraw";
 import { AlertTriangle, FileSearch, LockKeyhole } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { getPrReviewFlowDragShapeIds } from "@/features/pr-review/components/review-canvas/pr-review-flow-group-drag";
 import { activatePrReviewFileNode } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
 import type {
   PrReviewFileRoleType,
@@ -680,8 +682,36 @@ function PrReviewRoleLane({ shape }: { shape: PrReviewRoleLaneShape }) {
 }
 
 function PrReviewFlowLabel({ shape }: { shape: PrReviewFlowLabelShape }) {
+  const editor = useEditor();
+
+  function handlePointerDownCapture(event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || editor.getInstanceState().isReadonly) {
+      return;
+    }
+
+    const fileShapes = editor
+      .getCurrentPageShapes()
+      .filter(isPrReviewFileNodeShape)
+      .map((fileShape) => ({
+        id: String(fileShape.id),
+        flowId: fileShape.props.flowId,
+        pinned: fileShape.props.pinned
+      }));
+    const shapeIds = getPrReviewFlowDragShapeIds({
+      fileShapes,
+      flowId: shape.props.flowId,
+      flowLabelShapeId: String(shape.id)
+    });
+
+    editor.select(...shapeIds.map((shapeId) => shapeId as TLShapeId));
+  }
+
   return (
-    <HTMLContainer style={{ width: shape.props.w, height: shape.props.h }}>
+    <HTMLContainer
+      className="cursor-move"
+      onPointerDownCapture={handlePointerDownCapture}
+      style={{ width: shape.props.w, height: shape.props.h }}
+    >
       <div className="flex h-full min-w-0 flex-col justify-center overflow-hidden">
         <p className="text-xs font-semibold uppercase text-blue-600">
           Flow {shape.props.sortOrder} · {shape.props.fileCount}개 파일
