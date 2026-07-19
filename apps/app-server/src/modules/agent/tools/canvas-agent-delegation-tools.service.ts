@@ -48,7 +48,7 @@ export class CanvasAgentDelegationToolsService {
       {
         name: "delegate_canvas_agent",
         description:
-          "Use for requests about the Workspace Canvas or its active selection: finding existing shapes, Canvas toolbar help when the UI context enables toolHelpMode, and generating static HTML/CSS from an explicit Canvas selection. The App Server prioritizes the active classic freeform Canvas context, otherwise resolves the Workspace's single classic freeform Canvas, and delegates the user's original wording to Canvas AI. It does not create diagrams or arbitrary Canvas shapes. Do not rewrite the prompt or include identifiers in the tool input.",
+          "Use for requests about the Workspace Canvas or its active selection: finding existing shapes, importing an existing image from Workspace Drive, Canvas toolbar help when the UI context enables toolHelpMode, and generating static HTML/CSS from an explicit Canvas selection. The App Server prioritizes the active classic freeform Canvas context, otherwise resolves the Workspace's single classic freeform Canvas, and delegates the user's original wording to Canvas AI. It does not create diagrams or arbitrary Canvas shapes. Do not rewrite the prompt or include identifiers in the tool input.",
         riskLevel: "low",
         executionMode: "contextual",
         inputSchema: INPUT_SCHEMA,

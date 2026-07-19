@@ -374,6 +374,13 @@ def test_planner_prompt_finishes_action_item_transfer_before_approval() -> None:
     assert "Never approve before the assignee update succeeds" in prompt
 
 
+def test_planner_prompt_delegates_canvas_drive_image_import() -> None:
+    prompt = _agent_planner_system_prompt()
+
+    assert "Workspace Drive image" in prompt
+    assert "delegate_canvas_agent" in prompt
+
+
 def test_meeting_candidate_selection_resumes_terminal_goal_without_repeating_lookup() -> None:
     tools = [
         tool_snapshot(
