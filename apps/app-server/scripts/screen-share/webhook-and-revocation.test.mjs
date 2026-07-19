@@ -5,6 +5,7 @@ import "reflect-metadata";
 import { TrackSource } from "livekit-server-sdk";
 import { MeetingModule } from "../../dist/modules/meeting/meeting.module.js";
 import { LiveKitWebhookService } from "../../dist/modules/meeting/livekit-webhook.service.js";
+import { ScreenShareCleanupService } from "../../dist/modules/screen-share/screen-share-cleanup.service.js";
 import { ScreenShareMembershipRevocationService } from "../../dist/modules/screen-share/screen-share-membership-revocation.service.js";
 import { ScreenShareModule } from "../../dist/modules/screen-share/screen-share.module.js";
 import { ScreenShareRoomService } from "../../dist/modules/screen-share/screen-share-room.service.js";
@@ -57,6 +58,15 @@ class FakeStateService {
   getByRoomCalls = [];
   activateCalls = [];
   endCalls = [];
+  pendingEvents = [];
+  endedRooms = new Set();
+  beforeTerminate = null;
+
+  async isKnownScreenShareRoom(roomName) {
+    return (
+      this.current?.livekitRoomName === roomName || this.endedRooms.has(roomName)
+    );
+  }
 
   async getByRoom(roomName) {
     this.getByRoomCalls.push(roomName);
@@ -78,19 +88,40 @@ class FakeStateService {
     ) {
       return null;
     }
-    if (this.current.status === "active") return this.current;
+    if (this.current.status === "active") {
+      return { session: this.current, outboxId: null };
+    }
     if (this.current.status !== "starting") return null;
     this.current = {
       ...this.current,
       status: "active",
       startedAt: input.startedAt
     };
-    return this.current;
+    const outboxId = `outbox-${this.pendingEvents.length + 1}`;
+    this.pendingEvents.push({
+      id: outboxId,
+      event: {
+        version: 1,
+        event: "workspace-screen-share:started",
+        workspaceId: this.current.workspaceId,
+        session: {
+          id: this.current.sessionId,
+          sharer: {
+            userId: this.current.sharerUserId,
+            displayName: this.current.sharerDisplayName,
+            avatarUrl: this.current.sharerAvatarUrl
+          },
+          startedAt: this.current.startedAt
+        }
+      }
+    });
+    return { session: this.current, outboxId };
   }
 
-  async endIfCurrent(input) {
+  async terminateIfCurrent(input, cleanupMode = "revocation") {
     this.order.push("end");
     this.endCalls.push(input);
+    this.beforeTerminate?.(input);
     if (
       this.current?.workspaceId !== input.workspaceId ||
       this.current.sessionId !== input.sessionId ||
@@ -100,12 +131,24 @@ class FakeStateService {
     }
     const ended = this.current;
     this.current = null;
-    return ended;
+    this.endedRooms.add(ended.livekitRoomName);
+    const outboxId = `outbox-${this.pendingEvents.length + 1}`;
+    this.pendingEvents.push({
+      id: outboxId,
+      event: {
+        version: 1,
+        event: "workspace-screen-share:ended",
+        workspaceId: ended.workspaceId,
+        sessionId: ended.sessionId
+      }
+    });
+    return { session: ended, outboxId };
   }
 }
 
 class FakeRealtimePublisher {
-  constructor(order = []) {
+  constructor(state, order = []) {
+    this.state = state;
     this.order = order;
   }
 
@@ -124,12 +167,30 @@ class FakeRealtimePublisher {
     }
     this.events.push(event);
   }
+
+  async flushPendingEvents() {
+    let delivered = 0;
+    while (this.state.pendingEvents.length > 0) {
+      const pending = this.state.pendingEvents[0];
+      this.order.push("publish");
+      this.attempts.push(pending.event);
+      this.beforePublish?.(pending.event);
+      if (this.failures > 0) {
+        this.failures -= 1;
+        throw new Error("screen-share publish failed");
+      }
+      this.events.push(pending.event);
+      this.state.pendingEvents.shift();
+      delivered += 1;
+    }
+    return delivered;
+  }
 }
 
 const createWebhookHarness = current => {
   const order = [];
   const state = new FakeStateService(current, order);
-  const publisher = new FakeRealtimePublisher(order);
+  const publisher = new FakeRealtimePublisher(state, order);
   const handler = new ScreenShareWebhookService(state, publisher);
   return { handler, order, publisher, state };
 };
@@ -161,16 +222,24 @@ const createWebhookHarness = current => {
   ]);
 
   await harness.handler.handleVerifiedEvent(event);
-  assert.equal(harness.publisher.events.length, 2);
+  assert.equal(
+    harness.publisher.events.length,
+    1,
+    "redelivered activation must not enqueue a duplicate started event"
+  );
 }
 
 {
   const harness = createWebhookHarness(startingSession());
   const event = webhookEvent("track_published");
   harness.publisher.failures = 1;
-  await assert.rejects(() => harness.handler.handleVerifiedEvent(event));
+  assert.equal(
+    (await harness.handler.handleVerifiedEvent(event)).status,
+    "received"
+  );
   assert.equal(harness.state.current?.status, "active");
   assert.equal(harness.publisher.events.length, 0);
+  assert.equal(harness.state.pendingEvents.length, 1);
 
   assert.equal(
     (await harness.handler.handleVerifiedEvent(event)).status,
@@ -209,7 +278,7 @@ for (const eventName of [
   assert.equal(harness.state.current, null);
   assert.equal(harness.publisher.events.length, 1);
   assert.equal(harness.publisher.events[0].event, "workspace-screen-share:ended");
-  assert.deepEqual(harness.order.slice(0, 2), ["publish", "end"]);
+  assert.deepEqual(harness.order.slice(0, 2), ["end", "publish"]);
 
   await harness.handler.handleVerifiedEvent(event);
   assert.equal(harness.publisher.events.length, 1);
@@ -219,12 +288,16 @@ for (const eventName of [
   const harness = createWebhookHarness(activeSession());
   const event = webhookEvent("track_unpublished");
   harness.publisher.failures = 1;
-  await assert.rejects(() => harness.handler.handleVerifiedEvent(event));
-  assert.equal(harness.state.current?.sessionId, sessionId);
-
   assert.equal(
     (await harness.handler.handleVerifiedEvent(event)).status,
     "received"
+  );
+  assert.equal(harness.state.current, null);
+  assert.equal(harness.state.pendingEvents.length, 1);
+
+  assert.equal(
+    (await harness.handler.handleVerifiedEvent(event)).status,
+    "ignored"
   );
   assert.equal(harness.state.current, null);
   assert.equal(harness.publisher.attempts.length, 2);
@@ -238,12 +311,13 @@ for (const eventName of [
     sharerUserId: otherUserId
   });
   const harness = createWebhookHarness(activeSession());
-  harness.publisher.beforePublish = () => {
+  harness.state.beforeTerminate = () => {
     harness.state.current = replacement;
   };
   await harness.handler.handleVerifiedEvent(webhookEvent("track_unpublished"));
   assert.deepEqual(harness.state.current, replacement);
-  assert.deepEqual(harness.order, ["publish", "end"]);
+  assert.deepEqual(harness.order, ["end"]);
+  assert.equal(harness.publisher.events.length, 0);
 }
 
 {
@@ -283,6 +357,120 @@ class FakeDatabase {
   async transaction() {
     this.transactionCalls += 1;
     throw new Error("screen-share webhook must not open a Meeting transaction");
+  }
+}
+
+class FakeCleanupRedisClient {
+  entries = [];
+  locks = new Map();
+
+  on() {
+    return this;
+  }
+
+  async connect() {}
+
+  destroy() {}
+
+  async quit() {}
+
+  async xRange() {
+    return this.entries.map(entry => ({
+      id: entry.id,
+      message: { session: entry.session, mode: entry.mode }
+    }));
+  }
+
+  async eval(script, options) {
+    if (script.includes("CLAIM_WORKSPACE_SCREEN_SHARE_CLEANUP")) {
+      const entry = this.entries.find(item => item.id === options.arguments[0]);
+      if (!entry || this.locks.has(options.keys[1])) return null;
+      this.locks.set(options.keys[1], options.arguments[1]);
+      return [entry.session, entry.mode];
+    }
+    if (script.includes("RELEASE_WORKSPACE_SCREEN_SHARE_CLEANUP")) {
+      if (this.locks.get(options.keys[0]) !== options.arguments[0]) return 0;
+      this.locks.delete(options.keys[0]);
+      return 1;
+    }
+    if (script.includes("ACK_WORKSPACE_SCREEN_SHARE_CLEANUP")) {
+      if (this.locks.get(options.keys[1]) !== options.arguments[1]) return 0;
+      const before = this.entries.length;
+      this.entries = this.entries.filter(item => item.id !== options.arguments[0]);
+      this.locks.delete(options.keys[1]);
+      return before === this.entries.length ? 0 : 1;
+    }
+    throw new Error("Unexpected cleanup Redis script");
+  }
+}
+
+class FakeCleanupRoomService {
+  removeCalls = [];
+  revocationCalls = [];
+  deleteCalls = [];
+  removeFailures = 0;
+  revocationFailures = 0;
+
+  async removeParticipant(session) {
+    this.removeCalls.push(session);
+    if (this.removeFailures > 0) {
+      this.removeFailures -= 1;
+      throw new Error("LiveKit unavailable");
+    }
+  }
+
+  async removeParticipantForRevocation(session) {
+    this.revocationCalls.push(session);
+    if (this.revocationFailures > 0) {
+      this.revocationFailures -= 1;
+      throw new Error("LiveKit unavailable");
+    }
+  }
+
+  async deleteRoom(session) {
+    this.deleteCalls.push(session);
+  }
+}
+
+class TestScreenShareCleanupService extends ScreenShareCleanupService {
+  constructor(rooms, redis) {
+    super(rooms);
+    this.redis = redis;
+  }
+
+  createRedisClient(redisUrl) {
+    assert.equal(redisUrl, "redis://screen-share-cleanup.test:6379");
+    return this.redis;
+  }
+}
+
+{
+  const priorRedisUrl = process.env.REDIS_URL;
+  process.env.REDIS_URL = "redis://screen-share-cleanup.test:6379";
+  try {
+    const redis = new FakeCleanupRedisClient();
+    const rooms = new FakeCleanupRoomService();
+    const session = activeSession();
+    redis.entries.push({
+      id: "1-0",
+      session: JSON.stringify(session),
+      mode: "revocation"
+    });
+    rooms.revocationFailures = 1;
+    const cleanup = new TestScreenShareCleanupService(rooms, redis);
+
+    assert.equal(await cleanup.flushPendingCleanups(), 0);
+    assert.equal(redis.entries.length, 1);
+    assert.equal(await cleanup.flushPendingCleanups(), 1);
+    assert.equal(redis.entries.length, 0);
+    assert.equal(await cleanup.flushPendingCleanups(), 0);
+    assert.deepEqual(rooms.revocationCalls, [session, session]);
+    assert.deepEqual(rooms.removeCalls, []);
+    assert.deepEqual(rooms.deleteCalls, [session]);
+    await cleanup.onModuleDestroy();
+  } finally {
+    if (priorRedisUrl === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = priorRedisUrl;
   }
 }
 
@@ -336,6 +524,42 @@ try {
   assert.equal(result.status, "received");
   assert.equal(database.transactionCalls, 0);
   assert.equal(meetingService.reconciliationCalls.length, 0);
+
+  const endedBody = JSON.stringify({
+    id: "screen-event-ended",
+    event: "track_unpublished",
+    room: { name: `pilo-screen-share-${sessionId}` },
+    participant: { identity: `screen-share:${sessionId}:${userId}` },
+    track: { source: "SCREEN_SHARE" },
+    createdAt: String(eventSeconds)
+  });
+  const endedDatabase = new FakeDatabase();
+  const endedHarness = createWebhookHarness(activeSession());
+  const endedService = new LiveKitWebhookService(
+    endedDatabase,
+    new FakeMeetingService(),
+    endedHarness.handler
+  );
+  const endedAuthorization = await signWebhookBody(
+    endedBody,
+    process.env.LIVEKIT_API_KEY,
+    process.env.LIVEKIT_API_SECRET
+  );
+  assert.equal(
+    (await endedService.receiveWebhook(Buffer.from(endedBody), endedAuthorization))
+      .status,
+    "received"
+  );
+  assert.equal(
+    (await endedService.receiveWebhook(Buffer.from(endedBody), endedAuthorization))
+      .status,
+    "ignored"
+  );
+  assert.equal(
+    endedDatabase.transactionCalls,
+    0,
+    "an ended-room tombstone must keep duplicate webhooks out of Meeting routing"
+  );
 
   const invalidBody = JSON.stringify({
     id: "",
@@ -566,6 +790,7 @@ try {
 const screenShareProviders = Reflect.getMetadata("providers", ScreenShareModule);
 assert.ok(screenShareProviders.includes(ScreenShareWebhookService));
 assert.ok(screenShareProviders.includes(ScreenShareMembershipRevocationService));
+assert.ok(screenShareProviders.includes(ScreenShareCleanupService));
 assert.ok(
   Reflect.getMetadata("exports", ScreenShareModule).includes(
     ScreenShareWebhookService

@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { CommonModule } from "../../common/common.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { ScreenShareController } from "./screen-share.controller";
+import { ScreenShareCleanupService } from "./screen-share-cleanup.service";
 import { ScreenShareMembershipRevocationService } from "./screen-share-membership-revocation.service";
 import { ScreenShareRealtimePublisherService } from "./screen-share-realtime-publisher.service";
 import { ScreenShareRoomService } from "./screen-share-room.service";
@@ -15,6 +16,7 @@ import { ScreenShareWebhookService } from "./screen-share-webhook.service";
   controllers: [ScreenShareController],
   providers: [
     ScreenShareService,
+    ScreenShareCleanupService,
     ScreenShareStateService,
     ScreenShareTokenService,
     ScreenShareRoomService,

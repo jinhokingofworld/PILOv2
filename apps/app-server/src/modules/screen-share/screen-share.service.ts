@@ -16,9 +16,10 @@ import {
   ScreenShareTokenService,
   type ScreenShareTokenPayload
 } from "./screen-share-token.service";
-import type {
-  PublicWorkspaceScreenShareSession,
-  WorkspaceScreenShareSession
+import {
+  SCREEN_SHARE_STARTING_LEASE_MS,
+  type PublicWorkspaceScreenShareSession,
+  type WorkspaceScreenShareSession
 } from "./screen-share.types";
 
 export type CurrentWorkspaceScreenSharePayload = {
@@ -92,9 +93,10 @@ export class ScreenShareService {
     if (!current) throw screenShareAlreadyActive();
 
     if (current.status === "starting") {
-      return this.recoverStartingSession(
+      return this.resolveStartingCollision(
         userId,
         current,
+        candidate,
         rollbackAttemptId
       );
     }
@@ -137,6 +139,9 @@ export class ScreenShareService {
     ) {
       throw screenShareNotFound();
     }
+    if (current.sharerUserId === userId) {
+      throw forbidden("The screen sharer cannot request a viewer token");
+    }
 
     if (!(await this.rooms.hasActiveScreenTrack(current))) {
       await this.endStaleSession(current);
@@ -162,20 +167,26 @@ export class ScreenShareService {
       ended: true
     };
 
-    if (!current || current.sessionId !== sessionId) return payload;
+    if (!current || current.sessionId !== sessionId) {
+      await this.flushRealtimeOutbox();
+      return payload;
+    }
     if (current.sharerUserId !== userId) {
       throw forbidden("Only the screen sharer can end this session");
     }
 
-    await this.publishEnded(current);
-    const ended = await this.state.endIfCurrent({
+    const transition = await this.state.terminateIfCurrent({
       workspaceId,
       sessionId,
       livekitRoomName: current.livekitRoomName
     });
-    if (!ended) return payload;
+    if (!transition) {
+      await this.flushRealtimeOutbox();
+      return payload;
+    }
 
-    await this.cleanupRoom(ended);
+    await this.cleanupRoom(transition.session);
+    await this.flushRealtimeOutbox();
     return payload;
   }
 
@@ -186,13 +197,16 @@ export class ScreenShareService {
     const current = await this.state.getCurrent(workspaceId);
     if (!current || current.sharerUserId !== userId) return false;
 
-    await this.publishEnded(current);
-    const ended = await this.state.endIfCurrent({
+    const transition = await this.state.terminateIfCurrent({
       workspaceId,
       sessionId: current.sessionId,
       livekitRoomName: current.livekitRoomName
-    });
-    if (!ended) return false;
+    }, "revocation");
+    if (!transition) {
+      await this.flushRealtimeOutbox();
+      return false;
+    }
+    const ended = transition.session;
 
     try {
       await this.rooms.removeParticipantForRevocation(ended);
@@ -204,6 +218,7 @@ export class ScreenShareService {
     } catch {
       // The publisher token is revoked and Redis no longer exposes the session.
     }
+    await this.flushRealtimeOutbox();
     return true;
   }
 
@@ -252,10 +267,85 @@ export class ScreenShareService {
       workspaceId: session.workspaceId,
       sessionId: session.sessionId,
       livekitRoomName: session.livekitRoomName,
-      rollbackAttemptId
+      rollbackAttemptId,
+      claimedAt: this.now().toISOString()
     });
     if (!claimed) throw screenShareAlreadyActive();
-    return this.issuePublisherToken(session, HttpStatus.OK);
+    return this.issuePublisherToken(claimed, HttpStatus.OK);
+  }
+
+  private async resolveStartingCollision(
+    userId: string,
+    current: WorkspaceScreenShareSession,
+    candidate: WorkspaceScreenShareSession,
+    rollbackAttemptId: string
+  ): Promise<StartWorkspaceScreenSharePayload> {
+    if (current.sharerUserId === userId) {
+      return this.recoverStartingSession(
+        userId,
+        current,
+        rollbackAttemptId
+      );
+    }
+
+    const createdAt = Date.parse(current.createdAt);
+    const expiredBefore = new Date(
+      this.now().getTime() - SCREEN_SHARE_STARTING_LEASE_MS
+    ).toISOString();
+    if (!Number.isFinite(createdAt) || current.createdAt > expiredBefore) {
+      throw screenShareAlreadyActive();
+    }
+    if (await this.rooms.hasActiveScreenTrack(current)) {
+      throw screenShareAlreadyActive();
+    }
+
+    const replaced = await this.state.replaceExpiredStartingIfCurrent(
+      {
+        workspaceId: current.workspaceId,
+        sessionId: current.sessionId,
+        livekitRoomName: current.livekitRoomName,
+        createdAt: current.createdAt,
+        expiredBefore
+      },
+      candidate,
+      rollbackAttemptId
+    );
+    if (!replaced) {
+      return this.resolveReservationWinner(
+        userId,
+        current.workspaceId,
+        rollbackAttemptId
+      );
+    }
+    await this.cleanupReclaimedRoom(
+      current,
+      candidate,
+      rollbackAttemptId
+    );
+    return this.issueNewPublisherToken(candidate, rollbackAttemptId);
+  }
+
+  private async cleanupReclaimedRoom(
+    reclaimed: WorkspaceScreenShareSession,
+    candidate: WorkspaceScreenShareSession,
+    rollbackAttemptId: string
+  ): Promise<void> {
+    try {
+      await this.rooms.removeParticipantForRevocation(reclaimed);
+      await this.rooms.deleteRoom(reclaimed);
+    } catch (error) {
+      try {
+        await this.state.releaseStartingIfCurrent({
+          workspaceId: candidate.workspaceId,
+          sessionId: candidate.sessionId,
+          livekitRoomName: candidate.livekitRoomName,
+          rollbackAttemptId
+        });
+      } catch {
+        // Preserve the LiveKit cleanup failure as the API cause.
+      }
+      throw error;
+    }
   }
 
   private async resolveReservationWinner(
@@ -340,31 +430,33 @@ export class ScreenShareService {
   private async endStaleSession(
     session: WorkspaceScreenShareSession
   ): Promise<boolean> {
-    await this.publishEnded(session);
-    const ended = await this.state.endIfCurrent({
+    const transition = await this.state.terminateIfCurrent({
       workspaceId: session.workspaceId,
       sessionId: session.sessionId,
       livekitRoomName: session.livekitRoomName
     });
-    if (!ended) return false;
-    await this.cleanupRoom(ended);
+    if (!transition) {
+      await this.flushRealtimeOutbox();
+      return false;
+    }
+    await this.cleanupRoom(transition.session);
+    await this.flushRealtimeOutbox();
     return true;
   }
 
-  private publishEnded(session: WorkspaceScreenShareSession): Promise<void> {
-    return this.realtime.publish({
-      version: 1,
-      event: "workspace-screen-share:ended",
-      workspaceId: session.workspaceId,
-      sessionId: session.sessionId
-    });
+  private async flushRealtimeOutbox(): Promise<void> {
+    try {
+      await this.realtime.flushPendingEvents();
+    } catch {
+      // The Redis Stream retains the event for the background dispatcher.
+    }
   }
 
   private async cleanupRoom(
     session: WorkspaceScreenShareSession
   ): Promise<void> {
     try {
-      await this.rooms.removeParticipant(session);
+      await this.rooms.removeParticipantForRevocation(session);
     } catch {
       // Redis already owns the authoritative ended state.
     }

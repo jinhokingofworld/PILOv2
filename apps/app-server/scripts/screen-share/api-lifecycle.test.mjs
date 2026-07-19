@@ -8,7 +8,10 @@ import { ScreenShareModule } from "../../dist/modules/screen-share/screen-share.
 import { ScreenShareRealtimePublisherService } from "../../dist/modules/screen-share/screen-share-realtime-publisher.service.js";
 import { ScreenShareRoomService } from "../../dist/modules/screen-share/screen-share-room.service.js";
 import { ScreenShareService } from "../../dist/modules/screen-share/screen-share.service.js";
-import { WORKSPACE_SCREEN_SHARE_REDIS_CHANNEL } from "../../dist/modules/screen-share/screen-share.types.js";
+import {
+  WORKSPACE_SCREEN_SHARE_OUTBOX_STREAM,
+  WORKSPACE_SCREEN_SHARE_REDIS_CHANNEL
+} from "../../dist/modules/screen-share/screen-share.types.js";
 
 const workspaceId = "22222222-2222-4222-8222-222222222222";
 const userId = "33333333-3333-4333-8333-333333333333";
@@ -100,9 +103,13 @@ class FakeStateService {
   getCalls = [];
   reserveCalls = [];
   endCalls = [];
+  cleanupModes = [];
+  pendingEvents = [];
   releaseStartingCalls = [];
+  replaceExpiredStartingCalls = [];
   rollbackAttemptId = null;
   failReserve = false;
+  beforeTerminate = null;
 
   async getCurrent(requestedWorkspaceId) {
     this.getCalls.push(requestedWorkspaceId);
@@ -118,8 +125,10 @@ class FakeStateService {
     return true;
   }
 
-  async endIfCurrent(input) {
+  async terminateIfCurrent(input, cleanupMode = "revocation") {
     this.endCalls.push(input);
+    this.cleanupModes.push(cleanupMode);
+    this.beforeTerminate?.(input);
     if (
       this.current?.workspaceId !== input.workspaceId ||
       this.current?.sessionId !== input.sessionId ||
@@ -130,7 +139,17 @@ class FakeStateService {
     const ended = this.current;
     this.current = null;
     this.rollbackAttemptId = null;
-    return ended;
+    const outboxId = `outbox-${this.pendingEvents.length + 1}`;
+    this.pendingEvents.push({
+      id: outboxId,
+      event: {
+        version: 1,
+        event: "workspace-screen-share:ended",
+        workspaceId: ended.workspaceId,
+        sessionId: ended.sessionId
+      }
+    });
+    return { session: ended, outboxId };
   }
 
   async releaseStartingIfCurrent(input) {
@@ -157,9 +176,27 @@ class FakeStateService {
       this.current.livekitRoomName !== input.livekitRoomName ||
       this.current.status !== "starting"
     ) {
-      return false;
+      return null;
     }
     this.rollbackAttemptId = input.rollbackAttemptId;
+    this.current = { ...this.current, createdAt: input.claimedAt };
+    return this.current;
+  }
+
+  async replaceExpiredStartingIfCurrent(input, candidate, rollbackAttemptId) {
+    this.replaceExpiredStartingCalls.push({ input, candidate, rollbackAttemptId });
+    if (
+      this.current?.workspaceId !== input.workspaceId ||
+      this.current.sessionId !== input.sessionId ||
+      this.current.livekitRoomName !== input.livekitRoomName ||
+      this.current.status !== "starting" ||
+      this.current.createdAt !== input.createdAt ||
+      this.current.createdAt > input.expiredBefore
+    ) {
+      return false;
+    }
+    this.current = candidate;
+    this.rollbackAttemptId = rollbackAttemptId;
     return true;
   }
 }
@@ -181,7 +218,7 @@ class FakeTokenService {
     return {
       livekitUrl: "wss://screen-share.test",
       livekitToken: `publisher-token-${this.publisherCalls.length}`,
-      expiresAt: "2026-07-18T01:00:00.000Z"
+      expiresAt: "2026-07-18T00:01:00.000Z"
     };
   }
 
@@ -201,7 +238,10 @@ class FakeRoomService {
   removeCalls = [];
   deleteCalls = [];
   revocationCalls = [];
+  revocationFailures = 0;
   beforeActiveResult = null;
+  removeFailures = 0;
+  deleteFailures = 0;
 
   async hasActiveScreenTrack(session) {
     this.activeCalls.push(session);
@@ -211,18 +251,34 @@ class FakeRoomService {
 
   async removeParticipant(session) {
     this.removeCalls.push(session);
+    if (this.removeFailures > 0) {
+      this.removeFailures -= 1;
+      throw new Error("LiveKit cleanup failed");
+    }
   }
 
   async deleteRoom(session) {
     this.deleteCalls.push(session);
+    if (this.deleteFailures > 0) {
+      this.deleteFailures -= 1;
+      throw new Error("LiveKit cleanup failed");
+    }
   }
 
   async removeParticipantForRevocation(session) {
     this.revocationCalls.push(session);
+    if (this.revocationFailures > 0) {
+      this.revocationFailures -= 1;
+      throw new Error("LiveKit cleanup failed");
+    }
   }
 }
 
 class FakeRealtimePublisher {
+  constructor(state) {
+    this.state = state;
+  }
+
   attempts = [];
   events = [];
   failures = 0;
@@ -236,6 +292,23 @@ class FakeRealtimePublisher {
       throw new Error("screen-share publish failed");
     }
     this.events.push(event);
+  }
+
+  async flushPendingEvents() {
+    let delivered = 0;
+    while (this.state.pendingEvents.length > 0) {
+      const pending = this.state.pendingEvents[0];
+      this.attempts.push(pending.event);
+      this.beforePublish?.(pending.event);
+      if (this.failures > 0) {
+        this.failures -= 1;
+        throw new Error("screen-share publish failed");
+      }
+      this.events.push(pending.event);
+      this.state.pendingEvents.shift();
+      delivered += 1;
+    }
+    return delivered;
   }
 }
 
@@ -273,7 +346,7 @@ const createHarness = ({
   const state = new FakeStateService(current);
   const tokens = new FakeTokenService();
   const rooms = new FakeRoomService();
-  const realtime = new FakeRealtimePublisher();
+  const realtime = new FakeRealtimePublisher(state);
   const workspaces = new FakeWorkspaceService(members);
   const service = new TestScreenShareService(
     state,
@@ -327,7 +400,7 @@ assert.deepEqual(started, {
   startedAt: null,
   livekitUrl: "wss://screen-share.test",
   livekitToken: "publisher-token-1",
-  expiresAt: "2026-07-18T01:00:00.000Z"
+  expiresAt: "2026-07-18T00:01:00.000Z"
 });
 assert.equal(started.status, "starting");
 assert.equal(started.startedAt, null);
@@ -348,6 +421,22 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
   assert.equal(recovered.livekitToken, "publisher-token-2");
   assert.equal(startHarness.state.reserveCalls.length, 2);
   assert.equal(startHarness.service.getStartHttpStatus(recovered), 200);
+}
+
+{
+  const harness = createHarness({
+    current: startingSession(),
+    currentTime: "2026-07-18T00:02:00.000Z",
+    uuids: [nextSessionId]
+  });
+  const recovered = await harness.service.start(userId, workspaceId);
+  assert.equal(recovered.id, sessionId);
+  assert.equal(
+    harness.state.current?.createdAt,
+    "2026-07-18T00:02:00.000Z",
+    "same-owner recovery must refresh the protected starting lease"
+  );
+  assert.equal(harness.rooms.activeCalls.length, 0);
 }
 
 {
@@ -376,7 +465,7 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     () => harness.service.start(userId, workspaceId),
     error => error === harness.tokens.publisherError
   );
-  assert.equal(harness.state.current, existing);
+  assert.deepEqual(harness.state.current, existing);
   assert.equal(
     harness.state.endCalls.length,
     0,
@@ -478,6 +567,112 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     }
   );
   assert.equal(harness.tokens.publisherCalls.length, 0);
+  assert.equal(
+    harness.rooms.activeCalls.length,
+    0,
+    "a fresh starting lease must be protected without LiveKit reclamation"
+  );
+}
+
+{
+  const expired = startingSession({
+    sharerUserId: otherUserId,
+    sharerDisplayName: "Other member",
+    sharerLiveKitIdentity: `screen-share:${sessionId}:${otherUserId}`
+  });
+  const harness = createHarness({
+    current: expired,
+    currentTime: "2026-07-18T00:02:00.000Z",
+    uuids: [nextSessionId]
+  });
+  harness.rooms.active = false;
+
+  const result = await harness.service.start(userId, workspaceId);
+
+  assert.equal(result.id, nextSessionId);
+  assert.equal(result.sharer.userId, userId);
+  assert.equal(harness.rooms.activeCalls.length, 1);
+  assert.equal(harness.state.replaceExpiredStartingCalls.length, 1);
+  assert.equal(harness.state.current?.sessionId, nextSessionId);
+  assert.deepEqual(harness.rooms.revocationCalls, [expired]);
+  assert.deepEqual(harness.rooms.removeCalls, []);
+  assert.deepEqual(harness.rooms.deleteCalls, [expired]);
+}
+
+{
+  const expired = startingSession({
+    sharerUserId: otherUserId,
+    sharerDisplayName: "Other member",
+    sharerLiveKitIdentity: `screen-share:${sessionId}:${otherUserId}`
+  });
+  const harness = createHarness({
+    current: expired,
+    currentTime: "2026-07-18T00:02:00.000Z",
+    uuids: [nextSessionId]
+  });
+  harness.rooms.active = false;
+  harness.rooms.revocationFailures = 1;
+
+  await assert.rejects(() => harness.service.start(userId, workspaceId));
+  assert.equal(
+    harness.state.current,
+    null,
+    "a failed old-room cleanup must roll back the unissued replacement"
+  );
+  assert.equal(harness.tokens.publisherCalls.length, 0);
+}
+
+{
+  const expired = startingSession({
+    sharerUserId: otherUserId,
+    sharerDisplayName: "Other member",
+    sharerLiveKitIdentity: `screen-share:${sessionId}:${otherUserId}`
+  });
+  const harness = createHarness({
+    current: expired,
+    currentTime: "2026-07-18T00:02:00.000Z",
+    uuids: [nextSessionId]
+  });
+
+  await assert.rejects(
+    () => harness.service.start(userId, workspaceId),
+    error => error.getStatus() === 409
+  );
+  assert.deepEqual(harness.state.current, expired);
+  assert.equal(harness.state.replaceExpiredStartingCalls.length, 0);
+}
+
+{
+  const expired = startingSession({
+    sharerUserId: otherUserId,
+    sharerDisplayName: "Other member",
+    sharerLiveKitIdentity: `screen-share:${sessionId}:${otherUserId}`
+  });
+  const replacement = startingSession({
+    sessionId: "66666666-6666-4666-8666-666666666666",
+    sharerUserId: otherUserId,
+    sharerDisplayName: "Other member",
+    sharerLiveKitIdentity:
+      "screen-share:66666666-6666-4666-8666-666666666666:44444444-4444-4444-8444-444444444444",
+    livekitRoomName:
+      "pilo-screen-share-66666666-6666-4666-8666-666666666666",
+    createdAt: "2026-07-18T00:02:00.000Z"
+  });
+  const harness = createHarness({
+    current: expired,
+    currentTime: "2026-07-18T00:02:00.000Z",
+    uuids: [nextSessionId]
+  });
+  harness.rooms.active = false;
+  harness.rooms.beforeActiveResult = () => {
+    harness.state.current = replacement;
+  };
+
+  await assert.rejects(
+    () => harness.service.start(userId, workspaceId),
+    error => error.getStatus() === 409
+  );
+  assert.deepEqual(harness.state.current, replacement);
 }
 
 {
@@ -507,7 +702,7 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     uuids: [nextSessionId]
   });
   assert.deepEqual(
-    await active.service.createViewerToken(userId, workspaceId, sessionId),
+    await active.service.createViewerToken(otherUserId, workspaceId, sessionId),
     {
       livekitUrl: "wss://screen-share.test",
       livekitToken: "viewer-token-1",
@@ -516,11 +711,20 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
   );
   assert.deepEqual(active.tokens.viewerCalls, [
     {
-      identity: `screen-share-viewer:${sessionId}:${userId}:${nextSessionId}`,
+      identity: `screen-share-viewer:${sessionId}:${otherUserId}:${nextSessionId}`,
       roomName: `pilo-screen-share-${sessionId}`,
-      participantName: userId
+      participantName: otherUserId
     }
   ]);
+
+  await assert.rejects(
+    () => active.service.createViewerToken(userId, workspaceId, sessionId),
+    error =>
+      error.getStatus() === 403 &&
+      error.getResponse().error.message ===
+        "The screen sharer cannot request a viewer token"
+  );
+  assert.equal(active.tokens.viewerCalls.length, 1);
 }
 
 {
@@ -580,14 +784,11 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     null
   );
   assert.deepEqual(harness.state.current, replacement);
-  assert.deepEqual(harness.realtime.events, [
-    {
-      version: 1,
-      event: "workspace-screen-share:ended",
-      workspaceId,
-      sessionId
-    }
-  ]);
+  assert.deepEqual(
+    harness.realtime.events,
+    [],
+    "a failed current-session CAS must not enqueue an ended event"
+  );
 }
 
 {
@@ -615,19 +816,21 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     sessionId,
     ended: true
   });
-  assert.equal(harness.rooms.removeCalls.length, 1);
+  assert.equal(harness.rooms.revocationCalls.length, 1);
   assert.equal(harness.rooms.deleteCalls.length, 1);
 }
 
 {
   const harness = createHarness({ current: activeSession() });
   harness.realtime.failures = 1;
-  await assert.rejects(() =>
-    harness.service.end(userId, workspaceId, sessionId)
-  );
-  assert.equal(harness.state.current?.sessionId, sessionId);
-  assert.equal(harness.rooms.removeCalls.length, 0);
-  assert.equal(harness.rooms.deleteCalls.length, 0);
+  assert.deepEqual(await harness.service.end(userId, workspaceId, sessionId), {
+    sessionId,
+    ended: true
+  });
+  assert.equal(harness.state.current, null);
+  assert.equal(harness.state.pendingEvents.length, 1);
+  assert.equal(harness.rooms.revocationCalls.length, 1);
+  assert.equal(harness.rooms.deleteCalls.length, 1);
 
   assert.deepEqual(await harness.service.end(userId, workspaceId, sessionId), {
     sessionId,
@@ -635,7 +838,7 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
   });
   assert.equal(harness.state.current, null);
   assert.equal(harness.realtime.attempts.length, 2);
-  assert.equal(harness.rooms.removeCalls.length, 1);
+  assert.equal(harness.rooms.revocationCalls.length, 1);
   assert.equal(harness.rooms.deleteCalls.length, 1);
 }
 
@@ -647,13 +850,14 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     sharerUserId: otherUserId
   });
   const harness = createHarness({ current: activeSession() });
-  harness.realtime.beforePublish = () => {
+  harness.state.beforeTerminate = () => {
     harness.state.current = replacement;
   };
   await harness.service.end(userId, workspaceId, sessionId);
   assert.deepEqual(harness.state.current, replacement);
   assert.equal(harness.rooms.removeCalls.length, 0);
   assert.equal(harness.rooms.deleteCalls.length, 0);
+  assert.equal(harness.realtime.events.length, 0);
 }
 
 {
@@ -671,6 +875,7 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
   );
   assert.equal(harness.state.current, null);
   assert.deepEqual(harness.rooms.revocationCalls, [activeSession()]);
+  assert.equal(harness.state.cleanupModes.at(-1), "revocation");
   assert.deepEqual(harness.realtime.events, [
     {
       version: 1,
@@ -689,7 +894,7 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     sharerUserId: otherUserId
   });
   const harness = createHarness({ current: activeSession() });
-  harness.realtime.beforePublish = () => {
+  harness.state.beforeTerminate = () => {
     harness.state.current = replacement;
   };
   assert.equal(
@@ -699,6 +904,7 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
   assert.deepEqual(harness.state.current, replacement);
   assert.equal(harness.rooms.revocationCalls.length, 0);
   assert.equal(harness.rooms.deleteCalls.length, 0);
+  assert.equal(harness.realtime.events.length, 0);
 }
 
 class TestScreenShareRoomService extends ScreenShareRoomService {
@@ -780,6 +986,9 @@ try {
 
   class FakeRedisPublisherClient {
     publishCalls = [];
+    outboxEntries = [];
+    outboxPublishAttempts = [];
+    receiverCount = 0;
 
     on() {
       return this;
@@ -789,6 +998,28 @@ try {
 
     async publish(channel, message) {
       this.publishCalls.push({ channel, message });
+      return 1;
+    }
+
+    async xRange(key) {
+      assert.equal(key, WORKSPACE_SCREEN_SHARE_OUTBOX_STREAM);
+      return this.outboxEntries.map(entry => ({
+        id: entry.id,
+        message: { event: entry.event }
+      }));
+    }
+
+    async eval(script, options) {
+      assert.match(script, /DELIVER_WORKSPACE_SCREEN_SHARE_OUTBOX_EVENT/);
+      const entry = this.outboxEntries.find(item => item.id === options.arguments[0]);
+      if (!entry) return 0;
+      this.outboxPublishAttempts.push(entry.event);
+      if (this.receiverCount < 1) return 0;
+      this.outboxEntries = this.outboxEntries.filter(item => item.id !== entry.id);
+      this.publishCalls.push({
+        channel: options.arguments[1],
+        message: entry.event
+      });
       return 1;
     }
 
@@ -824,6 +1055,19 @@ try {
       message: JSON.stringify(event)
     }
   ]);
+
+  redisClient.outboxEntries.push({ id: "1-0", event: JSON.stringify(event) });
+  assert.equal(await publisher.flushPendingEvents(), 0);
+  assert.equal(redisClient.outboxEntries.length, 1);
+  redisClient.receiverCount = 1;
+  assert.equal(await publisher.flushPendingEvents(), 1);
+  assert.equal(redisClient.outboxEntries.length, 0);
+  assert.equal(await publisher.flushPendingEvents(), 0);
+  assert.equal(
+    redisClient.publishCalls.filter(call => call.message === JSON.stringify(event)).length,
+    2,
+    "one direct publish and one outbox handoff must not be duplicated by retries"
+  );
   await publisher.onModuleDestroy();
 } finally {
   for (const [key, value] of Object.entries(originalEnv)) {

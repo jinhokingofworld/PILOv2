@@ -15,6 +15,9 @@ const decodeJwtPayload = token => {
 class FakeRedisClient {
   values = new Map();
   expiries = new Map();
+  streamEntries = [];
+  cleanupEntries = [];
+  nextStreamId = 1;
   nowSeconds = 0;
 
   constructor({ failConnect = false, failEval = false, failGet = false } = {}) {
@@ -92,7 +95,7 @@ class FakeRedisClient {
       if (session.status === "active") {
         this.values.delete(rollbackKey);
         this.expiries.delete(rollbackKey);
-        return value;
+        return [value, "", ""];
       }
       if (session.status !== "starting") return null;
       const active = {
@@ -109,7 +112,25 @@ class FakeRedisClient {
       }
       this.values.delete(rollbackKey);
       this.expiries.delete(rollbackKey);
-      return encoded;
+      const outboxId = `${this.nextStreamId++}-0`;
+      this.streamEntries.push({
+        id: outboxId,
+        event: JSON.stringify({
+          version: 1,
+          event: "workspace-screen-share:started",
+          workspaceId: session.workspaceId,
+          session: {
+            id: session.sessionId,
+            sharer: {
+              userId: session.sharerUserId,
+              displayName: session.sharerDisplayName,
+              avatarUrl: session.sharerAvatarUrl
+            },
+            startedAt: active.startedAt
+          }
+        })
+      });
+      return [encoded, outboxId, ""];
     }
 
     if (script.includes("CLAIM_STARTING_WORKSPACE_SCREEN_SHARE")) {
@@ -127,6 +148,58 @@ class FakeRedisClient {
       }
       this.values.set(rollbackKey, options.arguments[2]);
       this.expiries.set(rollbackKey, this.expiries.get(workspaceKey));
+      session.createdAt = options.arguments[3];
+      const updated = JSON.stringify(session);
+      this.values.set(workspaceKey, updated);
+      return updated;
+    }
+
+    if (script.includes("REPLACE_EXPIRED_STARTING_WORKSPACE_SCREEN_SHARE")) {
+      const [
+        workspaceKey,
+        roomKey,
+        rollbackKey,
+        candidateRoomKey,
+        candidateRollbackKey,
+        tombstoneKey
+      ] = options.keys;
+      const value = await this.get(workspaceKey);
+      if (!value) return 0;
+      const session = JSON.parse(value);
+      const candidate = JSON.parse(options.arguments[4]);
+      if (
+        session.sessionId !== options.arguments[0] ||
+        session.livekitRoomName !== options.arguments[1] ||
+        session.status !== "starting" ||
+        session.createdAt !== options.arguments[2] ||
+        session.createdAt > options.arguments[3] ||
+        this.values.get(roomKey) !== session.workspaceId ||
+        this.has(candidateRoomKey) ||
+        candidate.workspaceId !== session.workspaceId ||
+        candidate.status !== "starting"
+      ) {
+        return 0;
+      }
+      const ttl = Number(options.arguments[5]);
+      this.values.delete(roomKey);
+      this.values.delete(rollbackKey);
+      this.expiries.delete(roomKey);
+      this.expiries.delete(rollbackKey);
+      this.values.set(workspaceKey, options.arguments[4]);
+      this.values.set(candidateRoomKey, candidate.workspaceId);
+      this.values.set(candidateRollbackKey, options.arguments[6]);
+      this.values.set(tombstoneKey, session.sessionId);
+      this.cleanupEntries.push({
+        session: value,
+        mode: "revocation"
+      });
+      this.expiries.set(workspaceKey, this.nowSeconds + ttl);
+      this.expiries.set(candidateRoomKey, this.nowSeconds + ttl);
+      this.expiries.set(candidateRollbackKey, this.nowSeconds + ttl);
+      this.expiries.set(
+        tombstoneKey,
+        this.nowSeconds + Number(options.arguments[7])
+      );
       return 1;
     }
 
@@ -154,6 +227,29 @@ class FakeRedisClient {
       this.expiries.delete(workspaceKey);
       this.expiries.delete(roomKey);
       this.expiries.delete(rollbackKey);
+      if (script.includes("END_WORKSPACE_SCREEN_SHARE")) {
+        const outboxId = `${this.nextStreamId++}-0`;
+        this.streamEntries.push({
+          id: outboxId,
+          event: JSON.stringify({
+            version: 1,
+            event: "workspace-screen-share:ended",
+            workspaceId: session.workspaceId,
+            sessionId: session.sessionId
+          })
+        });
+        const tombstoneKey = options.keys[4];
+        const tombstoneTtl = Number(options.arguments[2]);
+        this.values.set(tombstoneKey, session.sessionId);
+        this.expiries.set(tombstoneKey, this.nowSeconds + tombstoneTtl);
+        const cleanupId = `cleanup-${this.cleanupEntries.length + 1}`;
+        this.cleanupEntries.push({
+          id: cleanupId,
+          session: value,
+          mode: options.arguments[3]
+        });
+        return [value, outboxId, cleanupId];
+      }
       return value;
     }
 
@@ -205,7 +301,8 @@ try {
   };
 
   assert.equal(await state.reserve(session, "attempt-1"), true);
-  assert.equal(
+  const recoveredSession = { ...session, createdAt: "2026-07-18T00:00:00.500Z" };
+  assert.deepEqual(
     await state.reserve(
       {
         ...session,
@@ -222,14 +319,15 @@ try {
     "function",
     "same-owner recovery must claim rollback ownership"
   );
-  assert.equal(
+  assert.deepEqual(
     await state.claimStartingReservation({
       workspaceId: session.workspaceId,
       sessionId: session.sessionId,
       livekitRoomName: session.livekitRoomName,
-      rollbackAttemptId: "attempt-recovery"
+      rollbackAttemptId: "attempt-recovery",
+      claimedAt: "2026-07-18T00:00:00.500Z"
     }),
-    true
+    recoveredSession
   );
   assert.equal(
     await state.releaseStartingIfCurrent({
@@ -240,7 +338,7 @@ try {
     }),
     null
   );
-  assert.deepEqual(await state.getCurrent(session.workspaceId), session);
+  assert.deepEqual(await state.getCurrent(session.workspaceId), recoveredSession);
 
   const replacement = {
     ...session,
@@ -279,17 +377,21 @@ try {
     livekitRoomName: session.livekitRoomName,
     startedAt: "2026-07-18T00:00:01.000Z"
   });
-  assert.equal(activated?.status, "active");
-  assert.equal(activated?.startedAt, "2026-07-18T00:00:01.000Z");
-  assert.deepEqual(
-    await state.activate({
+  assert.equal(activated?.session.status, "active");
+  assert.equal(activated?.session.startedAt, "2026-07-18T00:00:01.000Z");
+  assert.equal(typeof activated?.outboxId, "string");
+  assert.equal(activated?.cleanupId, null);
+  const redeliveredActivation = await state.activate({
       workspaceId: session.workspaceId,
       sessionId: session.sessionId,
       livekitRoomName: session.livekitRoomName,
       startedAt: "2026-07-18T00:00:02.000Z"
-    }),
-    activated,
-    "redelivered track_published must recover the same active session"
+    });
+  assert.deepEqual(redeliveredActivation?.session, activated?.session);
+  assert.equal(
+    redeliveredActivation?.outboxId,
+    null,
+    "redelivered track_published must not enqueue a duplicate event"
   );
   assert.equal(
     (await state.getCurrent(session.workspaceId))?.startedAt,
@@ -309,7 +411,7 @@ try {
     }),
     null
   );
-  assert.deepEqual(await state.getCurrent(session.workspaceId), activated);
+  assert.deepEqual(await state.getCurrent(session.workspaceId), activated?.session);
   redis.advance(2);
   assert.equal(
     await state.reserve(
@@ -324,7 +426,7 @@ try {
   );
 
   assert.equal(
-    await state.endIfCurrent({
+    await state.terminateIfCurrent({
       workspaceId: session.workspaceId,
       sessionId: "55555555-5555-4555-8555-555555555555",
       livekitRoomName: session.livekitRoomName
@@ -337,7 +439,7 @@ try {
     "88888888-8888-4888-8888-888888888888"
   );
   assert.equal(
-    await state.endIfCurrent({
+    await state.terminateIfCurrent({
       workspaceId: session.workspaceId,
       sessionId: session.sessionId,
       livekitRoomName: session.livekitRoomName
@@ -351,15 +453,71 @@ try {
   redis.replaceRoomOwner(session.livekitRoomName, session.workspaceId);
   assert.equal(
     (
-      await state.endIfCurrent({
+      await state.terminateIfCurrent({
         workspaceId: session.workspaceId,
         sessionId: session.sessionId,
         livekitRoomName: session.livekitRoomName
       })
-    )?.sessionId,
+    )?.session.sessionId,
     session.sessionId
   );
   assert.equal(await state.getCurrent(session.workspaceId), null);
+  assert.equal(await state.isKnownScreenShareRoom(session.livekitRoomName), true);
+  assert.deepEqual(redis.cleanupEntries.at(-1), {
+    id: "cleanup-1",
+    session: JSON.stringify(activated?.session),
+    mode: "revocation"
+  });
+  assert.deepEqual(
+    JSON.parse(redis.streamEntries.at(-1).event),
+    {
+      version: 1,
+      event: "workspace-screen-share:ended",
+      workspaceId: session.workspaceId,
+      sessionId: session.sessionId
+    }
+  );
+
+  {
+    const reclaimRedis = new FakeRedisClient();
+    const reclaimState = new TestScreenShareStateService(reclaimRedis);
+    const expired = {
+      ...session,
+      createdAt: "2026-07-18T00:00:00.000Z"
+    };
+    const candidate = {
+      ...session,
+      sessionId: "66666666-6666-4666-8666-666666666666",
+      sharerUserId: "44444444-4444-4444-8444-444444444444",
+      sharerLiveKitIdentity:
+        "screen-share:66666666-6666-4666-8666-666666666666:44444444-4444-4444-8444-444444444444",
+      livekitRoomName:
+        "pilo-screen-share-66666666-6666-4666-8666-666666666666",
+      createdAt: "2026-07-18T00:02:00.000Z"
+    };
+    assert.equal(await reclaimState.reserve(expired, "old-attempt"), true);
+    assert.equal(
+      await reclaimState.replaceExpiredStartingIfCurrent(
+        {
+          workspaceId: expired.workspaceId,
+          sessionId: expired.sessionId,
+          livekitRoomName: expired.livekitRoomName,
+          createdAt: expired.createdAt,
+          expiredBefore: "2026-07-18T00:01:00.000Z"
+        },
+        candidate,
+        "new-attempt"
+      ),
+      true
+    );
+    assert.deepEqual(await reclaimState.getCurrent(candidate.workspaceId), candidate);
+    assert.equal(await reclaimState.getByRoom(expired.livekitRoomName), null);
+    assert.equal(
+      await reclaimState.isKnownScreenShareRoom(expired.livekitRoomName),
+      true
+    );
+    assert.deepEqual(await reclaimState.getByRoom(candidate.livekitRoomName), candidate);
+  }
 
   assert.equal(await state.reserve(session, "attempt-3"), true);
   assert.equal(
@@ -406,6 +564,11 @@ try {
   assert.deepEqual(publisher.video?.canPublishSources, ["screen_share"]);
   assert.equal(publisher.video?.canSubscribe, false);
   assert.equal(publisher.video?.canPublishData, false);
+  assert.equal(
+    publisher.exp - publisher.nbf,
+    45,
+    "publisher token must expire no later than the starting lease"
+  );
 
   const viewer = decodeJwtPayload(
     (
@@ -419,6 +582,7 @@ try {
   assert.equal(viewer.video?.canPublish, false);
   assert.equal(viewer.video?.canSubscribe, true);
   assert.equal(viewer.video?.canPublishData, false);
+  assert.equal(viewer.exp - viewer.nbf, 60 * 60);
 
   const publicSession = {
     id: session.sessionId,

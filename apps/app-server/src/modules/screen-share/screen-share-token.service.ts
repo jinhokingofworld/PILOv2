@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { AccessToken, TrackSource, VideoGrant } from "livekit-server-sdk";
 import { serviceUnavailable } from "./screen-share.errors";
+import { SCREEN_SHARE_STARTING_LEASE_MS } from "./screen-share.types";
 
 export type CreateScreenShareTokenInput = {
   identity: string;
@@ -15,6 +16,8 @@ export type ScreenShareTokenPayload = {
 };
 
 const LIVEKIT_JOIN_TOKEN_TTL_SECONDS = 60 * 60;
+const LIVEKIT_PUBLISHER_TOKEN_TTL_SECONDS =
+  SCREEN_SHARE_STARTING_LEASE_MS / 1000 - 15;
 
 @Injectable()
 export class ScreenShareTokenService {
@@ -29,7 +32,11 @@ export class ScreenShareTokenService {
       canPublishData: false,
       canSubscribe: false
     };
-    return this.createToken(input, publisherGrant);
+    return this.createToken(
+      input,
+      publisherGrant,
+      LIVEKIT_PUBLISHER_TOKEN_TTL_SECONDS
+    );
   }
 
   async createViewerToken(
@@ -42,22 +49,23 @@ export class ScreenShareTokenService {
       canPublishData: false,
       canSubscribe: true
     };
-    return this.createToken(input, viewerGrant);
+    return this.createToken(input, viewerGrant, LIVEKIT_JOIN_TOKEN_TTL_SECONDS);
   }
 
   private async createToken(
     input: CreateScreenShareTokenInput,
-    grant: VideoGrant
+    grant: VideoGrant,
+    ttlSeconds: number
   ): Promise<ScreenShareTokenPayload> {
     try {
       const config = this.getConfig();
       const expiresAt = new Date(
-        Date.now() + LIVEKIT_JOIN_TOKEN_TTL_SECONDS * 1000
+        Date.now() + ttlSeconds * 1000
       ).toISOString();
       const accessToken = new AccessToken(config.apiKey, config.apiSecret, {
         identity: input.identity,
         name: input.participantName,
-        ttl: LIVEKIT_JOIN_TOKEN_TTL_SECONDS
+        ttl: ttlSeconds
       });
       accessToken.addGrant(grant);
 

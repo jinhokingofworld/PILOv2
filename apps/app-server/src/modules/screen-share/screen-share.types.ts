@@ -1,6 +1,12 @@
 export const WORKSPACE_SCREEN_SHARE_REDIS_CHANNEL =
   "workspace-screen-share:events:v1";
+export const WORKSPACE_SCREEN_SHARE_OUTBOX_STREAM =
+  "workspace-screen-share:outbox:v1";
+export const WORKSPACE_SCREEN_SHARE_CLEANUP_STREAM =
+  "workspace-screen-share:cleanup:v1";
 export const SCREEN_SHARE_STATE_TTL_SECONDS = 12 * 60 * 60;
+export const SCREEN_SHARE_STARTING_LEASE_MS = 60 * 1000;
+export const SCREEN_SHARE_ENDED_ROOM_TOMBSTONE_TTL_SECONDS = 5 * 60;
 
 export type WorkspaceScreenShareSession = {
   sessionId: string;

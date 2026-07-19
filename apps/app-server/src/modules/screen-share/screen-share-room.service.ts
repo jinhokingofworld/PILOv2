@@ -39,12 +39,16 @@ export class ScreenShareRoomService {
   async removeParticipant(
     session: WorkspaceScreenShareSession
   ): Promise<void> {
-    await this.runRoomCommand(client =>
-      client.removeParticipant(
-        session.livekitRoomName,
-        session.sharerLiveKitIdentity
-      )
-    );
+    await this.runRoomCommand(async client => {
+      try {
+        await client.removeParticipant(
+          session.livekitRoomName,
+          session.sharerLiveKitIdentity
+        );
+      } catch (error) {
+        if (!this.isParticipantAbsent(error)) throw error;
+      }
+    });
   }
 
   async removeParticipantForRevocation(
@@ -94,9 +98,13 @@ export class ScreenShareRoomService {
   }
 
   async deleteRoom(session: WorkspaceScreenShareSession): Promise<void> {
-    await this.runRoomCommand(client =>
-      client.deleteRoom(session.livekitRoomName).then(() => undefined)
-    );
+    await this.runRoomCommand(async client => {
+      try {
+        await client.deleteRoom(session.livekitRoomName);
+      } catch (error) {
+        if (!this.isParticipantAbsent(error)) throw error;
+      }
+    });
   }
 
   protected createRoomServiceClient(

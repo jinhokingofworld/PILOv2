@@ -20,7 +20,7 @@ export class ScreenShareWebhookService {
   async canHandle(event: WebhookEvent): Promise<boolean> {
     const roomName = this.roomName(event);
     if (!roomName) return false;
-    return (await this.state.getByRoom(roomName)) !== null;
+    return this.state.isKnownScreenShareRoom(roomName);
   }
 
   async handleVerifiedEvent(
@@ -30,49 +30,32 @@ export class ScreenShareWebhookService {
     if (!roomName) return this.delivery(event, "ignored");
 
     const session = await this.state.getByRoom(roomName);
-    if (!session) return this.delivery(event, "ignored");
+    if (!session) {
+      await this.flushRealtimeOutbox();
+      return this.delivery(event, "ignored");
+    }
 
     if (
       event.event === "track_published" &&
       this.isExpectedScreenTrack(event, session)
     ) {
-      const active = await this.state.activate({
+      const transition = await this.state.activate({
         workspaceId: session.workspaceId,
         sessionId: session.sessionId,
         livekitRoomName: session.livekitRoomName,
         startedAt: this.eventIso(event)
       });
-      if (active) {
-        await this.publisher.publish({
-          version: 1,
-          event: "workspace-screen-share:started",
-          workspaceId: active.workspaceId,
-          session: {
-            id: active.sessionId,
-            sharer: {
-              userId: active.sharerUserId,
-              displayName: active.sharerDisplayName,
-              avatarUrl: active.sharerAvatarUrl
-            },
-            startedAt: active.startedAt!
-          }
-        });
-      }
+      if (transition) await this.flushRealtimeOutbox();
       return this.delivery(event, "received");
     }
 
     if (this.isExpectedEndEvent(event, session)) {
-      await this.publisher.publish({
-        version: 1,
-        event: "workspace-screen-share:ended",
-        workspaceId: session.workspaceId,
-        sessionId: session.sessionId
-      });
-      await this.state.endIfCurrent({
+      const transition = await this.state.terminateIfCurrent({
         workspaceId: session.workspaceId,
         sessionId: session.sessionId,
         livekitRoomName: session.livekitRoomName
       });
+      if (transition) await this.flushRealtimeOutbox();
       return this.delivery(event, "received");
     }
 
@@ -81,6 +64,14 @@ export class ScreenShareWebhookService {
 
   protected now(): Date {
     return new Date();
+  }
+
+  private async flushRealtimeOutbox(): Promise<void> {
+    try {
+      await this.publisher.flushPendingEvents();
+    } catch {
+      // The Redis Stream retains the event for the background dispatcher.
+    }
   }
 
   private isExpectedScreenTrack(
