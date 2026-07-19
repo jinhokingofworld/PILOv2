@@ -1440,7 +1440,9 @@ def _requested_meeting_report_summary_sections(prompt: str) -> tuple[str, ...] |
             rf"(?:{pattern.pattern})\s*(?:은|는|을|를|이|가)?\s*"
             r"(?:말고|빼(?:고|줘|주세요)?|제외(?:하고|해줘|해주세요)?|"
             r"없이|생략(?:하고|해줘|해주세요)?|필요\s*없(?:고|어|습니다)?|"
-            r"안\s*(?:보여|알려)(?:줘|주세요)?)",
+            r"안\s*(?:보여|알려)(?:줘|주세요)?|"
+            r"(?:알려|보여|포함|요약)\s*(?:주지|하지)\s*말고|"
+            r"하지\s*말고)",
             normalized_prompt,
             pattern.flags,
         )

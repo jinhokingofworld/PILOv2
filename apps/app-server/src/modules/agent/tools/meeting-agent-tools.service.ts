@@ -796,11 +796,19 @@ export class MeetingAgentToolsService {
             sourceTypes,
             sourceIds: sources.map((source) => source.sourceId)
           },
-          resourceRefs: sources.map((source) => ({
-            domain: "meeting",
-            resourceType: "meeting_report",
-            resourceId: source.reportId
-          })),
+          resourceRefs: reportId
+            ? [
+                {
+                  domain: "meeting",
+                  resourceType: "meeting_report",
+                  resourceId: reportId
+                }
+              ]
+            : sources.map((source) => ({
+                domain: "meeting",
+                resourceType: "meeting_report",
+                resourceId: source.reportId
+              })),
           status: "grounding_queued"
         };
       }

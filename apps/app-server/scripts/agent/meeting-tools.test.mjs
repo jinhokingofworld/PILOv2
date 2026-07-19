@@ -580,6 +580,28 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
     reportId: REPORT_ID
   });
 
+  ragService.sources = [
+    {
+      sourceId: "cross-report-source",
+      sourceType: "transcript",
+      reportId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      startedAtMs: 1000,
+      endedAtMs: 2000,
+      content: "다른 회의록의 근거"
+    }
+  ];
+  const scopedResult = await tool.execute(
+    context,
+    tool.validateInput({ query: "일정 결론", roomName: "기본 회의실" })
+  );
+  assert.deepEqual(scopedResult.resourceRefs, [
+    {
+      domain: "meeting",
+      resourceType: "meeting_report",
+      resourceId: REPORT_ID
+    }
+  ]);
+
   assert.throws(
     () => tool.validateInput({ query: "일정 결론", reportId: REPORT_ID })
   );

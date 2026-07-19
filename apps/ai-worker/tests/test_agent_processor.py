@@ -2533,6 +2533,9 @@ def test_normalizer_maps_action_item_ordinal_to_report_context() -> None:
         ("회의록 요약해줘", ["summary"]),
         ("회의록의 논의사항과 결정사항만 보여줘", ["discussionPoints", "decisions"]),
         ("회의록에서 결정사항은 빼고 보여줘", ["summary", "discussionPoints", "actionItems"]),
+        ("결정사항은 알려주지 말고 요약만 보여줘", ["summary"]),
+        ("후속 작업은 포함하지 말고 논의사항만 알려줘", ["discussionPoints"]),
+        ("요약하지 말고 회의록 전체를 보여줘", ["discussionPoints", "decisions", "actionItems"]),
         ("그 회의록의 후속 작업 알려줘", ["actionItems"]),
     ],
 )
