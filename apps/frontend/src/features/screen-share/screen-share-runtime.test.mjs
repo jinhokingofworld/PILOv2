@@ -62,6 +62,27 @@ test("current-session coordinator serializes invalidations into one follow-up sn
   assert.deepEqual(snapshots, [{ session: "fresh" }]);
 });
 
+test("current-session coordinator ignores a snapshot after its scope is disposed", async () => {
+  const { ScreenShareCurrentSessionCoordinator } = await import(
+    "./runtime/screen-share-current-session-coordinator.ts"
+  );
+  let resolveSnapshot;
+  const snapshots = [];
+  const coordinator = new ScreenShareCurrentSessionCoordinator({
+    getCurrent: () => new Promise((resolve) => { resolveSnapshot = resolve; }),
+    isCurrentWorkspace: () => true,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+    workspaceId: "workspace-1",
+  });
+
+  coordinator.invalidate();
+  coordinator.dispose();
+  resolveSnapshot({ session: "stale" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(snapshots, []);
+});
+
 test("current session loads on scope activation and invalidates after presence joins", () => {
   assert.match(provider, /new ScreenShareCurrentSessionCoordinator/);
   assert.match(provider, /requestCurrentRef\.current = invalidateCurrent;\s*invalidateCurrent\(\);/);
