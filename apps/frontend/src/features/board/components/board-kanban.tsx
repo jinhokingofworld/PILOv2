@@ -13,6 +13,7 @@ import {
   orderBoardColumns,
   resolveMobileBoardColumnId
 } from "@/features/board/utils/board-presentation";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
@@ -104,6 +105,7 @@ export function BoardKanban({
   onMoveIssue,
   selectedIssueId = null
 }: BoardKanbanProps) {
+  const isMobile = useIsMobile();
   const [draggedIssue, setDraggedIssue] = useState<DraggedIssue | null>(null);
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
   const [mobileColumnId, setMobileColumnId] = useState("");
@@ -355,13 +357,15 @@ export function BoardKanban({
       className="kanban-scroll overflow-x-auto p-4 sm:p-6"
       aria-label="보드 칸반"
     >
-      <div
-        className="mb-3 flex max-w-full gap-2 overflow-x-auto pb-1 md:hidden"
-        role="tablist"
-        aria-label="Board 컬럼"
-      >
-        {orderedColumns.map((column) => {
-          const issueCount = issuesByColumnId.get(column.id)?.length ?? 0;
+      {isMobile ? (
+        <>
+          <div
+            className="mb-3 flex max-w-full gap-2 overflow-x-auto pb-1"
+            role="tablist"
+            aria-label="Board 컬럼"
+          >
+            {orderedColumns.map((column) => {
+              const issueCount = issuesByColumnId.get(column.id)?.length ?? 0;
 
           return (
             <button
@@ -384,12 +388,12 @@ export function BoardKanban({
               <span className="font-mono text-xs">{issueCount}</span>
             </button>
           );
-        })}
-      </div>
+            })}
+          </div>
 
-      <div className="md:hidden">
-        {orderedColumns.map((column, index) => {
-          const isSelected = resolvedMobileColumnId === column.id;
+          <div>
+            {orderedColumns.map((column, index) => {
+              const isSelected = resolvedMobileColumnId === column.id;
 
           return (
             <div
@@ -399,24 +403,27 @@ export function BoardKanban({
               aria-labelledby={`board-column-tab-${column.id}`}
               hidden={!isSelected}
             >
-              {isSelected ? renderColumn(column, index, false, false) : null}
+              {isSelected ? renderColumn(column, index, false, true) : null}
             </div>
           );
-        })}
-      </div>
+            })}
+          </div>
 
-      <div
-        className="kanban-board hidden md:grid grid-flow-col auto-cols-[minmax(16rem,1fr)] gap-3.5"
-        style={{
-          gridAutoColumns: "minmax(16rem, 1fr)",
-          minWidth: `max(100%, ${Math.max(orderedColumns.length, 1) * 16}rem)`
-        }}
-        role="list"
-      >
-        {orderedColumns.map((column, index) =>
-          renderColumn(column, index, true, true)
-        )}
-      </div>
+        </>
+      ) : (
+        <div
+          className="kanban-board grid grid-flow-col auto-cols-[minmax(16rem,1fr)] gap-3.5"
+          style={{
+            gridAutoColumns: "minmax(16rem, 1fr)",
+            minWidth: `max(100%, ${Math.max(orderedColumns.length, 1) * 16}rem)`
+          }}
+          role="list"
+        >
+          {orderedColumns.map((column, index) =>
+            renderColumn(column, index, true, true)
+          )}
+        </div>
+      )}
     </section>
   );
 }

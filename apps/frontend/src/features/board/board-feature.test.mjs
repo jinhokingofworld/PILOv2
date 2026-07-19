@@ -218,16 +218,18 @@ assert.match(boardKanban, /aria-selected/);
 assert.match(boardKanban, /md:hidden/);
 assert.match(boardKanban, /hidden md:grid/);
 assert.match(boardKanban, /overflow-x-auto/);
+assert.match(boardKanban, /import \{ useIsMobile \} from "@\/hooks\/use-mobile"/);
+assert.match(boardKanban, /const isMobile = useIsMobile\(\)/);
 assert.match(
   boardKanban,
   /function renderColumn\(\s*column: BoardColumnPayload,\s*index: number,\s*enableDrop: boolean,\s*enableCursorTarget: boolean/,
-  "Only the desktop column variant should expose a page cursor target"
+  "Each mounted viewport variant must explicitly expose cursor targets"
 );
 assert.match(boardKanban, /enableCursorTarget\s*\? pageCursorTargetAttributes/);
 assert.match(
   boardKanban,
-  /isSelected \? renderColumn\(column, index, false, false\) : null/,
-  "The hidden mobile lane must not be selectable as a cursor target"
+  /isSelected \? renderColumn\(column, index, false, true\) : null/,
+  "The visible mobile lane must expose cursor targets"
 );
 assert.match(
   boardKanban,
@@ -253,8 +255,8 @@ assert.match(boardKanban, /case "End":/);
 assert.match(boardKanban, /nextTab\?\.focus\(\)/);
 assert.match(
   boardKanban,
-  /<BoardIssueCard[\s\S]*?enableCursorTarget=\{enableCursorTarget\}/,
-  "A mobile lane must also disable page cursor targets on its issue cards"
+  /isMobile \? \([\s\S]*?\) : \([\s\S]*?renderColumn\(column, index, true, true\)/,
+  "Only one viewport variant should mount while both retain cursor targets"
 );
 assert.match(
   boardKanban,
