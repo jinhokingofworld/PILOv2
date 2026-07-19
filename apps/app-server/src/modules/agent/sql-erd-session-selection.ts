@@ -50,8 +50,8 @@ export function parseSqlErdSessionCandidates(
       );
     }
   }
-  const candidates = value.flatMap((candidate) => {
-    if (!isPlainObject(candidate)) return [];
+  const candidates = value.map((candidate) => {
+    if (!isPlainObject(candidate)) return null;
     const title = normalizeSqlErdSessionTitle(candidate.title);
     const updatedAt = normalizeIsoDate(candidate.updatedAt);
     if (
@@ -61,21 +61,25 @@ export function parseSqlErdSessionCandidates(
       !isNonNegativeSafeInteger(candidate.tableCount) ||
       !isNonNegativeSafeInteger(candidate.relationCount)
     ) {
-      return [];
+      return null;
     }
-    return [
-      {
-        selectionToken: candidate.selectionToken,
-        title,
-        updatedAt,
-        tableCount: candidate.tableCount,
-        relationCount: candidate.relationCount
-      }
-    ];
+    return {
+      selectionToken: candidate.selectionToken,
+      title,
+      updatedAt,
+      tableCount: candidate.tableCount,
+      relationCount: candidate.relationCount
+    };
   });
-  return candidates.filter(
-    (candidate) => tokenCounts.get(candidate.selectionToken) === 1
-  );
+  if (
+    candidates.some(
+      (candidate) =>
+        candidate === null || tokenCounts.get(candidate.selectionToken) !== 1
+    )
+  ) {
+    return [];
+  }
+  return candidates as SqlErdSessionSelectionCandidate[];
 }
 
 export function buildSqlErdSelectionDisplayMessage(title: string): string {

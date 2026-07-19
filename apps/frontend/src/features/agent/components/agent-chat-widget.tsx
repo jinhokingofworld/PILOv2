@@ -35,9 +35,8 @@ import {
   createAgentApiClient
 } from "@/features/agent/api/client";
 import { AgentConfirmationCard } from "@/features/agent/components/agent-confirmation-card";
-import { AgentMeetingCandidateSelections } from "@/features/agent/components/agent-meeting-candidate-selections";
+import { AgentCandidateSelections } from "@/features/agent/components/agent-candidate-selections";
 import { AgentResourceLinks } from "@/features/agent/components/agent-resource-links";
-import { AgentSqlErdSessionCandidates } from "@/features/agent/components/agent-sql-erd-session-candidates";
 import { AgentCanvasArtifact } from "@/features/agent/components/agent-canvas-artifact";
 import {
   getCanvasAgentDelegationAdapter,
@@ -1066,7 +1065,7 @@ export function AgentChatWidget() {
                         />
                       ) : null}
                       {message.run ? (
-                        <AgentMeetingCandidateSelections
+                        <AgentCandidateSelections
                           run={message.run}
                           disabled={
                             !accessToken?.trim() || hasActiveAgentRequest
@@ -1074,16 +1073,10 @@ export function AgentChatWidget() {
                           onSelect={(input) =>
                             void appendRunInput(message, input)
                           }
-                        />
-                      ) : null}
-                      {message.run ? (
-                        <AgentSqlErdSessionCandidates
-                          run={message.run}
-                          disabled={
-                            !accessToken?.trim() || hasActiveAgentRequest
-                          }
-                          onSelect={(input) =>
-                            void appendRunInput(message, input)
+                          onRetry={() =>
+                            void appendRunInput(message, {
+                              message: "후보를 다시 찾아주세요."
+                            })
                           }
                         />
                       ) : null}

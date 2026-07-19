@@ -519,20 +519,25 @@ export class SqlErdAgentToolsService {
           resolution.candidates
         ),
         candidates: resolution.candidates.map((candidate) => ({
-          selectionToken: candidate.id,
           title: candidate.title,
           updatedAt: candidate.updatedAt,
           tableCount: candidate.tableCount,
           relationCount: candidate.relationCount
         }))
       }),
-      resourceRefs: resolution.candidates.map((candidate) => ({
-        domain: "sqltoerd",
-        resourceType: "session",
-        resourceId: candidate.id,
-        label: candidate.title,
-        url: `/sql-erd/session?sessionId=${encodeURIComponent(candidate.id)}`,
-        status: "candidate"
+      resourceRefs: [],
+      candidateResources: resolution.candidates.map((candidate) => ({
+        reference: {
+          domain: "sqltoerd",
+          resourceType: "session",
+          resourceId: candidate.id
+        },
+        candidate: {
+          resourceType: "session",
+          label: candidate.title,
+          description: `수정 ${candidate.updatedAt} · 테이블 ${candidate.tableCount}개 · 관계 ${candidate.relationCount}개`,
+          status: null
+        }
       }))
     };
   }

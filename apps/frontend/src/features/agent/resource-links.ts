@@ -1,4 +1,7 @@
-import type { AgentRun } from "@/features/agent/types";
+import type {
+  AgentRun,
+  AgentRunInputSelection
+} from "@/features/agent/types";
 import type { SqlErdAgentTableFocus } from "@/features/sql-erd/utils/agent-table-focus";
 
 export type AgentResourceLink = {
@@ -16,16 +19,19 @@ export type SqlErdSessionCandidate = {
   relationCount: number;
 };
 
-export type MeetingCandidateSelection = {
+export type StoredAgentCandidateSelection = {
   candidateSelectionId: string;
-  resourceType:
-    | "meeting_room"
-    | "meeting"
-    | "meeting_report"
-    | "workspace_member"
-    | "meeting_report_action_item";
+  resourceType: string;
   label: string;
   description: string | null;
+  status: string | null;
+};
+
+export type AgentCandidateSelection = {
+  description: string | null;
+  key: string;
+  label: string;
+  selection: AgentRunInputSelection;
   status: string | null;
 };
 
@@ -33,16 +39,50 @@ const SQL_ERD_SESSION_PATH = "/sql-erd/session";
 const CANVAS_PATH = "/canvas";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const MAX_SQL_ERD_SESSION_CANDIDATES = 5;
-const MAX_MEETING_CANDIDATES = 3;
+const MAX_AGENT_CANDIDATES = 5;
+type CandidateToolStep = AgentRun["steps"][number] & {
+  outputSummary: Record<string, unknown>;
+};
 
-export function getMeetingCandidateSelections(
+export function getAgentCandidateSelections(
   run: Pick<AgentRun, "status" | "steps"> | null | undefined
-): MeetingCandidateSelection[] {
+): AgentCandidateSelection[] {
+  const latestCompletedToolStep = getLatestCandidateToolStep(run);
+  if (!latestCompletedToolStep) return [];
+
+  const output = latestCompletedToolStep.outputSummary;
+  if (Array.isArray(output.candidateSelections)) {
+    return getStoredAgentCandidateSelections(run).map((candidate) => ({
+      key: `candidate:${candidate.candidateSelectionId}`,
+      label: candidate.label,
+      description: candidate.description,
+      status: candidate.status,
+      selection: {
+        kind: "candidate",
+        candidateSelectionId: candidate.candidateSelectionId
+      }
+    }));
+  }
+  if (Array.isArray(output.candidates)) {
+    return getSqlErdSessionCandidates(run).map((candidate) => ({
+      key: `sql-erd:${candidate.selectionToken}`,
+      label: candidate.title,
+      description: formatSqlErdCandidateDescription(candidate),
+      status: null,
+      selection: {
+        kind: "sql_erd_session",
+        token: candidate.selectionToken
+      }
+    }));
+  }
+  return [];
+}
+
+export function getStoredAgentCandidateSelections(
+  run: Pick<AgentRun, "status" | "steps"> | null | undefined
+): StoredAgentCandidateSelection[] {
   if (run?.status !== "waiting_user_input") return [];
-  const latestCompletedToolStep = [...run.steps]
-    .filter((step) => step.type === "tool" && step.status === "completed")
-    .sort((left, right) => right.order - left.order)[0];
+  const latestCompletedToolStep = getLatestCandidateToolStep(run);
   if (
     latestCompletedToolStep?.outputSummary?.status !== "needs_clarification" ||
     !Array.isArray(latestCompletedToolStep.outputSummary.candidateSelections)
@@ -50,13 +90,14 @@ export function getMeetingCandidateSelections(
     return [];
   }
   const rawCandidates = latestCompletedToolStep.outputSummary.candidateSelections;
-  if (rawCandidates.length === 0 || rawCandidates.length > MAX_MEETING_CANDIDATES) {
+  if (rawCandidates.length === 0 || rawCandidates.length > MAX_AGENT_CANDIDATES) {
     return [];
   }
   const seenIds = new Set<string>();
-  return rawCandidates.flatMap((candidate) => {
-    if (!isPlainObject(candidate)) return [];
+  const candidates = rawCandidates.map((candidate) => {
+    if (!isPlainObject(candidate)) return null;
     const candidateSelectionId = candidate.candidateSelectionId;
+    const resourceType = candidate.resourceType;
     const label = normalizeCandidateTitle(candidate.label);
     const description = normalizeOptionalCandidateText(candidate.description, 1000);
     const status = normalizeOptionalCandidateText(candidate.status, 100);
@@ -65,30 +106,30 @@ export function getMeetingCandidateSelections(
       !UUID_PATTERN.test(candidateSelectionId) ||
       seenIds.has(candidateSelectionId) ||
       !label ||
-      !isMeetingResourceType(candidate.resourceType)
+      typeof resourceType !== "string" ||
+      !/^[a-z][a-z0-9_]{0,99}$/.test(resourceType)
     ) {
-      return [];
+      return null;
     }
     seenIds.add(candidateSelectionId);
-    return [
-      {
-        candidateSelectionId,
-        resourceType: candidate.resourceType,
-        label,
-        description,
-        status
-      }
-    ];
+    return {
+      candidateSelectionId,
+      resourceType,
+      label,
+      description,
+      status
+    };
   });
+  return candidates.some((candidate) => candidate === null)
+    ? []
+    : (candidates as StoredAgentCandidateSelection[]);
 }
 
 export function getSqlErdSessionCandidates(
   run: Pick<AgentRun, "status" | "steps"> | null | undefined
 ): SqlErdSessionCandidate[] {
   if (run?.status !== "waiting_user_input") return [];
-  const latestCompletedToolStep = [...run.steps]
-    .filter((step) => step.type === "tool" && step.status === "completed")
-    .sort((left, right) => right.order - left.order)[0];
+  const latestCompletedToolStep = getLatestCandidateToolStep(run);
   if (
     latestCompletedToolStep?.toolName !== "inspect_sql_erd_schema" ||
     latestCompletedToolStep.outputSummary?.status !== "needs_clarification"
@@ -99,7 +140,7 @@ export function getSqlErdSessionCandidates(
   if (
     !Array.isArray(rawCandidates) ||
     rawCandidates.length === 0 ||
-    rawCandidates.length > MAX_SQL_ERD_SESSION_CANDIDATES
+    rawCandidates.length > MAX_AGENT_CANDIDATES
   ) {
     return [];
   }
@@ -116,8 +157,8 @@ export function getSqlErdSessionCandidates(
       );
     }
   }
-  const candidates = rawCandidates.flatMap((candidate) => {
-    if (!isPlainObject(candidate)) return [];
+  const candidates = rawCandidates.map((candidate) => {
+    if (!isPlainObject(candidate)) return null;
     const title = normalizeCandidateTitle(candidate.title);
     const updatedAt = normalizeCandidateDate(candidate.updatedAt);
     if (
@@ -128,21 +169,46 @@ export function getSqlErdSessionCandidates(
       !isNonNegativeSafeInteger(candidate.tableCount) ||
       !isNonNegativeSafeInteger(candidate.relationCount)
     ) {
-      return [];
+      return null;
     }
-    return [
-      {
-        selectionToken: candidate.selectionToken,
-        title,
-        updatedAt,
-        tableCount: candidate.tableCount,
-        relationCount: candidate.relationCount
-      }
-    ];
+    return {
+      selectionToken: candidate.selectionToken,
+      title,
+      updatedAt,
+      tableCount: candidate.tableCount,
+      relationCount: candidate.relationCount
+    };
   });
-  return candidates.filter(
-    (candidate) => tokenCounts.get(candidate.selectionToken) === 1
-  );
+  if (
+    candidates.some(
+      (candidate) =>
+        candidate === null || tokenCounts.get(candidate.selectionToken) !== 1
+    )
+  ) {
+    return [];
+  }
+  return candidates as SqlErdSessionCandidate[];
+}
+
+function getLatestCandidateToolStep(
+  run: Pick<AgentRun, "status" | "steps"> | null | undefined
+): CandidateToolStep | null {
+  if (run?.status !== "waiting_user_input") return null;
+  const latestCompletedToolStep = [...run.steps]
+    .filter((step) => step.type === "tool" && step.status === "completed")
+    .sort((left, right) => right.order - left.order)[0];
+  if (
+    !latestCompletedToolStep ||
+    !latestCompletedToolStep.outputSummary ||
+    latestCompletedToolStep.outputSummary.status !== "needs_clarification"
+  ) {
+    return null;
+  }
+  return latestCompletedToolStep as CandidateToolStep;
+}
+
+function formatSqlErdCandidateDescription(candidate: SqlErdSessionCandidate): string {
+  return `수정 ${candidate.updatedAt} · 테이블 ${candidate.tableCount}개 · 관계 ${candidate.relationCount}개`;
 }
 
 export function getAgentResourceLinks(
@@ -194,18 +260,6 @@ function toCanvasLink(
     key: `canvas:agent-run:${resourceRef.resourceId}`,
     label: "캔버스에서 열기"
   };
-}
-
-function isMeetingResourceType(
-  value: unknown
-): value is MeetingCandidateSelection["resourceType"] {
-  return typeof value === "string" && [
-    "meeting_room",
-    "meeting",
-    "meeting_report",
-    "workspace_member",
-    "meeting_report_action_item"
-  ].includes(value);
 }
 
 function normalizeOptionalCandidateText(

@@ -255,7 +255,7 @@ tool이다. inspect는 session 선택 clarification을 위해 `executionMode=con
 type InspectSqlErdSchemaInput = {
   featureQuery: string; // trim/공백 정리 후 1~200자
   sessionId?: string; // exact UUID
-  sessionSelectionToken?: string; // clarification 후보가 반환한 opaque token
+  sessionSelectionToken?: string; // 선택 후 App Server가 내부 planning memory에 복원한 reference
   sessionTitle?: string; // exact title, 1~120자
 };
 ```
@@ -263,8 +263,9 @@ type InspectSqlErdSchemaInput = {
 - 대상 선택 우선순위는 명시 `sessionId`, 후보의 `sessionSelectionToken`, exact `sessionTitle`, 현재 SQLtoERD request
   context, Workspace의 유일한 활성 session 순서다.
 - session이 없거나 여러 개이면 실행하지 않고 `needs_clarification`을 반환한다. 후보는 최근
-  수정순 최대 5개이며 후속 호출용 `selectionToken`, title, updatedAt, tableCount, relationCount를 보여준다.
-  같은 title의 후보를 골랐을 때는 title을 다시 보내지 않고 선택한 `selectionToken`을 그대로 사용한다.
+  수정순 최대 5개이며 browser에는 공통 server-owned `candidateSelectionId`, title, updatedAt,
+  tableCount, relationCount만 보여준다. 선택 직전 App Server가 session 접근을 재검증하고 내부
+  `sessionSelectionToken`으로 복원하며 raw session ID는 후보 payload에 노출하지 않는다.
 - 선택한 session의 modelJson을 table 선언 순서의 `t1`, `t2` compact ref로 투영한다.
   모든 FK edge를 유지하되 전체 projection은 JSON 직렬화 기준 최대 9,000자다.
 - projection에는 table name, 선택적인 schema/comment와 bounded 주요 column, compact FK만

@@ -983,6 +983,19 @@ function createExecutionServiceWithRegistry(
   const loggingService = new FakeAgentLoggingService(state);
   const confirmationService = new FakeAgentConfirmationService();
   const outboxPublisherService = new FakeAgentOutboxPublisherService();
+  const candidateSelectionService = {
+    calls: [],
+    async createCandidates(context, toolStepId, candidates) {
+      this.calls.push({ context, toolStepId, candidates });
+      return candidates.map(({ reference, candidate }, index) => ({
+        candidateSelectionId: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index + 1).padStart(12, "0")}`,
+        resourceType: reference.resourceType,
+        label: candidate.label,
+        description: candidate.description,
+        status: candidate.status
+      }));
+    }
+  };
 
   return {
     service: new AgentExecutionService(
@@ -993,8 +1006,10 @@ function createExecutionServiceWithRegistry(
       registry,
       undefined,
       undefined,
-      outboxPublisherService
+      outboxPublisherService,
+      candidateSelectionService
     ),
+    candidateSelectionService,
     confirmationService,
     loggingService,
     workspaceService
@@ -1952,12 +1967,13 @@ function formatterMeetingReport(index, overrides = {}) {
   const outputSummary = loggingService.calls[1].input.outputSummary;
   assert.equal(outputSummary.reason, "multiple_sessions");
   assert.deepEqual(
-    outputSummary.candidates.map((candidate) => candidate.selectionToken),
-    [SQL_ERD_SESSION_ID, SQL_ERD_SECOND_SESSION_ID]
+    outputSummary.candidateSelections.map((candidate) => candidate.label),
+    ["Untitled ERD", "Untitled ERD"]
   );
+  assert.equal(JSON.stringify(outputSummary).includes(SQL_ERD_SESSION_ID), false);
   assert.equal(loggingService.calls[1].input.waitForUserInput, true);
 
-  const selectedToken = outputSummary.candidates[1].selectionToken;
+  const selectedToken = SQL_ERD_SECOND_SESSION_ID;
   const resumedExecution = createExecutionServiceWithRegistry(
     plannerOutput({
       toolName: inspectDefinition.name,
