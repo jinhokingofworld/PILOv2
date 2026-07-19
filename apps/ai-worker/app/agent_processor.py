@@ -1461,14 +1461,31 @@ def _requested_meeting_report_summary_sections(prompt: str) -> tuple[str, ...] |
             continue
 
         only_selected_set.add(key)
-        prefix = normalized_prompt[: only_match.start()]
-        for grouped_key, grouped_pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS:
-            if grouped_key in excluded:
-                continue
-            for grouped_match in grouped_pattern.finditer(prefix):
-                connector = prefix[grouped_match.end() : only_match.start()]
-                if re.fullmatch(r"\s*(?:와|과|및|,|하고)\s*", connector):
-                    only_selected_set.add(grouped_key)
+        # Walk the complete connector-delimited section chain to the left of
+        # ``X만``.  A single direct look-behind would lose the earliest
+        # section in requests such as "요약과 논의사항과 결정사항만".
+        chain_end = only_match.start()
+        while chain_end > 0:
+            prefix = normalized_prompt[:chain_end]
+            linked_sections: list[tuple[int, int, str]] = []
+            for grouped_key, grouped_pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS:
+                if grouped_key in excluded:
+                    continue
+                for grouped_match in grouped_pattern.finditer(prefix):
+                    connector = prefix[grouped_match.end() : chain_end]
+                    if re.fullmatch(r"\s*(?:와|과|및|,|하고)\s*", connector):
+                        linked_sections.append(
+                            (grouped_match.end(), grouped_match.start(), grouped_key)
+                        )
+
+            if not linked_sections:
+                break
+
+            _matched_end, chain_end, grouped_key = max(
+                linked_sections,
+                key=lambda candidate: candidate[0],
+            )
+            only_selected_set.add(grouped_key)
 
     only_selected = [
         key
