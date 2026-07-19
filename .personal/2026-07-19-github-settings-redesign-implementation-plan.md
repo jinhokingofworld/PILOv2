@@ -268,7 +268,7 @@ git commit -m "feat: GitHub 연결 단계를 순차 활성화한다 (#1507)"
 
 **Interfaces:**
 - `GithubConnectRepositories` consumes repository data/search/page/select props and `enabled: boolean`.
-- `GithubConnectProject` consumes `projects`, `activeProjectV2Id`, `selectedRepository`, `isActivating`, and `onActivateProjectV2(projectV2Id): Promise<void>`.
+- `GithubConnectProject` consumes `projects`, `activeProjectV2Id`, `selectedRepository`, `projectOAuthConnected`, `isWorkspaceOwner`, `isActivating`, and `onActivateProjectV2(projectV2Id): Promise<void>`.
 - `GithubPanel.handleActivateProjectV2(projectV2Id)` resolves only after the existing active Board source API succeeds.
 
 - [ ] **Step 1: 새 섹션과 즉시 적용 동작의 실패 assertion을 추가한다**
