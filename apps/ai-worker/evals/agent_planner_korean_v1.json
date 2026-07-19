@@ -487,10 +487,17 @@
               "FAILED"
             ]
           },
+          "reportTitle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+          },
           "roomName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
           },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",
@@ -531,10 +538,17 @@
               "FAILED"
             ]
           },
+          "reportTitle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+          },
           "roomName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
           },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",
@@ -599,10 +613,17 @@
               "FAILED"
             ]
           },
+          "reportTitle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+          },
           "roomName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
           },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",
@@ -711,10 +732,17 @@
               "FAILED"
             ]
           },
+          "reportTitle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+          },
           "roomName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
           },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",
@@ -883,10 +911,17 @@
               "FAILED"
             ]
           },
+          "reportTitle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+          },
           "roomName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
           },
           "useSelectedMeetingReportCandidate": {
             "type": "boolean",

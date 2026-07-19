@@ -1141,8 +1141,11 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
 - `list_meeting_reports`는 `from`, `to`, `status`, Agent 내부 `roomName`, `limit`을 지원한다. 기간과
   개수를 생략하면 `createdAt DESC, id ASC` 정렬의 최신 report 1개를 반환한다. `roomName`은 Agent 내부
   도메인 조회 전용이며 Meeting REST API를 확장하지 않는다.
-- 특정 MeetingReport 상세/요약도 UUID `reportId`를 받지 않는다. selector가 없으면 최신 report 1개를
-  해소하고, filter 결과가 여러 개면 같은 run의 후보 버튼으로 선택을 요청한다.
+- 특정 MeetingReport 상세/요약도 UUID `reportId`를 받지 않는다. selector는 `[from, to)`, `status`,
+  Agent 내부 `roomName`과 표시 제목 exact match용 `reportTitle`을 조합할 수 있다. `roomName`은 회의가 열린
+  회의방 이름이고 `reportTitle`은 `COALESCE(user_title, title)`로 계산한 회의록 제목이므로 서로 대체하지
+  않는다. selector가 없으면 최신 report 1개를 해소하고, filter 결과가 여러 개면 같은 run의 후보 버튼으로
+  선택을 요청한다. 후보 label은 요약문 대신 회의록 제목을 사용한다.
 - 상세 조회의 `transcriptText`는 답변 생성에 사용할 수 있지만 Agent run/step/confirmation에는 전문 저장하지 않는다.
 - `search_meeting_transcript`는 `query`와 선택 MeetingReport selector를 받는다. raw `reportId`는
   planner-facing schema에 허용하지 않는다. transcript 원문과 raw Activity Log를 Agent run/step에 저장하지
