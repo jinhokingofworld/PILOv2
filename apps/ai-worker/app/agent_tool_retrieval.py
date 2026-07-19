@@ -12,7 +12,7 @@ _TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣_]+")
 _SUPPORTED_CATALOG_VERSIONS = frozenset(
     {"agent-tool-capabilities:v1", "agent-tool-capabilities:v2"}
 )
-TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v1"
+TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v2"
 _KOREAN_PARTICLES = (
     "으로",
     "에서",
@@ -34,6 +34,64 @@ _KOREAN_PARTICLES = (
     "도",
 )
 _KOREAN_REQUEST_ENDINGS = ("해주세요", "해 주세요", "해줘", "해요")
+_GENERIC_REQUEST_TOKENS = frozenset(
+    {
+        "알려줘",
+        "부탁드려요",
+        "요청",
+        "해주세요",
+        "해줘",
+        "해요",
+    }
+)
+_TOKEN_ALIASES = {
+    "board": ("보드",),
+    "canvas": ("캔버스",),
+    "pr_review": ("pr", "리뷰"),
+    "review": ("리뷰",),
+    "sql_erd": ("erd",),
+    "sqltoerd": ("erd",),
+    "table": ("테이블",),
+}
+_INTENT_CUE_MARKERS = (
+    ("조회", ("조회", "보여", "보기", "확인", "살펴")),
+    ("생성", ("생성", "만들", "추가")),
+    ("변경", ("변경", "바꾸", "바꿔", "수정")),
+    ("삭제", ("삭제", "지우", "지워", "제거")),
+    ("검색", ("검색", "찾")),
+    ("승인", ("승인",)),
+    ("반려", ("반려", "제외")),
+    ("참여", ("참여", "입장", "재입장")),
+    ("퇴장", ("퇴장", "나가")),
+    ("시작", ("시작",)),
+    ("종료", ("종료", "끝내")),
+    ("요약", ("요약",)),
+    ("이동", ("이동", "옮겨")),
+    ("위임", ("위임",)),
+    ("추천", ("추천",)),
+    ("실행", ("실행", "돌려")),
+    ("제출", ("제출", "merge", "머지")),
+)
+_INTENT_CUE_TOKENS = frozenset(cue for cue, _ in _INTENT_CUE_MARKERS)
+_INTENT_CUE_FAMILY = {
+    "조회": "read",
+    "검색": "read",
+    "추천": "read",
+    "요약": "read",
+    "생성": "create",
+    "변경": "update",
+    "삭제": "delete",
+    "승인": "approve",
+    "반려": "dismiss",
+    "참여": "join",
+    "퇴장": "leave",
+    "시작": "start",
+    "종료": "end",
+    "이동": "move",
+    "위임": "delegate",
+    "실행": "execute",
+    "제출": "submit",
+}
 _CAPABILITY_EXAMPLE_KINDS = frozenset(
     {"canonical", "paraphrase", "typo", "honorific", "abbreviation"}
 )
@@ -215,7 +273,8 @@ def retrieve_tool_shortlist(
             continue
         terminal_tool_name = capability.tool_names[-1]
         terminal_descriptor = descriptor_by_tool_name[terminal_tool_name]
-        negative_tokens = set(_tokens(" ".join(capability.must_not_use_for)))
+        metadata_tokens = _capability_metadata_tokens(capability)
+        negative_tokens = set(_tokens(" ".join(capability.must_not_use_for))) - metadata_tokens
         score = _capability_match_score(prompt_tokens, capability)
         score -= float(len(prompt_tokens & negative_tokens)) * 0.75
         metadata_scores.append(score)
@@ -451,7 +510,19 @@ def _confidence_bucket(score: float) -> str:
 
 
 def _capability_match_score(prompt_tokens: set[str], capability: CapabilityDefinition) -> float:
-    metadata_tokens = set(
+    metadata_tokens = _capability_metadata_tokens(capability)
+    score = float(len(prompt_tokens & metadata_tokens))
+    prompt_intent_cues = prompt_tokens & _INTENT_CUE_TOKENS
+    if prompt_intent_cues:
+        capability_intent_cues = metadata_tokens & _INTENT_CUE_TOKENS
+        prompt_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in prompt_intent_cues}
+        capability_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in capability_intent_cues}
+        score -= float(len(capability_intent_families - prompt_intent_families)) * 0.75
+    return score
+
+
+def _capability_metadata_tokens(capability: CapabilityDefinition) -> set[str]:
+    return set(
         _tokens(
             " ".join(
                 (
@@ -464,7 +535,6 @@ def _capability_match_score(prompt_tokens: set[str], capability: CapabilityDefin
             )
         )
     )
-    return float(len(prompt_tokens & metadata_tokens))
 
 
 def _valid_v2_capability_contract(
@@ -697,15 +767,23 @@ def _tokens(value: str) -> tuple[str, ...]:
     tokens: list[str] = []
     for raw_token in _TOKEN_PATTERN.findall(value):
         token = raw_token.lower()
-        tokens.append(token)
+        variants = [token]
         for ending in _KOREAN_REQUEST_ENDINGS:
             if token.endswith(ending) and len(token) > len(ending) + 1:
-                tokens.append(token[: -len(ending)])
+                variants.append(token[: -len(ending)])
                 break
         for particle in _KOREAN_PARTICLES:
             if token.endswith(particle) and len(token) > len(particle) + 1:
-                tokens.append(token[: -len(particle)])
+                variants.append(token[: -len(particle)])
                 break
+        for variant in variants:
+            if variant in _GENERIC_REQUEST_TOKENS:
+                continue
+            tokens.append(variant)
+            tokens.extend(_TOKEN_ALIASES.get(variant, ()))
+            for intent_cue, markers in _INTENT_CUE_MARKERS:
+                if any(marker in variant for marker in markers):
+                    tokens.append(intent_cue)
     return tuple(tokens)
 
 

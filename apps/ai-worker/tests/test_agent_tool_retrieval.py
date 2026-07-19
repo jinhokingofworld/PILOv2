@@ -213,6 +213,84 @@ def test_full_catalog_shortlists_calendar_list_for_common_date_queries(prompt: s
     assert calendar.tool_names == ("list_calendar_events",)
 
 
+@pytest.mark.parametrize(
+    ("prompt", "capability_id", "tool_names"),
+    (
+        (
+            "오늘 오후 3시 일정 만들어줘",
+            "calendar.events.create",
+            {"create_calendar_event"},
+        ),
+        (
+            "오늘 일정 시간 바꿔줘",
+            "calendar.events.update",
+            {"list_calendar_events", "update_calendar_event"},
+        ),
+        (
+            "첫 번째 후속 작업 승인해줘",
+            "meeting.action_items.approve",
+            {"find_action_items", "approve_meeting_report_action_item"},
+        ),
+        (
+            "두 번째 후속 작업 반려해줘",
+            "meeting.action_items.dismiss",
+            {"find_action_items", "dismiss_meeting_report_action_item"},
+        ),
+        (
+            "로그인 버그 이슈 찾아줘",
+            "board.issues.search",
+            {"search_board_issues", "get_board_issue_context"},
+        ),
+        ("새 보드 이슈 만들어줘", "board.issues.create", {"create_board_issue"}),
+        (
+            "첫 번째 이슈 상태를 진행 중으로 바꿔줘",
+            "board.issues.move",
+            {"search_board_issues", "move_board_issue_status"},
+        ),
+        (
+            "현재 ERD 테이블 보여줘",
+            "sql_erd.inspect",
+            {"inspect_sql_erd_schema", "focus_sql_erd_tables"},
+        ),
+        (
+            "PR 리뷰 우선순위 보여줘",
+            "pr_review.focus",
+            {"recommend_pr_review_focus"},
+        ),
+        ("캔버스 작업 해줘", "canvas.delegate", {"delegate_canvas_agent"}),
+    ),
+)
+def test_full_catalog_uses_korean_intent_cues_across_domains(
+    prompt: str,
+    capability_id: str,
+    tool_names: set[str],
+) -> None:
+    fixture = json.loads(QUALITY_FIXTURE_PATH.read_text(encoding="utf-8"))
+    schemas = fixture["eligibleToolSchemas"]
+    catalog = parse_tool_capability_catalog(fixture["toolCapabilityCatalog"], schemas)
+    assert catalog is not None
+
+    retrieval = retrieve_tool_shortlist(prompt, catalog)
+
+    assert retrieval.selected_capability_ids == (capability_id,)
+    assert set(retrieval.tool_names) == tool_names
+    assert retrieval.fallback_reason is None
+
+
+def test_full_catalog_routes_korean_delete_request_to_unsupported_capability() -> None:
+    fixture = json.loads(QUALITY_FIXTURE_PATH.read_text(encoding="utf-8"))
+    schemas = fixture["eligibleToolSchemas"]
+    catalog = parse_tool_capability_catalog(fixture["toolCapabilityCatalog"], schemas)
+    assert catalog is not None
+
+    retrieval = retrieve_tool_shortlist("내일 일정 삭제해줘", catalog)
+
+    assert retrieval.tool_names == ()
+    assert retrieval.selected_capability_ids == ()
+    assert retrieval.fallback_reason == "unsupported_capability"
+    assert retrieval.unsupported_capability_id == "calendar.events.delete"
+
+
 def test_compound_request_detection_requires_a_conjunction_token() -> None:
     assert _is_compound_request("일정과 회의록을 보여줘") is True
     assert _is_compound_request("회의에서 나와줘") is False
