@@ -53,6 +53,19 @@ const originalEnv = {
   SQS_ENDPOINT: process.env.SQS_ENDPOINT
 };
 
+{
+  const parameterTypes = Reflect.getMetadata(
+    "design:paramtypes",
+    AgentToolRegistryService
+  );
+
+  assert.equal(
+    parameterTypes?.[7],
+    AgentDomainFeatureFlagService,
+    "AgentToolRegistryService must retain AgentDomainFeatureFlagService Nest DI metadata"
+  );
+}
+
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
   "eb835c93100f96283166751167fe23eb7fe649711f566e6248f80223476c1b34";
 
