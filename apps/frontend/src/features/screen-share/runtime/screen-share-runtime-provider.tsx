@@ -271,6 +271,7 @@ export function ScreenShareRuntimeProvider({
   const publisherAttemptRef = useRef(0);
   const viewerAttemptRef = useRef(0);
   const reloadAttemptRef = useRef(0);
+  const requestCurrentRef = useRef<() => void>(() => undefined);
   const notifiedSessionIdsRef = useRef(new Set<string>());
   const workspaceIdRef = useRef(workspaceId);
   const previousWorkspaceIdRef = useRef(workspaceId);
@@ -539,44 +540,25 @@ export function ScreenShareRuntimeProvider({
   );
 
   const reloadCurrent = useCallback(() => {
-    if (!workspaceId) {
-      setActiveSession(null);
-      return;
-    }
-    const requestWorkspaceId = workspaceId;
-    const attempt = ++reloadAttemptRef.current;
-    void api
-      .getCurrent(requestWorkspaceId)
-      .then(({ session }) => {
-        if (isCurrentScreenShareRequest({
-          attempt,
-          currentAttempt: reloadAttemptRef.current,
-          currentWorkspaceId: workspaceIdRef.current,
-          requestWorkspaceId
-        })) {
-          const result = reconcileCurrentSession(session);
-          if (result.shouldToast && session) {
-            toast(`${session.sharer.displayName}님이 화면 공유를 시작했어요`, {
-              action: {
-                label: "시청하기",
-                onClick: () => startViewingRef.current(session.id)
-              }
-            });
-          }
-        }
-      })
-      .catch(() => undefined);
-  }, [api, reconcileCurrentSession, workspaceId]);
+    requestCurrentRef.current();
+  }, []);
 
   useEffect(() => {
     if (activeSession || !workspaceId) return;
 
     const requestWorkspaceId = workspaceId;
     let cancelled = false;
+    let inFlight = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const requestCurrent = () => {
-      if (cancelled) return;
+      if (cancelled || inFlight) return;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      inFlight = true;
       const attempt = ++reloadAttemptRef.current;
+      let shouldPoll = false;
       void api
         .getCurrent(requestWorkspaceId)
         .then(({ session }) => {
@@ -586,7 +568,7 @@ export function ScreenShareRuntimeProvider({
             currentWorkspaceId: workspaceIdRef.current,
             requestWorkspaceId
           })) {
-            if (activeSessionRef.current === null) schedulePoll();
+            shouldPoll = activeSessionRef.current === null;
             return;
           }
           if (cancelled) {
@@ -601,20 +583,29 @@ export function ScreenShareRuntimeProvider({
               }
             });
           }
-          if (!session) schedulePoll();
+          shouldPoll = !session;
         })
         .catch(() => {
-          schedulePoll();
+          shouldPoll = true;
+        })
+        .finally(() => {
+          inFlight = false;
+          if (shouldPoll) schedulePoll();
         });
     };
     const schedulePoll = () => {
-      if (cancelled) return;
-      timeoutId = setTimeout(requestCurrent, 5_000);
+      if (cancelled || timeoutId) return;
+      timeoutId = setTimeout(() => {
+        timeoutId = null;
+        requestCurrent();
+      }, 5_000);
     };
 
+    requestCurrentRef.current = requestCurrent;
     requestCurrent();
     return () => {
       cancelled = true;
+      requestCurrentRef.current = () => undefined;
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, [activeSession, api, reconcileCurrentSession, workspaceId]);

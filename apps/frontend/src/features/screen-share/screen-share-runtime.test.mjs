@@ -36,8 +36,10 @@ test("Workspace layout mounts screen share beside the Meeting runtime", () => {
 
 test("current session loads on mount and reloads on socket reconnect", () => {
   assert.match(provider, /const requestCurrent = \(\) => \{/);
+  assert.match(provider, /const reloadCurrent = useCallback\(\(\) => \{\s*requestCurrentRef\.current\(\);\s*\}, \[\]\)/);
   assert.match(provider, /socket\.on\("connect", reloadCurrent\)/);
   assert.match(provider, /socket\.off\("connect", reloadCurrent\)/);
+  assert.equal((provider.match(/\.getCurrent\(/g) ?? []).length, 1);
   assert.match(provider, /workspace-screen-share:started/);
   assert.match(provider, /workspace-screen-share:ended/);
   assert.match(
@@ -123,14 +125,14 @@ test("current-session polling is bounded to an inactive workspace lifecycle", ()
   assert.doesNotMatch(provider, /useEffect\(\(\) => \{\s*void reloadCurrent\(\);/);
   assert.match(
     polling,
-    /const requestCurrent = \(\) => \{[\s\S]*api[\s\S]*\.getCurrent\([\s\S]*schedulePoll\(\)[\s\S]*const schedulePoll = \(\) => \{[\s\S]*setTimeout\(requestCurrent, 5_000\)[\s\S]*requestCurrent\(\);/,
+    /const requestCurrent = \(\) => \{[\s\S]*api[\s\S]*\.getCurrent\([\s\S]*\.finally\(\(\) => \{[\s\S]*inFlight = false;[\s\S]*schedulePoll\(\)[\s\S]*const schedulePoll = \(\) => \{[\s\S]*setTimeout\(\(\) => \{[\s\S]*requestCurrent\(\)[\s\S]*\}, 5_000\)[\s\S]*requestCurrent\(\);/,
   );
   assert.match(provider, /let timeoutId: ReturnType<typeof setTimeout> \| null = null/);
   assert.match(
     polling,
     /const requestCurrent = \(\) => \{[\s\S]*const attempt = \+\+reloadAttemptRef\.current;[\s\S]*isCurrentScreenShareRequest/,
   );
-  assert.match(polling, /\.then\([\s\S]*schedulePoll\(\)[\s\S]*\.catch\([\s\S]*schedulePoll\(\)/);
+  assert.match(polling, /if \(cancelled \|\| inFlight\) return;/);
   assert.match(polling, /return \(\) => \{\s*cancelled = true;[\s\S]*clearTimeout\(timeoutId\)/);
 });
 
