@@ -789,6 +789,27 @@ assert.deepEqual(
   assert.equal(result, false);
   assert.deepEqual(appliedFocuses, []);
 }
+
+{
+  const appliedFocuses = [];
+  const result = agentResourceUtilities.applyAgentSqlErdTableFocus(
+    {
+      ...completedRun,
+      steps: [
+        {
+          ...completedRun.steps[0],
+          resourceRefs: [{ ...focusedResourceRef, domain: "calendar" }]
+        }
+      ]
+    },
+    { surface: "sql_erd", sessionId: resourceSessionId },
+    new Set(),
+    (focus) => appliedFocuses.push(focus)
+  );
+
+  assert.equal(result, false);
+  assert.deepEqual(appliedFocuses, []);
+}
 assert.deepEqual(
   getAgentResourceLinks({
     ...completedRun,

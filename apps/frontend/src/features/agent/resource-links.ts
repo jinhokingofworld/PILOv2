@@ -258,7 +258,7 @@ export function applyAgentSqlErdTableFocus(
       continue;
     }
     for (const resourceRef of [...step.resourceRefs].reverse()) {
-      const focus = parseSqlErdAgentTableFocusResource(resourceRef);
+      const focus = toSqlErdSessionLink(resourceRef)?.focus;
       if (!focus || focus.sessionId !== requestContext.sessionId) {
         continue;
       }
