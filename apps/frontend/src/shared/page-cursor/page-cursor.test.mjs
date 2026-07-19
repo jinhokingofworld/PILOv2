@@ -12,6 +12,7 @@ const [
   calendarPanel,
   boardPanel,
   boardKanban,
+  boardIssueCard,
 ] = await Promise.all([
   readSource("../../app/(workspace)/layout.tsx"),
   readSource("../realtime/realtime-provider.tsx"),
@@ -21,6 +22,7 @@ const [
   readSource("../../features/calendar/components/calendar-panel.tsx"),
   readSource("../../features/board/components/board-panel.tsx"),
   readSource("../../features/board/components/board-kanban.tsx"),
+  readSource("../../features/board/components/board-issue-card.tsx"),
 ]);
 
 assert.match(workspaceLayout, /RealtimeProvider/);
@@ -41,7 +43,7 @@ assert.match(homeDashboard, /page="home"/);
 assert.match(calendarPanel, /page="calendar"/);
 assert.match(boardPanel, /page="board"/);
 assert.match(boardPanel, /boardId=\{selectedBoardId\}/);
-assert.match(boardKanban, /type: "board_issue"/);
+assert.match(boardIssueCard, /type: "board_issue"/);
 assert.match(boardKanban, /type: "board_column"/);
 
 console.log("page cursor frontend behavior tests passed");
