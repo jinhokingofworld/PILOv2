@@ -4186,15 +4186,17 @@ export class PrReviewService {
       }
       return metadata;
     });
-    const semanticGraphCandidates = buildPrReviewSemanticGraphHandoffV1(
-      files.map((file) => ({
-        filePath: file.filePath,
-        previousFilePath: file.previousFilePath,
-        fileStatus: file.fileStatus,
-        isBinary: file.isBinary,
-        patch: file.patch
-      }))
-    );
+    const semanticGraphCandidateFiles = files.map((file) => ({
+      filePath: file.filePath,
+      previousFilePath: file.previousFilePath,
+      fileStatus: file.fileStatus,
+      isBinary: file.isBinary,
+      patch: file.patch
+    }));
+    const semanticGraphCandidates =
+      analysis.graphSchemaVersion === PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V2
+        ? buildPrReviewSemanticGraphHandoffV2(semanticGraphCandidateFiles)
+        : buildPrReviewSemanticGraphHandoffV1(semanticGraphCandidateFiles);
     const semanticGraph = prioritizePrReviewSemanticGraph(
       resolvePrReviewSemanticGraph(analysis, semanticGraphCandidates),
       normalizedFiles.map((file) => ({
@@ -4203,7 +4205,14 @@ export class PrReviewService {
       }))
     );
     if (semanticGraph.fallbackReason === "invalid_ai_graph") {
-      this.logger.warn("Invalid PR Review AI semantic graph used deterministic fallback");
+      this.logger.warn(
+        "PR Review semantic graph fallback category=flow reason=invalid_ai_graph"
+      );
+    }
+    if (semanticGraph.fallbackReason === "invalid_ai_relations") {
+      this.logger.warn(
+        "PR Review semantic graph fallback category=relation reason=invalid_ai_relations"
+      );
     }
 
     return {

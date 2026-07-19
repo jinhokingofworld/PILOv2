@@ -330,6 +330,107 @@ function semanticResultBody() {
   return body;
 }
 
+function semanticV2ChangedFiles() {
+  return [
+    {
+      filePath: "src/user.service.ts",
+      previousFilePath: null,
+      fileName: "user.service.ts",
+      headBlobSha: "blob-user-service-v2",
+      fileStatus: "modified",
+      additions: 3,
+      deletions: 1,
+      isBinary: false,
+      isLargeDiff: false,
+      githubFileUrl: "https://github.com/Developer-EJ/PILO/user.service.ts",
+      patch: "+export class UserService {}",
+      patchSizeBytes: 28
+    },
+    {
+      filePath: "src/user.service.test.ts",
+      previousFilePath: null,
+      fileName: "user.service.test.ts",
+      headBlobSha: "blob-user-service-test-v2",
+      fileStatus: "modified",
+      additions: 3,
+      deletions: 0,
+      isBinary: false,
+      isLargeDiff: false,
+      githubFileUrl: "https://github.com/Developer-EJ/PILO/user.service.test.ts",
+      patch: "+describe('UserService', () => {});",
+      patchSizeBytes: 35
+    },
+    {
+      filePath: "docs/users.md",
+      previousFilePath: null,
+      fileName: "users.md",
+      headBlobSha: "blob-users-doc-v2",
+      fileStatus: "modified",
+      additions: 1,
+      deletions: 0,
+      isBinary: false,
+      isLargeDiff: false,
+      githubFileUrl: "https://github.com/Developer-EJ/PILO/users.md",
+      patch: null,
+      patchSizeBytes: 0
+    }
+  ];
+}
+
+function semanticV2ResultBody() {
+  const body = resultBody();
+  body.analysis.files = semanticV2ChangedFiles().map((file) => ({
+    filePath: file.filePath,
+    fileRole: "AI 분석 역할",
+    riskLevel: "medium",
+    changeReason: "v2 Flow 저장 fixture입니다.",
+    changeSummary: `${file.additions}줄 추가`,
+    reviewPoints: ["v2 membership과 relation 저장을 확인합니다."]
+  }));
+  body.analysis.graphSchemaVersion = "pr-review-semantic-graph:v2";
+  body.analysis.semanticGraph = {
+    files: [
+      {
+        filePath: "src/user.service.ts",
+        roleType: "core_logic",
+        roleReason: "핵심 사용자 로직입니다."
+      },
+      {
+        filePath: "src/user.service.test.ts",
+        roleType: "verification",
+        roleReason: "사용자 로직 검증입니다."
+      },
+      {
+        filePath: "docs/users.md",
+        roleType: "support",
+        roleReason: "사용자 문서입니다."
+      }
+    ],
+    flows: [
+      {
+        title: "사용자 로직",
+        description: "구현과 테스트를 함께 검토합니다.",
+        reviewOrder: ["src/user.service.ts", "src/user.service.test.ts"]
+      },
+      {
+        title: "사용자 문서",
+        description: "문서를 별도 흐름으로 검토합니다.",
+        reviewOrder: ["docs/users.md"]
+      }
+    ],
+    relations: [
+      {
+        candidateKey: null,
+        fromFilePath: "docs/users.md",
+        toFilePath: "src/user.service.ts",
+        relationType: "supports",
+        reason: "서로 다른 Flow를 연결하는 AI hint입니다."
+      }
+    ]
+  };
+  return body;
+}
+
 function createService(database, github) {
   return new PrReviewService(database, {}, github, {}, {});
 }
@@ -415,6 +516,37 @@ function createService(database, github) {
     call.text.includes("SET status = 'succeeded'")
   );
   assert.ok(lastShapeCallIndex < jobSuccessCallIndex);
+}
+
+{
+  const database = new FakeDatabase(jobRow());
+  const result = await createService(
+    database,
+    new FakeGithubDependency({ files: semanticV2ChangedFiles() })
+  ).storeAnalysisJobResult(JOB_ID, semanticV2ResultBody());
+
+  assert.equal(result.persisted, true);
+  const calls = database.transactionState.calls;
+  const flowCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO review_flows")
+  );
+  const membershipCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO review_flow_files")
+  );
+  const relationCalls = calls.filter((call) =>
+    call.text.includes("INSERT INTO review_flow_relations")
+  );
+  assert.deepEqual(
+    flowCalls.map((call) => call.values.slice(1, 3)),
+    [
+      ["사용자 로직", "구현과 테스트를 함께 검토합니다."],
+      ["사용자 문서", "문서를 별도 흐름으로 검토합니다."]
+    ]
+  );
+  assert.equal(membershipCalls.length, 3);
+  assert.deepEqual(relationCalls.map((call) => call.values.slice(4, 6)), [
+    ["tests", "rule"]
+  ]);
 }
 
 {

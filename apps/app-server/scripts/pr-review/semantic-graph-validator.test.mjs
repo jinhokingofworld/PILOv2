@@ -120,6 +120,208 @@ function validAnalysis(overrides = {}) {
   );
 }
 
+function v2Candidates() {
+  const filePaths = [
+    "apps/app-server/src/job.ts",
+    "apps/app-server/src/job.test.ts",
+    "apps/ai-worker/app/worker.py"
+  ];
+  const lockedKey = `tests:${filePaths[1]}->${filePaths[0]}`;
+  return {
+    files: filePaths.map((filePath) => ({
+      filePath,
+      roleType: "core_logic",
+      confidence: 65,
+      evidence: "code_file_fallback",
+      roleOverrideAllowed: true
+    })),
+    relations: [
+      {
+        key: lockedKey,
+        fromFilePath: filePaths[1],
+        toFilePath: filePaths[0],
+        relationType: "tests",
+        source: "rule",
+        confidence: 90,
+        evidence: "matching_test_filename",
+        groupingBinding: "locked"
+      }
+    ],
+    flows: [
+      {
+        key: "candidate-flow-1",
+        title: "핵심 구현",
+        filePaths: filePaths.slice(0, 2),
+        relationKeys: [lockedKey],
+        fallback: false
+      },
+      {
+        key: "candidate-flow-fallback",
+        title: "기타 변경",
+        filePaths: [filePaths[2]],
+        relationKeys: [],
+        fallback: true
+      }
+    ]
+  };
+}
+
+function v2Analysis({ flows, relations = [], files } = {}) {
+  const candidates = v2Candidates();
+  return {
+    graphSchemaVersion: "pr-review-semantic-graph:v2",
+    semanticGraph: {
+      files:
+        files ??
+        candidates.files.map((file) => ({
+          filePath: file.filePath,
+          roleType: file.roleType,
+          roleReason: "v2 역할 검증 fixture"
+        })),
+      flows:
+        flows ?? [
+          {
+            title: "작업 생성",
+            description: "Job 구현과 검증을 함께 검토합니다.",
+            reviewOrder: [
+              "apps/app-server/src/job.ts",
+              "apps/app-server/src/job.test.ts"
+            ]
+          },
+          {
+            title: "Worker 처리",
+            description: "Worker 처리를 별도 흐름으로 검토합니다.",
+            reviewOrder: ["apps/ai-worker/app/worker.py"]
+          }
+        ],
+      relations
+    }
+  };
+}
+
+{
+  const result = resolvePrReviewSemanticGraph(v2Analysis(), v2Candidates());
+
+  assert.equal(result.validationStatus, "validated_ai");
+  assert.deepEqual(
+    result.flows.map((flow) => flow.reviewOrder),
+    [
+      ["apps/app-server/src/job.ts", "apps/app-server/src/job.test.ts"],
+      ["apps/ai-worker/app/worker.py"]
+    ]
+  );
+  assert.equal(result.flows.every((flow) => flow.candidateKey.startsWith("ai-flow:")), true);
+  assert.deepEqual(result.relations.map((relation) => relation.source), ["rule"]);
+}
+
+{
+  const result = resolvePrReviewSemanticGraph(
+    v2Analysis({
+      relations: [
+        {
+          candidateKey: null,
+          fromFilePath: "apps/app-server/src/job.ts",
+          toFilePath: "apps/ai-worker/app/worker.py",
+          relationType: "depends_on",
+          reason: "서로 다른 Flow를 직접 연결합니다."
+        }
+      ]
+    }),
+    v2Candidates()
+  );
+
+  assert.equal(result.validationStatus, "validated_ai_relation_fallback");
+  assert.equal(result.fallbackReason, "invalid_ai_relations");
+  assert.deepEqual(result.flows.map((flow) => flow.title), ["작업 생성", "Worker 처리"]);
+  assert.equal(
+    result.relations.every((relation) =>
+      result.flows.some(
+        (flow) =>
+          flow.candidateKey === relation.flowKey &&
+          flow.reviewOrder.includes(relation.fromFilePath) &&
+          flow.reviewOrder.includes(relation.toFilePath)
+      )
+    ),
+    true
+  );
+}
+
+for (const flows of [
+  [
+    {
+      title: "분리된 구현",
+      description: "잠긴 test/implementation pair를 나눕니다.",
+      reviewOrder: ["apps/app-server/src/job.ts"]
+    },
+    {
+      title: "분리된 테스트",
+      description: "잠긴 test/implementation pair를 나눕니다.",
+      reviewOrder: ["apps/app-server/src/job.test.ts"]
+    },
+    {
+      title: "Worker",
+      description: "독립 Worker입니다.",
+      reviewOrder: ["apps/ai-worker/app/worker.py"]
+    }
+  ],
+  Array.from({ length: 9 }, (_, index) => ({
+    title: `Flow ${index + 1}`,
+    description: "최대 Flow 개수를 초과합니다.",
+    reviewOrder: [
+      "apps/app-server/src/job.ts",
+      "apps/app-server/src/job.test.ts",
+      "apps/ai-worker/app/worker.py"
+    ]
+  })),
+  [
+    {
+      title: "누락된 파일",
+      description: "변경 파일 전체를 포함하지 않습니다.",
+      reviewOrder: ["apps/app-server/src/job.ts", "apps/app-server/src/job.test.ts"]
+    }
+  ],
+  [
+    {
+      title: "중복된 파일",
+      description: "파일을 두 번 포함합니다.",
+      reviewOrder: [
+        "apps/app-server/src/job.ts",
+        "apps/app-server/src/job.test.ts",
+        "apps/app-server/src/job.ts",
+        "apps/ai-worker/app/worker.py"
+      ]
+    }
+  ]
+]) {
+  const result = resolvePrReviewSemanticGraph(v2Analysis({ flows }), v2Candidates());
+  assert.equal(result.validationStatus, "deterministic_fallback");
+  assert.equal(result.fallbackReason, "invalid_ai_graph");
+}
+
+{
+  const result = resolvePrReviewSemanticGraph(
+    {
+      graphSchemaVersion: "pr-review-semantic-graph:v2",
+      semanticGraph: { files: [], flows: [], relations: [] }
+    },
+    { files: [], flows: [], relations: [] }
+  );
+
+  assert.equal(result.validationStatus, "validated_ai");
+  assert.deepEqual(result.flows, []);
+}
+
+{
+  const result = resolvePrReviewSemanticGraph(
+    { graphSchemaVersion: "pr-review-semantic-graph:v2" },
+    v2Candidates()
+  );
+
+  assert.equal(result.validationStatus, "deterministic_fallback");
+  assert.equal(result.fallbackReason, "invalid_ai_graph");
+  assert.equal(result.schemaVersion, "pr-review-semantic-graph:v2");
+}
+
 {
   const invalidLockedRole = validAnalysis();
   invalidLockedRole.semanticGraph.files[0].roleType = "core_logic";
