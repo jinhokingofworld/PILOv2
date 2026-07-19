@@ -1450,6 +1450,47 @@ def _requested_meeting_report_summary_sections(prompt: str) -> tuple[str, ...] |
             pattern.flags,
         )
     }
+    only_selected_set: set[str] = set()
+    for key, pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS:
+        only_match = re.search(
+            rf"(?:{pattern.pattern})(?:은|는|을|를|이|가)?\s*만(?:\s|$)",
+            normalized_prompt,
+            pattern.flags,
+        )
+        if only_match is None or key in excluded:
+            continue
+
+        only_selected_set.add(key)
+        prefix = normalized_prompt[: only_match.start()]
+        for grouped_key, grouped_pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS:
+            if grouped_key in excluded:
+                continue
+            for grouped_match in grouped_pattern.finditer(prefix):
+                connector = prefix[grouped_match.end() : only_match.start()]
+                if re.fullmatch(r"\s*(?:와|과|및|,|하고)\s*", connector):
+                    only_selected_set.add(grouped_key)
+
+    only_selected = [
+        key
+        for key, _pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS
+        if key in only_selected_set
+    ]
+    if only_selected:
+        return tuple(only_selected)
+
+    replacement_selected = [
+        key
+        for key, pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS
+        if re.search(
+            rf"대신\s*(?:{pattern.pattern})",
+            normalized_prompt,
+            pattern.flags,
+        )
+        and key not in excluded
+    ]
+    if replacement_selected:
+        return tuple(replacement_selected)
+
     selected = [key for key in mentioned if key not in excluded]
     if selected:
         return tuple(selected)
