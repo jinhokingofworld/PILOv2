@@ -12,19 +12,16 @@ assert.match(stepsSource, /2\. GitHub App 설치/);
 assert.match(stepsSource, /3\. Project 작업 권한/);
 assert.match(stepsSource, /보드 편집 권한 필요/);
 assert.match(stepsSource, /getGithubSettingsAccessState/);
-assert.match(
-  stepsSource,
-  /flex flex-col flex-wrap gap-4 p-4 @\[48rem\]:flex-row/
-);
 assert.equal(
   (
     stepsSource.match(
-      /flex flex-col flex-wrap gap-4 p-4 @\[48rem\]:flex-row/g
+      /grid-cols-\[26px_minmax\(0,1fr\)_auto\]/g
     ) ?? []
   ).length,
-  2
+  3
 );
-assert.doesNotMatch(stepsSource, /grid-cols-3/);
+assert.match(stepsSource, /before:h-\[calc\(100%-16px\)\]/);
+assert.doesNotMatch(stepsSource, /@\[48rem\]/);
 assert.doesNotMatch(stepsSource, /title="현재 작업"/);
 assert.doesNotMatch(stepsSource, /onStartSync/);
 assert.doesNotMatch(stepsSource, /isSyncing/);
@@ -58,6 +55,10 @@ const panelSource = await readFile(
   new URL("./components/github-panel.tsx", import.meta.url),
   "utf8"
 );
+const primitivesSource = await readFile(
+  new URL("./components/github-connect-primitives.tsx", import.meta.url),
+  "utf8"
+);
 const layoutSource = await readFile(
   new URL("./components/github-connect-layout.tsx", import.meta.url),
   "utf8"
@@ -65,6 +66,40 @@ const layoutSource = await readFile(
 const syncSource = await readFile(
   new URL("./components/github-connect-sync.tsx", import.meta.url),
   "utf8"
+);
+
+assert.equal(
+  (
+    layoutSource.match(
+      /<GithubConnect(?:Steps|Repositories|Project|Sync)\b/g
+    ) ?? []
+  ).length,
+  4
+);
+assert.equal(
+  (syncSource.match(/<GithubConnectPanel\b/g) ?? []).length,
+  1,
+  "sync target and recent runs stay in one domain panel"
+);
+assert.match(
+  syncSource,
+  /job-list overflow-hidden rounded-\[8px\] border border-\[#e5e9f2\] divide-y divide-\[#e5e9f2\]/
+);
+assert.match(syncSource, /syncRuns\.map\([\s\S]*?className="p-3"/);
+assert.doesNotMatch(
+  syncSource,
+  /syncRuns\.map\([\s\S]*?rounded-\[8px\] border border-\[#e5e9f2\] bg-\[#fbfcfe\]/
+);
+assert.match(
+  primitivesSource,
+  /relative overflow-hidden[^\"]*rounded-\[10px\][^\"]*shadow-\[0_10px_28px_rgba\(15,20,34,0\.08\)\]/
+);
+assert.match(primitivesSource, /data-github-panel-decoration/);
+assert.match(primitivesSource, /aria-hidden/);
+assert.match(primitivesSource, /pointer-events-none/);
+assert.doesNotMatch(
+  stepsSource,
+  /divide-y divide-\[#e4e7ec\] rounded-\[8px\] border border-\[#d9dee8\]/
 );
 
 assert.match(layoutSource, /GithubConnectRepositories/);
@@ -99,9 +134,22 @@ assert.doesNotMatch(panelSource, /setPullRequests/);
 
 assert.match(repositorySource, /Project를 조회하고 동기화할 repository/);
 assert.doesNotMatch(repositorySource, /Pull Request 조회 기준/);
+assert.match(
+  repositorySource,
+  /repo-row grid grid-cols-\[minmax\(0,1fr\)_auto\][\s\S]*?@\[48rem\]:grid-cols-\[minmax\(180px,1\.7fr\)_90px_90px_108px_86px\]/
+);
+assert.match(
+  repositorySource,
+  /col-span-2 row-start-2 flex flex-wrap items-center gap-x-2 gap-y-1[\s\S]*?@\[48rem\]:contents/
+);
+assert.match(repositorySource, /col-start-2 row-start-1 h-8/);
 assert.match(projectSource, /@\/components\/ui\/dialog/);
 assert.match(projectSource, /활성 Board 변경/);
 assert.match(projectSource, /await onActivateProjectV2\(project\.id\)/);
+assert.match(
+  projectSource,
+  /activeProject\.ownerType === "Organization" \? "Organization" : "Personal"/
+);
 assert.match(
   panelSource,
   /async function handleActivateProjectV2\(projectV2Id: string\)/
