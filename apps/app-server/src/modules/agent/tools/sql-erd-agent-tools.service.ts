@@ -29,6 +29,8 @@ interface ConfirmedSqlErdAgentInput {
   currentSessionId: string;
   schemaSpec: SqlErdSchemaSpecV1;
   targetMode: SqlErdAgentTargetMode;
+  expectedSessionRevision?: number;
+  expectedModelFingerprint?: string;
 }
 
 interface InspectSqlErdSchemaInput {
@@ -446,7 +448,11 @@ export class SqlErdAgentToolsService {
         },
         call: {
           schemaSpec: this.toAgentJsonObject(schemaSpec),
-          currentSessionId: session.id
+          currentSessionId: session.id,
+          expectedSessionRevision: session.revision,
+          expectedModelFingerprint: createSqlErdModelFingerprint(
+            session.modelJson
+          )
         },
         choices
       }
@@ -475,7 +481,13 @@ export class SqlErdAgentToolsService {
     if (!this.isPlainObject(input)) {
       throw badRequest("generate_sql_erd confirmation input is invalid");
     }
-    const allowedFields = ["schemaSpec", "currentSessionId", "targetMode"];
+    const allowedFields = [
+      "schemaSpec",
+      "currentSessionId",
+      "targetMode",
+      "expectedSessionRevision",
+      "expectedModelFingerprint"
+    ];
     const unexpected = Object.keys(input).find(
       (field) => !allowedFields.includes(field)
     );
@@ -493,11 +505,50 @@ export class SqlErdAgentToolsService {
     if (!TARGET_MODES.includes(input.targetMode as SqlErdAgentTargetMode)) {
       throw badRequest("generate_sql_erd target mode is invalid");
     }
+    const targetMode = input.targetMode as SqlErdAgentTargetMode;
+    const expectedSessionRevision =
+      typeof input.expectedSessionRevision === "number"
+        ? input.expectedSessionRevision
+        : undefined;
+    if (
+      input.expectedSessionRevision !== undefined &&
+      (expectedSessionRevision === undefined ||
+        !Number.isInteger(expectedSessionRevision) ||
+        expectedSessionRevision < 1)
+    ) {
+      throw badRequest("generate_sql_erd expected session revision is invalid");
+    }
+    const expectedModelFingerprint =
+      typeof input.expectedModelFingerprint === "string"
+        ? input.expectedModelFingerprint
+        : undefined;
+    if (
+      input.expectedModelFingerprint !== undefined &&
+      (expectedModelFingerprint === undefined ||
+        !MODEL_FINGERPRINT_PATTERN.test(expectedModelFingerprint))
+    ) {
+      throw badRequest("generate_sql_erd expected model fingerprint is invalid");
+    }
+    if (
+      targetMode === "replace_current" &&
+      (expectedSessionRevision === undefined ||
+        expectedModelFingerprint === undefined)
+    ) {
+      throw badRequest(
+        "generate_sql_erd replace confirmation is stale; inspect the schema again"
+      );
+    }
 
     return {
       currentSessionId: input.currentSessionId,
       schemaSpec: validateSqlErdSchemaSpec(input.schemaSpec),
-      targetMode: input.targetMode as SqlErdAgentTargetMode
+      targetMode,
+      ...(expectedSessionRevision === undefined
+        ? {}
+        : { expectedSessionRevision }),
+      ...(expectedModelFingerprint === undefined
+        ? {}
+        : { expectedModelFingerprint })
     };
   }
 
@@ -977,7 +1028,11 @@ export class SqlErdAgentToolsService {
           context.workspaceId,
           confirmed.currentSessionId,
           context.runId,
-          confirmed.schemaSpec
+          confirmed.schemaSpec,
+          {
+            revision: confirmed.expectedSessionRevision!,
+            modelFingerprint: confirmed.expectedModelFingerprint!
+          }
         );
         const session = await this.sqlErdService.getSession(
           context.currentUserId,

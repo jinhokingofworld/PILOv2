@@ -217,7 +217,14 @@ schema 생성 tool 이름은 `generate_sql_erd`이며 `riskLevel=medium`,
   `replace_current`도 제공한다.
 - approve 요청은 `choiceId`만 받는다. 저장된 plan의 schemaSpec과 current session ID를
   App Server가 복원·검증한 뒤 선택한 mutation을 실행한다.
+- `replace_current` plan에는 App Server가 읽은 `expectedSessionRevision`과
+  `expectedModelFingerprint`를 내부 상태 token으로 함께 저장한다. 승인 transaction에서 session row를
+  잠근 뒤 현재 revision 또는 model fingerprint가 다르면 `409 CONFLICT`로 거부하고 schema를 다시
+  확인하도록 안내한다. token이 없는 기존 pending confirmation도 실행하지 않으며, stale 거부 시
+  snapshot, operation, Activity Log를 남기지 않는다.
 - 신규 세션과 교체 모두 `agentRunId`를 domain mutation의 멱등성 식별자로 사용한다.
+- 같은 `agentRunId`로 이미 완료된 교체를 재시도하면 stale 비교보다 기존 operation 조회를 우선해
+  저장된 성공 결과를 반환한다.
 - step output은 `action`, `title`, `dialect`, `tableCount`, `relationCount`, 고유 warning
   code만 저장한다. sourceText, DDL, modelJson, layoutJson은 Agent step에 복제하지 않는다.
 

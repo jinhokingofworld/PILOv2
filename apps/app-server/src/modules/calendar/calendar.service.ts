@@ -1,7 +1,7 @@
 import { Injectable, Optional } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { ActivityLogService } from "../../common/activity-log.service";
-import { badRequest, notFound } from "../../common/api-error";
+import { badRequest, conflict, notFound } from "../../common/api-error";
 import {
   DatabaseService,
   DatabaseTransaction
@@ -78,6 +78,10 @@ export interface CalendarEventPayload {
     status: "pending" | "synced" | "failed";
     lastError: string | null;
   } | null;
+}
+
+export interface CalendarEventUpdateOptions {
+  expectedUpdatedAt?: string;
 }
 
 export interface DeleteCalendarEventPayload {
@@ -309,7 +313,8 @@ export class CalendarService {
     currentUserId: string,
     workspaceId: string,
     eventId: string,
-    body: unknown
+    body: unknown,
+    options: CalendarEventUpdateOptions = {}
   ): Promise<CalendarEventPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
@@ -321,6 +326,15 @@ export class CalendarService {
       );
       if (!existing) {
         throw notFound("Calendar event not found");
+      }
+
+      if (
+        options.expectedUpdatedAt !== undefined &&
+        this.toIsoString(existing.updated_at) !== options.expectedUpdatedAt
+      ) {
+        throw conflict(
+          "Calendar event changed; review the latest event before updating"
+        );
       }
 
       const input = this.normalizeUpdateInput(body, existing);

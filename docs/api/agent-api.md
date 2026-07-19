@@ -936,6 +936,11 @@ Status code: `200 OK`
   session 접근과 write protocol을 다시 검증한다. `snapshot` session에서는 `new_session`만 제공하고,
   `operations_v1` session에서는 `replace_current`도 제공한다. 클라이언트는 선택한 `choiceId`만 보내며
   저장된 schemaSpec과 session ID는 서버가 복원한다.
+- `replace_current` confirmation plan에는 App Server가 조회한 session revision과 model fingerprint를
+  server-owned 상태 token으로 저장한다. 승인 실행 transaction에서 session row를 잠근 뒤 두 값 중
+  하나라도 현재 상태와 다르면 `409 CONFLICT`로 거부하며 snapshot, operation, Activity Log를 만들지
+  않는다. token이 없는 기존 pending confirmation도 실행하지 않는다. 같은 Agent run의 완료된 operation
+  재시도는 기존 결과를 먼저 반환한다.
 - 결과 step에는 sourceText, DDL, modelJson, layoutJson을 저장하지 않는다. `outputSummary`는 action,
   title, dialect, table/relation count, warning code만 포함한다.
 - 생성·교체된 session은 `domain=sqltoerd`, `resourceType=session` resource ref 하나로 반환한다.
@@ -1042,6 +1047,10 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
 - 후보가 정확히 하나일 때에만 App Server가 내부 eventId로 현재 event를 다시 조회해 confirmation의
   `before`를 만든다. 후보가 없거나 여러 개이면 confirmation과 write 없이 run을 완료하고, 제목·대상
   날짜·시간을 더 구체적으로 적어 다시 요청하도록 안내한다.
+- update confirmation plan에는 App Server가 조회한 event의 `updatedAt`을 server-owned 상태 token으로
+  저장한다. 승인 실행 transaction에서 event row를 잠근 뒤 현재 `updatedAt`과 다르면 `409 CONFLICT`로
+  거부하며 일정 변경, Activity Log, Google Calendar sync intent를 만들지 않는다. token이 없는 기존
+  pending confirmation도 fail-closed 처리한다. 공개 Calendar PATCH request에는 이 token을 추가하지 않는다.
 - Calendar 상대 날짜 조회는 run의 `currentDate`와 사용자 timezone을 기준으로 계산한다.
   `이번 주말`은 현재 날짜에서 아직 완전히 지나지 않은 가장 가까운 토요일·일요일이며, 토요일에는
   당일을 포함하고 일요일에는 다음 주말을 사용한다. `다음 주 월요일`은 바로 다가오는 월요일,
