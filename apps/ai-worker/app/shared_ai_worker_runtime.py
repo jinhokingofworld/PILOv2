@@ -8,6 +8,7 @@ from app.agent_processor import (
     AgentGroundedAnswerProcessor,
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
+    OpenAiAgentRouterClient,
 )
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
 from app.canvas_agent.embeddings import LocalSentenceTransformerCanvasEmbedder
@@ -64,6 +65,8 @@ class SharedAiWorkerSettings:
     openai_api_key: str
     openai_agent_planner_model: str
     openai_agent_planner_timeout_seconds: float
+    openai_agent_router_model: str
+    openai_agent_router_timeout_seconds: float
     agent_execution_handoff_base_url: str | None
     agent_execution_handoff_token: str | None
     agent_execution_handoff_timeout_seconds: int
@@ -104,6 +107,21 @@ class SharedAiWorkerSettings:
             openai_agent_planner_timeout_seconds=_positive_ms_env(
                 "OPENAI_AGENT_PLANNER_TIMEOUT_MS",
                 DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
+            ),
+            openai_agent_router_model=_env(
+                "OPENAI_AGENT_ROUTER_MODEL",
+                _env("OPENAI_AGENT_PLANNER_MODEL", "gpt-5.4-mini"),
+            ),
+            openai_agent_router_timeout_seconds=(
+                _positive_ms_env(
+                    "OPENAI_AGENT_ROUTER_TIMEOUT_MS",
+                    DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
+                )
+                if _optional_env("OPENAI_AGENT_ROUTER_TIMEOUT_MS") is not None
+                else _positive_ms_env(
+                    "OPENAI_AGENT_PLANNER_TIMEOUT_MS",
+                    DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
+                )
             ),
             agent_execution_handoff_base_url=(_optional_env("AGENT_EXECUTION_HANDOFF_BASE_URL")),
             agent_execution_handoff_token=(_optional_env("AGENT_EXECUTION_HANDOFF_TOKEN")),
@@ -218,10 +236,16 @@ def create_shared_ai_worker(
             resolved_settings.agent_execution_handoff_token,
             resolved_settings.agent_execution_handoff_timeout_seconds,
         )
+        agent_router_client = OpenAiAgentRouterClient(
+            resolved_settings.openai_api_key,
+            resolved_settings.openai_agent_router_model,
+            resolved_settings.openai_agent_router_timeout_seconds,
+        )
         agent_run_processor = AgentRunProcessor(
             agent_run_repository,
             agent_planner_client,
             agent_execution_handoff_client,
+            router_client=agent_router_client,
         )
     canvas_agent_processor = CanvasAgentProcessor(
         canvas_agent_repository,

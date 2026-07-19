@@ -17,7 +17,7 @@ from app.agent_planner_evaluation import (
     load_evaluation_suite,
     load_meeting_regression_suite,
 )
-from app.agent_processor import OpenAiAgentPlannerClient
+from app.agent_processor import OpenAiAgentPlannerClient, OpenAiAgentRouterClient
 from app.agent_tool_retrieval import TOOL_RETRIEVER_VERSION
 
 
@@ -90,6 +90,19 @@ def main() -> None:
         action="store_true",
         help="Run both legacy and shadow retrieval with the same fixed inputs.",
     )
+    retrieval_mode.add_argument(
+        "--llm-routing",
+        action="store_true",
+        help="Run the two-stage LLM Router and Planner path without executing a tool.",
+    )
+    parser.add_argument(
+        "--router-model",
+        default=os.environ.get(
+            "OPENAI_AGENT_ROUTER_MODEL",
+            os.environ.get("OPENAI_AGENT_PLANNER_MODEL", "gpt-5.4-mini"),
+        ),
+        help="Router model used by --llm-routing. Defaults to the Planner model.",
+    )
     parser.add_argument(
         "--seed",
         type=int,
@@ -143,11 +156,16 @@ def main() -> None:
         )
         if not suite.cases:
             raise SystemExit("Selected evaluation shard has no cases")
-    if (args.shadow_retrieval or args.compare_shadow_retrieval) and (
+    if (args.shadow_retrieval or args.compare_shadow_retrieval or args.llm_routing) and (
         suite.job.tool_capability_catalog is None
     ):
-        raise SystemExit("--tool-capability-catalog is required for shadow retrieval evaluation")
+        raise SystemExit("--tool-capability-catalog is required for routing evaluation")
     planner = OpenAiAgentPlannerClient(api_key, args.model, args.timeout_seconds)
+    router = (
+        OpenAiAgentRouterClient(api_key, args.router_model, args.timeout_seconds)
+        if args.llm_routing
+        else None
+    )
     if args.compare_shadow_retrieval:
         legacy_results = evaluate_suite(
             planner,
@@ -181,6 +199,8 @@ def main() -> None:
             shadow_top_k=args.retrieval_top_k,
             model_version=args.model,
             evaluation_seed=args.seed,
+            router=router,
+            use_llm_routing=args.llm_routing,
         )
         report = build_evaluation_report(results)
     report["metadata"] = {
@@ -193,6 +213,8 @@ def main() -> None:
         "toolSchemaVersion": suite.job.tool_schema_version,
         "shadowRetrieval": args.shadow_retrieval,
         "compareShadowRetrieval": args.compare_shadow_retrieval,
+        "llmRouting": args.llm_routing,
+        "routerModel": args.router_model if args.llm_routing else None,
         "retrievalTopK": args.retrieval_top_k,
         "retrieverVersion": TOOL_RETRIEVER_VERSION,
         "evaluationSeed": args.seed,

@@ -287,6 +287,7 @@ module "ecs" {
         S3_UPLOADS_BUCKET               = module.s3.uploads_bucket_name
         SQS_AI_JOBS_QUEUE_URL           = module.sqs.ai_jobs_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL   = module.sqs.github_webhooks_queue_url
+        AGENT_TOOL_RETRIEVAL_MODE       = "llm_router"
         OPENAI_AGENT_PLANNER_TIMEOUT_MS = "60000"
         LEGACY_MEETING_DRAIN_ENABLED    = tostring(var.legacy_meeting_drain_enabled)
         LEGACY_AGENT_DRAIN_ENABLED      = tostring(var.legacy_agent_drain_enabled)
@@ -325,7 +326,7 @@ module "ecs" {
         AGENT_EXECUTION_HANDOFF_BASE_URL         = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS  = "10"
         OPENAI_AGENT_PLANNER_TIMEOUT_MS          = "60000"
-        AGENT_TOOL_RETRIEVAL_MODE                = "shortlist"
+        AGENT_TOOL_RETRIEVAL_MODE                = "llm_router"
         AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS = "90"
       }
       secrets = module.secrets.agent_worker_ecs_secrets

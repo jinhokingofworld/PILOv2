@@ -8,22 +8,32 @@ import pytest
 
 from app.agent_processor import (
     AGENT_TOOL_SCHEMA_VERSION,
+    TOOL_RETRIEVAL_MODE_LLM_ROUTER,
     TOOL_RETRIEVAL_MODE_SHADOW,
     TOOL_RETRIEVAL_MODE_SHORTLIST,
     AgentGroundedAnswerProcessor,
     AgentPlannerDecision,
     AgentPlanningRequest,
+    AgentRouterOutputError,
+    AgentRoutingDecision,
+    AgentRoutingRequest,
     AgentRunContext,
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
+    OpenAiAgentRouterClient,
     _agent_planner_schema,
     _agent_planner_system_prompt,
     _agent_planner_user_prompt,
+    _agent_router_schema,
+    _agent_router_user_prompt,
     normalize_agent_planner_decision,
+    normalize_agent_routing_decision,
     parse_agent_planner_output,
+    parse_agent_router_output,
     parse_agent_run_job_payload,
     select_agent_planner_tool_selection,
     select_agent_planner_tools,
+    select_agent_planner_tools_for_routing,
 )
 from app.agent_prompt_security import PromptSecuritySource
 from app.agent_tool_retrieval import (
@@ -104,6 +114,20 @@ def planner_decision(**overrides: object) -> AgentPlannerDecision:
         **overrides,
     }
     return AgentPlannerDecision(**values)
+
+
+def routing_decision(**overrides: object) -> AgentRoutingDecision:
+    values = {
+        "status": "routed",
+        "domains": ("calendar",),
+        "capability_ids": ("calendar.events.list",),
+        "intent_summary": "오늘의 캘린더 일정을 조회한다.",
+        "confidence": "high",
+        "clarification_question": None,
+        "unsupported_reason": None,
+    }
+    values.update(overrides)
+    return AgentRoutingDecision(**values)
 
 
 def tool_capability_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
@@ -693,6 +717,23 @@ class FakePlannerClient:
         return self.decision
 
 
+class FakeRouterClient:
+    def __init__(
+        self,
+        decision: AgentRoutingDecision | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.decision = decision or routing_decision()
+        self.error = error
+        self.requests = []
+
+    def route(self, request):
+        self.requests.append(request)
+        if self.error:
+            raise self.error
+        return self.decision
+
+
 class FakeExecutionHandoffClient:
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
@@ -796,13 +837,276 @@ def create_processor(
     repository: FakeAgentRunRepository,
     planner_client: FakePlannerClient | None = None,
     execution_handoff_client: FakeExecutionHandoffClient | None = None,
+    router_client: FakeRouterClient | None = None,
+    tool_retrieval_mode: str | None = None,
 ) -> AgentRunProcessor:
     return AgentRunProcessor(
         repository,
         planner_client or FakePlannerClient(),
         execution_handoff_client or FakeExecutionHandoffClient(),
         current_date_provider=lambda _timezone: date(2026, 7, 9),
+        router_client=router_client,
+        tool_retrieval_mode=tool_retrieval_mode,
     )
+
+
+def test_llm_router_then_planner_selects_calendar_tool() -> None:
+    tools = [tool_snapshot()]
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            prompt="오늘 일정 보여줘",
+            planning_context="user: 앞에서 캘린더 이야기를 했어",
+        )
+    )
+    router_client = FakeRouterClient()
+    planner_client = FakePlannerClient(
+        decision=planner_decision(tool_input={"start": "2026-07-09", "end": "2026-07-09"})
+    )
+    handoff_client = FakeExecutionHandoffClient()
+    processor = create_processor(
+        repository,
+        planner_client,
+        handoff_client,
+        router_client,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert len(router_client.requests) == 1
+    assert router_client.requests[0].prompt == "오늘 일정 보여줘"
+    assert router_client.requests[0].planning_context.startswith("user:")
+    assert len(planner_client.requests) == 1
+    assert [tool.name for tool in planner_client.requests[0].tools] == ["list_calendar_events"]
+    planner_prompt = json.loads(_agent_planner_user_prompt(planner_client.requests[0]))
+    assert planner_prompt["routing"]["domains"] == ["calendar"]
+    assert planner_prompt["routing"]["intentSummary"] == "오늘의 캘린더 일정을 조회한다."
+    assert handoff_client.calls == [RUN_ID]
+    assert repository.completed_steps[0][2]["toolRouting"] == {
+        "mode": "llm_router",
+        "status": "routed",
+        "domains": ["calendar"],
+        "capabilityIds": ["calendar.events.list"],
+        "confidence": "high",
+        "catalogVersion": "agent-tool-capabilities:v2",
+        "catalogSha256": tool_capability_catalog(tools)["sha256"],
+        "selectedToolCount": 1,
+    }
+
+
+def test_llm_router_low_confidence_asks_without_planner_or_handoff() -> None:
+    tools = [tool_snapshot()]
+    repository = FakeAgentRunRepository(context=run_context(prompt="그거 보여줘"))
+    router_client = FakeRouterClient(
+        decision=routing_decision(
+            confidence="low",
+            clarification_question="어떤 종류의 일정을 말씀하시는지 알려주세요.",
+        )
+    )
+    planner_client = FakePlannerClient()
+    handoff_client = FakeExecutionHandoffClient()
+    processor = create_processor(
+        repository,
+        planner_client,
+        handoff_client,
+        router_client,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+
+    assert result.reason == "agent_router_needs_clarification"
+    assert planner_client.requests == []
+    assert handoff_client.calls == []
+    assert repository.waiting_user_input_updates == [
+        (RUN_ID, "어떤 종류의 일정을 말씀하시는지 알려주세요.")
+    ]
+
+
+def test_llm_router_preserves_compound_domain_tool_chains() -> None:
+    tools = [tool_snapshot(), tool_snapshot(name="list_meeting_reports")]
+    catalog = calendar_and_meeting_read_catalog(tools)
+    repository = FakeAgentRunRepository()
+    router_client = FakeRouterClient(
+        decision=routing_decision(
+            domains=("calendar", "meeting"),
+            capability_ids=("calendar.events.list", "meeting.reports.list"),
+            intent_summary="일정과 최근 회의록을 함께 조회한다.",
+        )
+    )
+    planner_client = FakePlannerClient()
+    processor = create_processor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        router_client,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    processor.process_payload(agent_payload(tools=tools, toolCapabilityCatalog=catalog))
+
+    assert [tool.name for tool in planner_client.requests[0].tools] == [
+        "list_calendar_events",
+        "list_meeting_reports",
+    ]
+
+
+def test_llm_router_rejects_unknown_capability_before_planner() -> None:
+    tools = [tool_snapshot()]
+    repository = FakeAgentRunRepository()
+    router_client = FakeRouterClient(
+        decision=routing_decision(capability_ids=("calendar.events.unknown",))
+    )
+    planner_client = FakePlannerClient()
+    handoff_client = FakeExecutionHandoffClient()
+    processor = create_processor(
+        repository,
+        planner_client,
+        handoff_client,
+        router_client,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+
+    assert result.reason == "agent_routing_failed"
+    assert planner_client.requests == []
+    assert handoff_client.calls == []
+    assert repository.failed_updates[0][1] == "AGENT_ROUTER_FAILED"
+
+
+def test_llm_router_rejects_domain_capability_mismatch_before_planner() -> None:
+    tools = [tool_snapshot()]
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient()
+    processor = create_processor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        FakeRouterClient(decision=routing_decision(domains=("meeting",))),
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+
+    assert result.reason == "agent_routing_failed"
+    assert planner_client.requests == []
+    assert repository.failed_updates[0][1] == "AGENT_ROUTER_FAILED"
+
+
+def test_llm_router_rejects_schema_budget_overflow() -> None:
+    tools = [tool_snapshot()]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+
+    with pytest.raises(AgentRouterOutputError, match="configured budget"):
+        select_agent_planner_tools_for_routing(
+            job,
+            routing_decision(),
+            schema_token_budget=1,
+        )
+
+
+def test_llm_router_unsupported_skips_planner_and_handoff() -> None:
+    tools = [tool_snapshot()]
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient()
+    handoff_client = FakeExecutionHandoffClient()
+    processor = create_processor(
+        repository,
+        planner_client,
+        handoff_client,
+        FakeRouterClient(
+            decision=routing_decision(
+                status="unsupported",
+                domains=(),
+                capability_ids=(),
+                unsupported_reason="지원 capability 없음",
+            )
+        ),
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+
+    assert result.reason == "agent_routing_unsupported"
+    assert planner_client.requests == []
+    assert handoff_client.calls == []
+    assert repository.completed_runs[0][0] == RUN_ID
+
+
+def test_agent_router_prompt_uses_compact_catalog_without_tool_schema() -> None:
+    tools = [tool_snapshot()]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+    routing_request = AgentRoutingRequest(
+        prompt="오늘 일정 보여줘",
+        timezone="Asia/Seoul",
+        current_date="2026-07-09",
+        catalog=job.tool_capability_catalog,
+    )
+    prompt = json.loads(_agent_router_user_prompt(routing_request))
+    schema = _agent_router_schema(job.tool_capability_catalog)
+
+    assert prompt["capabilities"][0]["domain"] == "calendar"
+    assert "toolNames" not in prompt["capabilities"][0]
+    assert "inputSchema" not in json.dumps(prompt)
+    assert schema["properties"]["domains"]["maxItems"] == 3
+
+
+def test_parse_agent_router_output_requires_structured_fields() -> None:
+    parsed = parse_agent_router_output(
+        json.dumps(
+            {
+                "status": "routed",
+                "domains": ["calendar"],
+                "capabilityIds": ["calendar.events.list"],
+                "intentSummary": "오늘 일정을 조회한다.",
+                "confidence": "high",
+                "clarificationQuestion": None,
+                "unsupportedReason": None,
+            }
+        )
+    )
+
+    assert parsed.domains == ("calendar",)
+    with pytest.raises(AgentRouterOutputError, match="Agent router"):
+        parse_agent_router_output("{}")
+
+
+def test_agent_router_normalization_redacts_user_visible_internal_ids() -> None:
+    tools = [tool_snapshot()]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+
+    normalized = normalize_agent_routing_decision(
+        routing_decision(
+            confidence="low",
+            intent_summary=f"{USER_VISIBLE_UUID} 일정을 조회한다.",
+            clarification_question=f"{USER_VISIBLE_UUID}가 어느 일정인지 알려주세요.",
+        ),
+        job.tool_capability_catalog,
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert USER_VISIBLE_UUID not in normalized.intent_summary
+    assert USER_VISIBLE_UUID not in (normalized.clarification_question or "")
 
 
 def test_parse_agent_run_job_payload_validates_required_ids() -> None:
@@ -2909,6 +3213,52 @@ def test_openai_agent_planner_uses_timeout_and_retries_timeout_failure(monkeypat
         )
 
     assert FakeOpenAI.initialized_with == ("test-key", 45)
+
+
+def test_openai_agent_router_uses_timeout_and_retries_timeout_failure(monkeypatch) -> None:
+    class FakeTimeoutError(Exception):
+        pass
+
+    class FakeResponses:
+        def create(self, **_kwargs):
+            raise FakeTimeoutError("timed out")
+
+    class FakeOpenAI:
+        initialized_with: tuple[str, float] | None = None
+
+        def __init__(self, *, api_key: str, timeout: float) -> None:
+            FakeOpenAI.initialized_with = (api_key, timeout)
+            self.responses = FakeResponses()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "openai",
+        SimpleNamespace(
+            OpenAI=FakeOpenAI,
+            APIConnectionError=FakeTimeoutError,
+            APITimeoutError=FakeTimeoutError,
+            InternalServerError=FakeTimeoutError,
+            RateLimitError=FakeTimeoutError,
+        ),
+    )
+    tools = [tool_snapshot()]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+    client = OpenAiAgentRouterClient("test-key", "gpt-router", 30)
+
+    with pytest.raises(InfrastructureError, match="router retryable failure"):
+        client.route(
+            AgentRoutingRequest(
+                prompt="오늘 일정 보여줘",
+                timezone="Asia/Seoul",
+                current_date="2026-07-19",
+                catalog=job.tool_capability_catalog,
+            )
+        )
+
+    assert FakeOpenAI.initialized_with == ("test-key", 30)
 
 
 def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:

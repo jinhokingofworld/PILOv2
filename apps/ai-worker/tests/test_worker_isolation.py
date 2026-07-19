@@ -135,6 +135,11 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
     )
     monkeypatch.setattr(
         shared_ai_worker_runtime,
+        "OpenAiAgentRouterClient",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
         "OpenAiCanvasAgentIntentClassifier",
         lambda *_args: object(),
     )
@@ -196,6 +201,7 @@ def test_agent_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None
 
     assert settings.sqs_queue_url == "https://sqs.example.com/agent-jobs"
     assert settings.visibility_timeout_seconds == 90
+    assert settings.openai_agent_router_model == settings.openai_agent_planner_model
 
 
 def test_agent_worker_dispatcher_has_no_meeting_or_pr_review_processor() -> None:

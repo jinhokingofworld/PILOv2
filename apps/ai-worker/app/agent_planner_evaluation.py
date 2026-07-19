@@ -11,12 +11,17 @@ from uuid import NAMESPACE_URL, uuid5
 from app.agent_processor import (
     AGENT_RUN_REQUESTED_JOB_TYPE,
     AgentPlannerClient,
+    AgentPlannerDecision,
     AgentPlanningRequest,
+    AgentRouterClient,
+    AgentRoutingRequest,
     AgentRunJob,
     AgentToolSchema,
     NormalizedPlannerDecision,
     normalize_agent_planner_decision,
+    normalize_agent_routing_decision,
     parse_agent_run_job_payload,
+    select_agent_planner_tools_for_routing,
 )
 from app.agent_tool_retrieval import (
     DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
@@ -90,6 +95,8 @@ class CaseEvaluationResult:
     expected: EvaluationExpectation
     actual: NormalizedPlannerDecision
     retrieval: ToolRetrievalResult | None
+    routing_status: str | None
+    routing_confidence: str | None
     shortlist_tool_names: tuple[str, ...]
     shortlist_schema_bytes: int
     retrieval_latency_ms: float
@@ -351,6 +358,8 @@ def evaluate_suite(
     shadow_top_k: int = 8,
     model_version: str = "unknown",
     evaluation_seed: int = 0,
+    router: AgentRouterClient | None = None,
+    use_llm_routing: bool = False,
 ) -> tuple[CaseEvaluationResult, ...]:
     if repetitions < 1:
         raise ValueError("Evaluation repetitions must be at least 1")
@@ -368,6 +377,8 @@ def evaluate_suite(
             model_version=model_version,
             evaluation_seed=evaluation_seed,
             suite_version=suite.version,
+            router=router,
+            use_llm_routing=use_llm_routing,
         )
         for attempt in range(1, repetitions + 1)
         for case in suite.cases
@@ -387,37 +398,86 @@ def evaluate_case(
     model_version: str = "unknown",
     evaluation_seed: int = 0,
     suite_version: str = "unknown",
+    router: AgentRouterClient | None = None,
+    use_llm_routing: bool = False,
 ) -> CaseEvaluationResult:
     tools = job.tools
     retrieval = None
     retrieval_latency_ms = 0.0
-    if use_shadow_retrieval:
+    routing = None
+    if use_llm_routing:
+        if router is None or job.tool_capability_catalog is None:
+            raise ValueError("LLM routing evaluation requires a router and capability catalog")
+        routing_started = perf_counter()
+        routing = normalize_agent_routing_decision(
+            router.route(
+                AgentRoutingRequest(
+                    prompt=case.prompt,
+                    timezone=timezone,
+                    current_date=current_date,
+                    catalog=job.tool_capability_catalog,
+                    planning_context=case.planning_context,
+                    context_surface=(
+                        job.request_context.get("surface")
+                        if job.request_context is not None
+                        else None
+                    ),
+                )
+            ),
+            job.tool_capability_catalog,
+        )
+        retrieval_latency_ms = (perf_counter() - routing_started) * 1000
+        if routing.status == "routed":
+            tools = select_agent_planner_tools_for_routing(
+                job,
+                routing,
+                top_k=shadow_top_k,
+            )
+    elif use_shadow_retrieval:
         retrieval_started = perf_counter()
         tools, retrieval = select_shadow_planner_tools(job, case.prompt, top_k=shadow_top_k)
         retrieval_latency_ms = (perf_counter() - retrieval_started) * 1000
 
     planner_started = perf_counter()
-    decision = planner.plan(
-        AgentPlanningRequest(
-            run_id=str(
-                uuid5(
-                    NAMESPACE_URL,
-                    f"agent-planner-evaluation:{evaluation_seed}:{case.case_id}:{attempt}",
-                )
+    if routing is not None and routing.status != "routed":
+        decision = AgentPlannerDecision(
+            status=(
+                "needs_clarification" if routing.status == "needs_clarification" else "unsupported"
             ),
-            prompt=case.prompt,
-            timezone=timezone,
-            current_date=current_date,
-            tool_schema_version=job.tool_schema_version,
-            tools=tools,
-            planning_context=case.planning_context,
+            message="Router terminal decision",
+            final_answer_draft=(
+                routing.clarification_question
+                if routing.status == "needs_clarification"
+                else "현재 지원하지 않는 요청입니다."
+            ),
+            tool_name=None,
+            tool_input={},
+            requires_confirmation=False,
+            missing_fields=("intent",) if routing.status == "needs_clarification" else (),
+            unsupported_reason=routing.unsupported_reason,
         )
-    )
+    else:
+        decision = planner.plan(
+            AgentPlanningRequest(
+                run_id=str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        f"agent-planner-evaluation:{evaluation_seed}:{case.case_id}:{attempt}",
+                    )
+                ),
+                prompt=case.prompt,
+                timezone=timezone,
+                current_date=current_date,
+                tool_schema_version=job.tool_schema_version,
+                tools=tools,
+                planning_context=case.planning_context,
+                routing=routing,
+            )
+        )
     planner_latency_ms = (perf_counter() - planner_started) * 1000
     shortlist_tool_names = tuple(tool.name for tool in tools)
     shortlist_violation = bool(
-        retrieval
-        and not retrieval.low_confidence
+        (routing is not None or retrieval and not retrieval.low_confidence)
         and decision.tool_name
         and decision.tool_name not in shortlist_tool_names
     )
@@ -461,6 +521,8 @@ def evaluate_case(
         expected=case.expectation,
         actual=actual,
         retrieval=retrieval,
+        routing_status=routing.status if routing else None,
+        routing_confidence=routing.confidence if routing else None,
         shortlist_tool_names=shortlist_tool_names,
         shortlist_schema_bytes=_tool_schema_bytes(tools),
         retrieval_latency_ms=retrieval_latency_ms,
@@ -474,16 +536,22 @@ def evaluate_case(
             if case.expectation.supported is not None
             else case.expectation.status != "unsupported"
         ),
-        retrieved_domains=tuple(
-            sorted({descriptor.domain for descriptor in retrieved_descriptors})
+        retrieved_domains=(
+            routing.domains
+            if routing is not None
+            else tuple(sorted({descriptor.domain for descriptor in retrieved_descriptors}))
         ),
-        retrieved_capability_ids=tuple(
-            sorted(
-                {
-                    capability_id
-                    for descriptor in retrieved_descriptors
-                    for capability_id in descriptor.capability_ids
-                }
+        retrieved_capability_ids=(
+            routing.capability_ids
+            if routing is not None
+            else tuple(
+                sorted(
+                    {
+                        capability_id
+                        for descriptor in retrieved_descriptors
+                        for capability_id in descriptor.capability_ids
+                    }
+                )
             )
         ),
         model_version=model_version,
@@ -494,14 +562,32 @@ def evaluate_case(
         catalog_sha256=(
             job.tool_capability_catalog.sha256 if job.tool_capability_catalog else None
         ),
-        retriever_version=(TOOL_RETRIEVER_VERSION if retrieval else None),
+        retriever_version=(
+            "agent-tool-llm-router:v1"
+            if routing is not None
+            else TOOL_RETRIEVER_VERSION if retrieval else None
+        ),
         current_date=current_date,
         timezone=timezone,
         evaluation_seed=evaluation_seed,
-        provider_input_tokens=decision.provider_input_tokens,
-        provider_output_tokens=decision.provider_output_tokens,
-        provider_total_tokens=decision.provider_total_tokens,
+        provider_input_tokens=_sum_optional_tokens(
+            decision.provider_input_tokens,
+            routing.provider_input_tokens if routing else None,
+        ),
+        provider_output_tokens=_sum_optional_tokens(
+            decision.provider_output_tokens,
+            routing.provider_output_tokens if routing else None,
+        ),
+        provider_total_tokens=_sum_optional_tokens(
+            decision.provider_total_tokens,
+            routing.provider_total_tokens if routing else None,
+        ),
     )
+
+
+def _sum_optional_tokens(*values: int | None) -> int | None:
+    present = [value for value in values if value is not None]
+    return sum(present) if present else None
 
 
 def select_shadow_planner_tools(
@@ -540,7 +626,7 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
         _case_summary(case_id, case_results)
         for case_id, case_results in sorted(cases_by_id.items())
     ]
-    retrieval_results = [result for result in results if result.retrieval is not None]
+    retrieval_results = [result for result in results if result.retriever_version is not None]
     retrieval_tool_cases = [result for result in retrieval_results if result.expected.tool_name]
     adjacent_negative_results = [
         result for result in retrieval_tool_cases if result.kind == "counterexample"
@@ -839,10 +925,7 @@ def _retrieval_recall(results: list[CaseEvaluationResult]) -> float | None:
     if not results:
         return None
     return round(
-        sum(
-            bool(result.retrieval and result.expected.tool_name in result.retrieval.tool_names)
-            for result in results
-        )
+        sum(bool(result.expected.tool_name in _retrieved_tool_names(result)) for result in results)
         / len(results),
         4,
     )
@@ -867,10 +950,7 @@ def _required_tool_recall(results: list[CaseEvaluationResult]) -> float | None:
     eligible = [result for result in results if result.required_tool_names]
     return _rate(
         [
-            bool(
-                result.retrieval
-                and set(result.required_tool_names) <= set(result.retrieval.tool_names)
-            )
+            bool(set(result.required_tool_names) <= set(_retrieved_tool_names(result)))
             for result in eligible
         ]
     )
@@ -878,9 +958,7 @@ def _required_tool_recall(results: list[CaseEvaluationResult]) -> float | None:
 
 def _supported_to_unsupported_count(results: list[CaseEvaluationResult]) -> int:
     return sum(
-        result.expected_supported
-        and result.retrieval is not None
-        and result.retrieval.fallback_reason == "unsupported_capability"
+        result.expected_supported and _routing_or_retrieval_unsupported(result)
         for result in results
     )
 
@@ -889,12 +967,19 @@ def _supported_to_unsupported_rate(
     results: list[CaseEvaluationResult],
 ) -> float | None:
     supported = [result for result in results if result.expected_supported]
-    return _rate(
-        [
-            bool(result.retrieval and result.retrieval.fallback_reason == "unsupported_capability")
-            for result in supported
-        ]
-    )
+    return _rate([_routing_or_retrieval_unsupported(result) for result in supported])
+
+
+def _retrieved_tool_names(result: CaseEvaluationResult) -> tuple[str, ...]:
+    if result.routing_status is not None:
+        return result.shortlist_tool_names if result.routing_status == "routed" else ()
+    return result.retrieval.tool_names if result.retrieval else ()
+
+
+def _routing_or_retrieval_unsupported(result: CaseEvaluationResult) -> bool:
+    if result.routing_status is not None:
+        return result.routing_status == "unsupported"
+    return bool(result.retrieval and result.retrieval.fallback_reason == "unsupported_capability")
 
 
 def _retrieval_metric_summary(
@@ -946,6 +1031,10 @@ def _fallback_taxonomy(results: list[CaseEvaluationResult]) -> dict[str, int]:
     taxonomy: dict[str, int] = {}
     for result in results:
         reason = result.retrieval.fallback_reason if result.retrieval else None
+        if result.routing_status == "needs_clarification":
+            reason = "router_needs_clarification"
+        elif result.routing_status == "unsupported":
+            reason = "router_unsupported"
         if reason:
             taxonomy[reason] = taxonomy.get(reason, 0) + 1
     return dict(sorted(taxonomy.items()))
@@ -999,19 +1088,35 @@ def _privacy_safe_actual(actual: NormalizedPlannerDecision) -> dict[str, object]
 
 def _retrieval_output(result: CaseEvaluationResult) -> dict[str, object] | None:
     retrieval = result.retrieval
-    if retrieval is None:
+    if retrieval is None and result.routing_status is None:
         return None
+    retrieved_tool_names = _retrieved_tool_names(result)
     return {
         "shortlistToolNames": list(result.shortlist_tool_names),
         "shortlistSize": len(result.shortlist_tool_names),
         "expectedToolIncluded": (
-            result.expected.tool_name in retrieval.tool_names if result.expected.tool_name else None
+            result.expected.tool_name in retrieved_tool_names if result.expected.tool_name else None
         ),
-        "lowConfidence": retrieval.low_confidence,
-        "candidateCount": retrieval.candidate_count,
-        "confidenceBucket": retrieval.confidence_bucket,
-        "fallbackReason": retrieval.fallback_reason,
-        "unsupportedCapabilityId": retrieval.unsupported_capability_id,
+        "routingStatus": result.routing_status,
+        "lowConfidence": (
+            retrieval.low_confidence if retrieval else result.routing_confidence == "low"
+        ),
+        "candidateCount": (
+            retrieval.candidate_count if retrieval else len(result.retrieved_capability_ids)
+        ),
+        "confidenceBucket": (
+            retrieval.confidence_bucket if retrieval else result.routing_confidence
+        ),
+        "fallbackReason": (
+            retrieval.fallback_reason
+            if retrieval
+            else (
+                f"router_{result.routing_status}"
+                if result.routing_status in {"needs_clarification", "unsupported"}
+                else None
+            )
+        ),
+        "unsupportedCapabilityId": retrieval.unsupported_capability_id if retrieval else None,
         "shortlistViolation": result.shortlist_violation,
         "retrievalLatencyMs": round(result.retrieval_latency_ms, 4),
         "plannerLatencyMs": round(result.planner_latency_ms, 4),
@@ -1024,24 +1129,42 @@ def _privacy_safe_retrieval_event(
     result: CaseEvaluationResult,
 ) -> dict[str, object]:
     retrieval = result.retrieval
-    if retrieval is None:
-        raise ValueError("Retrieval event requires a retrieval result")
+    if retrieval is None and result.routing_status is None:
+        raise ValueError("Routing event requires a routing result")
     return {
         "eventVersion": "agent-tool-retrieval-observation:v1",
-        "mode": "shadow",
+        "mode": "llm_router" if result.routing_status is not None else "shadow",
         "caseKind": _bounded_case_kind(result.kind),
         "catalogVersion": result.catalog_version,
         "catalogSha256": result.catalog_sha256,
         "modelVersion": result.model_version,
         "suiteVersion": result.suite_version,
         "retrieverVersion": result.retriever_version,
-        "candidateCount": min(max(retrieval.candidate_count, 0), 100),
-        "confidenceBucket": retrieval.confidence_bucket,
-        "lowConfidence": retrieval.low_confidence,
-        "fallbackReason": retrieval.fallback_reason,
+        "candidateCount": min(
+            max(
+                retrieval.candidate_count if retrieval else len(result.retrieved_capability_ids),
+                0,
+            ),
+            100,
+        ),
+        "confidenceBucket": (
+            retrieval.confidence_bucket if retrieval else result.routing_confidence
+        ),
+        "lowConfidence": (
+            retrieval.low_confidence if retrieval else result.routing_confidence == "low"
+        ),
+        "fallbackReason": (
+            retrieval.fallback_reason
+            if retrieval
+            else (
+                f"router_{result.routing_status}"
+                if result.routing_status in {"needs_clarification", "unsupported"}
+                else None
+            )
+        ),
         "shortlistSize": min(max(len(result.shortlist_tool_names), 0), 100),
         "supportedToUnsupportedMisjudgment": bool(
-            result.expected_supported and retrieval.fallback_reason == "unsupported_capability"
+            result.expected_supported and _routing_or_retrieval_unsupported(result)
         ),
         "latencyMs": {
             "retrieval": _bounded_latency(result.retrieval_latency_ms),

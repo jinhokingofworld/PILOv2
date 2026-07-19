@@ -927,6 +927,7 @@ def test_runtime_settings_default_meeting_report_model(monkeypatch) -> None:
     assert settings.openai_meeting_report_model == "gpt-5.4-mini"
     assert settings.openai_meeting_transcript_embedding_model == "text-embedding-3-small"
     assert settings.openai_agent_planner_model == "gpt-5.4-mini"
+    assert settings.openai_agent_router_model == "gpt-5.4-mini"
 
 
 def test_runtime_settings_reads_agent_planner_model(monkeypatch) -> None:
@@ -934,10 +935,25 @@ def test_runtime_settings_reads_agent_planner_model(monkeypatch) -> None:
     monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("OPENAI_AGENT_PLANNER_MODEL", "gpt-agent-planner")
+    monkeypatch.delenv("OPENAI_AGENT_ROUTER_MODEL", raising=False)
 
     settings = RuntimeSettings.from_env()
 
     assert settings.openai_agent_planner_model == "gpt-agent-planner"
+    assert settings.openai_agent_router_model == "gpt-agent-planner"
+
+
+def test_runtime_settings_reads_agent_router_overrides(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
+    monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AGENT_ROUTER_MODEL", "gpt-agent-router")
+    monkeypatch.setenv("OPENAI_AGENT_ROUTER_TIMEOUT_MS", "30000")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.openai_agent_router_model == "gpt-agent-router"
+    assert settings.openai_agent_router_timeout_seconds == 30
 
 
 def test_runtime_settings_reads_agent_planner_timeout(monkeypatch) -> None:
@@ -945,10 +961,12 @@ def test_runtime_settings_reads_agent_planner_timeout(monkeypatch) -> None:
     monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("OPENAI_AGENT_PLANNER_TIMEOUT_MS", "45000")
+    monkeypatch.delenv("OPENAI_AGENT_ROUTER_TIMEOUT_MS", raising=False)
 
     settings = RuntimeSettings.from_env()
 
     assert settings.openai_agent_planner_timeout_seconds == 45
+    assert settings.openai_agent_router_timeout_seconds == 45
 
 
 def test_runtime_settings_reads_database_ssl(monkeypatch) -> None:

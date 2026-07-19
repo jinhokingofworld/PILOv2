@@ -20,6 +20,7 @@ from app.agent_processor import (
     AgentRunJob,
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
+    OpenAiAgentRouterClient,
 )
 from app.agent_prompt_security import PromptSecuritySource
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
@@ -383,6 +384,8 @@ class RuntimeSettings:
     openai_meeting_transcript_embedding_model: str
     openai_agent_planner_model: str
     openai_agent_planner_timeout_seconds: float
+    openai_agent_router_model: str
+    openai_agent_router_timeout_seconds: float
     agent_execution_handoff_base_url: str
     agent_execution_handoff_token: str
     agent_execution_handoff_timeout_seconds: int
@@ -418,6 +421,21 @@ class RuntimeSettings:
             openai_agent_planner_timeout_seconds=_positive_ms_env(
                 "OPENAI_AGENT_PLANNER_TIMEOUT_MS",
                 DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
+            ),
+            openai_agent_router_model=_env(
+                "OPENAI_AGENT_ROUTER_MODEL",
+                _env("OPENAI_AGENT_PLANNER_MODEL", "gpt-5.4-mini"),
+            ),
+            openai_agent_router_timeout_seconds=(
+                _positive_ms_env(
+                    "OPENAI_AGENT_ROUTER_TIMEOUT_MS",
+                    DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
+                )
+                if _optional_env("OPENAI_AGENT_ROUTER_TIMEOUT_MS") is not None
+                else _positive_ms_env(
+                    "OPENAI_AGENT_PLANNER_TIMEOUT_MS",
+                    DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
+                )
             ),
             agent_execution_handoff_base_url=_require_env("AGENT_EXECUTION_HANDOFF_BASE_URL"),
             agent_execution_handoff_token=_require_env("AGENT_EXECUTION_HANDOFF_TOKEN"),
@@ -3117,6 +3135,11 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.openai_agent_planner_model,
         resolved_settings.openai_agent_planner_timeout_seconds,
     )
+    agent_router_client = OpenAiAgentRouterClient(
+        resolved_settings.openai_api_key,
+        resolved_settings.openai_agent_router_model,
+        resolved_settings.openai_agent_router_timeout_seconds,
+    )
     canvas_agent_intent_classifier = OpenAiCanvasAgentIntentClassifier(
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
@@ -3150,6 +3173,7 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         agent_run_repository,
         agent_planner_client,
         agent_execution_handoff_client,
+        router_client=agent_router_client,
     )
     canvas_agent_processor = CanvasAgentProcessor(
         canvas_agent_repository,

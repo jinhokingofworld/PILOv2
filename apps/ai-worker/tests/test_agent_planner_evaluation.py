@@ -15,7 +15,7 @@ from app.agent_planner_evaluation import (
     load_meeting_regression_suite,
     select_shadow_planner_tools,
 )
-from app.agent_processor import AgentPlannerDecision
+from app.agent_processor import AgentPlannerDecision, AgentRoutingDecision
 from app.agent_tool_retrieval import (
     compute_input_schema_sha256,
     compute_tool_capability_catalog_sha,
@@ -29,6 +29,16 @@ class FakePlanner:
         self.requests = []
 
     def plan(self, request):
+        self.requests.append(request)
+        return next(self.decisions)
+
+
+class FakeRouter:
+    def __init__(self, decisions):
+        self.decisions = iter(decisions)
+        self.requests = []
+
+    def route(self, request):
         self.requests.append(request)
         return next(self.decisions)
 
@@ -328,6 +338,50 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
     ]
     assert write_retrieval is not None
     assert write_retrieval.fallback_reason == "write_capability"
+
+    router = FakeRouter(
+        [
+            AgentRoutingDecision(
+                status="routed",
+                domains=("calendar",),
+                capability_ids=("calendar.list",),
+                intent_summary="이번 주 일정을 조회한다.",
+                confidence="high",
+                clarification_question=None,
+                unsupported_reason=None,
+                provider_input_tokens=50,
+                provider_output_tokens=10,
+                provider_total_tokens=60,
+            )
+        ]
+    )
+    planner = FakePlanner(
+        [
+            decision(
+                provider_input_tokens=100,
+                provider_output_tokens=20,
+                provider_total_tokens=120,
+            )
+        ]
+    )
+    routed_results = evaluate_suite(
+        planner,
+        replace(suite, cases=(suite.cases[0],)),
+        current_date="2026-07-11",
+        router=router,
+        use_llm_routing=True,
+        shadow_top_k=1,
+    )
+    routed_report = build_evaluation_report(routed_results)
+
+    assert [tool.name for tool in planner.requests[0].tools] == ["list_calendar_events"]
+    assert planner.requests[0].routing is not None
+    assert routed_report["retrieval"]["attempts"] == 1
+    assert routed_report["retrieval"]["domainRecallAtK"] == 1.0
+    assert routed_report["retrieval"]["capabilityRecallAtK"] == 1.0
+    assert routed_report["retrieval"]["requiredToolRecallAtK"] == 1.0
+    assert routed_report["planner"]["providerTokenUsage"]["total"]["average"] == 180
+    assert routed_report["retrievalEvents"][0]["mode"] == "llm_router"
 
 
 def test_legacy_shadow_comparison_requires_paired_inputs_and_reports_deltas(tmp_path) -> None:
