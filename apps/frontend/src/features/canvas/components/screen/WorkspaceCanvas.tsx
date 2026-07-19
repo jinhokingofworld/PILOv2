@@ -34,6 +34,7 @@ import {
   MousePointer2,
   Pencil,
   Redo2,
+  RotateCcw,
   Rows3,
   SendToBack,
   Slash,
