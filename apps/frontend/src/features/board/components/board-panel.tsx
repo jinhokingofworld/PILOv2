@@ -37,6 +37,8 @@ import { cn } from "@/lib/utils";
 import { PageCursorSurface } from "@/shared/page-cursor/PageCursorSurface";
 import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
+const ALL_FILTER_VALUE = "__pilo_all_filters__";
+
 function SummaryChip({
   children,
   tone = "default"
@@ -275,10 +277,10 @@ export function BoardPanel() {
           </span>
 
           <Select
-            value={state || "__all__"}
+            value={state || ALL_FILTER_VALUE}
             onValueChange={(value) => {
               setState(
-                value && value !== "__all__" ? (value as BoardIssueState) : ""
+                value && value !== ALL_FILTER_VALUE ? (value as BoardIssueState) : ""
               );
               setSelectedIssueId(null);
             }}
@@ -293,7 +295,7 @@ export function BoardPanel() {
               <SelectValue>상태: {stateFilterLabel}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__all__">상태 전체</SelectItem>
+              <SelectItem value={ALL_FILTER_VALUE}>상태 전체</SelectItem>
               {(boardData.filterOptions?.states ?? []).map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label} ({option.count})
@@ -303,9 +305,9 @@ export function BoardPanel() {
           </Select>
 
           <Select
-            value={assignee || "__all__"}
+            value={assignee || ALL_FILTER_VALUE}
             onValueChange={(value) => {
-              setAssignee(value && value !== "__all__" ? value : "");
+              setAssignee(value && value !== ALL_FILTER_VALUE ? value : "");
               setSelectedIssueId(null);
             }}
           >
@@ -319,7 +321,7 @@ export function BoardPanel() {
               <SelectValue>담당자: {assigneeFilterLabel}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__all__">담당자 전체</SelectItem>
+              <SelectItem value={ALL_FILTER_VALUE}>담당자 전체</SelectItem>
               {(boardData.filterOptions?.assignees ?? []).map((option) => (
                 <SelectItem key={option.login} value={option.login}>
                   @{option.login} ({option.count})
@@ -329,9 +331,9 @@ export function BoardPanel() {
           </Select>
 
           <Select
-            value={label || "__all__"}
+            value={label || ALL_FILTER_VALUE}
             onValueChange={(value) => {
-              setLabel(value && value !== "__all__" ? value : "");
+              setLabel(value && value !== ALL_FILTER_VALUE ? value : "");
               setSelectedIssueId(null);
             }}
           >
@@ -345,7 +347,7 @@ export function BoardPanel() {
               <SelectValue>라벨: {labelFilterLabel}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__all__">라벨 전체</SelectItem>
+              <SelectItem value={ALL_FILTER_VALUE}>라벨 전체</SelectItem>
               {(boardData.filterOptions?.labels ?? []).map((option) => (
                 <SelectItem key={option.name} value={option.name}>
                   {option.name} ({option.count})

@@ -131,6 +131,43 @@ export function BoardKanban({
     ({ id }) => id === resolvedMobileColumnId
   );
 
+  function handleMobileTabKeyDown(
+    event: React.KeyboardEvent<HTMLButtonElement>
+  ) {
+    const tabButtons = Array.from(
+      event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+        '[role="tab"]'
+      ) ?? []
+    );
+    const currentIndex = tabButtons.indexOf(event.currentTarget);
+    if (currentIndex < 0 || !orderedColumns.length) {
+      return;
+    }
+
+    let nextIndex: number | null = null;
+    switch (event.key) {
+      case "ArrowRight":
+        nextIndex = (currentIndex + 1) % orderedColumns.length;
+        break;
+      case "ArrowLeft":
+        nextIndex = (currentIndex - 1 + orderedColumns.length) % orderedColumns.length;
+        break;
+      case "Home":
+        nextIndex = 0;
+        break;
+      case "End":
+        nextIndex = orderedColumns.length - 1;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    setMobileColumnId(orderedColumns[nextIndex].id);
+    const nextTab = tabButtons[nextIndex];
+    nextTab?.focus();
+  }
+
   function readDraggedIssue(event: React.DragEvent): DraggedIssue | null {
     if (draggedIssue) {
       return draggedIssue;
@@ -176,10 +213,11 @@ export function BoardKanban({
   function renderColumn(
     column: BoardColumnPayload,
     index: number,
-    enableDrop: boolean
+    enableDrop: boolean,
+    enableCursorTarget: boolean
   ) {
     const columnIssues = issuesByColumnId.get(column.id) ?? [];
-    const cursorAttributes = enableDrop
+    const cursorAttributes = enableCursorTarget
       ? pageCursorTargetAttributes({
           id: column.id,
           label: column.name,
@@ -329,13 +367,17 @@ export function BoardKanban({
               key={column.id}
               type="button"
               role="tab"
+              id={`board-column-tab-${column.id}`}
+              aria-controls={`board-column-panel-${column.id}`}
               aria-selected={resolvedMobileColumnId === column.id}
+              tabIndex={resolvedMobileColumnId === column.id ? 0 : -1}
               className={cn(
                 "inline-flex h-9 max-w-48 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600",
                 resolvedMobileColumnId === column.id &&
                   "border-violet-300 bg-violet-50 text-violet-700"
               )}
               onClick={() => setMobileColumnId(column.id)}
+              onKeyDown={handleMobileTabKeyDown}
             >
               <span className="truncate">{column.name}</span>
               <span className="font-mono text-xs">{issueCount}</span>
@@ -344,11 +386,19 @@ export function BoardKanban({
         })}
       </div>
 
-      <div className="md:hidden" role="list">
+      <div
+        className="md:hidden"
+        id={mobileColumn ? `board-column-panel-${mobileColumn.id}` : undefined}
+        role="tabpanel"
+        aria-labelledby={
+          mobileColumn ? `board-column-tab-${mobileColumn.id}` : undefined
+        }
+      >
         {mobileColumn
           ? renderColumn(
               mobileColumn,
               orderedColumns.findIndex(({ id }) => id === mobileColumn.id),
+              false,
               false
             )
           : null}
@@ -363,7 +413,7 @@ export function BoardKanban({
         role="list"
       >
         {orderedColumns.map((column, index) =>
-          renderColumn(column, index, true)
+          renderColumn(column, index, true, true)
         )}
       </div>
     </section>

@@ -218,6 +218,50 @@ assert.match(boardKanban, /aria-selected/);
 assert.match(boardKanban, /md:hidden/);
 assert.match(boardKanban, /hidden md:grid/);
 assert.match(boardKanban, /overflow-x-auto/);
+assert.match(
+  boardKanban,
+  /function renderColumn\(\s*column: BoardColumnPayload,\s*index: number,\s*enableDrop: boolean,\s*enableCursorTarget: boolean/,
+  "Only the desktop column variant should expose a page cursor target"
+);
+assert.match(boardKanban, /enableCursorTarget\s*\? pageCursorTargetAttributes/);
+assert.match(
+  boardKanban,
+  /renderColumn\(\s*mobileColumn,[\s\S]*?false,\s*false\s*\)/,
+  "The hidden mobile lane must not be selectable as a cursor target"
+);
+assert.match(
+  boardKanban,
+  /renderColumn\(column, index, true, true\)/,
+  "The visible desktop lanes should retain cursor targets"
+);
+assert.match(boardKanban, /id=\{`board-column-tab-\$\{column.id\}`\}/);
+assert.match(
+  boardKanban,
+  /aria-controls=\{`board-column-panel-\$\{column.id\}`\}/
+);
+assert.match(boardKanban, /tabIndex=\{resolvedMobileColumnId === column.id \? 0 : -1\}/);
+assert.match(boardKanban, /onKeyDown=\{handleMobileTabKeyDown\}/);
+assert.match(boardKanban, /role="tabpanel"/);
+assert.match(
+  boardKanban,
+  /mobileColumn \? `board-column-tab-\$\{mobileColumn.id\}` : undefined/
+);
+assert.match(boardKanban, /case "ArrowRight":/);
+assert.match(boardKanban, /case "ArrowLeft":/);
+assert.match(boardKanban, /case "Home":/);
+assert.match(boardKanban, /case "End":/);
+assert.match(boardKanban, /nextTab\?\.focus\(\)/);
+
+assert.match(
+  boardPanel,
+  /const ALL_FILTER_VALUE = "__pilo_all_filters__"/,
+  "The all-filter UI value must not collide with GitHub labels or logins"
+);
+assert.doesNotMatch(boardPanel, /value="__all__"/);
+assert.match(boardPanel, /value=\{state \|\| ALL_FILTER_VALUE\}/);
+assert.match(boardPanel, /value=\{assignee \|\| ALL_FILTER_VALUE\}/);
+assert.match(boardPanel, /value=\{label \|\| ALL_FILTER_VALUE\}/);
+assert.match(boardPanel, /value !== ALL_FILTER_VALUE/);
 
 assert.match(boardIssueCard, /from "@\/components\/ui\/card"/);
 assert.match(boardIssueCard, /<Card/);
