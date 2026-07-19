@@ -77,6 +77,18 @@
       }
     },
     {
+      "id": "meeting_video_highlight_unsupported",
+      "kind": "counterexample",
+      "prompt": "회의 영상을 자동으로 편집해서 하이라이트를 만들어줘",
+      "expected": {
+        "status": "unsupported",
+        "requiresConfirmation": false,
+        "domain": "meeting",
+        "requiredToolNames": [],
+        "supported": false
+      }
+    },
+    {
       "id": "meeting_summary_sections_context",
       "kind": "context",
       "prompt": "그 회의록의 논의사항만 알려줘",

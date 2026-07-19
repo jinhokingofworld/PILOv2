@@ -1612,12 +1612,25 @@ function errorCode(error) {
 
 {
   const { meetingService, registry } = createRegistry();
+  meetingService.participants.push({
+    ...meetingService.participants[0],
+    id: "99999999-9999-4999-8999-999999999992",
+    userId: "11111111-1111-4111-8111-111111111112",
+    joinedAt: "2026-07-08T00:30:00.000Z",
+    leftAt: "2026-07-08T01:00:00.000Z",
+    isActive: false,
+    user: {
+      id: "11111111-1111-4111-8111-111111111112",
+      name: "은재",
+      avatarUrl: null
+    }
+  });
   const tool = registry.getDefinition("get_meeting_participants");
   const result = await tool.execute(context, tool.validateInput({}));
 
   assert.deepEqual(result.outputSummary, {
     meetingId: MEETING_ID,
-    count: 1,
+    count: 2,
     hasMore: false,
     participants: [
       {
@@ -1627,6 +1640,14 @@ function errorCode(error) {
         joinedAt: "2026-07-08T00:00:00.000Z",
         leftAt: null,
         isActive: true
+      },
+      {
+        userId: "11111111-1111-4111-8111-111111111112",
+        name: "은재",
+        avatarUrl: null,
+        joinedAt: "2026-07-08T00:30:00.000Z",
+        leftAt: "2026-07-08T01:00:00.000Z",
+        isActive: false
       }
     ]
   });

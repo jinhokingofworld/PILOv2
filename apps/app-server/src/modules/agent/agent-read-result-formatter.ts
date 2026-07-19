@@ -483,7 +483,7 @@ function formatMeetingRooms(input: AgentReadResultFormatterInput): string | null
   }
 
   const lines = rooms
-    .map((room) => formatMeetingRoom(room))
+    .map((room) => formatMeetingRoom(room, input.timezone))
     .filter((line): line is string => line !== null)
     .slice(0, MAX_LIST_ITEMS);
   if (lines.length === 0) {
@@ -498,7 +498,10 @@ function formatMeetingRooms(input: AgentReadResultFormatterInput): string | null
   return answer.join("\n");
 }
 
-function formatMeetingRoom(room: AgentJsonObject): string | null {
+function formatMeetingRoom(
+  room: AgentJsonObject,
+  timezone: string | undefined
+): string | null {
   const name = boundText(room.name, MAX_CALENDAR_TITLE_LENGTH);
   if (!name) {
     return null;
@@ -513,6 +516,7 @@ function formatMeetingRoom(room: AgentJsonObject): string | null {
 
   const participantCount = readCount(currentMeeting.activeParticipantCount);
   const duration = formatDuration(readCount(currentMeeting.durationSec));
+  const startedAt = formatIsoDateTime(currentMeeting.startedAt, timezone);
   const recording = isPlainObject(currentMeeting.recording)
     ? readString(currentMeeting.recording.status)
     : null;
@@ -520,7 +524,8 @@ function formatMeetingRoom(room: AgentJsonObject): string | null {
     "진행 중",
     participantCount === null ? null : `${participantCount}명 참여`,
     duration ? `${duration} 경과` : null,
-    recording === "RUNNING" ? "녹음 중" : null
+    recording === "RUNNING" ? "녹음 중" : null,
+    startedAt ? `시작 ${startedAt}` : null
   ].filter((value): value is string => value !== null);
 
   return `${name} · ${details.join(" · ")}`;

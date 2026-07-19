@@ -1453,17 +1453,17 @@ gate를 통과한 adapter만 Phase 4 retriever와 planner shortlist에 노출한
 Meeting은 첫 reference adapter로 아래 품질 기준을 적용한다. 이후 Calendar·Board·Canvas·SQLtoERD·
 PR Review·Drive도 같은 gate로 순차 등록하고, 각 도메인의 조회 formatter·근거 품질 기준을 추가한다.
 
-- [ ] 회의방 목록, active Meeting, 경과 시간, 참여자 조회 formatter가 이름·상태·시간을 일관된
+- [x] 회의방 목록, active Meeting, 경과 시간, 참여자 조회 formatter가 이름·상태·시간을 일관된
   사용자 timezone으로 표시한다.
-- [ ] 최근·실패·재시도·기간별 report 조회가 실제 상태와 정렬 조건을 보존한다.
-- [ ] 회의록 요약 tool이 사용자가 요구한 summary, discussion, decision, action item section만
+- [x] 최근·실패·재시도·기간별 report 조회가 실제 상태와 정렬 조건을 보존한다.
+- [x] 회의록 요약 tool이 사용자가 요구한 summary, discussion, decision, action item section만
   선택적으로 반환할 수 있게 한다.
-- [ ] 실패한 report 상세는 안전한 오류 코드·단계와 재시도 가능 여부를 설명하고 provider raw error는
+- [x] 실패한 report 상세는 안전한 오류 코드·단계와 재시도 가능 여부를 설명하고 provider raw error는
   노출하지 않는다.
 - [x] 후속 일정·회의 내용 질문은 transcript와 Activity evidence를 source type별로 구분해 사용한다.
 - [x] 결정사항 검증은 같은 decision item을 직접 가리키는 evidence만 반환하고, 근거가 없으면
   “직접 연결된 근거 없음”으로 답한다.
-- [ ] 질문과 관련 없는 회의·report·action item source가 최종 답변에 섞이지 않게 검증한다.
+- [x] 질문과 관련 없는 회의·report·action item source가 최종 답변에 섞이지 않게 검증한다.
 
 완료 기준: 요청한 범위만 근거와 함께 답하고, 미지원 오판이나 근거 혼합이 발생하지 않는다.
 
@@ -1490,9 +1490,9 @@ PR Review·Drive도 같은 gate로 순차 등록하고, 각 도메인의 조회 
 - [ ] `domain + read/write` flag, domain 단위 rollback, selector outcome·fallback·clarification reason의
   privacy-safe 관측을 추가한다.
 
-##### 5-B. Meeting reference adapter 품질 완료
+##### 5-B. Meeting reference adapter 코드·fixture 준비
 
-- [ ] 회의방·active meeting·참여자 formatter는 사용자 timezone, 빈 목록·종료됨·녹음 중·권한 없음의
+- [x] 회의방·active meeting·참여자 formatter는 사용자 timezone, 빈 목록·종료됨·녹음 중·권한 없음의
   상태를 일관되게 표시한다.
 - [x] report 목록/상세는 최신 기본값, 기간·상태·명시 count, 실패 단계와 재시도 가능 여부를 보존한다.
 - [x] summary/discussion/decision/action-item 요청은 선택한 section만 반환하며 transcript·다른 section을
@@ -1501,8 +1501,19 @@ PR Review·Drive도 같은 gate로 순차 등록하고, 각 도메인의 조회 
   source·직접 연결되지 않은 decision evidence를 제거한다.
 - [x] source type, bounded citation 수, 빈 근거와 관련성 탈락 사유만 관측하고 raw evidence/provider payload는
   저장하지 않는다.
-- [ ] canonical·held-out·counterexample·stateful follow-up에서 section 범위, citation relevance,
-  unsupported 오판, 0/1/N clarification, UUID 비노출을 검증한다.
+- [x] canonical·held-out·counterexample·stateful quality case와 0/1/N·UUID 비노출 metadata 계약을
+  fixture와 contract test로 고정한다.
+- [ ] 실제 provider evaluation에서 section 범위, citation relevance, unsupported 오판과 stateful
+  follow-up을 검증한다.
+
+2026-07-19 기준 Meeting formatter는 회의방·active Meeting의 시작 시각을 run timezone으로 표시하고,
+회의방의 녹음 상태를 회귀로 고정했다. 참여자의 참여 중·퇴장 상태와
+입장·퇴장 시각, 빈 회의방·active Meeting·참여자 결과도 같은 formatter suite에서 검증한다. Meeting
+regression catalog는 canonical·held-out·counterexample·stateful quality case에 명시적 unsupported
+반례를 포함하며, 0/1/N·동명이인 해소와 UUID 비노출은 catalog contract test로 고정한다. citation
+관련성과 scope 혼합 방지는 App Server grounded-answer/evidence regression이 담당한다. 실제 provider
+evaluation·threshold, dev read/write smoke와 `shadow` rollback rehearsal은 아직 수행하지 않았으며
+Issue #1480의 공개 완료 조건으로 남긴다.
 
 ##### 5-C. 순차 도메인 공개
 

@@ -606,6 +606,7 @@ class SmokeCalendarService {
 {
   const answer = buildAgentReadResultAnswer({
     toolName: "list_meeting_rooms",
+    timezone: "Asia/Seoul",
     outputSummary: {
       count: 2,
       hasMore: false,
@@ -635,6 +636,7 @@ class SmokeCalendarService {
 
   assert.match(answer, /회의방 2개/);
   assert.match(answer, /기본 회의실 · 진행 중 · 3명 참여 · 1시간 1분 경과 · 녹음 중/);
+  assert.match(answer, /시작 2026-07-10 09:00/);
   assert.match(answer, /디자인 회의실 · 진행 중인 회의 없음/);
 }
 
@@ -674,6 +676,7 @@ class SmokeCalendarService {
 
   assert.match(answer, /기본 회의실 회의에 참여 중입니다/);
   assert.match(answer, /진행 시간: 5분/);
+  assert.match(answer, /시작: 2026-07-10 09:00/);
 }
 
 {

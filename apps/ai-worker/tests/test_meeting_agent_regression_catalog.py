@@ -165,7 +165,7 @@ def test_catalog_builds_separate_canonical_and_held_out_planner_suites() -> None
     assert held_out.version == "meeting-agent-regression:v1:held_out"
     assert len(canonical.cases) == 18 * 4 * 3 + 1
     assert len(held_out.cases) == 18 * 3 + 1
-    assert len(counterexamples.cases) == 18 * 4 + 1
+    assert len(counterexamples.cases) == 18 * 4 + 2
     assert len(context.cases) == 18 * 3 + 1
     assert {case.kind for case in counterexamples.cases} == {"counterexample"}
     assert {case.kind for case in context.cases} == {"context"}
@@ -194,6 +194,33 @@ def test_catalog_builds_separate_canonical_and_held_out_planner_suites() -> None
         quality_cases["quality:meeting_decision_evidence_counterexample"].expectation.tool_name
         == "get_meeting_decision_evidence"
     )
+    assert (
+        quality_cases["quality:meeting_video_highlight_unsupported"].expectation.status
+        == "unsupported"
+    )
+    assert (
+        quality_cases["quality:meeting_video_highlight_unsupported"].expectation.supported is False
+    )
     assert quality_cases["quality:meeting_summary_sections_context"].planning_context.startswith(
         "previous assistant:"
     )
+
+
+def test_phase5_quality_cases_cover_variants_resolution_and_uuid_safety() -> None:
+    catalog = load_catalog()
+    quality_cases = catalog["qualityCases"]
+
+    assert {case["kind"] for case in quality_cases} == {
+        "canonical",
+        "held_out",
+        "counterexample",
+        "context",
+    }
+    assert any(case["expected"]["status"] == "unsupported" for case in quality_cases)
+    assert {fixture["cardinality"] for fixture in catalog["resolutionFixtures"]} == {
+        "none",
+        "single",
+        "multiple",
+        "homonym",
+    }
+    assert all(not UUID_PATTERN.search(case["prompt"]) for case in quality_cases)
