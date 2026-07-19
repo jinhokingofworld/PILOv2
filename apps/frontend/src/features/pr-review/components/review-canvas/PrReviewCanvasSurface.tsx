@@ -98,7 +98,10 @@ import {
 import {
   registerPrReviewFileNodeActivationHandler
 } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
-import { shouldRemoveCreatedPrReviewSystemShape } from "@/features/pr-review/components/review-canvas/pr-review-system-shape-policy";
+import {
+  preservePrReviewFlowLabelTranslation,
+  shouldRemoveCreatedPrReviewSystemShape
+} from "@/features/pr-review/components/review-canvas/pr-review-system-shape-policy";
 import type { PrReviewFollowSurfaceKey } from "@/features/pr-review/pr-review-follow-location";
 import {
   buildPrReviewGraphPresentation,
@@ -1355,6 +1358,13 @@ function registerReviewShapePolicy(
         rotation: prev.rotation,
         props: prev.props
       };
+    }
+
+    if (
+      prev.type === PR_REVIEW_FLOW_LABEL_SHAPE_TYPE &&
+      next.type === PR_REVIEW_FLOW_LABEL_SHAPE_TYPE
+    ) {
+      return preservePrReviewFlowLabelTranslation(prev, next);
     }
 
     if (prReviewShapeTypes.has(next.type)) {
