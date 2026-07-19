@@ -4,7 +4,10 @@ import type {
   PrReviewFileStatus,
   PrReviewRelationType
 } from "./types";
-import { buildSemanticFlowCandidates } from "./pr-review-semantic-flow";
+import {
+  buildSemanticFlowCandidates,
+  buildSemanticFlowCandidatesV2
+} from "./pr-review-semantic-flow";
 import { buildSupportRelationCandidates } from "./pr-review-semantic-support";
 
 const CODE_EXTENSIONS = new Set([
@@ -80,6 +83,18 @@ export interface PrReviewSemanticGraphCandidates {
   flows: PrReviewFlowCandidate[];
 }
 
+export type PrReviewGroupingBinding = "locked" | "hint";
+
+export interface PrReviewRelationCandidateV2 extends PrReviewRelationCandidate {
+  groupingBinding: PrReviewGroupingBinding;
+}
+
+export interface PrReviewSemanticGraphCandidatesV2 {
+  files: PrReviewFileRoleCandidate[];
+  relations: PrReviewRelationCandidateV2[];
+  flows: PrReviewFlowCandidate[];
+}
+
 export function buildDeterministicSemanticGraphCandidates(
   inputFiles: readonly PrReviewSemanticGraphFileInput[]
 ): PrReviewSemanticGraphCandidates {
@@ -102,6 +117,28 @@ export function buildDeterministicSemanticGraphCandidates(
     relations,
     flows
   };
+}
+
+export function buildDeterministicSemanticGraphCandidatesV2(
+  inputFiles: readonly PrReviewSemanticGraphFileInput[]
+): PrReviewSemanticGraphCandidatesV2 {
+  const candidates = buildDeterministicSemanticGraphCandidates(inputFiles);
+  const relations: PrReviewRelationCandidateV2[] = candidates.relations.map((relation) => ({
+    ...relation,
+    groupingBinding: isLockedEvidence(relation.evidence) ? "locked" : "hint"
+  }));
+
+  return {
+    files: candidates.files,
+    relations,
+    flows: buildSemanticFlowCandidatesV2(candidates.files, relations)
+  };
+}
+
+function isLockedEvidence(evidence: string): boolean {
+  return (
+    evidence === "matching_test_filename" || evidence === "package_lock_manifest"
+  );
 }
 
 function normalizeInputFiles(

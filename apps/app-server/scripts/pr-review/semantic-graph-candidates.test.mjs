@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { buildDeterministicSemanticGraphCandidates } = require(
+const {
+  buildDeterministicSemanticGraphCandidates,
+  buildDeterministicSemanticGraphCandidatesV2
+} = require(
   "../../dist/modules/pr-review/pr-review-semantic-graph.js"
 );
 
@@ -297,6 +300,62 @@ assert.throws(
     ]),
   /unique and non-empty/
 );
+
+{
+  const v2 = buildDeterministicSemanticGraphCandidatesV2([
+    changedFile(
+      "apps/app-server/src/a.ts",
+      `@@ -1 +1 @@
++export const a = true;`
+    ),
+    changedFile(
+      "apps/app-server/src/a.spec.ts",
+      `@@ -0,0 +1 @@
++describe("a", () => {});`,
+      { fileStatus: "added" }
+    ),
+    changedFile(
+      "apps/ai-worker/app/b.py",
+      `@@ -1 +1 @@
++b = True`
+    ),
+    changedFile(
+      "apps/ai-worker/tests/test_b.py",
+      `@@ -0,0 +1 @@
++def test_b(): pass`,
+      { fileStatus: "added" }
+    ),
+    changedFile(
+      "apps/frontend/src/x.ts",
+      `@@ -1 +1 @@
++import { y } from "./y";`
+    ),
+    changedFile(
+      "apps/frontend/src/y.ts",
+      `@@ -1 +1 @@
++export const y = true;`
+    )
+  ]);
+
+  assert.equal(
+    v2.relations.find((relation) => relation.evidence.startsWith("relative_import:"))
+      .groupingBinding,
+    "hint"
+  );
+  assert.equal(
+    v2.relations.find((relation) => relation.evidence === "matching_test_filename")
+      .groupingBinding,
+    "locked"
+  );
+  assert.equal(
+    v2.flows.some(
+      (flow) =>
+        flow.filePaths.includes("apps/app-server/src/a.ts") &&
+        flow.filePaths.includes("apps/ai-worker/app/b.py")
+    ),
+    false
+  );
+}
 
 {
   const crossLanguageResult = buildDeterministicSemanticGraphCandidates([

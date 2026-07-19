@@ -2,8 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION = "pr-review-semantic-graph:v1"
+PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V1 = "pr-review-semantic-graph:v1"
+PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V2 = "pr-review-semantic-graph:v2"
+PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSIONS = {
+    PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V1,
+    PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V2,
+}
+PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION = PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V1
 PR_REVIEW_ROLE_OVERRIDE_CONFIDENCE_THRESHOLD = 85
+FLOW_TITLE_MAX_CHARS = 255
+FLOW_DESCRIPTION_MAX_CHARS = 10_000
+ROLE_REASON_MAX_CHARS = 500
+RELATION_REASON_MAX_CHARS = 500
+RELATION_REASON_MAX_UTF8_BYTES = 500
 PR_REVIEW_FILE_ROLES = {
     "entry",
     "core_logic",
@@ -21,6 +32,7 @@ PR_REVIEW_RELATION_TYPES = {
     "supports",
 }
 PR_REVIEW_RELATION_SOURCES = {"rule", "ai", "hybrid"}
+PR_REVIEW_GROUPING_BINDINGS = {"locked", "hint"}
 
 
 @dataclass(frozen=True)
@@ -41,6 +53,7 @@ class SemanticGraphRelationInput:
     source: str
     confidence: int
     evidence: str
+    grouping_binding: str | None
 
 
 @dataclass(frozen=True)
@@ -54,6 +67,7 @@ class SemanticGraphFlowInput:
 
 @dataclass(frozen=True)
 class SemanticGraphInput:
+    schema_version: str
     files: tuple[SemanticGraphFileInput, ...]
     relations: tuple[SemanticGraphRelationInput, ...]
     flows: tuple[SemanticGraphFlowInput, ...]
@@ -77,7 +91,7 @@ class SemanticGraphRelationOutput:
 
 @dataclass(frozen=True)
 class SemanticGraphFlowOutput:
-    candidate_key: str
+    candidate_key: str | None
     title: str
     description: str
     review_order: tuple[str, ...]
@@ -98,17 +112,26 @@ def parse_semantic_graph_input(
     graph_value = data.get("semanticGraph")
     if version is None and graph_value is None:
         return None
-    if version != PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION or not isinstance(graph_value, dict):
+    if version not in PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSIONS or not isinstance(graph_value, dict):
         raise ValueError("Invalid semantic graph input version")
 
     files = _parse_input_files(graph_value.get("files"))
     if {file.file_path for file in files} != known_file_paths:
         raise ValueError("Semantic graph input files do not match changed files")
 
-    relations = _parse_input_relations(graph_value.get("relations"), known_file_paths)
+    relations = _parse_input_relations(
+        graph_value.get("relations"),
+        known_file_paths,
+        schema_version=version,
+    )
     relation_by_key = {relation.key: relation for relation in relations}
     flows = _parse_input_flows(graph_value.get("flows"), known_file_paths, relation_by_key)
-    return SemanticGraphInput(files=files, relations=relations, flows=flows)
+    return SemanticGraphInput(
+        schema_version=version,
+        files=files,
+        relations=relations,
+        flows=flows,
+    )
 
 
 def parse_semantic_graph_output(
@@ -121,7 +144,7 @@ def parse_semantic_graph_output(
         if version is not None or graph_value is not None:
             raise ValueError("Legacy analysis output must not include semantic graph")
         return None
-    if version != PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION or not isinstance(graph_value, dict):
+    if version != graph_input.schema_version or not isinstance(graph_value, dict):
         raise ValueError("Invalid semantic graph output version")
 
     input_file_by_path = {file.file_path: file for file in graph_input.files}
@@ -131,7 +154,7 @@ def parse_semantic_graph_output(
         set(input_file_by_path),
         {relation.key for relation in graph_input.relations},
     )
-    flows = _parse_output_flows(graph_value.get("flows"), graph_input.flows)
+    flows = _parse_output_flows(graph_value.get("flows"), graph_input)
     return SemanticGraphOutput(files=files, relations=relations, flows=flows)
 
 
@@ -181,7 +204,7 @@ def semantic_graph_output_error_reason(error: ValueError) -> str:
 
 def semantic_graph_prompt_input(graph: SemanticGraphInput) -> dict[str, object]:
     return {
-        "schemaVersion": PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
+        "schemaVersion": graph.schema_version,
         "rolePolicy": {
             "overrideConfidenceThreshold": PR_REVIEW_ROLE_OVERRIDE_CONFIDENCE_THRESHOLD,
             "rule": (
@@ -197,11 +220,7 @@ def semantic_graph_prompt_input(graph: SemanticGraphInput) -> dict[str, object]:
                 "connect a file to itself, and never duplicate the same fromFilePath, "
                 "toFilePath, and relationType."
             ),
-            "flows": (
-                "Return every input flow exactly once with its exact key in candidateKey. "
-                "reviewOrder must contain every filePath from that flow exactly once and no "
-                "filePath from another flow."
-            ),
+            "flows": _flow_output_policy(graph.schema_version),
         },
         "files": [
             {
@@ -222,6 +241,11 @@ def semantic_graph_prompt_input(graph: SemanticGraphInput) -> dict[str, object]:
                 "source": relation.source,
                 "confidence": relation.confidence,
                 "evidence": relation.evidence,
+                **(
+                    {"groupingBinding": relation.grouping_binding}
+                    if relation.grouping_binding is not None
+                    else {}
+                ),
             }
             for relation in graph.relations
         ],
@@ -263,7 +287,7 @@ def semantic_graph_output_schema(graph: SemanticGraphInput) -> dict[str, object]
                             "type": "string",
                             "enum": sorted(PR_REVIEW_FILE_ROLES),
                         },
-                        "roleReason": {"type": "string"},
+                        "roleReason": {"type": "string", "maxLength": ROLE_REASON_MAX_CHARS},
                     },
                 ),
             },
@@ -285,28 +309,15 @@ def semantic_graph_output_schema(graph: SemanticGraphInput) -> dict[str, object]
                             "type": "string",
                             "enum": sorted(PR_REVIEW_RELATION_TYPES),
                         },
-                        "reason": {"type": "string"},
+                        "reason": {"type": "string", "maxLength": RELATION_REASON_MAX_CHARS},
                     },
                 ),
             },
-            "flows": {
-                "type": "array",
-                "items": _closed_object(
-                    ["candidateKey", "title", "description", "reviewOrder"],
-                    {
-                        "candidateKey": {
-                            "type": "string",
-                            "enum": flow_candidate_keys,
-                        },
-                        "title": {"type": "string"},
-                        "description": {"type": "string"},
-                        "reviewOrder": {
-                            "type": "array",
-                            "items": file_path_schema,
-                        },
-                    },
-                ),
-            },
+            "flows": _flow_output_schema(
+                graph.schema_version,
+                file_path_schema,
+                flow_candidate_keys,
+            ),
         },
     }
 
@@ -333,7 +344,7 @@ def serialize_semantic_graph_output(graph: SemanticGraphOutput) -> dict[str, obj
         ],
         "flows": [
             {
-                "candidateKey": flow.candidate_key,
+                **({"candidateKey": flow.candidate_key} if flow.candidate_key is not None else {}),
                 "title": flow.title,
                 "description": flow.description,
                 "reviewOrder": list(flow.review_order),
@@ -374,7 +385,10 @@ def _parse_input_files(value: object) -> tuple[SemanticGraphFileInput, ...]:
 
 
 def _parse_input_relations(
-    value: object, known_paths: set[str]
+    value: object,
+    known_paths: set[str],
+    *,
+    schema_version: str,
 ) -> tuple[SemanticGraphRelationInput, ...]:
     items = _require_list(value, "semantic graph relations")
     relations: list[SemanticGraphRelationInput] = []
@@ -389,6 +403,11 @@ def _parse_input_relations(
         if from_path not in known_paths or to_path not in known_paths:
             raise ValueError("Unknown semantic graph relation endpoint")
         seen_keys.add(key)
+        grouping_binding = (
+            _require_one_of(record, "groupingBinding", PR_REVIEW_GROUPING_BINDINGS)
+            if schema_version == PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V2
+            else None
+        )
         relations.append(
             SemanticGraphRelationInput(
                 key=key,
@@ -398,6 +417,7 @@ def _parse_input_relations(
                 source=_require_one_of(record, "source", PR_REVIEW_RELATION_SOURCES),
                 confidence=_require_confidence(record, "confidence"),
                 evidence=_require_string(record, "evidence"),
+                grouping_binding=grouping_binding,
             )
         )
     return tuple(relations)
@@ -464,7 +484,11 @@ def _parse_output_files(
             SemanticGraphFileOutput(
                 file_path=file_path,
                 role_type=role_type,
-                role_reason=_require_string(record, "roleReason"),
+                role_reason=_require_bounded_string(
+                    record,
+                    "roleReason",
+                    max_chars=ROLE_REASON_MAX_CHARS,
+                ),
             )
         )
     if seen_paths != set(input_file_by_path):
@@ -502,7 +526,12 @@ def _parse_output_relations(
                 from_file_path=from_path,
                 to_file_path=to_path,
                 relation_type=relation_type,
-                reason=_require_string(record, "reason"),
+                reason=_require_bounded_string(
+                    record,
+                    "reason",
+                    max_chars=RELATION_REASON_MAX_CHARS,
+                    max_utf8_bytes=RELATION_REASON_MAX_UTF8_BYTES,
+                ),
             )
         )
     return tuple(relations)
@@ -510,10 +539,13 @@ def _parse_output_relations(
 
 def _parse_output_flows(
     value: object,
-    input_flows: tuple[SemanticGraphFlowInput, ...],
+    graph_input: SemanticGraphInput,
 ) -> tuple[SemanticGraphFlowOutput, ...]:
+    if graph_input.schema_version == PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V2:
+        return _parse_v2_output_flows(value, graph_input.files)
+
     items = _require_list(value, "semantic graph output flows")
-    input_by_key = {flow.key: flow for flow in input_flows}
+    input_by_key = {flow.key: flow for flow in graph_input.flows}
     flows: list[SemanticGraphFlowOutput] = []
     seen_keys: set[str] = set()
     for item in items:
@@ -532,14 +564,96 @@ def _parse_output_flows(
         flows.append(
             SemanticGraphFlowOutput(
                 candidate_key=candidate_key,
-                title=_require_string(record, "title"),
-                description=_require_string(record, "description"),
+                title=_require_bounded_string(record, "title", max_chars=FLOW_TITLE_MAX_CHARS),
+                description=_require_bounded_string(
+                    record,
+                    "description",
+                    max_chars=FLOW_DESCRIPTION_MAX_CHARS,
+                ),
                 review_order=review_order,
             )
         )
     if seen_keys != set(input_by_key):
         raise ValueError("Semantic graph output omitted an input flow")
     return tuple(flows)
+
+
+def _parse_v2_output_flows(
+    value: object,
+    input_files: tuple[SemanticGraphFileInput, ...],
+) -> tuple[SemanticGraphFlowOutput, ...]:
+    items = _require_list(value, "semantic graph output flows")
+    known_paths = {file.file_path for file in input_files}
+    if len(items) > min(8, len(known_paths)):
+        raise ValueError("Invalid semantic graph output flows")
+
+    flows: list[SemanticGraphFlowOutput] = []
+    assigned_paths: set[str] = set()
+    for item in items:
+        record = _require_dict(item, "semantic graph output flow")
+        review_order = _require_string_tuple(record, "reviewOrder")
+        if (
+            len(review_order) != len(set(review_order))
+            or not set(review_order) <= known_paths
+            or assigned_paths.intersection(review_order)
+        ):
+            raise ValueError("Invalid semantic graph output flow")
+        assigned_paths.update(review_order)
+        flows.append(
+            SemanticGraphFlowOutput(
+                candidate_key=None,
+                title=_require_bounded_string(record, "title", max_chars=FLOW_TITLE_MAX_CHARS),
+                description=_require_bounded_string(
+                    record,
+                    "description",
+                    max_chars=FLOW_DESCRIPTION_MAX_CHARS,
+                ),
+                review_order=review_order,
+            )
+        )
+    if assigned_paths != known_paths:
+        raise ValueError("Semantic graph output omitted an input file")
+    return tuple(flows)
+
+
+def _flow_output_policy(schema_version: str) -> str:
+    if schema_version == PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V2:
+        return (
+            "Group every input file exactly once into at most 8 flows. "
+            "Keep files connected by groupingBinding=locked in the same flow. "
+            "Use groupingBinding=hint only as evidence; it must not force two flows together."
+        )
+    return (
+        "Return every input flow exactly once with its exact key in candidateKey. "
+        "reviewOrder must contain every filePath from that flow exactly once and no "
+        "filePath from another flow."
+    )
+
+
+def _flow_output_schema(
+    schema_version: str,
+    file_path_schema: dict[str, object],
+    flow_candidate_keys: list[str],
+) -> dict[str, object]:
+    properties: dict[str, object] = {
+        "title": {"type": "string", "maxLength": FLOW_TITLE_MAX_CHARS},
+        "description": {"type": "string", "maxLength": FLOW_DESCRIPTION_MAX_CHARS},
+        "reviewOrder": {
+            "type": "array",
+            "items": file_path_schema,
+        },
+    }
+    required = ["title", "description", "reviewOrder"]
+    if schema_version == PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V1:
+        properties["candidateKey"] = {
+            "type": "string",
+            "enum": flow_candidate_keys,
+        }
+        required.insert(0, "candidateKey")
+    return {
+        "type": "array",
+        "items": _closed_object(required, properties),
+    }
 
 
 def _closed_object(required: list[str], properties: dict[str, object]) -> dict[str, object]:
@@ -568,6 +682,25 @@ def _require_string(value: dict[str, object], key: str) -> str:
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError(f"Invalid {key}")
     return raw.strip()
+
+
+def _require_bounded_string(
+    value: dict[str, object],
+    key: str,
+    *,
+    max_chars: int,
+    max_utf8_bytes: int | None = None,
+) -> str:
+    result = _require_string(value, key)
+    if _utf16_code_unit_length(result) > max_chars:
+        raise ValueError(f"Invalid {key}")
+    if max_utf8_bytes is not None and len(result.encode("utf-8")) > max_utf8_bytes:
+        raise ValueError(f"Invalid {key}")
+    return result
+
+
+def _utf16_code_unit_length(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
 
 
 def _read_optional_string(value: dict[str, object], key: str) -> str | None:

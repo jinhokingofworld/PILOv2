@@ -1012,6 +1012,7 @@ function getGraphNodes(editor: Editor): PrReviewGraphNode[] {
         y: shape.y,
         width: shape.props.w,
         height: shape.props.h,
+        workflowOrder: shape.props.workflowOrder,
         riskLevel: shape.props.riskLevel,
         reviewStatus: shape.props.reviewStatus,
         pinned: shape.props.pinned

@@ -2,7 +2,8 @@ import type { PrReviewFileRoleType } from "./types";
 import type {
   PrReviewFileRoleCandidate,
   PrReviewFlowCandidate,
-  PrReviewRelationCandidate
+  PrReviewRelationCandidate,
+  PrReviewRelationCandidateV2
 } from "./pr-review-semantic-graph";
 
 const FLOW_TITLE_BY_ROLE: Record<PrReviewFileRoleType, string> = {
@@ -83,6 +84,16 @@ export function buildSemanticFlowCandidates(
   }
 
   return flows;
+}
+
+export function buildSemanticFlowCandidatesV2(
+  files: readonly PrReviewFileRoleCandidate[],
+  relations: readonly PrReviewRelationCandidateV2[]
+): PrReviewFlowCandidate[] {
+  return buildSemanticFlowCandidates(
+    files,
+    relations.filter((relation) => relation.groupingBinding === "locked")
+  );
 }
 
 function createFlowCandidate(

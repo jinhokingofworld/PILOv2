@@ -1,0 +1,22 @@
+{
+  "v1": {
+    "schemaVersion": "pr-review-semantic-graph:v1"
+  },
+  "v2": {
+    "schemaVersion": "pr-review-semantic-graph:v2",
+    "lockedEvidence": ["matching_test_filename", "package_lock_manifest"],
+    "hintEvidencePrefixes": [
+      "relative_import:",
+      "explicit_file_reference",
+      "shared_identifier:"
+    ],
+    "maxFlows": 8,
+    "limits": {
+      "titleChars": 255,
+      "descriptionChars": 10000,
+      "roleReasonChars": 500,
+      "relationReasonChars": 500,
+      "relationReasonUtf8Bytes": 500
+    }
+  }
+}

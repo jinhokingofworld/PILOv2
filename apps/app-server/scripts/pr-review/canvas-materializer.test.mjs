@@ -8,6 +8,9 @@ const {
   getPrReviewFileShapeId,
   getPrReviewRelationShapeId
 } = require("../../dist/modules/pr-review/pr-review-canvas-materializer.js");
+const {
+  buildPrReviewCanvasGraphLayout
+} = require("../../dist/modules/pr-review/pr-review-canvas-layout.js");
 
 const ROOM_ID = "11111111-1111-4111-8111-111111111111";
 const SESSION_ID = "22222222-2222-4222-8222-222222222222";
@@ -44,6 +47,24 @@ function relation(overrides = {}) {
     reason: "호출 관계",
     ...overrides
   };
+}
+
+function layoutFile(id, workflowOrder, roleType, overrides = {}) {
+  return {
+    roomFileId: id,
+    flowId: "layout-flow-1",
+    width: 240,
+    height: 144,
+    flowSortOrder: 1,
+    workflowOrder,
+    filePath: `src/${id}.ts`,
+    roleType,
+    ...overrides
+  };
+}
+
+function layoutRelation(id, fromRoomFileId, toRoomFileId, isReviewOrder = false) {
+  return { id, fromRoomFileId, toRoomFileId, isReviewOrder };
 }
 
 function asStoredShape(shape, overrides = {}) {
@@ -178,6 +199,102 @@ assert.deepEqual(
   "semantic relations must not change the primary review-order layout"
 );
 
+const layoutOne = layoutFile("one", 1, "support");
+const layoutTwo = layoutFile("two", 2, "entry");
+const layoutThree = layoutFile("three", 3, "verification");
+const layoutFour = layoutFile("four", 4, "core_logic");
+const layoutFive = layoutFile("five", 5, "api_contract");
+const nextFlowFile = layoutFile("next", 1, "unknown", {
+  flowId: "layout-flow-2",
+  flowSortOrder: 2
+});
+const reversedSemantic = layoutRelation("three-to-one", "three", "one");
+const cyclicSemantic = layoutRelation("two-to-one", "two", "one");
+const overlappingSemantic = layoutRelation("two-to-four", "two", "four");
+const disjointSemantic = layoutRelation("four-to-five", "four", "five");
+const adjacentSemantic = layoutRelation("semantic-one-to-two", "one", "two");
+const orderedOneToTwo = layoutRelation("one-to-two", "one", "two", true);
+const orderedTwoToThree = layoutRelation("two-to-three", "two", "three", true);
+const semanticLaneLayout = await buildPrReviewCanvasGraphLayout({
+  files: [
+    layoutThree,
+    nextFlowFile,
+    layoutOne,
+    layoutFive,
+    layoutTwo,
+    layoutFour
+  ],
+  relations: [
+    reversedSemantic,
+    cyclicSemantic,
+    overlappingSemantic,
+    disjointSemantic,
+    adjacentSemantic,
+    orderedOneToTwo,
+    orderedTwoToThree
+  ]
+});
+assert.ok(semanticLaneLayout);
+const layoutGeometry = semanticLaneLayout.nodeGeometryByRoomFileId;
+assert.ok(layoutGeometry.get("one").x < layoutGeometry.get("two").x);
+assert.ok(layoutGeometry.get("two").x < layoutGeometry.get("three").x);
+assert.ok(layoutGeometry.get("three").x < layoutGeometry.get("four").x);
+assert.ok(layoutGeometry.get("four").x < layoutGeometry.get("five").x);
+assert.equal(
+  semanticLaneLayout.routePointsByRelationId.has("layout-spine:one->two"),
+  false,
+  "synthetic review-order spine routes must not be exposed"
+);
+const firstFlowBottom = Math.max(
+  ...["one", "two", "three", "four", "five"].map((id) => {
+    const geometry = layoutGeometry.get(id);
+    return geometry.y + 144;
+  })
+);
+const getLayoutRoute = (relationToFind) =>
+  semanticLaneLayout.routePointsByRelationId.get(relationToFind.id);
+const reversedRoute = getLayoutRoute(reversedSemantic);
+const cyclicRoute = getLayoutRoute(cyclicSemantic);
+const overlappingRoute = getLayoutRoute(overlappingSemantic);
+const disjointRoute = getLayoutRoute(disjointSemantic);
+const adjacentSemanticRoute = getLayoutRoute(adjacentSemantic);
+for (const route of [reversedRoute, overlappingRoute, disjointRoute]) {
+  assert.ok(route.length >= 4);
+  assert.ok(
+    route.slice(1, -1).every((point) => point.y > firstFlowBottom),
+    "semantic route intermediates must be below every node in the Flow"
+  );
+}
+assert.notEqual(
+  reversedRoute[1].y,
+  overlappingRoute[1].y,
+  "overlapping semantic spans must use separate lanes"
+);
+assert.ok(
+  [
+    reversedRoute[1].y,
+    cyclicRoute[1].y,
+    overlappingRoute[1].y,
+    adjacentSemanticRoute[1].y
+  ].includes(disjointRoute[1].y),
+  "disjoint semantic spans must reuse their lane"
+);
+assert.ok(
+  layoutGeometry.get("next").y >
+    Math.max(reversedRoute[1].y, overlappingRoute[1].y, disjointRoute[1].y),
+  "the next Flow must start below the deepest semantic lane"
+);
+assert.ok(adjacentSemanticRoute.length >= 4);
+assert.ok(
+  adjacentSemanticRoute
+    .slice(1, -1)
+    .every((point) => point.y > firstFlowBottom),
+  "adjacent semantic edges must use a bottom lane rather than a direct route"
+);
+const adjacentOrderRoute = getLayoutRoute(orderedOneToTwo);
+assert.equal(adjacentOrderRoute.length, 2);
+assert.equal(adjacentOrderRoute[0].y, adjacentOrderRoute[1].y);
+
 const flowOneFirst = file(1, { workflowOrder: 1 });
 const flowOneSecond = file(2, { workflowOrder: 2 });
 const flowOneThird = file(3, { workflowOrder: 3 });
@@ -306,18 +423,13 @@ const layeredFlow = await buildPrReviewCanvasMaterialization({
   ],
   existingShapes: []
 });
+const entryGeometry = getFileGeometry(layeredFlow, entryFile.roomFileId);
 const coreGeometry = getFileGeometry(layeredFlow, coreFile.roomFileId);
 const stateGeometry = getFileGeometry(layeredFlow, stateFile.roomFileId);
-assert.equal(
-  coreGeometry[0],
-  stateGeometry[0],
-  "parallel relation targets must share a review layer"
-);
-assert.notEqual(
-  coreGeometry[1],
-  stateGeometry[1],
-  "parallel relation targets must not collapse into a single review row"
-);
+const apiGeometry = getFileGeometry(layeredFlow, apiFile.roomFileId);
+assert.ok(entryGeometry[0] < coreGeometry[0]);
+assert.ok(coreGeometry[0] < stateGeometry[0]);
+assert.ok(stateGeometry[0] < apiGeometry[0]);
 
 const movedRawShape = {
   ...firstFileShape.values.rawShape,

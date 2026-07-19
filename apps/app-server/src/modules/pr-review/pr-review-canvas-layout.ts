@@ -1,5 +1,4 @@
 import ELK, {
-  type ElkExtendedEdge,
   type ElkNode
 } from "elkjs";
 
@@ -47,6 +46,11 @@ type NodeGeometry = {
   columnIndex: number;
 };
 
+type RouteLane = {
+  lastEndX: number;
+  y: number;
+};
+
 const CANVAS_START_X = 160;
 const CANVAS_START_Y = 160;
 const FLOW_NODE_GAP_X = 184;
@@ -54,6 +58,7 @@ const FLOW_LANE_GAP_Y = 320;
 const FLOW_LAYOUT_GAP_Y = 360;
 const SAME_FLOW_ROUTE_OFFSET = 72;
 const SAME_FLOW_ROUTE_GAP = 32;
+const MAX_SAME_FLOW_ROUTE_LANES = 8;
 const CROSS_FLOW_ROUTE_OFFSET = 52;
 const CROSS_FLOW_GUTTER_OFFSET = 112;
 const CROSS_FLOW_GUTTER_GAP = 40;
@@ -111,17 +116,13 @@ async function buildFlowGeometry(
 
   for (const [flowKey, members] of flows) {
     const sortedMembers = [...members].sort(compareFilesInFlow);
-    const flowRelationIds = new Set(
-      relations
-        .filter(
-          (relation) =>
-            getFlowKeyByRoomFileId(members, relation.fromRoomFileId) === flowKey &&
-            getFlowKeyByRoomFileId(members, relation.toRoomFileId) === flowKey
-        )
-        .map((relation) => relation.id)
+    const memberIds = new Set(members.map((member) => member.roomFileId));
+    const flowRelations = relations.filter(
+      (relation) =>
+        memberIds.has(relation.fromRoomFileId) &&
+        memberIds.has(relation.toRoomFileId)
     );
-    const flowRelations = relations.filter((relation) => flowRelationIds.has(relation.id));
-    const layout = await buildElkFlowLayout(sortedMembers, flowRelations);
+    const layout = await buildElkFlowLayout(sortedMembers);
     const layoutChildren = layout.children ?? [];
     const layoutHeight = Math.max(
       ...layoutChildren.map((child) => (child.y ?? 0) + (child.height ?? 0)),
@@ -140,22 +141,26 @@ async function buildFlowGeometry(
       });
     }
 
-    for (const edge of layout.edges ?? []) {
-      const points = toRoutePoints(edge, CANVAS_START_X, nextFlowY);
-      if (points.length >= 2) {
-        routePointsByRelationId.set(edge.id, points);
-      }
+    const flowGeometryByRoomFileId = new Map(
+      sortedMembers.map((member) => [
+        member.roomFileId,
+        geometryByRoomFileId.get(member.roomFileId)
+      ]).filter((entry): entry is [string, NodeGeometry] => Boolean(entry[1]))
+    );
+    const { maxRouteY, routePointsByRelationId: sameFlowRoutes } =
+      buildSameFlowRoutes(flowRelations, flowGeometryByRoomFileId);
+    for (const [relationId, points] of sameFlowRoutes) {
+      routePointsByRelationId.set(relationId, points);
     }
 
-    nextFlowY += layoutHeight + FLOW_LAYOUT_GAP_Y;
+    nextFlowY = Math.max(nextFlowY + layoutHeight, maxRouteY) + FLOW_LAYOUT_GAP_Y;
   }
 
   return { geometryByRoomFileId, routePointsByRelationId };
 }
 
 async function buildElkFlowLayout(
-  files: PrReviewCanvasLayoutFile[],
-  relations: PrReviewCanvasLayoutRelation[]
+  files: PrReviewCanvasLayoutFile[]
 ) {
   const elk = new ELK();
   const graph: ElkNode = {
@@ -172,43 +177,111 @@ async function buildElkFlowLayout(
     children: files.map((file) => ({
       id: file.roomFileId,
       width: file.width,
-      height: file.height,
-      layoutOptions: getRoleLayoutOptions(file)
+      height: file.height
     })),
-    edges: relations.map((relation) => ({
-      id: relation.id,
-      sources: [relation.fromRoomFileId],
-      targets: [relation.toRoomFileId]
-    }))
+    edges: buildReviewOrderSpine(files)
   };
 
   return elk.layout(graph);
 }
 
-function getRoleLayoutOptions(file: PrReviewCanvasLayoutFile) {
-  if (file.roleType === "entry") {
-    return { "elk.layered.layering.layerConstraint": "FIRST" };
-  }
-  if (file.roleType === "verification") {
-    return { "elk.layered.layering.layerConstraint": "LAST" };
-  }
-  return undefined;
+function buildReviewOrderSpine(files: readonly PrReviewCanvasLayoutFile[]) {
+  return files.slice(1).map((file, index) => ({
+    id: `layout-spine:${files[index].roomFileId}->${file.roomFileId}`,
+    sources: [files[index].roomFileId],
+    targets: [file.roomFileId]
+  }));
 }
 
-function toRoutePoints(edge: ElkExtendedEdge, offsetX: number, offsetY: number) {
-  const section = edge.sections?.[0];
-  if (!section) {
-    return [];
+function buildSameFlowRoutes(
+  relations: PrReviewCanvasLayoutRelation[],
+  geometryByRoomFileId: Map<string, NodeGeometry>
+) {
+  const flowGeometry = [...geometryByRoomFileId.values()];
+  const flowBottom = Math.max(
+    ...flowGeometry.map((geometry) => geometry.y + geometry.height)
+  );
+  const lanes: RouteLane[] = [];
+  const routePointsByRelationId = new Map<string, PrReviewCanvasRoutePoint[]>();
+  const relationsToRoute = relations
+    .filter((relation) => {
+      const from = geometryByRoomFileId.get(relation.fromRoomFileId);
+      const to = geometryByRoomFileId.get(relation.toRoomFileId);
+      if (!from || !to) {
+        return false;
+      }
+      return !isAdjacentReviewOrder(relation, from, to);
+    })
+    .sort((left, right) =>
+      compareSameFlowRouteRelations(left, right, geometryByRoomFileId)
+    );
+
+  for (const relation of relationsToRoute) {
+    const from = geometryByRoomFileId.get(relation.fromRoomFileId);
+    const to = geometryByRoomFileId.get(relation.toRoomFileId);
+    if (!from || !to) {
+      continue;
+    }
+
+    const startX = Math.min(getCenterX(from), getCenterX(to));
+    const endX = Math.max(getCenterX(from), getCenterX(to));
+    const laneY = assignBottomLane(startX, endX, flowBottom, lanes);
+    routePointsByRelationId.set(
+      relation.id,
+      buildSameFlowRoute(from, to, laneY)
+    );
   }
 
-  return deduplicateRoutePoints([
-    { x: offsetX + section.startPoint.x, y: offsetY + section.startPoint.y },
-    ...(section.bendPoints ?? []).map((point) => ({
-      x: offsetX + point.x,
-      y: offsetY + point.y
-    })),
-    { x: offsetX + section.endPoint.x, y: offsetY + section.endPoint.y }
-  ]);
+  return {
+    maxRouteY: Math.max(flowBottom, ...lanes.map((lane) => lane.y)),
+    routePointsByRelationId
+  };
+}
+
+function assignBottomLane(
+  startX: number,
+  endX: number,
+  flowBottom: number,
+  lanes: RouteLane[]
+) {
+  const lane = lanes.find((candidate) => candidate.lastEndX < startX);
+  if (lane) {
+    lane.lastEndX = endX;
+    return lane.y;
+  }
+  if (lanes.length >= MAX_SAME_FLOW_ROUTE_LANES) {
+    const reused = [...lanes].sort(
+      (left, right) => left.lastEndX - right.lastEndX || left.y - right.y
+    )[0];
+    reused.lastEndX = Math.max(reused.lastEndX, endX);
+    return reused.y;
+  }
+  const y = flowBottom + SAME_FLOW_ROUTE_OFFSET + lanes.length * SAME_FLOW_ROUTE_GAP;
+  lanes.push({ lastEndX: endX, y });
+  return y;
+}
+
+function compareSameFlowRouteRelations(
+  left: PrReviewCanvasLayoutRelation,
+  right: PrReviewCanvasLayoutRelation,
+  geometryByRoomFileId: Map<string, NodeGeometry>
+) {
+  const leftFrom = geometryByRoomFileId.get(left.fromRoomFileId);
+  const leftTo = geometryByRoomFileId.get(left.toRoomFileId);
+  const rightFrom = geometryByRoomFileId.get(right.fromRoomFileId);
+  const rightTo = geometryByRoomFileId.get(right.toRoomFileId);
+  if (!leftFrom || !leftTo || !rightFrom || !rightTo) {
+    return compareRelations(left, right);
+  }
+  const leftStartX = Math.min(getCenterX(leftFrom), getCenterX(leftTo));
+  const rightStartX = Math.min(getCenterX(rightFrom), getCenterX(rightTo));
+  const leftEndX = Math.max(getCenterX(leftFrom), getCenterX(leftTo));
+  const rightEndX = Math.max(getCenterX(rightFrom), getCenterX(rightTo));
+  return (
+    leftStartX - rightStartX ||
+    leftEndX - rightEndX ||
+    compareRelations(left, right)
+  );
 }
 
 function buildOrthogonalRoutes(
@@ -233,7 +306,6 @@ function buildOrthogonalRoutes(
   const minNodeLeft = Math.min(
     ...[...geometryByRoomFileId.values()].map((geometry) => geometry.x)
   );
-  const sameFlowTrackByFlowKey = new Map<string, number>();
   let crossFlowTrack = 0;
 
   for (const relation of validRelations) {
@@ -258,11 +330,13 @@ function buildOrthogonalRoutes(
     }
 
     if (from.flowKey === to.flowKey) {
-      const track = sameFlowTrackByFlowKey.get(from.flowKey) ?? 0;
-      sameFlowTrackByFlowKey.set(from.flowKey, track + 1);
       routePointsByRelationId.set(
         relation.id,
-        buildSameFlowRoute(from, to, track)
+        buildSameFlowRoute(
+          from,
+          to,
+          Math.max(from.y + from.height, to.y + to.height) + SAME_FLOW_ROUTE_OFFSET
+        )
       );
       continue;
     }
@@ -277,13 +351,12 @@ function buildOrthogonalRoutes(
   return routePointsByRelationId;
 }
 
-function buildSameFlowRoute(from: NodeGeometry, to: NodeGeometry, track: number) {
-  const trackY = Math.min(from.y, to.y) - SAME_FLOW_ROUTE_OFFSET - track * SAME_FLOW_ROUTE_GAP;
+function buildSameFlowRoute(from: NodeGeometry, to: NodeGeometry, trackY: number) {
   return deduplicateRoutePoints([
-    { x: getCenterX(from), y: from.y },
+    { x: getCenterX(from), y: from.y + from.height },
     { x: getCenterX(from), y: trackY },
     { x: getCenterX(to), y: trackY },
-    { x: getCenterX(to), y: to.y }
+    { x: getCenterX(to), y: to.y + to.height }
   ]);
 }
 
@@ -375,30 +448,10 @@ function compareFiles(left: PrReviewCanvasLayoutFile, right: PrReviewCanvasLayou
 
 function compareFilesInFlow(left: PrReviewCanvasLayoutFile, right: PrReviewCanvasLayoutFile) {
   return (
-    getRolePriority(left.roleType) - getRolePriority(right.roleType) ||
     left.workflowOrder - right.workflowOrder ||
     left.filePath.localeCompare(right.filePath) ||
     left.roomFileId.localeCompare(right.roomFileId)
   );
-}
-
-function getRolePriority(roleType: PrReviewCanvasLayoutFile["roleType"]) {
-  switch (roleType) {
-    case "entry":
-      return 0;
-    case "core_logic":
-      return 1;
-    case "ui_state":
-      return 2;
-    case "api_contract":
-      return 3;
-    case "support":
-      return 4;
-    case "verification":
-      return 5;
-    case "unknown":
-      return 6;
-  }
 }
 
 function compareRelations(

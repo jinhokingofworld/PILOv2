@@ -9,6 +9,7 @@ export type PrReviewGraphNode = {
   reviewStatus: "not_reviewed" | "approved" | "discussion_needed" | "unknown";
   roomFileId: string | null;
   width: number;
+  workflowOrder: number;
   x: number;
   y: number;
 };
@@ -208,7 +209,7 @@ export function findMissingPrReviewOrderEdges(
 
 export function createPrReviewFlowLayout(
   nodes: PrReviewGraphNode[],
-  relations: PrReviewGraphRelation[],
+  _relations: PrReviewGraphRelation[],
   flowId: string
 ): Map<string, { x: number; y: number }> {
   const flowNodes = nodes.filter((node) => node.flowId === flowId);
@@ -232,17 +233,16 @@ export function createPrReviewFlowLayout(
     graph.setNode(node.id, { height: node.height, width: node.width });
   }
 
-  const movableByRoomFileId = new Map(
-    movableNodes.flatMap((node) =>
-      node.roomFileId ? [[node.roomFileId, node]] : []
-    )
+  const orderedMovableNodes = [...movableNodes].sort(
+    (left, right) =>
+      left.workflowOrder - right.workflowOrder || left.id.localeCompare(right.id)
   );
-  for (const relation of relations) {
-    const from = movableByRoomFileId.get(relation.fromRoomFileId);
-    const to = movableByRoomFileId.get(relation.toRoomFileId);
-    if (from && to && from.id !== to.id) {
-      graph.setEdge({ name: relation.id, v: from.id, w: to.id });
-    }
+  for (let index = 1; index < orderedMovableNodes.length; index += 1) {
+    graph.setEdge({
+      name: `layout-spine:${index}`,
+      v: orderedMovableNodes[index - 1].id,
+      w: orderedMovableNodes[index].id
+    });
   }
 
   dagre.layout(graph);

@@ -22,7 +22,11 @@ from app.pr_review_analysis_processor import (
     parse_pr_review_analysis_job_payload,
     parse_pr_review_analysis_output,
 )
-from app.pr_review_semantic_graph import PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION
+from app.pr_review_semantic_graph import (
+    PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
+    parse_semantic_graph_input,
+    semantic_graph_output_schema,
+)
 
 JOB_ID = "11111111-1111-1111-1111-111111111111"
 SESSION_ID = "22222222-2222-2222-2222-222222222222"
@@ -203,6 +207,54 @@ def semantic_graph_output() -> dict[str, object]:
                         "apps/app-server/src/pr-review.ts",
                     ],
                 }
+            ],
+        },
+    }
+
+
+def semantic_graph_v2_payload() -> dict[str, object]:
+    graph = semantic_graph_payload()
+    graph["relations"][0]["groupingBinding"] = "locked"
+    return graph
+
+
+def semantic_graph_v2_output() -> dict[str, object]:
+    relation_key = "supports:docs/api/pr-review-api.md->apps/app-server/src/pr-review.ts"
+    return {
+        "graphSchemaVersion": "pr-review-semantic-graph:v2",
+        "semanticGraph": {
+            "files": [
+                {
+                    "filePath": "apps/app-server/src/pr-review.ts",
+                    "roleType": "core_logic",
+                    "roleReason": "분석 Job 진입점을 제공합니다.",
+                },
+                {
+                    "filePath": "docs/api/pr-review-api.md",
+                    "roleType": "support",
+                    "roleReason": "내부 handoff 계약을 설명합니다.",
+                },
+            ],
+            "relations": [
+                {
+                    "candidateKey": relation_key,
+                    "fromFilePath": "apps/app-server/src/pr-review.ts",
+                    "toFilePath": "docs/api/pr-review-api.md",
+                    "relationType": "depends_on",
+                    "reason": "App Server가 후보 의미를 최종 판정합니다.",
+                }
+            ],
+            "flows": [
+                {
+                    "title": "Worker 변경",
+                    "description": "분석 요청을 검토합니다.",
+                    "reviewOrder": ["apps/app-server/src/pr-review.ts"],
+                },
+                {
+                    "title": "계약 변경",
+                    "description": "내부 handoff 계약을 검토합니다.",
+                    "reviewOrder": ["docs/api/pr-review-api.md"],
+                },
             ],
         },
     }
@@ -728,6 +780,155 @@ def test_versioned_semantic_graph_contract_round_trip_and_role_policy(caplog) ->
         assert (
             f"pr_review_semantic_graph_fallback category={category} reason={reason}" in caplog.text
         )
+
+
+def test_v2_graph_schema_allows_regrouped_flows_without_candidate_key() -> None:
+    known_paths = {
+        "apps/app-server/src/pr-review.ts",
+        "docs/api/pr-review-api.md",
+    }
+    parsed = parse_semantic_graph_input(
+        {
+            "graphSchemaVersion": "pr-review-semantic-graph:v2",
+            "semanticGraph": semantic_graph_v2_payload(),
+        },
+        known_paths,
+    )
+
+    assert parsed is not None
+    assert parsed.schema_version == "pr-review-semantic-graph:v2"
+    assert parsed.relations[0].grouping_binding == "locked"
+    schema = semantic_graph_output_schema(parsed)
+    flow = schema["properties"]["flows"]["items"]
+    assert flow["required"] == ["title", "description", "reviewOrder"]
+    assert "candidateKey" not in flow["properties"]
+
+
+def test_v2_output_preserves_version_and_defers_relation_and_flow_semantics() -> None:
+    input_value = parse_pr_review_analysis_input_payload(
+        input_payload(
+            graphSchemaVersion="pr-review-semantic-graph:v2",
+            semanticGraph=semantic_graph_v2_payload(),
+        ),
+        parse_pr_review_analysis_job_payload(job_payload()),
+    )
+    assert input_value.semantic_graph is not None
+
+    prompt = _build_prompt_input(input_value)
+    assert prompt["semanticGraph"]["outputPolicy"]["flows"] == (
+        "Group every input file exactly once into at most 8 flows. "
+        "Keep files connected by groupingBinding=locked in the same flow. "
+        "Use groupingBinding=hint only as evidence; it must not force two flows together."
+    )
+
+    parsed = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **semantic_graph_v2_output()}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+
+    assert parsed.semantic_graph is not None
+    assert [flow.candidate_key for flow in parsed.semantic_graph.flows] == [None, None]
+    serialized = _serialize_analysis_result(parsed)
+    assert serialized["graphSchemaVersion"] == "pr-review-semantic-graph:v2"
+    assert "candidateKey" not in serialized["semanticGraph"]["flows"][0]
+
+
+def test_semantic_graph_output_enforces_app_string_limits() -> None:
+    input_value = parse_pr_review_analysis_input_payload(
+        input_payload(
+            graphSchemaVersion="pr-review-semantic-graph:v2",
+            semanticGraph=semantic_graph_v2_payload(),
+        ),
+        parse_pr_review_analysis_job_payload(job_payload()),
+    )
+    assert input_value.semantic_graph is not None
+    output = semantic_graph_v2_output()
+    output["semanticGraph"]["flows"][0]["title"] = "a" * 256
+    output["semanticGraph"]["relations"][0]["reason"] = "한" * 167
+
+    parsed = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **output}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+
+    assert parsed.semantic_graph is None
+
+
+def test_semantic_graph_flow_title_uses_utf16_code_unit_limit() -> None:
+    input_value = parse_pr_review_analysis_input_payload(
+        input_payload(
+            graphSchemaVersion="pr-review-semantic-graph:v2",
+            semanticGraph=semantic_graph_v2_payload(),
+        ),
+        parse_pr_review_analysis_job_payload(job_payload()),
+    )
+    assert input_value.semantic_graph is not None
+    valid_output = semantic_graph_v2_output()
+    valid_output["semanticGraph"]["flows"][0]["title"] = "🙂" * 127
+    valid = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **valid_output}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+    assert valid.semantic_graph is not None
+
+    invalid_output = semantic_graph_v2_output()
+    invalid_output["semanticGraph"]["flows"][0]["title"] = "🙂" * 128
+    invalid = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **invalid_output}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+    assert invalid.semantic_graph is None
+
+
+def test_semantic_graph_role_reason_uses_utf16_code_unit_limit() -> None:
+    input_value = parse_pr_review_analysis_input_payload(
+        input_payload(
+            graphSchemaVersion="pr-review-semantic-graph:v2",
+            semanticGraph=semantic_graph_v2_payload(),
+        ),
+        parse_pr_review_analysis_job_payload(job_payload()),
+    )
+    assert input_value.semantic_graph is not None
+    valid_output = semantic_graph_v2_output()
+    valid_output["semanticGraph"]["files"][0]["roleReason"] = "🙂" * 250
+    valid = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **valid_output}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+    assert valid.semantic_graph is not None
+
+    invalid_output = semantic_graph_v2_output()
+    invalid_output["semanticGraph"]["files"][0]["roleReason"] = "🙂" * 251
+    invalid = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **invalid_output}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+    assert invalid.semantic_graph is None
+
+
+def test_v1_input_still_serializes_v1() -> None:
+    input_value = parse_pr_review_analysis_input_payload(
+        input_payload(
+            graphSchemaVersion=PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
+            semanticGraph=semantic_graph_payload(),
+        ),
+        parse_pr_review_analysis_job_payload(job_payload()),
+    )
+    parsed = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **semantic_graph_output()}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+
+    assert _serialize_analysis_result(parsed)["graphSchemaVersion"] == (
+        PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION
+    )
 
 
 def test_semantic_graph_input_rejects_partial_or_unknown_contract_data() -> None:

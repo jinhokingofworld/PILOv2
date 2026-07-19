@@ -12,7 +12,6 @@ from uuid import UUID
 
 from app.meeting_report_processor import InfrastructureError
 from app.pr_review_semantic_graph import (
-    PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
     SemanticGraphInput,
     SemanticGraphOutput,
     parse_semantic_graph_input,
@@ -132,6 +131,7 @@ class PrReviewAnalysisResult:
     flow_description: str
     files: tuple[PrReviewAnalysisFileResult, ...]
     semantic_graph: SemanticGraphOutput | None = None
+    graph_schema_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -639,6 +639,9 @@ def parse_pr_review_analysis_output(
         flow_description=_require_non_empty_string(value, "flowDescription"),
         files=tuple(normalized_files),
         semantic_graph=semantic_graph,
+        graph_schema_version=(
+            semantic_graph_input.schema_version if semantic_graph is not None else None
+        ),
     )
 
 
@@ -794,7 +797,7 @@ def _pr_review_analysis_schema(
         required.extend(["graphSchemaVersion", "semanticGraph"])
         properties["graphSchemaVersion"] = {
             "type": "string",
-            "enum": [PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION],
+            "enum": [semantic_graph_input.schema_version],
         }
         properties["semanticGraph"] = semantic_graph_output_schema(semantic_graph_input)
 
@@ -827,7 +830,9 @@ def _serialize_analysis_result(analysis: PrReviewAnalysisResult) -> dict[str, ob
         ],
     }
     if analysis.semantic_graph is not None:
-        result["graphSchemaVersion"] = PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION
+        if analysis.graph_schema_version is None:
+            raise ValueError("Semantic graph result is missing schema version")
+        result["graphSchemaVersion"] = analysis.graph_schema_version
         result["semanticGraph"] = serialize_semantic_graph_output(analysis.semantic_graph)
     return result
 

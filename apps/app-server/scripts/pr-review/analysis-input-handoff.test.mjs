@@ -115,7 +115,13 @@ function createService(database, github) {
   assert.equal(input.reviewSessionId, SESSION_ID);
   assert.equal(input.workspaceId, WORKSPACE_ID);
   assert.equal(input.headSha, HEAD_SHA);
-  assert.equal(input.graphSchemaVersion, "pr-review-semantic-graph:v1");
+  assert.equal(input.graphSchemaVersion, "pr-review-semantic-graph:v2");
+  assert.ok(
+    input.semanticGraph.relations.every(
+      (relation) =>
+        relation.groupingBinding === "locked" || relation.groupingBinding === "hint"
+    )
+  );
   assert.equal(input.pullRequest.prNumber, 24);
   assert.deepEqual(input.files, [
     {
