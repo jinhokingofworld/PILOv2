@@ -20,6 +20,16 @@ type CanvasCandidate = {
   title: string;
 };
 
+type CanvasResolution =
+  | {
+      kind: "resolved";
+      canvas: CanvasCandidate;
+    }
+  | {
+      kind: "needs_clarification";
+      question: string;
+    };
+
 const INPUT_SCHEMA: AgentToolInputSchema = {
   type: "object",
   additionalProperties: false,
@@ -38,7 +48,7 @@ export class CanvasAgentDelegationToolsService {
       {
         name: "delegate_canvas_agent",
         description:
-          "Use for requests about the Workspace Canvas or its active selection: finding existing shapes, Canvas toolbar help when the UI context enables toolHelpMode, and generating static HTML/CSS from an explicit Canvas selection. The App Server resolves the Workspace's single freeform Canvas and delegates the user's original wording to Canvas AI. It does not create diagrams or arbitrary Canvas shapes. Do not rewrite the prompt or include identifiers in the tool input.",
+          "Use for requests about the Workspace Canvas or its active selection: finding existing shapes, Canvas toolbar help when the UI context enables toolHelpMode, and generating static HTML/CSS from an explicit Canvas selection. The App Server prioritizes the active classic freeform Canvas context, otherwise resolves the Workspace's single classic freeform Canvas, and delegates the user's original wording to Canvas AI. It does not create diagrams or arbitrary Canvas shapes. Do not rewrite the prompt or include identifiers in the tool input.",
         riskLevel: "low",
         executionMode: "contextual",
         inputSchema: INPUT_SCHEMA,
@@ -66,7 +76,10 @@ export class CanvasAgentDelegationToolsService {
     context: AgentToolContext,
     _input: CanvasDelegationInput
   ): Promise<AgentToolPreparationResult> {
-    await this.resolveWorkspaceCanvas(context);
+    const resolution = await this.resolveCanvas(context);
+    if (resolution.kind === "needs_clarification") {
+      return this.toClarification(resolution.question);
+    }
     return { kind: "execute" };
   }
 
@@ -74,7 +87,18 @@ export class CanvasAgentDelegationToolsService {
     context: AgentToolContext,
     _input: CanvasDelegationInput
   ): Promise<AgentToolExecutionResult> {
-    const canvas = await this.resolveWorkspaceCanvas(context);
+    const resolution = await this.resolveCanvas(context);
+    if (resolution.kind === "needs_clarification") {
+      return {
+        status: "needs_clarification",
+        outputSummary: {
+          status: "needs_clarification",
+          question: resolution.question
+        },
+        resourceRefs: []
+      };
+    }
+    const canvas = resolution.canvas;
     const prompt = await this.readOriginalPrompt(context.runId);
     const canvasContext =
       context.requestContext?.surface === "canvas" &&
@@ -145,31 +169,65 @@ export class CanvasAgentDelegationToolsService {
     return request as CreateCanvasAgentRunRequest;
   }
 
-  private async resolveWorkspaceCanvas(
+  private async resolveCanvas(
     context: AgentToolContext
-  ): Promise<CanvasCandidate> {
+  ): Promise<CanvasResolution> {
+    if (context.requestContext?.surface === "canvas") {
+      const canvases = await this.database.query<CanvasCandidate>(
+        `
+          SELECT id, title
+          FROM canvas
+          WHERE id = $1
+            AND workspace_id = $2
+            AND board_type = 'freeform'
+            AND engine_type = 'classic'
+          LIMIT 1
+        `,
+        [context.requestContext.canvasId, context.workspaceId]
+      );
+      const canvas = canvases[0];
+      return canvas
+        ? { kind: "resolved", canvas }
+        : {
+            kind: "needs_clarification",
+            question:
+              "현재 열린 Canvas를 확인할 수 없습니다. Canvas를 새로고침한 뒤 다시 요청해주세요."
+          };
+    }
+
     const canvases = await this.database.query<CanvasCandidate>(
       `
         SELECT id, title
         FROM canvas
         WHERE workspace_id = $1
           AND board_type = 'freeform'
+          AND engine_type = 'classic'
         ORDER BY id ASC
         LIMIT 2
       `,
       [context.workspaceId]
     );
-    if (canvases.length !== 1) {
-      throw badRequest("Workspace must have exactly one freeform Canvas");
+    if (canvases.length === 1) {
+      return { kind: "resolved", canvas: canvases[0] };
     }
-    const canvas = canvases[0];
-    if (
-      context.requestContext?.surface === "canvas" &&
-      context.requestContext.canvasId !== canvas.id
-    ) {
-      throw badRequest("Canvas request context does not match the Workspace Canvas");
-    }
-    return canvas;
+    return {
+      kind: "needs_clarification",
+      question:
+        canvases.length === 0
+          ? "현재 Workspace의 Canvas를 찾을 수 없습니다. Canvas 화면을 한 번 연 뒤 다시 요청해주세요."
+          : "현재 Workspace의 Canvas를 하나로 결정할 수 없습니다. 사용할 Canvas 화면에서 다시 요청해주세요."
+    };
+  }
+
+  private toClarification(question: string): AgentToolPreparationResult {
+    return {
+      kind: "needs_clarification",
+      outputSummary: {
+        status: "needs_clarification",
+        question
+      },
+      resourceRefs: []
+    };
   }
 
   private async readOriginalPrompt(runId: string): Promise<string> {

@@ -20,6 +20,6 @@ test("routes only document sync upgrades through the Hocuspocus transport", asyn
   assert.match(hocuspocusService, /hocuspocus\.closeConnections\(\)/);
   assert.match(hocuspocusService, /hocuspocus\.flushPendingStores\(\)/);
   assert.match(hocuspocusService, /afterUnloadDocument/);
-  assert.match(server, /url\.pathname === "\/sync\/canvas"/);
+  assert.doesNotMatch(server, /url\.pathname === "\/sync\/canvas"/);
   assert.match(server, /url\.pathname\.startsWith\("\/socket\.io\/"\)/);
 });

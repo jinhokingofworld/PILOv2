@@ -17,8 +17,6 @@ test("Canvas는 canvas ID와 tldraw camera를 capture/restore한다", async () =
   assert.match(adapter, /setCamera/);
   const host = await readFile(new URL("./engine/editor/CanvasEditor.tsx", import.meta.url), "utf8");
   assert.match(host, /CanvasWorkspaceLocationAdapter/);
-  const syncHost = await readFile(new URL("./engine/runtime/TldrawSyncCanvasRuntime.tsx", import.meta.url), "utf8");
-  assert.match(syncHost, /CanvasWorkspaceLocationAdapter/);
   const page = await readFile(new URL("./page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(page, /await searchParams/);
   const panel = await readFile(new URL("./components/canvas-panel.tsx", import.meta.url), "utf8");

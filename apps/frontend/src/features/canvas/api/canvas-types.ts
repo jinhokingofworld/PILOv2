@@ -30,9 +30,6 @@ export type CanvasBoardDetail = {
   workspaceId: string;
   title: string;
   boardType: "freeform" | string;
-  engineType: "classic" | "tldraw_sync" | string;
-  engineVersion: number;
-  sourceCanvasId: string | null;
   zoom: number;
   viewportX: number;
   viewportY: number;
@@ -47,15 +44,6 @@ export type CanvasBoardSummary = Omit<
   CanvasBoardDetail,
   "shapes" | "viewSetting" | "userState"
 >;
-
-export type CanvasSyncDocumentPayload = {
-  canvasId: string;
-  workspaceId: string;
-  providerType: "tldraw_sync" | string;
-  snapshot: Record<string, unknown> | null;
-  version: number;
-  updatedAt: string | null;
-};
 
 export type CanvasClientOptions = {
   mode?: string;

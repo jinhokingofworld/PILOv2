@@ -17,6 +17,7 @@ function createDatabase(row) {
       assert.match(text, /JOIN workspace_members wm/);
       assert.match(text, /LEFT JOIN pr_review_rooms/);
       assert.match(text, /review_room\.status IN \('active', 'completed'\)/);
+      assert.match(text, /c\.engine_type = 'classic'/);
       assert.deepEqual(values, ["workspace-1", "canvas-1", "user-1"]);
       return row;
     }
@@ -30,37 +31,33 @@ assert.deepEqual(
   await createCanvasAccessService(
     createDatabase({
       board_type: "freeform",
-      engine_type: "classic",
       review_room_status: null
     })
   ).getCanvasRoomAccess(context, room),
-  { boardType: "freeform", engineType: "classic", readOnly: false }
+  { boardType: "freeform", readOnly: false }
 );
 assert.deepEqual(
   await createCanvasAccessService(
     createDatabase({
       board_type: "review",
-      engine_type: "classic",
       review_room_status: "active"
     })
   ).getCanvasRoomAccess(context, room),
-  { boardType: "review", engineType: "classic", readOnly: false }
+  { boardType: "review", readOnly: false }
 );
 assert.deepEqual(
   await createCanvasAccessService(
     createDatabase({
       board_type: "review",
-      engine_type: "classic",
       review_room_status: "completed"
     })
   ).getCanvasRoomAccess(context, room),
-  { boardType: "review", engineType: "classic", readOnly: true }
+  { boardType: "review", readOnly: true }
 );
 assert.equal(
   await createCanvasAccessService(
     createDatabase({
       board_type: "review",
-      engine_type: "classic",
       review_room_status: "unexpected"
     })
   ).getCanvasRoomAccess(context, room),

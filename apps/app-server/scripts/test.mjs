@@ -78,9 +78,6 @@ const canvasShapeQueryService = await readSource(
 const canvasShapeCleanupService = await readSource(
   "../src/modules/canvas/infrastructure/canvas-shape-cleanup.service.ts"
 );
-const canvasSyncDocumentService = await readSource(
-  "../src/modules/canvas/sync-document/canvas-sync-document.service.ts"
-);
 const canvasUserStateService = await readSource(
   "../src/modules/canvas/user-state/canvas-user-state.service.ts"
 );
@@ -92,7 +89,6 @@ const canvasService = [
   canvasShapeCleanupService,
   canvasShapeCommandService,
   canvasShapeQueryService,
-  canvasSyncDocumentService,
   canvasUserStateService
 ].join("\n");
 const canvasTypes = await readSource(
@@ -440,7 +436,7 @@ assert.match(canvasModule, /CanvasRecordingActivityService/);
 assert.match(canvasModule, /CanvasOperationPublisherService/);
 assert.match(canvasModule, /CanvasShapeCommandService/);
 assert.match(canvasModule, /CanvasShapeQueryService/);
-assert.match(canvasModule, /CanvasSyncDocumentService/);
+assert.doesNotMatch(canvasModule, /CanvasSyncDocumentService/);
 assert.match(canvasModule, /CanvasUserStateService/);
 assert.match(canvasController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(canvasController, /@Get\("canvases"\)/);
@@ -463,11 +459,10 @@ assert.match(canvasService, /CANVAS_SHAPE_CLEANUP_INTERVAL_MS = 10 \* 60 \* 1000
 assert.match(canvasService, /canvasShapeCleanupInterval/);
 assert.match(canvasService, /cleanupDeletedFreeformShapes/);
 assert.match(canvasService, /FROM canvas c/);
-assert.match(canvasService, /validateCanvasEngineType\(input\.engineType\)/);
-assert.match(canvasService, /INSERT INTO canvas \(\s*workspace_id,\s*title,\s*board_type,\s*engine_type,\s*engine_version,\s*created_by\s*\)/);
-assert.match(canvasService, /validateCanvasEngineConversion\(input\)/);
-assert.match(canvasService, /INSERT INTO canvas \(\s*workspace_id,\s*title,\s*board_type,\s*engine_type,\s*engine_version,\s*source_canvas_id,\s*created_by\s*\)/);
-assert.match(canvasService, /canvas_sync_documents/);
+assert.match(canvasService, /INSERT INTO canvas \(\s*workspace_id,\s*title,\s*board_type,\s*created_by\s*\)/);
+assert.doesNotMatch(canvasService, /canvas_sync_documents/);
+assert.doesNotMatch(canvasController, /engine-conversions/);
+assert.doesNotMatch(canvasController, /sync-document/);
 assert.match(canvasService, /UPDATE canvas/);
 assert.match(canvasService, /viewport_x =/);
 assert.match(canvasService, /INSERT INTO canvas_freeform_shapes/);

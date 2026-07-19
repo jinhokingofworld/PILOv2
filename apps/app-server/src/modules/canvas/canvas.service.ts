@@ -9,10 +9,8 @@ import type {
   CanvasShapeDeletePayload,
   CanvasShapePayload,
   CanvasShapeSummaryPayload,
-  CanvasSyncDocumentPayload,
   CanvasUserStatePayload,
   CanvasViewSettingPayload,
-  ConvertCanvasEngineRequest,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
   DeleteCanvasShapeRequest,
@@ -20,13 +18,11 @@ import type {
   ListCanvasShapesQuery,
   SyncCanvasShapesBatchRequest,
   UpdateCanvasShapeRequest,
-  UpdateCanvasSyncDocumentRequest,
   UpdateCanvasViewSettingRequest
 } from "./contracts/canvas.types";
 import { CanvasOperationQueryService } from "./operation/canvas-operation-query.service";
 import { CanvasShapeCommandService } from "./shape/canvas-shape-command.service";
 import { CanvasShapeQueryService } from "./shape/canvas-shape-query.service";
-import { CanvasSyncDocumentService } from "./sync-document/canvas-sync-document.service";
 import { CanvasUserStateService } from "./user-state/canvas-user-state.service";
 
 @Injectable()
@@ -36,7 +32,6 @@ export class CanvasService {
     private readonly operationQueryService: CanvasOperationQueryService,
     private readonly shapeCommandService: CanvasShapeCommandService,
     private readonly shapeQueryService: CanvasShapeQueryService,
-    private readonly syncDocumentService: CanvasSyncDocumentService,
     private readonly userStateService: CanvasUserStateService
   ) {}
 
@@ -53,20 +48,6 @@ export class CanvasService {
     input: CreateCanvasRequest
   ): Promise<CanvasBoardPayload> {
     return this.boardService.createCanvas(currentUserId, workspaceId, input);
-  }
-
-  convertCanvasEngine(
-    currentUserId: string,
-    workspaceId: string,
-    canvasId: string,
-    input: ConvertCanvasEngineRequest
-  ): Promise<CanvasBoardPayload> {
-    return this.boardService.convertCanvasEngine(
-      currentUserId,
-      workspaceId,
-      canvasId,
-      input
-    );
   }
 
   getCanvas(
@@ -178,32 +159,6 @@ export class CanvasService {
     input: UpdateCanvasViewSettingRequest
   ): Promise<CanvasViewSettingPayload> {
     return this.boardService.updateViewSetting(
-      currentUserId,
-      workspaceId,
-      canvasId,
-      input
-    );
-  }
-
-  getCanvasSyncDocument(
-    currentUserId: string,
-    workspaceId: string,
-    canvasId: string
-  ): Promise<CanvasSyncDocumentPayload> {
-    return this.syncDocumentService.getCanvasSyncDocument(
-      currentUserId,
-      workspaceId,
-      canvasId
-    );
-  }
-
-  updateCanvasSyncDocument(
-    currentUserId: string,
-    workspaceId: string,
-    canvasId: string,
-    input: UpdateCanvasSyncDocumentRequest
-  ): Promise<CanvasSyncDocumentPayload> {
-    return this.syncDocumentService.updateCanvasSyncDocument(
       currentUserId,
       workspaceId,
       canvasId,

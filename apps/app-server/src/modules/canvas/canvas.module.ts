@@ -12,7 +12,6 @@ import { CanvasAccessService } from "./policies/canvas-access.service";
 import { CanvasService } from "./canvas.service";
 import { CanvasShapeCommandService } from "./shape/canvas-shape-command.service";
 import { CanvasShapeQueryService } from "./shape/canvas-shape-query.service";
-import { CanvasSyncDocumentService } from "./sync-document/canvas-sync-document.service";
 import { CanvasUserStateService } from "./user-state/canvas-user-state.service";
 import { CanvasRecordingActivityController } from "./recording-activity/canvas-recording-activity.controller";
 import { CanvasRecordingActivityGuard } from "./recording-activity/canvas-recording-activity.guard";
@@ -30,7 +29,6 @@ import { CanvasRecordingActivityService } from "./recording-activity/canvas-reco
     CanvasShapeCleanupService,
     CanvasShapeCommandService,
     CanvasShapeQueryService,
-    CanvasSyncDocumentService,
     CanvasUserStateService,
     CanvasRecordingActivityGuard,
     CanvasRecordingActivityService

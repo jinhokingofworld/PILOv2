@@ -995,9 +995,11 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   `CanvasAgentService`가 시작한 Canvas Agent run이 담당한다.
 - `delegate_canvas_agent` input은 빈 object만 허용한다. `prompt`, 사용자 ID, Workspace ID, Canvas ID,
   Canvas 이름, 선택 도형 또는 viewport를 planner가 다시 작성해 넣을 수 없다.
-- App Server는 Workspace의 유일한 `freeform` Canvas를 서버에서 조회해 대상으로 사용한다. 현재 Canvas
-  request context가 있으면 그 `canvasId`가 조회한 Workspace Canvas와 같은지도 재검증한다. 0개 또는
-  복수 Canvas는 사용자에게 이름을 묻지 않고 Workspace Canvas 불변식 위반으로 실패 처리한다.
+- 현재 Canvas request context가 있으면 App Server는 그 `canvasId`가 같은 Workspace의
+  `board_type=freeform`, `engine_type=classic` Canvas인지 재검증하고 위임 대상으로 우선 사용한다.
+- Canvas request context가 없으면 Workspace의 유일한 `board_type=freeform`, `engine_type=classic`
+  Canvas를 서버에서 조회해 대상으로 사용한다. 0개 또는 복수이면 child run을 만들지 않고 Canvas 화면을
+  열거나 대상 Canvas 화면에서 다시 요청하도록 사용자용 clarification으로 종료한다.
 - App Server는 일반 Agent run의 최신 user message를 그대로 child run의 prompt로 사용한다. Canvas 화면에서
   받은 `selectedShapeIds`, `selectedScene`, loaded shape summary, viewport, `toolHelpMode`는 검증된
   `canvasContext`에서만 복원한다.

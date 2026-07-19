@@ -3,7 +3,6 @@ import type {
   CanvasBoardSummary,
   CanvasOperationsCatchupPayload,
   CanvasShapeOperationPayload,
-  CanvasSyncDocumentPayload,
   CanvasViewSetting,
 } from "./canvas-types";
 import {
@@ -178,32 +177,6 @@ export function normalizeCanvasOperationsCatchup(
   };
 }
 
-export function normalizeCanvasSyncDocument(
-  value: unknown,
-  { boardId, workspaceId }: { boardId: string; workspaceId: string },
-): CanvasSyncDocumentPayload {
-  if (!isRecord(value)) {
-    return {
-      canvasId: boardId,
-      providerType: "tldraw_sync",
-      snapshot: null,
-      updatedAt: null,
-      version: 0,
-      workspaceId,
-    };
-  }
-
-  return {
-    canvasId: normalizeString(value.canvasId, boardId),
-    providerType: normalizeString(value.providerType, "tldraw_sync"),
-    snapshot: isRecord(value.snapshot) ? value.snapshot : null,
-    updatedAt:
-      typeof value.updatedAt === "string" ? value.updatedAt : null,
-    version: normalizeNumber(value.version),
-    workspaceId: normalizeString(value.workspaceId, workspaceId),
-  };
-}
-
 export function createMockCanvasBoardDetail(
   workspaceId = "pilo-local-workspace",
 ): CanvasBoardDetail {
@@ -212,9 +185,6 @@ export function createMockCanvasBoardDetail(
     workspaceId,
     title: "PILO Canvas",
     boardType: "freeform",
-    engineType: "classic",
-    engineVersion: 1,
-    sourceCanvasId: null,
     zoom: 0.8,
     viewportX: 0,
     viewportY: 0,
@@ -232,9 +202,6 @@ export function toBoardSummary(board: CanvasBoardDetail): CanvasBoardSummary {
     workspaceId: board.workspaceId,
     title: board.title,
     boardType: board.boardType,
-    engineType: board.engineType,
-    engineVersion: board.engineVersion,
-    sourceCanvasId: board.sourceCanvasId,
     zoom: board.zoom,
     viewportX: board.viewportX,
     viewportY: board.viewportY,
@@ -271,18 +238,6 @@ export function normalizeCanvasBoardDetail(
       typeof rawBoard.boardType === "string"
         ? rawBoard.boardType
         : fallback.boardType,
-    engineType:
-      typeof rawBoard.engineType === "string"
-        ? rawBoard.engineType
-        : fallback.engineType,
-    engineVersion:
-      typeof rawBoard.engineVersion === "number"
-        ? rawBoard.engineVersion
-        : fallback.engineVersion,
-    sourceCanvasId:
-      typeof rawBoard.sourceCanvasId === "string"
-        ? rawBoard.sourceCanvasId
-        : null,
     zoom: typeof rawBoard.zoom === "number" ? rawBoard.zoom : fallback.zoom,
     viewportX:
       typeof rawBoard.viewportX === "number"
