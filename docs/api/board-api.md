@@ -377,7 +377,7 @@ Query:
 | --- | --- |
 | `columnId` | 같은 board의 local column id. 양의 정수 문자열 |
 | `state` | GitHub issue state. `open`, `closed` |
-| `search` | `title` 또는 `body` 부분 일치 검색 |
+| `search` | `title` 부분 일치 검색 |
 | `label` | label name 정확히 일치 |
 | `assignee` | GitHub login 정확히 일치 |
 | `page`, `limit` | 페이지네이션. 기본 `1`, `20`, 최대 `100` |

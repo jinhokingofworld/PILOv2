@@ -8,6 +8,8 @@ import {
   resolveBackgroundSnapshot
 } from "@/features/board/utils/board-request-coordinator";
 import { selectBoardProjectRepositoryId } from "@/features/board/utils/board-project-repository";
+import { loadAllBoardIssuePages } from "@/features/board/utils/board-issue-page-loader";
+import { createBoardIssueLoadPublicationGuard } from "@/features/board/utils/board-issue-load-publication-guard";
 import type {
   BoardColumnPayload,
   BoardDetailPayload,
@@ -40,6 +42,13 @@ type BoardWorkspaceBoardState = {
   issues: BoardIssueCardPayload[];
   issuesMeta: BoardPaginatedPayload<BoardIssueCardPayload>["meta"] | null;
   filterOptions: BoardFilterOptionsPayload | null;
+};
+
+type BoardIssuesLoadProgress = {
+  error: Error | null;
+  isLoading: boolean;
+  loaded: number;
+  total: number;
 };
 
 type UseBoardWorkspaceDataOptions = {
@@ -96,6 +105,13 @@ export function useBoardWorkspaceData({
   const [boardStatus, setBoardStatus] = useState<BoardWorkspaceStatus>("idle");
   const [catalogError, setCatalogError] = useState<Error | null>(null);
   const [boardError, setBoardError] = useState<Error | null>(null);
+  const [issuesLoadProgress, setIssuesLoadProgress] =
+    useState<BoardIssuesLoadProgress>({
+      error: null,
+      isLoading: false,
+      loaded: 0,
+      total: 0
+    });
   const boardClient = useMemo(
     () => createBoardApiClient({ accessToken: normalizedAccessToken }),
     [normalizedAccessToken]
@@ -106,6 +122,10 @@ export function useBoardWorkspaceData({
   );
   const boardRequestCoordinator = useMemo(
     () => createBoardRequestCoordinator(),
+    []
+  );
+  const boardIssueLoadPublicationGuard = useMemo(
+    () => createBoardIssueLoadPublicationGuard(),
     []
   );
 
@@ -156,25 +176,99 @@ export function useBoardWorkspaceData({
     }
 
     const parsedIssueQuery = JSON.parse(issueQueryKey) as ListBoardIssuesQuery;
-    const [board, columns, issues, filterOptions] = await Promise.all([
+    const canPublishIssues = boardIssueLoadPublicationGuard.begin();
+    let latestIssues: BoardIssueCardPayload[] = [];
+    let latestIssuesMeta: BoardPaginatedPayload<BoardIssueCardPayload>["meta"] | null =
+      null;
+    const boardContext = Promise.all([
       boardClient.getBoard(normalizedWorkspaceId, normalizedBoardId),
       boardClient.listBoardColumns(normalizedWorkspaceId, normalizedBoardId),
-      boardClient.listBoardIssues(normalizedWorkspaceId, normalizedBoardId, {
-        ...parsedIssueQuery,
-        limit: parsedIssueQuery.limit ?? BOARD_ISSUES_PAGE_LIMIT
-      }),
       boardClient.getBoardFilterOptions(normalizedWorkspaceId, normalizedBoardId)
     ]);
+    setIssuesLoadProgress({
+      error: null,
+      isLoading: true,
+      loaded: 0,
+      total: 0
+    });
+    const issues = await loadAllBoardIssuePages({
+      fetchPage: (page) =>
+        boardClient.listBoardIssues(normalizedWorkspaceId, normalizedBoardId, {
+          ...parsedIssueQuery,
+          limit: BOARD_ISSUES_PAGE_LIMIT,
+          page
+        }),
+      onFirstPage: (firstPage) => {
+        latestIssues = firstPage.data;
+        latestIssuesMeta = firstPage.meta;
+        void boardContext.then(([board, columns, filterOptions]) => {
+          if (!canPublishIssues()) return;
+
+          setBoardState({
+            board,
+            columns,
+            filterOptions,
+            issues: latestIssues,
+            issuesMeta: latestIssuesMeta
+          });
+          setBoardStatus("success");
+          setIssuesLoadProgress({
+            error: null,
+            isLoading: firstPage.meta.total > latestIssues.length,
+            loaded: latestIssues.length,
+            total: firstPage.meta.total
+          });
+        });
+      },
+      onProgress: (result) => {
+        if (!canPublishIssues()) return;
+
+        latestIssues = result.items;
+        latestIssuesMeta = result.meta;
+        void boardContext.then(() => {
+          if (!canPublishIssues()) return;
+
+          setBoardState((current) => ({
+            ...current,
+            issues: latestIssues,
+            issuesMeta: latestIssuesMeta
+          }));
+          setIssuesLoadProgress({
+            error:
+              result.failedPages.length > 0
+                ? new Error("일부 이슈를 불러오지 못했습니다.")
+                : null,
+            isLoading: true,
+            loaded: latestIssues.length,
+            total: result.meta.total
+          });
+        });
+      }
+    });
+    const [board, columns, filterOptions] = await boardContext;
+
+    if (canPublishIssues()) {
+      setIssuesLoadProgress({
+        error:
+          issues.failedPages.length > 0
+            ? new Error("일부 이슈를 불러오지 못했습니다.")
+            : null,
+        isLoading: false,
+        loaded: issues.items.length,
+        total: issues.meta.total
+      });
+    }
 
     return {
       board,
       columns,
-      issues: issues.data,
+      issues: issues.items,
       issuesMeta: issues.meta,
       filterOptions
     };
   }, [
     boardClient,
+    boardIssueLoadPublicationGuard,
     canLoad,
     issueQueryKey,
     normalizedBoardId,
@@ -240,6 +334,7 @@ export function useBoardWorkspaceData({
   const refreshBoard = useCallback(async () => {
     if (!canLoad || !normalizedBoardId) {
       boardRequestCoordinator.invalidate();
+      boardIssueLoadPublicationGuard.invalidate();
       setBoardError(null);
       return null;
     }
@@ -266,6 +361,7 @@ export function useBoardWorkspaceData({
     return null;
   }, [
     boardRequestCoordinator,
+    boardIssueLoadPublicationGuard,
     canLoad,
     loadBoardData,
     normalizedBoardId
@@ -303,6 +399,7 @@ export function useBoardWorkspaceData({
       }
 
       const mutation = boardRequestCoordinator.beginMutation();
+      boardIssueLoadPublicationGuard.invalidate();
       setBoardError(null);
       setBoardState((current) => ({
         ...current,
@@ -341,6 +438,7 @@ export function useBoardWorkspaceData({
     },
     [
       boardClient,
+      boardIssueLoadPublicationGuard,
       boardRequestCoordinator,
       boardState,
       canLoad,
@@ -357,6 +455,7 @@ export function useBoardWorkspaceData({
       }
 
       const mutation = boardRequestCoordinator.beginMutation();
+      boardIssueLoadPublicationGuard.invalidate();
       setBoardError(null);
 
       try {
@@ -405,6 +504,7 @@ export function useBoardWorkspaceData({
     },
     [
       boardClient,
+      boardIssueLoadPublicationGuard,
       boardRequestCoordinator,
       canLoad,
       normalizedBoardId,
@@ -455,6 +555,7 @@ export function useBoardWorkspaceData({
     async function loadSelectedBoard() {
       if (!canLoad || !normalizedBoardId) {
         boardRequestCoordinator.invalidate();
+        boardIssueLoadPublicationGuard.invalidate();
         setBoardState(emptyBoardState);
         setBoardStatus("idle");
         setBoardError(null);
@@ -483,9 +584,11 @@ export function useBoardWorkspaceData({
     return () => {
       active = false;
       boardRequestCoordinator.invalidate();
+      boardIssueLoadPublicationGuard.invalidate();
     };
   }, [
     boardRequestCoordinator,
+    boardIssueLoadPublicationGuard,
     canLoad,
     loadBoardData,
     normalizedBoardId
@@ -495,6 +598,7 @@ export function useBoardWorkspaceData({
     ...catalog,
     ...boardState,
     boardError,
+    issuesLoadProgress,
     boardStatus,
     catalogError,
     catalogStatus,

@@ -443,6 +443,27 @@ export function BoardPanel() {
         </p>
       ) : null}
 
+      {boardData.issuesLoadProgress.isLoading ? (
+        <p className="mx-7 mt-4 text-[18px] text-muted-foreground">
+          이슈 불러오는 중 {boardData.issuesLoadProgress.loaded}/
+          {boardData.issuesLoadProgress.total}
+        </p>
+      ) : null}
+
+      {boardData.issuesLoadProgress.error ? (
+        <div className="mx-7 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[18px] font-medium text-red-600">
+          <span>{boardData.issuesLoadProgress.error.message}</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => void boardData.refreshBoard()}
+          >
+            다시 시도
+          </Button>
+        </div>
+      ) : null}
+
       {statusMoveError ? (
         <p className="mx-7 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[21px] font-medium text-red-600">
           {statusMoveError}
