@@ -13,8 +13,8 @@ const panel = await readFile(
   new URL("./components/github-panel.tsx", import.meta.url),
   "utf8"
 );
-const tables = await readFile(
-  new URL("./components/github-connect-tables.tsx", import.meta.url),
+const project = await readFile(
+  new URL("./components/github-connect-project.tsx", import.meta.url),
   "utf8"
 );
 const paginationModule = await import(
@@ -27,8 +27,8 @@ assert.match(client, /activateWorkspaceBoardSource/);
 assert.match(client, /discoverGithubProjectV2/);
 assert.match(client, /projects-v2\/discovery/);
 assert.match(client, /method: "PUT"/);
-assert.doesNotMatch(tables, /type="checkbox"|onToggleProjectV2Selection|selectedProjectV2Ids/);
-assert.match(tables, /onSaveProjectV2Selections/);
+assert.doesNotMatch(project, /type="checkbox"|onToggleProjectV2Selection|selectedProjectV2Ids/);
+assert.match(project, /onActivateProjectV2/);
 assert.match(panel, /activateWorkspaceBoardSource/);
 assert.match(
   panel,
@@ -36,8 +36,8 @@ assert.match(
   "the complete-list save must include closed ProjectV2s"
 );
 assert.doesNotMatch(panel, /setSelectedProjectV2Ids|replaceGithubProjectV2Selections|rememberGithubBoardSelection/);
-assert.match(panel, /async function handleSaveProjectV2Selections/);
-const saveSelectionStart = panel.indexOf("async function handleSaveProjectV2Selections");
+assert.match(panel, /async function handleActivateProjectV2/);
+const saveSelectionStart = panel.indexOf("async function handleActivateProjectV2");
 const nextHandlerStart = panel.indexOf(
   "async function handleStartGithubSyncRun",
   saveSelectionStart
@@ -50,12 +50,12 @@ assert.match(
 );
 assert.match(
   panel,
-  /Only the workspace owner can change the active Board source/,
+  /Workspace Owner만 활성 Board를 변경할 수 있습니다/,
   "only the workspace owner may switch the shared Board source"
 );
 assert.match(
   panel.slice(saveSelectionStart, nextHandlerStart),
-  /activateWorkspaceBoardSource\([\s\S]{0,240}projectV2Id: selectedProjectV2Id/,
+  /activateWorkspaceBoardSource\([\s\S]{0,240}projectV2Id/,
   "the selected ProjectV2 must be the only active Board source input"
 );
 assert.match(panel, /handleDiscoverGithubProjectV2/);

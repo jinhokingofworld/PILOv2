@@ -26,8 +26,16 @@ for (const [scope, expected] of [
   );
 }
 
-const [panel, steps] = await Promise.all([
+const [panel, layout, project, steps] = await Promise.all([
   readFile(new URL("./components/github-panel.tsx", import.meta.url), "utf8"),
+  readFile(
+    new URL("./components/github-connect-layout.tsx", import.meta.url),
+    "utf8"
+  ),
+  readFile(
+    new URL("./components/github-connect-project.tsx", import.meta.url),
+    "utf8"
+  ),
   readFile(
     new URL("./components/github-connect-steps.tsx", import.meta.url),
     "utf8"
@@ -38,17 +46,24 @@ for (const component of [panel, steps]) {
   assert.match(component, /hasRequiredGithubProjectOAuthScopes/);
 }
 
+assert.match(layout, /hasRequiredGithubProjectOAuthScopes/);
+assert.match(
+  layout,
+  /projectOAuthConnected=\{projectOAuth\?\.connected === true && projectOAuthHasRequiredScopes\}/
+);
+assert.match(project, /projectOAuthConnected: boolean/);
+
 assert.doesNotMatch(panel, /function hasProjectScope/);
 assert.match(
   panel,
   /GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes/
 );
 assert.match(panel, /project와 repo 권한이 모두 필요합니다/);
-assert.match(steps, /project \+ repo scopes\s+OAuth 토큰이 필요합니다/);
+assert.match(steps, /Project 작업 권한 재연결/);
 assert.match(
   steps,
   /projectOAuth\?\.connected === true\s*&&\s*projectOAuthHasRequiredScopes/
 );
-assert.match(steps, /Project access 재연결/);
+assert.match(steps, /Project 작업 권한 연결/);
 
 console.log("GitHub ProjectV2 OAuth scope tests passed");

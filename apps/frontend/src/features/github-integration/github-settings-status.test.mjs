@@ -21,8 +21,8 @@ const steps = await readFile(
   new URL("./components/github-connect-steps.tsx", import.meta.url),
   "utf8"
 );
-const tables = await readFile(
-  new URL("./components/github-connect-tables.tsx", import.meta.url),
+const repositories = await readFile(
+  new URL("./components/github-connect-repositories.tsx", import.meta.url),
   "utf8"
 );
 
@@ -43,6 +43,8 @@ assert.doesNotMatch(layout, /min-h-\[calc\(100vh-3\.5rem\)\]/);
 assert.match(primitives, /@\/components\/ui\/card/);
 assert.match(primitives, /@\/components\/ui\/badge/);
 assert.doesNotMatch(steps, /md:grid-cols-3/);
-assert.match(steps, /@\[48rem\]:grid-cols-3/);
-assert.doesNotMatch(tables, /max-\[760px\]/);
-assert.equal((tables.match(/@\[48rem\]:grid-cols-/g) ?? []).length, 4);
+assert.match(steps, /divide-y divide-\[#e4e7ec\]/);
+assert.doesNotMatch(steps, /@\[48rem\]:grid-cols-3/);
+assert.doesNotMatch(steps, /onStartSync|isSyncing|동기화 시작/);
+assert.doesNotMatch(repositories, /max-\[760px\]/);
+assert.equal((repositories.match(/@\[48rem\]:grid-cols-/g) ?? []).length, 2);

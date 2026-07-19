@@ -6,9 +6,12 @@ async function loadModule(relativePath) {
 }
 
 const pagination = await loadModule("./utils/github-page-collector.ts");
-const [panel, tables] = await Promise.all([
+const [panel, repositories] = await Promise.all([
   readFile(new URL("./components/github-panel.tsx", import.meta.url), "utf8"),
-  readFile(new URL("./components/github-connect-tables.tsx", import.meta.url), "utf8")
+  readFile(
+    new URL("./components/github-connect-repositories.tsx", import.meta.url),
+    "utf8"
+  )
 ]);
 
 const pages = await pagination.collectGithubPages((page) =>
@@ -47,8 +50,8 @@ assert.match(
   /function handleRepositoryPageChange\(page: number\) \{[\s\S]{0,240}clearRepositorySelection\(\)/
 );
 assert.match(panel, /function clearRepositorySelection\(\) \{[\s\S]{0,240}setSelectedRepositoryId\(""\)/);
-assert.match(tables, /<span>보관 상태<\/span>/);
-assert.match(tables, /<span>마지막 동기화<\/span>/);
-assert.match(tables, /<span>선택<\/span>/);
+assert.match(repositories, /<span>보관 상태<\/span>/);
+assert.match(repositories, /<span>마지막 동기화<\/span>/);
+assert.match(repositories, /<span>선택<\/span>/);
 
 console.log("GitHub repository pagination feature tests passed");

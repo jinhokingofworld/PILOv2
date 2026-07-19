@@ -9,8 +9,8 @@ const [client, workspaceData, lifecycle, types] = await Promise.all([
   readFile(new URL("types/index.ts", directory), "utf8")
 ]);
 const boardPanel = await readFile(new URL("components/board-panel.tsx", directory), "utf8");
-const githubTables = await readFile(
-  new URL("../github-integration/components/github-connect-tables.tsx", directory),
+const githubProject = await readFile(
+  new URL("../github-integration/components/github-connect-project.tsx", directory),
   "utf8"
 );
 
@@ -25,6 +25,6 @@ assert.match(lifecycle, /reloadActiveSource/);
 assert.doesNotMatch(boardPanel, /readGithubBoardSelection|rememberGithubBoardSelection/);
 assert.doesNotMatch(boardPanel, /boardData\.hydrateBoard/);
 assert.doesNotMatch(boardPanel, /boardData\.boards\[0\]/);
-assert.doesNotMatch(githubTables, /selectedProjectV2Ids|onToggleProjectV2Selection|type="checkbox"/);
+assert.doesNotMatch(githubProject, /selectedProjectV2Ids|onToggleProjectV2Selection|type="checkbox"/);
 
 console.log("active board source frontend tests passed");

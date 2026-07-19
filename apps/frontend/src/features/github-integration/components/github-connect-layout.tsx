@@ -6,15 +6,16 @@ import type {
   GithubOAuthStatus,
   GithubProjectOAuthStatus,
   GithubProjectV2,
-  GithubPullRequest,
   GithubRepository,
   GithubSyncRun,
   GithubSyncTarget
 } from "@/features/github-integration/types";
+import { hasRequiredGithubProjectOAuthScopes } from "@/features/github-integration/utils/github-project-oauth-scope";
 
-import { GithubConnectSidebar } from "./github-connect-sidebar";
-import { GithubConnectSourceTables } from "./github-connect-tables";
+import { GithubConnectProject } from "./github-connect-project";
+import { GithubConnectRepositories } from "./github-connect-repositories";
 import { GithubConnectSteps } from "./github-connect-steps";
+import { GithubConnectSync } from "./github-connect-sync";
 
 export type GithubConnectStage = "idle" | "loading" | "ready" | "error";
 
@@ -37,19 +38,14 @@ export type GithubConnectLayoutProps = {
   selectedRepositoryId: string;
   selectedRepository: GithubRepository | undefined;
   projects: GithubProjectV2[];
-  projectsTotal: number;
   selectedProjectV2Id: string;
-  selectedProject: GithubProjectV2 | undefined;
-  pullRequests: GithubPullRequest[];
-  pullRequestsTotal: number;
   isLoading: boolean;
-  isPullRequestsLoading: boolean;
   isDisconnecting: boolean;
   isDisconnectingProjectOAuth: boolean;
   isDeletingInstallation: boolean;
   isInstallationDeleteRequested: boolean;
   isSyncing: boolean;
-  isSavingProjectV2Selections: boolean;
+  isActivatingProjectV2: boolean;
   isWorkspaceOwner: boolean;
   redirectAction: "oauth" | "installation" | "project_oauth" | null;
   syncRuns: GithubSyncRun[];
@@ -67,8 +63,7 @@ export type GithubConnectLayoutProps = {
   onRepositoryQueryChange: (value: string) => void;
   onRepositoryPageChange: (page: number) => void;
   onSelectRepository: (id: string) => void;
-  onSelectProjectV2: (id: string) => void;
-  onSaveProjectV2Selections: () => void;
+  onActivateProjectV2: (projectV2Id: string) => Promise<void>;
   onSyncTargetChange: (target: GithubSyncTarget) => void;
   onStartSync: () => void;
 };
@@ -92,19 +87,14 @@ export function GithubConnectLayout({
   selectedRepositoryId,
   selectedRepository,
   projects,
-  projectsTotal,
   selectedProjectV2Id,
-  selectedProject,
-  pullRequests,
-  pullRequestsTotal,
   isLoading,
-  isPullRequestsLoading,
   isDisconnecting,
   isDisconnectingProjectOAuth,
   isDeletingInstallation,
   isInstallationDeleteRequested,
   isSyncing,
-  isSavingProjectV2Selections,
+  isActivatingProjectV2,
   isWorkspaceOwner,
   redirectAction,
   syncRuns,
@@ -122,13 +112,16 @@ export function GithubConnectLayout({
   onRepositoryQueryChange,
   onRepositoryPageChange,
   onSelectRepository,
-  onSelectProjectV2,
-  onSaveProjectV2Selections,
+  onActivateProjectV2,
   onSyncTargetChange,
   onStartSync
 }: GithubConnectLayoutProps) {
+  const projectOAuthHasRequiredScopes = hasRequiredGithubProjectOAuthScopes(
+    projectOAuth?.tokenScope
+  );
+
   return (
-    <div className="github-connect-root @container rounded-xl bg-muted/40 p-4 text-foreground sm:p-5">
+    <div className="github-connect-root @container text-foreground">
       <div className="grid gap-4">
         {panelStatus === "error" ? (
           <StatusNotice
@@ -139,7 +132,6 @@ export function GithubConnectLayout({
             {errorMessage ?? "잠시 후 다시 시도하세요."}
           </StatusNotice>
         ) : null}
-
         {actionError ? (
           <StatusNotice
             icon={<XCircle className="size-4" />}
@@ -149,7 +141,6 @@ export function GithubConnectLayout({
             {actionError}
           </StatusNotice>
         ) : null}
-
         {actionMessage ? (
           <StatusNotice
             icon={<CheckCircle2 className="size-4" />}
@@ -167,7 +158,6 @@ export function GithubConnectLayout({
           isDeletingInstallation={isDeletingInstallation}
           isInstallationDeleteRequested={isInstallationDeleteRequested}
           isLoading={isLoading}
-          isSyncing={isSyncing}
           projectOAuth={projectOAuth}
           onCancelDeleteInstallation={onCancelDeleteInstallation}
           onConfirmDeleteInstallation={onConfirmDeleteInstallation}
@@ -178,49 +168,44 @@ export function GithubConnectLayout({
           onStartInstallation={onStartInstallation}
           onStartGithubProjectOAuth={onStartGithubProjectOAuth}
           onStartOAuth={onStartOAuth}
-          onStartSync={onStartSync}
           redirectAction={redirectAction}
           selectedInstallation={selectedInstallation}
         />
-
-        <div className="main-grid grid items-start gap-4 @[64rem]:grid-cols-[minmax(0,1.55fr)_minmax(20rem,1fr)]">
-          <GithubConnectSourceTables
-            hasNextRepositoryPage={hasNextRepositoryPage}
-            isLoading={isLoading}
-            onRepositoryQueryChange={onRepositoryQueryChange}
-            onRepositoryPageChange={onRepositoryPageChange}
-            onSelectProjectV2={onSelectProjectV2}
-            onSaveProjectV2Selections={onSaveProjectV2Selections}
-            onSelectRepository={onSelectRepository}
-            projects={projects}
-            projectsTotal={projectsTotal}
-            pullRequests={pullRequests}
-            pullRequestsTotal={pullRequestsTotal}
-            repositories={repositories}
-            repositoriesTotal={repositoriesTotal}
-            repositoryQuery={repositoryQuery}
-            repositoryPage={repositoryPage}
-            selectedRepository={selectedRepository}
-            selectedProjectV2Id={selectedProjectV2Id}
-            isSavingProjectV2Selections={isSavingProjectV2Selections}
-            isWorkspaceOwner={isWorkspaceOwner}
-            selectedRepositoryId={selectedRepositoryId}
-            isPullRequestsLoading={isPullRequestsLoading}
-          />
-
-          <GithubConnectSidebar
-            isLoading={isLoading}
-            isSyncing={isSyncing}
-            onStartSync={onStartSync}
-            onSyncTargetChange={onSyncTargetChange}
-            installations={installations}
-            selectedInstallationId={selectedInstallationId}
-            selectedRepositoryId={selectedRepositoryId}
-            syncRuns={syncRuns}
-            syncRunsTotal={syncRunsTotal}
-            syncTarget={syncTarget}
-          />
-        </div>
+        <GithubConnectRepositories
+          enabled={installations.length > 0}
+          hasNextRepositoryPage={hasNextRepositoryPage}
+          isLoading={isLoading}
+          onRepositoryPageChange={onRepositoryPageChange}
+          onRepositoryQueryChange={onRepositoryQueryChange}
+          onSelectRepository={onSelectRepository}
+          repositories={repositories}
+          repositoriesTotal={repositoriesTotal}
+          repositoryPage={repositoryPage}
+          repositoryQuery={repositoryQuery}
+          selectedRepositoryId={selectedRepositoryId}
+        />
+        <GithubConnectProject
+          activeProjectV2Id={selectedProjectV2Id}
+          isActivating={isActivatingProjectV2}
+          isWorkspaceOwner={isWorkspaceOwner}
+          onActivateProjectV2={onActivateProjectV2}
+          projectOAuthConnected={projectOAuth?.connected === true && projectOAuthHasRequiredScopes}
+          projects={projects}
+          selectedRepository={selectedRepository}
+        />
+        <GithubConnectSync
+          installations={installations}
+          isLoading={isLoading}
+          isSyncing={isSyncing}
+          onStartSync={onStartSync}
+          onSyncTargetChange={onSyncTargetChange}
+          selectedInstallationId={selectedInstallationId}
+          selectedProjectV2Id={selectedProjectV2Id}
+          selectedRepositoryId={selectedRepositoryId}
+          syncRuns={syncRuns}
+          syncRunsTotal={syncRunsTotal}
+          syncTarget={syncTarget}
+        />
       </div>
     </div>
   );

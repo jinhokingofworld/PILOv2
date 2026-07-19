@@ -1,24 +1,16 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [panel, client, types, tables, sidebar] = await Promise.all([
+const [panel, client, types, sync] = await Promise.all([
   readFile(new URL("./components/github-panel.tsx", import.meta.url), "utf8"),
   readFile(new URL("./api/client.ts", import.meta.url), "utf8"),
   readFile(new URL("./types/index.ts", import.meta.url), "utf8"),
   readFile(
-    new URL("./components/github-connect-tables.tsx", import.meta.url),
-    "utf8"
-  ),
-  readFile(
-    new URL("./components/github-connect-sidebar.tsx", import.meta.url),
+    new URL("./components/github-connect-sync.tsx", import.meta.url),
     "utf8"
   ),
 ]);
 
-assert.match(
-  panel,
-  /if \(!selectedRepositoryId\) \{[\s\S]{0,160}setPullRequests\(\[\]\)/
-);
 const snapshotLoader =
   panel.match(
     /async function loadGithubIntegrationSnapshot\([\s\S]*?\n  \}/
@@ -49,19 +41,15 @@ assert.match(
 );
 assert.match(
   panel,
-  /async function loadGithubPullRequests[\s\S]{0,1800}const isCurrentRequest = \(\) =>[\s\S]*?selectedRepositoryIdRef\.current === repositoryId[\s\S]*?pullRequestsRequestGateRef\.current\.isCurrent\(requestGeneration\)/
-);
-assert.match(
-  panel,
   /async function handleDiscoverGithubProjectV2[\s\S]{0,1200}const discovery = await[\s\S]{0,600}if \(selectedRepositoryIdRef\.current !== repositoryId\) \{\s*return;[\s\S]{0,400}if \(discovery\.connectionRequired\)/
 );
 assert.match(
   panel,
   /const requiresSelectedRepository = syncTarget !== "source";[\s\S]{0,300}requiresSelectedRepository && !selectedRepositoryId/
 );
-assert.match(sidebar, /option\.value !== "source"/);
+assert.match(sync, /option\.value !== "source"/);
 assert.match(
-  sidebar,
+  sync,
   /!selectedRepositoryId && syncTarget !== "source"/
 );
 assert.match(
@@ -82,7 +70,7 @@ assert.match(
 );
 const repositorySelectionHandler =
   panel.match(
-    /async function handleSelectRepository\(repositoryId: string\) \{[\s\S]*?\n  \}\n\n  function handleSelectProjectV2/
+    /async function handleSelectRepository\(repositoryId: string\) \{[\s\S]*?\n  \}\n\n  function clearRepositorySelection/
   )?.[0] ?? "";
 assert.match(repositorySelectionHandler, /snapshot\.repositories\.find\(/);
 assert.match(
@@ -93,24 +81,16 @@ assert.match(
   repositorySelectionHandler,
   /handleDiscoverGithubProjectV2\(repository\.installationId, repositoryId\)/
 );
-const projectSelectionSaveHandler =
+const projectActivationHandler =
   panel.match(
-    /async function handleSaveProjectV2Selections\(\) \{[\s\S]*?\n  \}\n\n  async function handleStartGithubSyncRun/
+    /async function handleActivateProjectV2\(projectV2Id: string\) \{[\s\S]*?\n  \}\n\n  async function handleStartGithubSyncRun/
   )?.[0] ?? "";
 assert.match(
-  projectSelectionSaveHandler,
-  /snapshot\.repositories\.find\([\s\S]*?candidate\.id === selectedRepositoryId/
-);
-assert.match(
-  projectSelectionSaveHandler,
-  /activateWorkspaceBoardSource\([\s\S]*?repositoryId: selectedRepositoryId[\s\S]*?projectV2Id: selectedProjectV2Id/,
+  projectActivationHandler,
+  /activateWorkspaceBoardSource\([\s\S]*?repositoryId: selectedRepositoryId[\s\S]*?projectV2Id/,
   "the selected repository and ProjectV2 must become the active Board source"
 );
-assert.doesNotMatch(projectSelectionSaveHandler, /projectIdsByInstallation/);
-assert.doesNotMatch(projectSelectionSaveHandler, /replaceGithubProjectV2Selections/);
-assert.match(
-  tables,
-  /저장소를 선택하면 PR 및 ProjectV2 동기화 범위를 관리할 수 있습니다/
-);
+assert.doesNotMatch(projectActivationHandler, /projectIdsByInstallation/);
+assert.doesNotMatch(projectActivationHandler, /replaceGithubProjectV2Selections/);
 
 console.log("repository-scoped GitHub feature tests passed");

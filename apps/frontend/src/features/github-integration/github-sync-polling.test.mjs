@@ -177,8 +177,8 @@ const githubPanel = await readFile(
   new URL("./components/github-panel.tsx", import.meta.url),
   "utf8"
 );
-const githubConnectSidebar = await readFile(
-  new URL("./components/github-connect-sidebar.tsx", import.meta.url),
+const githubConnectSync = await readFile(
+  new URL("./components/github-connect-sync.tsx", import.meta.url),
   "utf8"
 );
 const githubConnectPrimitives = await readFile(
@@ -213,16 +213,16 @@ assert.match(githubPanel, /createGithubSyncRequestGate/);
 assert.match(githubPanel, /createGithubSyncPollLoop/);
 assert.match(githubPanel, /syncPollingError/);
 
-assert.match(githubConnectSidebar, /getGithubSyncProgress/);
-assert.match(githubConnectSidebar, /getGithubSyncProgressStageLabel/);
-assert.match(githubConnectSidebar, /title="최근 수동 동기화"/);
-assert.match(githubConnectSidebar, /수동 동기화 기록/);
-assert.match(githubConnectSidebar, /아직 수동으로 실행한 동기화가 없습니다\./);
-assert.match(githubConnectSidebar, /조회 \{syncRun\.fetchedCount\}/);
-assert.match(githubConnectSidebar, /추가\{" "\}/);
-assert.match(githubConnectSidebar, /업데이트 \{syncRun\.updatedCount\}/);
+assert.match(githubConnectSync, /getGithubSyncProgress/);
+assert.match(githubConnectSync, /getGithubSyncProgressStageLabel/);
+assert.match(githubConnectSync, /title="최근 수동 실행"/);
+assert.match(githubConnectSync, /수동 동기화 기록/);
+assert.match(githubConnectSync, /아직 수동 동기화 기록이 없습니다\./);
+assert.match(githubConnectSync, /조회 \{syncRun\.fetchedCount\}/);
+assert.match(githubConnectSync, /추가 \{syncRun\.createdCount\}/);
+assert.match(githubConnectSync, /업데이트\{" "\}/);
 assert.match(
-  githubConnectSidebar,
+  githubConnectSync,
   /isGithubSyncActiveStatus\(syncRun\.status\) \? \([\s\S]*?<GithubConnectProgress value=\{progress\} \/>[\s\S]*?\{progress\}%[\s\S]*?\) : null/,
   "progress must render only for queued or running sync runs"
 );
