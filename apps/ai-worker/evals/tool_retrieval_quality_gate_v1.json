@@ -4,8 +4,8 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "c59def06e2e255b931757a511709e151870fde114fa1ab8b00af752f0ac7b6a3",
-    "catalogSha256": "6036aa6058405cee87c24c55b1e0efb5d8cb4f38ca4ff1ba7315a30dd86567d7",
+    "inventorySha256": "1182c191fcec737ae9248381be37e574a5f4895a60a341a813a31f7f0534cd60",
+    "catalogSha256": "80b9156fc17a055c3f6070f083dd5df374b5197593c13d384e493a9e3b36e489",
     "eligibleSnapshotSha256": "2a396b2efef711beb2c0ac2c505c2ff8f28b74c0f4b1587b2b0793119b33e64b"
   },
   "privacySensitiveValues": [
@@ -1516,7 +1516,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "6036aa6058405cee87c24c55b1e0efb5d8cb4f38ca4ff1ba7315a30dd86567d7",
+    "sha256": "80b9156fc17a055c3f6070f083dd5df374b5197593c13d384e493a9e3b36e489",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -2365,28 +2365,28 @@
           "새 일정 생성 또는 기존 일정 변경 요청"
         ],
         "positiveExamples": [
-          "기간의 일정 목록을 조회할 때",
-          "기간의 일정 목록을 조회할 때 알려줘",
-          "기간의일정목록을조회할때",
-          "기간의 일정 목록을 조회할 때 부탁드려요",
+          "일정 보여줘",
+          "이번 주 일정 알려줘",
+          "일정보여줘",
+          "일정 보여줘 부탁드려요",
           "calendar list 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "기간의 일정 목록을 조회할 때"
+            "utterance": "일정 보여줘"
           },
           {
             "kind": "paraphrase",
-            "utterance": "기간의 일정 목록을 조회할 때 알려줘"
+            "utterance": "이번 주 일정 알려줘"
           },
           {
             "kind": "typo",
-            "utterance": "기간의일정목록을조회할때"
+            "utterance": "일정보여줘"
           },
           {
             "kind": "honorific",
-            "utterance": "기간의 일정 목록을 조회할 때 부탁드려요"
+            "utterance": "일정 보여줘 부탁드려요"
           },
           {
             "kind": "abbreviation",
@@ -4455,7 +4455,7 @@
     {
       "id": "canonical_calendar_list",
       "kind": "canonical",
-      "prompt": "특정 기간의 일정 목록",
+      "prompt": "오늘 일정 보여줘",
       "domain": "calendar",
       "capabilityId": "calendar.events.list",
       "requiredToolNames": [
@@ -4499,7 +4499,7 @@
     {
       "id": "held_out_calendar",
       "kind": "held_out",
-      "prompt": "특정 기간 일정 목록 보여줘",
+      "prompt": "이번 주 일정 알려줘",
       "domain": "calendar",
       "capabilityId": "calendar.events.list",
       "requiredToolNames": [

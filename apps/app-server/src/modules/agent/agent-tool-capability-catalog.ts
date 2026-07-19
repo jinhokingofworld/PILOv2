@@ -164,7 +164,14 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("meeting.action_items.approve", "meeting", ["find_action_items", "approve_meeting_report_action_item"], "후속 작업을 일정 또는 이슈로 승인할 때", ["후속 작업 수정 또는 반려 요청"]),
   capability("meeting.action_items.transfer_and_approve", "meeting", ["find_action_items", "update_meeting_report_action_item", "approve_meeting_report_action_item"], "후속 작업 담당자를 바꾸고 바로 승인할 때", ["담당자 변경만 하거나 반려하는 요청"]),
   capability("meeting.report.regenerate", "meeting", ["list_meeting_reports", "regenerate_meeting_report"], "실패한 회의록을 다시 생성할 때", ["회의록 조회 또는 요약 요청"]),
-  capability("calendar.events.list", "calendar", ["list_calendar_events"], "기간의 일정 목록을 조회할 때", ["새 일정 생성 또는 기존 일정 변경 요청"]),
+  capability(
+    "calendar.events.list",
+    "calendar",
+    ["list_calendar_events"],
+    "기간의 일정 목록을 조회할 때",
+    ["새 일정 생성 또는 기존 일정 변경 요청"],
+    ["일정 보여줘", "이번 주 일정 알려줘"]
+  ),
   capability("calendar.events.create", "calendar", ["create_calendar_event"], "새 일정을 생성할 때", ["기존 일정 변경 또는 회의록 조회 요청"]),
   capability("calendar.events.update", "calendar", ["list_calendar_events", "update_calendar_event"], "기존 일정의 시간이나 내용을 변경할 때", ["새 일정 생성 요청"]),
   capability("board.issues.search", "board", ["search_board_issues", "get_board_issue_context"], "이슈를 찾거나 현재 맥락을 확인할 때", ["이슈 생성 또는 상태 변경 요청"]),

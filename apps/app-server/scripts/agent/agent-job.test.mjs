@@ -67,7 +67,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "c59def06e2e255b931757a511709e151870fde114fa1ab8b00af752f0ac7b6a3";
+  "1182c191fcec737ae9248381be37e574a5f4895a60a341a813a31f7f0534cd60";
 
 const payload = {
   jobType: "agent_run_requested",

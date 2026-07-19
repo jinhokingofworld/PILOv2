@@ -193,6 +193,26 @@ def test_full_catalog_shortlists_current_meeting_leave_without_adjacent_actions(
     assert reports.tool_names == ("list_meeting_reports",)
 
 
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "오늘 일정 보여줘",
+        "이번 주 일정 알려줘",
+    ),
+)
+def test_full_catalog_shortlists_calendar_list_for_common_date_queries(prompt: str) -> None:
+    fixture = json.loads(QUALITY_FIXTURE_PATH.read_text(encoding="utf-8"))
+    schemas = fixture["eligibleToolSchemas"]
+    catalog = parse_tool_capability_catalog(fixture["toolCapabilityCatalog"], schemas)
+    assert catalog is not None
+
+    calendar = select_tool_shortlist(prompt, catalog, schemas)
+
+    assert calendar.used_shortlist is True
+    assert calendar.retrieval.selected_capability_ids == ("calendar.events.list",)
+    assert calendar.tool_names == ("list_calendar_events",)
+
+
 def test_compound_request_detection_requires_a_conjunction_token() -> None:
     assert _is_compound_request("일정과 회의록을 보여줘") is True
     assert _is_compound_request("회의에서 나와줘") is False
