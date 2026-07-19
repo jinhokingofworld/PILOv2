@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-const { shouldRemoveCreatedPrReviewSystemShape } = await import(
+const {
+  preservePrReviewFlowLabelTranslation,
+  shouldRemoveCreatedPrReviewSystemShape
+} = await import(
   "../../src/features/pr-review/components/review-canvas/pr-review-system-shape-policy.ts"
 );
 
@@ -48,6 +51,28 @@ assert.equal(
     source: "remote"
   }),
   false
+);
+
+const previousProps = { title: "Flow 1", w: 720 };
+const previous = {
+  id: "shape:flow-1",
+  type: "pr_review_flow_label",
+  x: 40,
+  y: 32,
+  rotation: 0,
+  props: previousProps
+};
+const next = {
+  ...previous,
+  x: 240,
+  y: 180,
+  rotation: 1,
+  props: { title: "변조", w: 1 }
+};
+
+assert.deepEqual(
+  preservePrReviewFlowLabelTranslation(previous, next),
+  { ...previous, x: 240, y: 180 }
 );
 
 console.log("PR Review system shape policy tests passed");
