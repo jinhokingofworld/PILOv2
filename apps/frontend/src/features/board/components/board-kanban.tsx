@@ -1,9 +1,8 @@
 "use client";
 
-import { ExternalLink, GitPullRequestArrow } from "lucide-react";
+import { GitPullRequestArrow } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { Button } from "@/components/ui/button";
 import { BoardIssueCard } from "@/features/board/components/board-issue-card";
 import type {
   BoardColumnPayload,
@@ -317,22 +316,6 @@ export function BoardKanban({
       className="kanban-scroll overflow-x-auto p-4 sm:p-6"
       aria-label="보드 칸반"
     >
-      <div className="mb-3 flex justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-[48px] text-[19.2px]"
-          disabled={!board.repository.htmlUrl}
-          onClick={() =>
-            window.open(board.repository.htmlUrl, "_blank", "noopener")
-          }
-        >
-          <ExternalLink />
-          저장소
-        </Button>
-      </div>
-
       <div
         className="mb-3 flex max-w-full gap-2 overflow-x-auto pb-1 md:hidden"
         role="tablist"

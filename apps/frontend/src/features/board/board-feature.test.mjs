@@ -132,22 +132,28 @@ assert.match(boardPanel, /board-toolbar/);
 assert.match(boardPanel, /board-summary/);
 assert.match(boardPanel, /summary-chip/);
 assert.match(boardPanel, /board-controls/);
+assert.match(boardPanel, />Board</);
+assert.match(boardPanel, /전체/);
+assert.match(boardPanel, /열림/);
+assert.match(boardPanel, /닫힘/);
+assert.match(boardPanel, /마지막 업데이트/);
+assert.match(boardPanel, /SelectTrigger/);
+assert.match(boardPanel, /GitHub 저장소/);
 assert.match(
   boardPanel,
-  /board-controls[\s\S]*placeholder="Search issues"[\s\S]*RefreshCw[\s\S]*setIsIssueCreateModalOpen\(true\)/,
+  /board-toolbar[\s\S]*RefreshCw[\s\S]*board-controls[\s\S]*placeholder="Search issues"[\s\S]*setIsIssueCreateModalOpen\(true\)/,
   "Board toolbar should keep search, refresh, and new issue controls"
 );
 assert.doesNotMatch(boardPanel, />Board 선택</);
-assert.match(boardPanel, /text-\[18\.75px\]/);
-assert.match(boardPanel, /text-\[17\.25px\]/);
+assert.match(boardPanel, /text-lg font-semibold/);
+assert.match(boardPanel, /text-xs/);
 assert.match(boardIssueCard, /text-base/);
 assert.match(boardKanban, /lane-name[\s\S]*text-base/);
 assert.match(boardIssueCreateForm, /text-\[21px\]/);
 assert.match(boardIssueCreateDialog, /text-\[27px\]/);
 assert.match(boardIssueSheet, /text-\[27px\]/);
 assert.match(boardIssueAssigneeSelector, /text-\[18px\]/);
-assert.match(boardPanel, /text-\[19\.2px\]/);
-assert.match(boardKanban, /text-\[19\.2px\]/);
+assert.match(boardPanel, /className="h-9"/);
 assert.match(boardIssueSheet, /text-\[19\.2px\]/);
 assert.match(boardIssueAssigneeSelector, /text-\[19\.2px\]/);
 assert.match(
@@ -156,7 +162,7 @@ assert.match(
 );
 assert.match(
   boardPanel,
-  /<Input\s+className="[^"]*text-\[18\.75px\][^"]*md:text-\[18\.75px\]/
+  /<Input\s+className="[^"]*text-sm[^"]*md:text-sm/
 );
 assert.match(
   boardIssueCreateForm,
