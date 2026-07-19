@@ -54,10 +54,10 @@ export class DocumentSearchService {
             item.name AS title,
             chunk.heading_path,
             chunk.chunk_text,
-            1 - (chunk.embedding <=> $2::extensions.vector) AS score,
+            1 - (chunk.embedding OPERATOR(extensions.<=>) $2::extensions.vector) AS score,
             row_number() OVER (
               PARTITION BY document.id
-              ORDER BY chunk.embedding <=> $2::extensions.vector
+              ORDER BY chunk.embedding OPERATOR(extensions.<=>) $2::extensions.vector
             ) AS document_rank
           FROM document_embedding_chunks AS chunk
           JOIN documents AS document
