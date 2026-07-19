@@ -33,6 +33,10 @@ export type EndScreenShareInput = {
   livekitRoomName: string;
 };
 
+export type StartingReservationOwnershipInput = EndScreenShareInput & {
+  rollbackAttemptId: string;
+};
+
 const RESERVE_SESSION_SCRIPT = `
 -- RESERVE_WORKSPACE_SCREEN_SHARE
 if redis.call("EXISTS", KEYS[1]) == 1 or redis.call("EXISTS", KEYS[2]) == 1 then
@@ -40,6 +44,7 @@ if redis.call("EXISTS", KEYS[1]) == 1 or redis.call("EXISTS", KEYS[2]) == 1 then
 end
 redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
 redis.call("SET", KEYS[2], ARGV[3], "EX", ARGV[2])
+redis.call("SET", KEYS[3], ARGV[4], "EX", ARGV[2])
 return 1
 `;
 
@@ -58,6 +63,7 @@ if workspaceId ~= session.workspaceId then
   return false
 end
 if session.status == "active" then
+  redis.call("DEL", KEYS[3])
   return encoded
 end
 if session.status ~= "starting" then
@@ -68,6 +74,7 @@ session.startedAt = ARGV[3]
 local updated = cjson.encode(session)
 redis.call("SET", KEYS[1], updated, "EX", ARGV[4])
 redis.call("EXPIRE", KEYS[2], ARGV[4])
+redis.call("DEL", KEYS[3])
 return updated
 `;
 
@@ -85,7 +92,51 @@ local workspaceId = redis.call("GET", KEYS[2])
 if workspaceId ~= session.workspaceId then
   return false
 end
-redis.call("DEL", KEYS[1], KEYS[2])
+redis.call("DEL", KEYS[1], KEYS[2], KEYS[3])
+return encoded
+`;
+
+const CLAIM_STARTING_SESSION_SCRIPT = `
+-- CLAIM_STARTING_WORKSPACE_SCREEN_SHARE
+local encoded = redis.call("GET", KEYS[1])
+if not encoded then
+  return 0
+end
+local session = cjson.decode(encoded)
+if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] or session.status ~= "starting" then
+  return 0
+end
+local workspaceId = redis.call("GET", KEYS[2])
+if workspaceId ~= session.workspaceId then
+  return 0
+end
+local ttl = redis.call("PTTL", KEYS[1])
+if ttl <= 0 then
+  return 0
+end
+redis.call("SET", KEYS[3], ARGV[3], "PX", ttl)
+return 1
+`;
+
+const RELEASE_STARTING_SESSION_SCRIPT = `
+-- RELEASE_STARTING_WORKSPACE_SCREEN_SHARE
+local encoded = redis.call("GET", KEYS[1])
+if not encoded then
+  return false
+end
+local session = cjson.decode(encoded)
+if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] or session.status ~= "starting" then
+  return false
+end
+local rollbackAttemptId = redis.call("GET", KEYS[3])
+if rollbackAttemptId ~= ARGV[3] then
+  return false
+end
+local workspaceId = redis.call("GET", KEYS[2])
+if workspaceId ~= session.workspaceId then
+  return false
+end
+redis.call("DEL", KEYS[1], KEYS[2], KEYS[3])
 return encoded
 `;
 
@@ -121,17 +172,22 @@ export class ScreenShareStateService {
       : null;
   }
 
-  async reserve(session: WorkspaceScreenShareSession): Promise<boolean> {
+  async reserve(
+    session: WorkspaceScreenShareSession,
+    rollbackAttemptId: string
+  ): Promise<boolean> {
     const result = await this.runRedisCommand(client =>
       client.eval(RESERVE_SESSION_SCRIPT, {
         keys: [
           this.workspaceKey(session.workspaceId),
-          this.roomKey(session.livekitRoomName)
+          this.roomKey(session.livekitRoomName),
+          this.rollbackKey(session.sessionId)
         ],
         arguments: [
           JSON.stringify(session),
           String(SCREEN_SHARE_STATE_TTL_SECONDS),
-          session.workspaceId
+          session.workspaceId,
+          rollbackAttemptId
         ]
       })
     );
@@ -145,7 +201,8 @@ export class ScreenShareStateService {
       client.eval(ACTIVATE_SESSION_SCRIPT, {
         keys: [
           this.workspaceKey(input.workspaceId),
-          this.roomKey(input.livekitRoomName)
+          this.roomKey(input.livekitRoomName),
+          this.rollbackKey(input.sessionId)
         ],
         arguments: [
           input.sessionId,
@@ -167,7 +224,8 @@ export class ScreenShareStateService {
       client.eval(END_SESSION_SCRIPT, {
         keys: [
           this.workspaceKey(input.workspaceId),
-          this.roomKey(input.livekitRoomName)
+          this.roomKey(input.livekitRoomName),
+          this.rollbackKey(input.sessionId)
         ],
         arguments: [input.sessionId, input.livekitRoomName]
       })
@@ -175,6 +233,48 @@ export class ScreenShareStateService {
     return typeof value === "string"
       ? parseWorkspaceScreenShareSession(value)
       : null;
+  }
+
+  async releaseStartingIfCurrent(
+    input: StartingReservationOwnershipInput
+  ): Promise<WorkspaceScreenShareSession | null> {
+    const value = await this.runRedisCommand(client =>
+      client.eval(RELEASE_STARTING_SESSION_SCRIPT, {
+        keys: [
+          this.workspaceKey(input.workspaceId),
+          this.roomKey(input.livekitRoomName),
+          this.rollbackKey(input.sessionId)
+        ],
+        arguments: [
+          input.sessionId,
+          input.livekitRoomName,
+          input.rollbackAttemptId
+        ]
+      })
+    );
+    return typeof value === "string"
+      ? parseWorkspaceScreenShareSession(value)
+      : null;
+  }
+
+  async claimStartingReservation(
+    input: StartingReservationOwnershipInput
+  ): Promise<boolean> {
+    const value = await this.runRedisCommand(client =>
+      client.eval(CLAIM_STARTING_SESSION_SCRIPT, {
+        keys: [
+          this.workspaceKey(input.workspaceId),
+          this.roomKey(input.livekitRoomName),
+          this.rollbackKey(input.sessionId)
+        ],
+        arguments: [
+          input.sessionId,
+          input.livekitRoomName,
+          input.rollbackAttemptId
+        ]
+      })
+    );
+    return value === 1;
   }
 
   protected createRedisClient(redisUrl: string): ScreenShareRedisClient {
@@ -256,5 +356,9 @@ export class ScreenShareStateService {
 
   private roomKey(livekitRoomName: string): string {
     return `workspace-screen-share:room:v1:${livekitRoomName}`;
+  }
+
+  private rollbackKey(sessionId: string): string {
+    return `workspace-screen-share:rollback:v1:${sessionId}`;
   }
 }

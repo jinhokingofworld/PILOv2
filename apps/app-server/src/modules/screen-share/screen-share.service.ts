@@ -83,15 +83,20 @@ export class ScreenShareService {
     if (!member) throw forbidden("Workspace access denied");
 
     const candidate = this.createSession(member, workspaceId);
-    if (await this.state.reserve(candidate)) {
-      return this.issueNewPublisherToken(candidate);
+    const rollbackAttemptId = candidate.sessionId;
+    if (await this.state.reserve(candidate, rollbackAttemptId)) {
+      return this.issueNewPublisherToken(candidate, rollbackAttemptId);
     }
 
     const current = await this.state.getCurrent(workspaceId);
     if (!current) throw screenShareAlreadyActive();
 
     if (current.status === "starting") {
-      return this.recoverStartingSession(userId, current);
+      return this.recoverStartingSession(
+        userId,
+        current,
+        rollbackAttemptId
+      );
     }
 
     if (await this.rooms.hasActiveScreenTrack(current)) {
@@ -100,14 +105,22 @@ export class ScreenShareService {
 
     const ended = await this.endStaleSession(current);
     if (!ended) {
-      return this.resolveReservationWinner(userId, workspaceId);
+      return this.resolveReservationWinner(
+        userId,
+        workspaceId,
+        rollbackAttemptId
+      );
     }
 
-    if (await this.state.reserve(candidate)) {
-      return this.issueNewPublisherToken(candidate);
+    if (await this.state.reserve(candidate, rollbackAttemptId)) {
+      return this.issueNewPublisherToken(candidate, rollbackAttemptId);
     }
 
-    return this.resolveReservationWinner(userId, workspaceId);
+    return this.resolveReservationWinner(
+      userId,
+      workspaceId,
+      rollbackAttemptId
+    );
   }
 
   async createViewerToken(
@@ -231,20 +244,33 @@ export class ScreenShareService {
 
   private async recoverStartingSession(
     userId: string,
-    session: WorkspaceScreenShareSession
+    session: WorkspaceScreenShareSession,
+    rollbackAttemptId: string
   ): Promise<StartWorkspaceScreenSharePayload> {
     if (session.sharerUserId !== userId) throw screenShareAlreadyActive();
+    const claimed = await this.state.claimStartingReservation({
+      workspaceId: session.workspaceId,
+      sessionId: session.sessionId,
+      livekitRoomName: session.livekitRoomName,
+      rollbackAttemptId
+    });
+    if (!claimed) throw screenShareAlreadyActive();
     return this.issuePublisherToken(session, HttpStatus.OK);
   }
 
   private async resolveReservationWinner(
     userId: string,
-    workspaceId: string
+    workspaceId: string,
+    rollbackAttemptId: string
   ): Promise<StartWorkspaceScreenSharePayload> {
     const current = await this.state.getCurrent(workspaceId);
     if (!current) throw screenShareAlreadyActive();
     if (current.status === "starting") {
-      return this.recoverStartingSession(userId, current);
+      return this.recoverStartingSession(
+        userId,
+        current,
+        rollbackAttemptId
+      );
     }
     throw screenShareAlreadyActive(this.toPublicSession(current));
   }
@@ -274,16 +300,18 @@ export class ScreenShareService {
   }
 
   private async issueNewPublisherToken(
-    session: WorkspaceScreenShareSession
+    session: WorkspaceScreenShareSession,
+    rollbackAttemptId: string
   ): Promise<StartWorkspaceScreenSharePayload> {
     try {
       return await this.issuePublisherToken(session, HttpStatus.CREATED);
     } catch (error) {
       try {
-        await this.state.endIfCurrent({
+        await this.state.releaseStartingIfCurrent({
           workspaceId: session.workspaceId,
           sessionId: session.sessionId,
-          livekitRoomName: session.livekitRoomName
+          livekitRoomName: session.livekitRoomName,
+          rollbackAttemptId
         });
       } catch {
         // Preserve the publisher token failure as the API cause.

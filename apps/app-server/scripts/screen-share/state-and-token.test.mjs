@@ -65,18 +65,20 @@ class FakeRedisClient {
   async eval(script, options) {
     if (this.failEval) throw new Error("Redis eval failed");
     if (script.includes("RESERVE_WORKSPACE_SCREEN_SHARE")) {
-      const [workspaceKey, roomKey] = options.keys;
+      const [workspaceKey, roomKey, rollbackKey] = options.keys;
       if (this.has(workspaceKey) || this.has(roomKey)) return 0;
       const ttl = Number(options.arguments[1]);
       this.values.set(workspaceKey, options.arguments[0]);
       this.values.set(roomKey, options.arguments[2]);
+      this.values.set(rollbackKey, options.arguments[3]);
       this.expiries.set(workspaceKey, this.nowSeconds + ttl);
       this.expiries.set(roomKey, this.nowSeconds + ttl);
+      this.expiries.set(rollbackKey, this.nowSeconds + ttl);
       return 1;
     }
 
     if (script.includes("ACTIVATE_WORKSPACE_SCREEN_SHARE")) {
-      const [workspaceKey, roomKey] = options.keys;
+      const [workspaceKey, roomKey, rollbackKey] = options.keys;
       const value = await this.get(workspaceKey);
       if (!value) return null;
       const session = JSON.parse(value);
@@ -87,7 +89,11 @@ class FakeRedisClient {
         return null;
       }
       if (this.values.get(roomKey) !== session.workspaceId) return null;
-      if (session.status === "active") return value;
+      if (session.status === "active") {
+        this.values.delete(rollbackKey);
+        this.expiries.delete(rollbackKey);
+        return value;
+      }
       if (session.status !== "starting") return null;
       const active = {
         ...session,
@@ -101,25 +107,53 @@ class FakeRedisClient {
       if (roomKey && this.values.get(roomKey) === session.workspaceId) {
         this.expiries.set(roomKey, this.nowSeconds + ttl);
       }
+      this.values.delete(rollbackKey);
+      this.expiries.delete(rollbackKey);
       return encoded;
     }
 
-    if (script.includes("END_WORKSPACE_SCREEN_SHARE")) {
-      const [workspaceKey, roomKey] = options.keys;
+    if (script.includes("CLAIM_STARTING_WORKSPACE_SCREEN_SHARE")) {
+      const [workspaceKey, roomKey, rollbackKey] = options.keys;
+      const value = await this.get(workspaceKey);
+      if (!value) return 0;
+      const session = JSON.parse(value);
+      if (
+        session.sessionId !== options.arguments[0] ||
+        session.livekitRoomName !== options.arguments[1] ||
+        session.status !== "starting" ||
+        this.values.get(roomKey) !== session.workspaceId
+      ) {
+        return 0;
+      }
+      this.values.set(rollbackKey, options.arguments[2]);
+      this.expiries.set(rollbackKey, this.expiries.get(workspaceKey));
+      return 1;
+    }
+
+    if (
+      script.includes("END_WORKSPACE_SCREEN_SHARE") ||
+      script.includes("RELEASE_STARTING_WORKSPACE_SCREEN_SHARE")
+    ) {
+      const [workspaceKey, roomKey, rollbackKey] = options.keys;
       const value = this.values.get(workspaceKey);
       if (!value) return null;
       const session = JSON.parse(value);
       if (
         session.sessionId !== options.arguments[0] ||
         session.livekitRoomName !== options.arguments[1] ||
+        (script.includes("RELEASE_STARTING_WORKSPACE_SCREEN_SHARE") &&
+          (session.status !== "starting" ||
+            this.values.get(rollbackKey) !== options.arguments[2])) ||
         this.values.get(roomKey) !== session.workspaceId
       ) {
         return null;
       }
       this.values.delete(workspaceKey);
       this.values.delete(roomKey);
+      this.values.delete(rollbackKey);
       this.expiries.delete(workspaceKey);
       this.expiries.delete(roomKey);
+      this.expiries.delete(rollbackKey);
       return value;
     }
 
@@ -170,16 +204,43 @@ try {
     startedAt: null
   };
 
-  assert.equal(await state.reserve(session), true);
+  assert.equal(await state.reserve(session, "attempt-1"), true);
   assert.equal(
-    await state.reserve({
-      ...session,
-      sessionId: "44444444-4444-4444-8444-444444444444"
-    }),
+    await state.reserve(
+      {
+        ...session,
+        sessionId: "44444444-4444-4444-8444-444444444444"
+      },
+      "attempt-2"
+    ),
     false
   );
   assert.deepEqual(await state.getCurrent(session.workspaceId), session);
   assert.deepEqual(await state.getByRoom(session.livekitRoomName), session);
+  assert.equal(
+    typeof state.claimStartingReservation,
+    "function",
+    "same-owner recovery must claim rollback ownership"
+  );
+  assert.equal(
+    await state.claimStartingReservation({
+      workspaceId: session.workspaceId,
+      sessionId: session.sessionId,
+      livekitRoomName: session.livekitRoomName,
+      rollbackAttemptId: "attempt-recovery"
+    }),
+    true
+  );
+  assert.equal(
+    await state.releaseStartingIfCurrent({
+      workspaceId: session.workspaceId,
+      sessionId: session.sessionId,
+      livekitRoomName: session.livekitRoomName,
+      rollbackAttemptId: "attempt-1"
+    }),
+    null
+  );
+  assert.deepEqual(await state.getCurrent(session.workspaceId), session);
 
   const replacement = {
     ...session,
@@ -234,13 +295,31 @@ try {
     (await state.getCurrent(session.workspaceId))?.startedAt,
     "2026-07-18T00:00:01.000Z"
   );
+  assert.equal(
+    typeof state.releaseStartingIfCurrent,
+    "function",
+    "state must expose a starting-only reservation rollback"
+  );
+  assert.equal(
+    await state.releaseStartingIfCurrent({
+      workspaceId: session.workspaceId,
+      sessionId: session.sessionId,
+      livekitRoomName: session.livekitRoomName,
+      rollbackAttemptId: "attempt-recovery"
+    }),
+    null
+  );
+  assert.deepEqual(await state.getCurrent(session.workspaceId), activated);
   redis.advance(2);
   assert.equal(
-    await state.reserve({
-      ...session,
-      sessionId: "77777777-7777-4777-8777-777777777777",
-      workspaceId: "88888888-8888-4888-8888-888888888888"
-    }),
+    await state.reserve(
+      {
+        ...session,
+        sessionId: "77777777-7777-4777-8777-777777777777",
+        workspaceId: "88888888-8888-4888-8888-888888888888"
+      },
+      "attempt-other"
+    ),
     false
   );
 
@@ -279,6 +358,39 @@ try {
       })
     )?.sessionId,
     session.sessionId
+  );
+  assert.equal(await state.getCurrent(session.workspaceId), null);
+
+  assert.equal(await state.reserve(session, "attempt-3"), true);
+  assert.equal(
+    await state.releaseStartingIfCurrent({
+      workspaceId: session.workspaceId,
+      sessionId: "55555555-5555-4555-8555-555555555555",
+      livekitRoomName: session.livekitRoomName,
+      rollbackAttemptId: "attempt-3"
+    }),
+    null
+  );
+  assert.equal(
+    await state.releaseStartingIfCurrent({
+      workspaceId: session.workspaceId,
+      sessionId: session.sessionId,
+      livekitRoomName: "pilo-screen-share-wrong-room",
+      rollbackAttemptId: "attempt-3"
+    }),
+    null
+  );
+  assert.deepEqual(await state.getCurrent(session.workspaceId), session);
+  assert.equal(
+    (
+      await state.releaseStartingIfCurrent({
+        workspaceId: session.workspaceId,
+        sessionId: session.sessionId,
+        livekitRoomName: session.livekitRoomName,
+        rollbackAttemptId: "attempt-3"
+      })
+    )?.status,
+    "starting"
   );
   assert.equal(await state.getCurrent(session.workspaceId), null);
 

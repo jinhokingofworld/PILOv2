@@ -100,6 +100,8 @@ class FakeStateService {
   getCalls = [];
   reserveCalls = [];
   endCalls = [];
+  releaseStartingCalls = [];
+  rollbackAttemptId = null;
   failReserve = false;
 
   async getCurrent(requestedWorkspaceId) {
@@ -107,11 +109,12 @@ class FakeStateService {
     return this.current;
   }
 
-  async reserve(session) {
+  async reserve(session, rollbackAttemptId) {
     this.reserveCalls.push(session);
     if (this.failReserve) throw new Error("Redis unavailable");
     if (this.current) return false;
     this.current = session;
+    this.rollbackAttemptId = rollbackAttemptId;
     return true;
   }
 
@@ -126,7 +129,38 @@ class FakeStateService {
     }
     const ended = this.current;
     this.current = null;
+    this.rollbackAttemptId = null;
     return ended;
+  }
+
+  async releaseStartingIfCurrent(input) {
+    this.releaseStartingCalls.push(input);
+    if (
+      this.current?.workspaceId !== input.workspaceId ||
+      this.current.sessionId !== input.sessionId ||
+      this.current.livekitRoomName !== input.livekitRoomName ||
+      this.current.status !== "starting" ||
+      this.rollbackAttemptId !== input.rollbackAttemptId
+    ) {
+      return null;
+    }
+    const released = this.current;
+    this.current = null;
+    this.rollbackAttemptId = null;
+    return released;
+  }
+
+  async claimStartingReservation(input) {
+    if (
+      this.current?.workspaceId !== input.workspaceId ||
+      this.current.sessionId !== input.sessionId ||
+      this.current.livekitRoomName !== input.livekitRoomName ||
+      this.current.status !== "starting"
+    ) {
+      return false;
+    }
+    this.rollbackAttemptId = input.rollbackAttemptId;
+    return true;
   }
 }
 
@@ -141,7 +175,7 @@ class FakeTokenService {
     this.publisherCalls.push(input);
     if (this.publisherFailures > 0) {
       this.publisherFailures -= 1;
-      this.beforePublisherFailure?.();
+      await this.beforePublisherFailure?.();
       throw this.publisherError;
     }
     return {
@@ -364,7 +398,45 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
   };
   await assert.rejects(() => harness.service.start(userId, workspaceId));
   assert.deepEqual(harness.state.current, replacement);
-  assert.equal(harness.state.endCalls.length, 1);
+  assert.equal(harness.state.releaseStartingCalls.length, 1);
+}
+
+{
+  const activated = activeSession();
+  const harness = createHarness({ uuids: [sessionId] });
+  harness.tokens.publisherFailures = 1;
+  harness.tokens.beforePublisherFailure = () => {
+    harness.state.current = activated;
+  };
+  await assert.rejects(
+    () => harness.service.start(userId, workspaceId),
+    error => error === harness.tokens.publisherError
+  );
+  assert.deepEqual(
+    harness.state.current,
+    activated,
+    "an older token failure must not roll back the same session after activation"
+  );
+}
+
+{
+  const harness = createHarness({ uuids: [sessionId, nextSessionId] });
+  let recovered = null;
+  harness.tokens.publisherFailures = 1;
+  harness.tokens.beforePublisherFailure = async () => {
+    recovered = await harness.service.start(userId, workspaceId);
+  };
+  await assert.rejects(
+    () => harness.service.start(userId, workspaceId),
+    error => error === harness.tokens.publisherError
+  );
+  assert.equal(recovered?.id, sessionId);
+  assert.equal(recovered?.livekitToken, "publisher-token-2");
+  assert.deepEqual(
+    harness.state.current,
+    startingSession(),
+    "an older token failure must preserve a concurrently recovered token"
+  );
 }
 
 {
