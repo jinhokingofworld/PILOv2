@@ -25,6 +25,8 @@ import {
 } from "tldraw";
 import { useValue } from "@tldraw/state-react";
 import { useCanvasAgent } from "@/features/canvas/agent/use-canvas-agent";
+import { CanvasAgentDeepLinkHandler } from "@/features/canvas/agent/CanvasAgentDeepLinkHandler";
+import { getCanvasAgentDriveShapeId } from "@/features/canvas/agent/canvas-agent-deep-link";
 import { buildCanvasAgentDelegationRequestContext } from "@/features/canvas/agent/canvas-agent-delegation-context";
 import { registerCanvasAgentDelegationAdapter } from "@/features/agent/canvas-delegation-context";
 import { CanvasWorkspaceLocationAdapter } from "@/features/canvas/canvas-workspace-location-adapter";
@@ -1048,16 +1050,25 @@ export function CanvasEditor({
     });
   }, [onViewportBoundsChange]);
   const handleCanvasAgentDriveFileInsert = useCallback(
-    (file: { fileId: string; fileName: string; mimeType: string }) => {
+    (
+      file: { fileId: string; fileName: string; mimeType: string },
+      runId: string,
+    ) => {
       const editor = editorRef.current;
       if (!editor) return false;
+
+      const shapeId = getCanvasAgentDriveShapeId(runId) as TLShapeId;
+      if (editor.getShape(shapeId)) {
+        editor.setSelectedShapes([shapeId]);
+        return true;
+      }
 
       editor.cancel();
       editor.setCurrentTool("select.idle");
       const result = placePiloCanvasShapeInEmptyViewport({
         editor,
         index: createdLocalCardsRef.current + 1,
-        placementRequest: { type: "drive-file", file },
+        placementRequest: { type: "drive-file", file, shapeId },
       });
       if (!result.placed) return false;
 
@@ -2394,6 +2405,11 @@ export function CanvasEditor({
               shapeUtils={piloCanvasShapeUtils}
             >
               <CanvasWorkspaceLocationAdapter canvasId={board.id} />
+              <CanvasAgentDeepLinkHandler
+                canvasId={board.id}
+                onDriveFileInsert={handleCanvasAgentDriveFileInsert}
+                workspaceId={board.workspaceId}
+              />
               <CanvasLocalInteractionReporter
                 onChange={handleLocalInteractionChange}
               />

@@ -1006,10 +1006,16 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
 - Canvas 화면에서 PILO AI의 `기능 설명` 버튼을 누른 요청만 `toolHelpMode=true`다. 다른 화면에는 버튼을
   노출하지 않고, 일반 모드의 같은 단어는 Canvas 도형 검색으로 처리한다.
 - child run resource ref는 `domain=canvas`, `resourceType=canvas_agent_run`이다. 일반 Agent frontend는
-  child 상세를 조회해 HTML artifact가 있으면 동일한 sandbox preview/copy UI를 표시한다.
+  `/canvas?canvasId={canvasId}&canvasAgentRunId={runId}` 형식의 검증된 링크를 만들고, child 상세를
+  조회해 HTML artifact가 있으면 동일한 sandbox preview/copy UI를 표시한다. `clientActionType`은
+  `insert_drive_file` 같은 bounded action taxonomy만 포함하며 파일 payload는 일반 Agent step에 복사하지
+  않는다.
 - 같은 Canvas editor가 활성화돼 있으면 delegated child run을 Canvas 결과 presenter에 전달한다. 따라서
   도형 focus와 HTML code block/connector 삽입은 기존 Classic Canvas roomState patch 흐름을 그대로 사용한다.
-  Canvas 밖에서는 Canvas를 몰래 수정하지 않고 preview와 검증된 Canvas 링크만 제공한다.
+  Canvas 밖의 `find_shapes`는 사용자가 링크를 누른 경우에만 child run의 저장된 viewport와 shape id로
+  일회성 focus를 수행한다. `import_drive_file`은 링크 문구를 `캔버스에 추가하고 열기`로 표시하고,
+  사용자가 누른 뒤 파일 권한을 재검증한 경우에만 기존 editor/realtime patch 흐름으로 `file_node`를
+  생성한다. 링크를 누르기 전에는 Canvas를 수정하지 않는다.
 
 ### Calendar
 

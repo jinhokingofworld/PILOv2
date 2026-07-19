@@ -574,7 +574,7 @@ Request:
 | `selectedScene` | No | Up to 160 normalized selected shapes and 50000 bytes. Required for `generate_html`; omitted when there is no selection or the snapshot is incomplete. Coordinates are relative to the real or virtual root bounds. |
 | `selectedSceneError` | No | Bounded client-side selection/hydration error. A `generate_html` intent returns this message without producing partial HTML. |
 | `viewport` | No | Current visible Canvas bounds used only to create minimal planning context. |
-| `presentationMode` | No | `interactive` shows requester-only progress, pointer, highlight, and viewport focus on the Canvas surface. `background` creates the same read-only run without Canvas-local playback. Defaults to `interactive`. |
+| `presentationMode` | No | `interactive` shows requester-only progress, pointer, highlight, and viewport focus on the Canvas surface. `background` suppresses automatic Canvas-local playback. A requester who explicitly opens a validated `canvasAgentRunId` deep link can still consume its search focus or Drive insertion once. Defaults to `interactive`. |
 | `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, classify among general or selection-scoped chat, existing-shape search, Workspace Drive image import, selected-scene HTML generation, and unsupported mutation or external-domain requests. Defaults to `false`. |
 | `conversationContext` | No | Short-lived same-panel chat memory. `messages` contains up to 10 recent user/assistant messages, and `lastTask` can describe the previous Canvas Agent run for follow-up prompts such as “why?”, “another way?”, or an explicit retry. The current prompt remains authoritative. Legacy draft id/title fields remain nullable for compatibility. |
 | `clientRequestId` | No | Stable retry idempotency key, up to 128 bytes. |
@@ -697,8 +697,19 @@ For a completed and unambiguous `import_drive_file` run, `run.clientAction` is:
 ```
 
 The action never contains an S3 bucket, object key, credential, or presigned
-URL. The requesting Canvas client deduplicates by run id and creates the
-`file_node` through its ordinary editor/realtime path.
+URL. A Canvas deep link carries only `canvasId` and `canvasAgentRunId`. The
+requesting client reads the requester-only run, revalidates the Drive file by
+requesting a fresh preview grant, and creates the `file_node` through its
+ordinary editor/realtime path. The file node uses a deterministic shape id
+derived from the run id, so refreshes or repeated link clicks converge on the
+same roomState record instead of creating duplicates. The consumed run query is
+removed after a successful insertion.
+
+For a completed `find_shapes` run opened through the same deep link, the client
+first focuses `run.progress.targetViewport` so lazy loading can hydrate the
+area. It then retries `highlightedShapeIds`, selects the shapes that are loaded,
+and centers their actual combined bounds. This explicit navigation does not
+change the automatic playback rule for `presentationMode=background`.
 
 Main errors: `401 UNAUTHORIZED`, `403 FORBIDDEN`, `404 CANVAS_AGENT_RUN_NOT_FOUND`.
 

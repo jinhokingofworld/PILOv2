@@ -124,6 +124,10 @@ assert.deepEqual(await definition.prepareExecution(context, {}), { kind: "execut
 const result = await definition.execute(context, {});
 assert.equal(result.status, "delegated");
 assert.equal(result.outputSummary.canvasAgentRunId, CANVAS_RUN_ID);
+assert.equal(
+  result.resourceRefs[0].url,
+  `/canvas?canvasId=${CANVAS_ID}&canvasAgentRunId=${CANVAS_RUN_ID}`,
+);
 assert.equal(delegatedCalls.length, 1);
 assert.equal(delegatedCalls[0][0], USER_ID);
 assert.equal(delegatedCalls[0][1], WORKSPACE_ID);
@@ -227,6 +231,7 @@ const completionDatabase = {
         result_summary: "선택한 영역의 정적 HTML/CSS 초안을 만들었습니다.",
         error_message: null,
         has_artifact: true,
+        client_action_type: "insert_drive_file",
       },
     ];
   },
@@ -248,6 +253,10 @@ assert.equal(
   "선택한 영역의 정적 HTML/CSS 초안을 만들었습니다.",
 );
 assert.equal(settleCalls[0][2].outputSummary.hasArtifact, true);
+assert.equal(
+  settleCalls[0][2].outputSummary.clientActionType,
+  "insert_drive_file",
+);
 
 const targetedSettleCalls = [];
 const targetedActionCalls = [];
@@ -272,6 +281,7 @@ const targetedCompletion = new AgentCanvasDelegationCompletionService(
           result_summary: "대시보드 프레임을 찾았습니다.",
           error_message: null,
           has_artifact: false,
+          client_action_type: null,
         },
       ];
     },

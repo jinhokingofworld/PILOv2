@@ -448,12 +448,13 @@ export function createDriveFileNodeShape(
   index: number,
   position: { x: number; y: number },
   file: CanvasDriveFileReference,
+  shapeId?: TLShapeId,
 ): PiloFileNodePartial {
   const width = 420;
   const height = 280;
 
   return {
-    id: createShapeId(`pilo-drive-file-${Date.now()}-${index}`),
+    id: shapeId ?? createShapeId(`pilo-drive-file-${Date.now()}-${index}`),
     type: "file_node",
     x: position.x - width / 2,
     y: position.y - height / 2,

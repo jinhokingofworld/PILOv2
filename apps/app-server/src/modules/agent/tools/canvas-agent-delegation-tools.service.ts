@@ -127,7 +127,7 @@ export class CanvasAgentDelegationToolsService {
           resourceType: "canvas_agent_run",
           resourceId: run.id,
           label: canvas.title,
-          url: `/canvas?canvasId=${encodeURIComponent(canvas.id)}`,
+          url: `/canvas?canvasId=${encodeURIComponent(canvas.id)}&canvasAgentRunId=${encodeURIComponent(run.id)}`,
           status: run.status,
           metadata: { canvasId: canvas.id }
         }

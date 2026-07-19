@@ -225,7 +225,9 @@ export function getAgentResourceLinks(
     }
 
     for (const resourceRef of step.resourceRefs) {
-      const link = toSqlErdSessionLink(resourceRef) ?? toCanvasLink(resourceRef);
+      const link =
+        toSqlErdSessionLink(resourceRef) ??
+        toCanvasLink(resourceRef, step.outputSummary);
       if (link) {
         links.set(link.key, link);
       }
@@ -236,7 +238,8 @@ export function getAgentResourceLinks(
 }
 
 function toCanvasLink(
-  resourceRef: Record<string, unknown>
+  resourceRef: Record<string, unknown>,
+  outputSummary: Record<string, unknown> | null | undefined,
 ): AgentResourceLink | null {
   const metadata = isPlainObject(resourceRef.metadata) ? resourceRef.metadata : null;
   const canvasId = metadata?.canvasId;
@@ -251,14 +254,17 @@ function toCanvasLink(
   ) {
     return null;
   }
-  const href = `${CANVAS_PATH}?canvasId=${encodeURIComponent(canvasId)}`;
+  const href = `${CANVAS_PATH}?canvasId=${encodeURIComponent(canvasId)}&canvasAgentRunId=${encodeURIComponent(resourceRef.resourceId)}`;
   if (resourceRef.url !== href) {
     return null;
   }
   return {
     href,
     key: `canvas:agent-run:${resourceRef.resourceId}`,
-    label: "캔버스에서 열기"
+    label:
+      outputSummary?.clientActionType === "insert_drive_file"
+        ? "캔버스에 추가하고 열기"
+        : "캔버스에서 열기"
   };
 }
 

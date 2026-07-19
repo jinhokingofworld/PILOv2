@@ -21,6 +21,7 @@ export type PiloPlacementRequest =
   | {
       type: "drive-file";
       file: CanvasDriveFileReference;
+      shapeId?: TLShapeId;
     };
 
 const piloPlacementSizeByType: Record<
@@ -59,11 +60,16 @@ export function placePiloCanvasShapeAt({
       index,
       point,
       placementRequest.file,
+      placementRequest.shapeId,
     );
 
     editor.createShapes([shape]);
     editor.select(shape.id as TLShapeId);
-    return { placed: true, createdCount: 1 };
+    return {
+      placed: true,
+      createdCount: 1,
+      createdShapeIds: [shape.id as TLShapeId],
+    };
   }
 
   const { asset, shape } = createInsertableShape(index, point, placementRequest);

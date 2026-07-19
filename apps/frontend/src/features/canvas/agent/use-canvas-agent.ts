@@ -56,7 +56,7 @@ export function useCanvasAgent({
     fileId: string;
     fileName: string;
     mimeType: string;
-  }) => boolean;
+  }, runId: string) => boolean;
   onFrameSubtreeRequest?: (frameId: string) => Promise<void> | void;
   workspaceId: string;
 }) {
@@ -96,9 +96,10 @@ export function useCanvasAgent({
     (nextRun: CanvasAgentRun) => {
       setRun(nextRun);
       if (
+        nextRun.presentationMode !== "background" &&
         nextRun.clientAction?.type === "insert_drive_file" &&
         !insertedDriveFileRunIdsRef.current.has(nextRun.id) &&
-        onDriveFileInsert(nextRun.clientAction.file)
+        onDriveFileInsert(nextRun.clientAction.file, nextRun.id)
       ) {
         insertedDriveFileRunIdsRef.current.add(nextRun.id);
       }
