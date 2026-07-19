@@ -32,7 +32,8 @@ export class AgentToolRegistryService {
     prReviewAgentToolsService?: PrReviewAgentToolsService,
     canvasAgentDelegationToolsService?: CanvasAgentDelegationToolsService,
     driveAgentToolsService?: DriveAgentToolsService,
-    private readonly domainFeatureFlags = new AgentDomainFeatureFlagService()
+    private readonly domainFeatureFlags: AgentDomainFeatureFlagService =
+      new AgentDomainFeatureFlagService()
   ) {
     if (calendarAgentToolsService) {
       this.registerMany(calendarAgentToolsService.listDefinitions());
