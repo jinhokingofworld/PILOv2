@@ -74,17 +74,32 @@ class FakeActivityLogService {
   }
 }
 
-function createSubject(database = new FakeDatabase()) {
+class FakeGoogleCalendarSyncService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async enqueueUpdatedEventInTransaction(transaction, workspaceId, event) {
+    this.calls.push({ transaction, workspaceId, event });
+  }
+}
+
+function createSubject(
+  database = new FakeDatabase(),
+  googleCalendarSyncService
+) {
   const workspaceService = new FakeWorkspaceService();
   const activityLogService = new FakeActivityLogService();
   const service = new CalendarService(
     database,
     workspaceService,
-    activityLogService
+    activityLogService,
+    googleCalendarSyncService
   );
   return {
     activityLogService,
     database,
+    googleCalendarSyncService,
     service,
     workspaceService
   };
@@ -117,6 +132,48 @@ async function assertBadRequest(action, messagePattern) {
     assert.match(error.getResponse().error.message, messagePattern);
     return true;
   });
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      calendarRow({
+        title: "Existing event",
+        updated_at: new Date("2026-07-03T02:00:00.000Z")
+      }),
+      calendarRow({
+        title: "Changed event",
+        updated_at: new Date("2026-07-03T03:00:00.000Z")
+      })
+    ]
+  });
+  const googleCalendarSyncService = new FakeGoogleCalendarSyncService();
+  const { activityLogService, service } = createSubject(
+    database,
+    googleCalendarSyncService
+  );
+
+  await assert.rejects(
+    () =>
+      service.updateEvent(
+        currentUserId,
+        workspaceId,
+        "1",
+        { title: "Changed event" },
+        { expectedUpdatedAt: "2026-07-03T01:00:00.000Z" }
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 409);
+      assert.match(error.getResponse().error.message, /changed|updatedAt/i);
+      return true;
+    }
+  );
+  assert.equal(
+    database.queries.some(({ text }) => /UPDATE calendar_events/.test(text)),
+    false
+  );
+  assert.equal(activityLogService.calls.length, 0);
+  assert.equal(googleCalendarSyncService.calls.length, 0);
 }
 
 {
