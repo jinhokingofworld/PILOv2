@@ -15,11 +15,12 @@ import {
   readCanvasAgentDeepLinkRunId,
 } from "./canvas-agent-deep-link";
 
-const FOCUS_RETRY_DELAYS_MS = [700, 1_400, 2_800] as const;
+const FOCUS_RETRY_DELAYS_MS = [700, 1_400, 2_800, 5_600] as const;
 
 export function CanvasAgentDeepLinkHandler({
   canvasId,
   onDriveFileInsert,
+  onFrameSubtreeRequest,
   workspaceId,
 }: {
   canvasId: string;
@@ -27,6 +28,7 @@ export function CanvasAgentDeepLinkHandler({
     file: CanvasDriveFileReference,
     runId: string,
   ) => boolean;
+  onFrameSubtreeRequest: (frameId: string) => Promise<void>;
   workspaceId: string;
 }) {
   const editor = useEditor();
@@ -70,10 +72,11 @@ export function CanvasAgentDeepLinkHandler({
 
     function retryShapeFocus(shapeIds: string[], attempt = 0) {
       if (abortController.signal.aborted) return;
-      if (focusLoadedShapes(shapeIds) || attempt >= FOCUS_RETRY_DELAYS_MS.length) {
+      if (focusLoadedShapes(shapeIds)) {
         finish();
         return;
       }
+      if (attempt >= FOCUS_RETRY_DELAYS_MS.length) return;
       retryTimer = window.setTimeout(
         () => retryShapeFocus(shapeIds, attempt + 1),
         FOCUS_RETRY_DELAYS_MS[attempt],
@@ -134,6 +137,7 @@ export function CanvasAgentDeepLinkHandler({
         }
 
         const highlightedShapeIds = run.progress?.highlightedShapeIds ?? [];
+        const loadRootShapeIds = run.progress?.loadRootShapeIds ?? [];
         const targetViewport = run.progress?.targetViewport ?? null;
         if (!highlightedShapeIds.length && !targetViewport) {
           finish();
@@ -147,6 +151,10 @@ export function CanvasAgentDeepLinkHandler({
           finish();
           return;
         }
+        await Promise.allSettled(
+          loadRootShapeIds.map((shapeId) => onFrameSubtreeRequest(shapeId)),
+        );
+        if (abortController.signal.aborted) return;
         retryShapeFocus(highlightedShapeIds);
       } catch {
         // Preserve the query so an explicit reload can retry a transient failure.
@@ -158,7 +166,16 @@ export function CanvasAgentDeepLinkHandler({
       abortController.abort();
       if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
-  }, [canvasId, editor, onDriveFileInsert, router, runId, search, workspaceId]);
+  }, [
+    canvasId,
+    editor,
+    onDriveFileInsert,
+    onFrameSubtreeRequest,
+    router,
+    runId,
+    search,
+    workspaceId,
+  ]);
 
   return null;
 }

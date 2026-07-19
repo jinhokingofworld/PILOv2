@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../../../database/database.service";
 import type {
+  CanvasAgentShapeAncestorRow,
   CanvasAgentDraftRow,
   CanvasAgentRunRow,
   CanvasAgentShapeRow,
@@ -172,12 +173,82 @@ export class CanvasAgentRepository {
 
     return this.database.query<CanvasAgentShapeRow>(
       `
-        SELECT id, title, text_content, shape_type, x, y, width, height, revision, raw_shape
+        SELECT id, title, text_content, shape_type, x, y, width, height,
+          parent_shape_id, rotation, revision, raw_shape
         FROM canvas_freeform_shapes
         WHERE canvas_id = $1
           AND id = ANY($2::text[])
           AND deleted_at IS NULL
         ORDER BY array_position($2::text[], id)
+      `,
+      [canvasId, shapeIds]
+    );
+  }
+
+  async findShapeAncestors(
+    canvasId: string,
+    shapeIds: string[]
+  ): Promise<CanvasAgentShapeAncestorRow[]> {
+    if (!shapeIds.length) return [];
+
+    return this.database.query<CanvasAgentShapeAncestorRow>(
+      `
+        WITH RECURSIVE shape_ancestors AS (
+          SELECT
+            target.id AS source_shape_id,
+            parent.id,
+            parent.title,
+            parent.text_content,
+            parent.shape_type,
+            parent.x,
+            parent.y,
+            parent.width,
+            parent.height,
+            parent.parent_shape_id,
+            parent.rotation,
+            parent.revision,
+            parent.raw_shape,
+            1 AS depth,
+            ARRAY[target.id, parent.id]::text[] AS path
+          FROM canvas_freeform_shapes target
+          JOIN canvas_freeform_shapes parent
+            ON parent.canvas_id = target.canvas_id
+           AND parent.id = target.parent_shape_id
+           AND parent.deleted_at IS NULL
+          WHERE target.canvas_id = $1
+            AND target.id = ANY($2::text[])
+            AND target.deleted_at IS NULL
+
+          UNION ALL
+
+          SELECT
+            ancestors.source_shape_id,
+            parent.id,
+            parent.title,
+            parent.text_content,
+            parent.shape_type,
+            parent.x,
+            parent.y,
+            parent.width,
+            parent.height,
+            parent.parent_shape_id,
+            parent.rotation,
+            parent.revision,
+            parent.raw_shape,
+            ancestors.depth + 1,
+            ancestors.path || parent.id
+          FROM shape_ancestors ancestors
+          JOIN canvas_freeform_shapes parent
+            ON parent.canvas_id = $1
+           AND parent.id = ancestors.parent_shape_id
+           AND parent.deleted_at IS NULL
+          WHERE ancestors.depth < 12
+            AND NOT parent.id = ANY(ancestors.path)
+        )
+        SELECT source_shape_id, id, title, text_content, shape_type, x, y,
+          width, height, parent_shape_id, rotation, revision, raw_shape, depth
+        FROM shape_ancestors
+        ORDER BY array_position($2::text[], source_shape_id), depth DESC
       `,
       [canvasId, shapeIds]
     );
@@ -361,6 +432,7 @@ export class CanvasAgentRepository {
             jsonb_build_object(
               'message', $3,
               'highlightedShapeIds', '[]'::jsonb,
+              'loadRootShapeIds', '[]'::jsonb,
               'targetViewport', NULL,
               'toolTarget', NULL,
               'toolTargetLabel', NULL

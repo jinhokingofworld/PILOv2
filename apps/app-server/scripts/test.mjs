@@ -544,6 +544,9 @@ assert.match(canvasOperationPublisher, /CANVAS_OPERATION_REDIS_CHANNEL = "canvas
 assert.match(canvasOperationPublisher, /REDIS_URL/);
 assert.match(canvasOperationPublisher, /publishOperation/);
 assert.match(canvasAgentRepository, /async discardDraft/);
+assert.match(canvasAgentRepository, /WITH RECURSIVE shape_ancestors/);
+assert.match(canvasAgentRepository, /parent\.id = target\.parent_shape_id/);
+assert.match(canvasAgentRepository, /ancestors\.depth < 12/);
 assert.match(canvasAgentRepository, /DELETE FROM canvas_agent_drafts/);
 assert.doesNotMatch(canvasAgentRepository, /SET status = 'discarded'/);
 assert.match(canvasAgentConstants, /코드 생성 중 오류가 났어요\. 다시 시도해 주세요\./);

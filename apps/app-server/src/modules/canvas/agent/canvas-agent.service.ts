@@ -156,6 +156,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
             progress: {
               message: localAction.message,
               highlightedShapeIds: values.context.selectedShapeIds,
+              loadRootShapeIds: [],
               targetViewport: null,
               toolTarget: typeof localAction.input.toolTarget === "string" ? localAction.input.toolTarget : null,
               toolTargetLabel: typeof localAction.input.toolTargetLabel === "string" ? localAction.input.toolTargetLabel : null
@@ -250,6 +251,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       progress: {
         message: "Canvas AI 초안을 적용했습니다.",
         highlightedShapeIds: shapeIds,
+        loadRootShapeIds: [],
         targetViewport: null,
         toolTarget: null,
         toolTargetLabel: null
@@ -279,6 +281,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       progress: {
         message: "Canvas AI 초안을 폐기했습니다.",
         highlightedShapeIds: [],
+        loadRootShapeIds: [],
         targetViewport: null,
         toolTarget: null,
         toolTargetLabel: null
@@ -474,6 +477,11 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     const highlightedShapeIds = Array.isArray(payload.highlightedShapeIds)
       ? payload.highlightedShapeIds.filter((item): item is string => typeof item === "string")
       : [];
+    const loadRootShapeIds = Array.isArray(payload.loadRootShapeIds)
+      ? payload.loadRootShapeIds.filter(
+          (item): item is string => typeof item === "string"
+        )
+      : [];
     const target = payload.targetViewport;
     const targetViewport = target && typeof target === "object" && !Array.isArray(target)
       && ["x", "y", "width", "height"].every((key) => typeof (target as Record<string, unknown>)[key] === "number")
@@ -485,7 +493,14 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     const toolTargetLabel = typeof payload.toolTargetLabel === "string" && payload.toolTargetLabel.trim()
       ? payload.toolTargetLabel.trim()
       : null;
-    return { message: payload.message, highlightedShapeIds, targetViewport, toolTarget, toolTargetLabel };
+    return {
+      message: payload.message,
+      highlightedShapeIds,
+      loadRootShapeIds,
+      targetViewport,
+      toolTarget,
+      toolTargetLabel
+    };
   }
 
   private readHtmlArtifact(value: Record<string, unknown>) {

@@ -679,6 +679,7 @@ function ClassicCanvasRuntimeInner({
       const result = applyCanvasRoomShapePatch({
         currentShapes: freeformShapesRef.current,
         deletedShapeIds: patch.deletedShapeIds,
+        pendingShapeIds: unloadedShapeIdsRef.current,
         respectViewport: patch.respectViewport,
         shapeDetailCache: shapeDetailCacheRef.current,
         upsertShapes: patch.upsertShapes,

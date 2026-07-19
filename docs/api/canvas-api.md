@@ -38,6 +38,14 @@ coalesced as one editing burst. The burst flushes after 3 seconds without a
 new change and is force-flushed every 30 seconds during continuous editing.
 The first `capturedAt` and `receiveSeq` are retained for each flushed burst.
 
+## Parent shape persistence invariant
+
+Frontend direct persistence and Realtime checkpoint persistence both store a
+shape parent with its complete tldraw id, for example `shape:parent-id`. They
+never strip the `shape:` prefix. Page parents remain represented as
+`parent_shape_id = NULL`. During lazy loading, the latest roomState record wins
+over a persisted DB record with the same shape id.
+
 ## 범위
 
 Canvas API는 사용자가 직접 편집하는 자유형 캔버스와 PR Review room에 연결된

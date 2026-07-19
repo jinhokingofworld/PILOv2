@@ -2408,6 +2408,7 @@ export function CanvasEditor({
               <CanvasAgentDeepLinkHandler
                 canvasId={board.id}
                 onDriveFileInsert={handleCanvasAgentDriveFileInsert}
+                onFrameSubtreeRequest={onFrameSubtreeRequest}
                 workspaceId={board.workspaceId}
               />
               <CanvasLocalInteractionReporter

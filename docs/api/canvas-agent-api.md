@@ -707,9 +707,16 @@ removed after a successful insertion.
 
 For a completed `find_shapes` run opened through the same deep link, the client
 first focuses `run.progress.targetViewport` so lazy loading can hydrate the
-area. It then retries `highlightedShapeIds`, selects the shapes that are loaded,
-and centers their actual combined bounds. This explicit navigation does not
-change the automatic playback rule for `presentationMode=background`.
+area. `run.progress.loadRootShapeIds` contains the validated top-level frame ids
+whose descendants must be hydrated before focusing a nested result. The client
+loads those frame subtrees, retries `highlightedShapeIds`, selects only the
+matched shapes that are loaded, and centers their actual combined editor bounds.
+The App Server fallback viewport composes the stored parent translations and
+rotations, but `editor.getShapePageBounds()` remains authoritative after load.
+If matched shapes are too far apart for a useful combined viewport, progress
+focuses the highest-ranked result while `resourceRefs` retains every match.
+This explicit navigation does not change the automatic playback rule for
+`presentationMode=background`.
 
 Main errors: `401 UNAUTHORIZED`, `403 FORBIDDEN`, `404 CANVAS_AGENT_RUN_NOT_FOUND`.
 
@@ -808,9 +815,13 @@ Response: `200 OK`
 
 The requesting Canvas client polls the run detail endpoint while a run is
 non-terminal. A response may include `progress` with a message, highlighted
-shape ids, and an optional target viewport. The client renders any virtual
-pointer and selection highlight locally; it does not publish those
-values through shared Canvas presence or store pointer coordinates in the DB.
+shape ids, optional root frame ids to hydrate, and an optional target viewport.
+For shape search, a DB match reports that the result is loading until the target
+exists in the editor. The client reports focus completion only after it can
+derive actual editor bounds; a bounded retry timeout does not claim that screen
+navigation succeeded. The client renders any virtual pointer and selection
+highlight locally; it does not publish those values through shared Canvas
+presence or store pointer coordinates in the DB.
 
 When an authorized requester polls an `executing` run, App Server also attempts
 to claim and execute that run's pending action before returning the refreshed
