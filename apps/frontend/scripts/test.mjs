@@ -463,6 +463,7 @@ const featurePages = await Promise.all(
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
 );
 const navigation = navigationFiles.join("\n");
+const calendarNavigationSource = navigationFiles[1];
 const featureNavigation = await readFile(
   new URL("../src/features/navigation.ts", import.meta.url),
   "utf8"
@@ -481,6 +482,8 @@ assert.match(navigation, /Board/);
 assert.match(navigation, /PR review/);
 assert.match(navigation, /Voice meeting/);
 assert.match(navigation, /Canvas/);
+assert.match(calendarNavigationSource, /items:\s*\[\]/);
+assert.doesNotMatch(calendarNavigationSource, /월간 일정|새 일정/);
 assert.match(featureNavigation, /meetingNavigation,[\s\S]*canvasNavigation,[\s\S]*driveNavigation/);
 assert.match(canvasNavigationSource, /items:\s*\[\]/);
 assert.doesNotMatch(canvasNavigationSource, /최근 캔버스|새 캔버스|도형 보드/);

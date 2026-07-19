@@ -10,8 +10,5 @@ export const calendarNavigation: FeatureNavigationItem = {
   action: "일정 보기",
   href: "/calendar",
   icon: CalendarDays,
-  items: [
-    { title: "월간 일정", href: "/calendar#month" },
-    { title: "새 일정", href: "/calendar#new" }
-  ]
+  items: []
 };
