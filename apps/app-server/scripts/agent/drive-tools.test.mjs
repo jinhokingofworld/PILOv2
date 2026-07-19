@@ -16,6 +16,7 @@ const USER_ID = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const RUN_ID = "33333333-3333-4333-8333-333333333333";
 const DOCUMENT_ID = "44444444-4444-4444-8444-444444444444";
+const CHUNK_ID = "55555555-5555-4555-8555-555555555555";
 
 {
   const previousThreshold = process.env.DRIVE_RAG_MIN_SIMILARITY;
@@ -41,6 +42,7 @@ class FakeDocumentSearchService {
     this.calls.push({ currentUserId, workspaceId, input });
     return [
       {
+        chunkId: CHUNK_ID,
         documentId: DOCUMENT_ID,
         title: "PILO \uAE30\uD68D\uC11C",
         headingPath: "Agent MVP",
@@ -67,6 +69,7 @@ function definition(definitions, name) {
 
   assert.equal(tool.riskLevel, "low");
   assert.equal(tool.executionMode, "auto");
+  assert.equal(tool.requiresGroundedAnswer, true);
   assert.deepEqual(tool.inputSchema.required, ["query"]);
   assert.equal(tool.inputSchema.properties.topK.maximum, 8);
 
@@ -85,15 +88,17 @@ function definition(definitions, name) {
       }
     }
   ]);
-  assert.equal(result.status, "completed");
-  assert.equal(result.outputSummary.count, 1);
-  assert.deepEqual(result.outputSummary.documents, [
-    {
-      title: "PILO \uAE30\uD68D\uC11C",
-      headingPath: "Agent MVP",
-      excerpt: "Board Issue \uC870\uD68C\uC640 \uC77C\uC815 \uBCC0\uACBD \uC2DC\uB098\uB9AC\uC624\uB97C \uC815\uC758\uD588\uC2B5\uB2C8\uB2E4."
-    }
-  ]);
+  assert.equal(result.status, "grounding_queued");
+  assert.deepEqual(result.outputSummary, {
+    groundingOutcome: "sources_found",
+    sourceCount: 1,
+    sourceTypes: ["drive_document"]
+  });
+  assert.equal(result.groundingSources.length, 1);
+  assert.equal(result.groundingSources[0].sourceType, "drive_document");
+  assert.equal(result.groundingSources[0].sourceRef, `drive_chunk:${CHUNK_ID}`);
+  assert.equal(result.groundingSources[0].score, 0.91);
+  assert.equal(JSON.stringify(result.outputSummary).includes(CHUNK_ID), false);
   assert.deepEqual(result.resourceRefs, [
     {
       domain: "drive",
@@ -129,6 +134,7 @@ function definition(definitions, name) {
       calls.push({ sql, parameters });
       return [
         {
+          chunk_id: CHUNK_ID,
           document_id: DOCUMENT_ID,
           title: " PILO \uAE30\uD68D\uC11C ",
           heading_path: " Agent MVP ",
@@ -166,6 +172,7 @@ function definition(definitions, name) {
       { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
     ]);
     assert.equal(result[0].title, "PILO \uAE30\uD68D\uC11C");
+    assert.equal(result[0].chunkId, CHUNK_ID);
     assert.equal(result[0].headingPath, "Agent MVP");
     assert.equal(result[0].score, 0.91);
     assert.match(calls[0].sql, /document\.latest_snapshot_id = chunk\.snapshot_id/);
@@ -180,6 +187,39 @@ function definition(definitions, name) {
     } else {
       process.env.OPENAI_API_KEY = previousApiKey;
     }
+  }
+}
+
+{
+  const database = {
+    async query() {
+      return [
+        {
+          chunk_id: CHUNK_ID,
+          document_id: DOCUMENT_ID,
+          title: "irrelevant",
+          heading_path: "other",
+          chunk_text: "unrelated",
+          score: "0.57"
+        }
+      ];
+    }
+  };
+  const service = new DocumentSearchService(database, {
+    async assertWorkspaceAccess() {}
+  });
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.OPENAI_API_KEY = "test-key";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    data: [{ embedding: Array.from({ length: 1536 }, () => 0.01) }]
+  }), { status: 200 });
+  try {
+    assert.deepEqual(await service.search(USER_ID, WORKSPACE_ID, { query: "unrelated", topK: 3 }), []);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
   }
 }
 

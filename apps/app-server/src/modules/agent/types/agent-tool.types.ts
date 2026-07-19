@@ -134,6 +134,17 @@ export interface AgentToolExecutionResult {
   outputSummary: AgentToolOutputSummary;
   resourceRefs: AgentResourceRef[];
   status?: string;
+  /** Server-only evidence. It must never be copied into the public output summary. */
+  groundingSources?: AgentGroundingSourceCandidate[];
+}
+
+export interface AgentGroundingSourceCandidate {
+  sourceType: "meeting_transcript" | "meeting_activity" | "drive_document";
+  sourceRef: string;
+  title?: string;
+  excerpt: string;
+  score: number;
+  resourceRef: AgentResourceRef;
 }
 
 export type AgentToolPostExecutionDisposition =

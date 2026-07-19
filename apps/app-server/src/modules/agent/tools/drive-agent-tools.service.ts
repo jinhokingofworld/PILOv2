@@ -39,6 +39,7 @@ export class DriveAgentToolsService {
         "Workspace\uc5d0\uc11c \ucd5c\uc2e0 \uc0c1\ud0dc\ub85c \uc778\ub371\uc2f1\ub41c \ubb38\uc11c\ub97c \uc758\ubbf8 \uae30\ubc18\uc73c\ub85c \uac80\uc0c9\ud569\ub2c8\ub2e4. \ubb38\uc11c \uc81c\ubaa9\uc5d0 \uc5c6\ub294 \ub0b4\uc6a9\uc73c\ub85c\ub3c4 \uac80\uc0c9\ud558\uba70, \ubb38\uc11c\ub97c \uc218\uc815\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
       riskLevel: "low",
       executionMode: "auto",
+      requiresGroundedAnswer: true,
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -69,15 +70,21 @@ export class DriveAgentToolsService {
 
     return {
       outputSummary: {
-        count: results.length,
-        documents: results.map((result) => ({
-          title: result.title,
-          headingPath: result.headingPath,
-          excerpt: result.excerpt
-        }))
+        groundingOutcome:
+          results.length === 0 ? "no_relevant_sources" : "sources_found",
+        sourceCount: results.length,
+        sourceTypes: results.length === 0 ? [] : ["drive_document"]
       },
+      groundingSources: results.map((result) => ({
+        sourceType: "drive_document" as const,
+        sourceRef: `drive_chunk:${result.chunkId}`,
+        title: result.title,
+        excerpt: result.excerpt,
+        score: result.score,
+        resourceRef: this.toResourceRef(result)
+      })),
       resourceRefs: results.map((result) => this.toResourceRef(result)),
-      status: "completed"
+      status: "grounding_queued"
     };
   }
 

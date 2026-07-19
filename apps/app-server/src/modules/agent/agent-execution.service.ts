@@ -956,7 +956,7 @@ export class AgentExecutionService {
       }
 
       if (definition.requiresGroundedAnswer) {
-        await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs, executionLease: lease });
+        await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs, groundingSources: result.groundingSources, executionLease: lease });
         await this.agentGroundedAnswerOutboxPublisherService
           .publish(runId)
           .catch(() => undefined);

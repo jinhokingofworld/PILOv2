@@ -2,13 +2,13 @@ import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../../database/database.service";
 import { MeetingTranscriptRagService, type MeetingEvidenceSource } from "../meeting/meeting-transcript-rag.service";
 import type { AgentExecutionLease } from "./agent-logging.service";
-import type { AgentJsonObject, AgentResourceRef } from "./types/agent-tool.types";
+import type { AgentGroundingSourceCandidate, AgentJsonObject, AgentResourceRef } from "./types/agent-tool.types";
 
 @Injectable()
 export class AgentGroundedAnswerService {
   constructor(private readonly database: DatabaseService, private readonly meetingTranscriptRagService: MeetingTranscriptRagService) {}
 
-  async completeToolAndQueue(input: { runId: string; workspaceId: string; currentUserId: string; stepId: string; outputSummary: AgentJsonObject; resourceRefs: AgentResourceRef[]; executionLease: AgentExecutionLease }): Promise<void> {
+  async completeToolAndQueue(input: { runId: string; workspaceId: string; currentUserId: string; stepId: string; outputSummary: AgentJsonObject; resourceRefs: AgentResourceRef[]; groundingSources?: AgentGroundingSourceCandidate[]; executionLease: AgentExecutionLease }): Promise<void> {
     const requestedSourceIds = this.meetingTranscriptRagService.normalizeSourceIds(
       Array.isArray(input.outputSummary.sourceIds)
         ? input.outputSummary.sourceIds.filter((id): id is string => typeof id === "string")
