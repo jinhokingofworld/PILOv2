@@ -4197,13 +4197,26 @@ export class PrReviewService {
       analysis.graphSchemaVersion === PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V2
         ? buildPrReviewSemanticGraphHandoffV2(semanticGraphCandidateFiles)
         : buildPrReviewSemanticGraphHandoffV1(semanticGraphCandidateFiles);
-    const semanticGraph = prioritizePrReviewSemanticGraph(
-      resolvePrReviewSemanticGraph(analysis, semanticGraphCandidates),
-      normalizedFiles.map((file) => ({
-        filePath: file.filePath,
-        riskLevel: file.riskLevel
-      }))
+    const resolvedSemanticGraph = resolvePrReviewSemanticGraph(
+      analysis,
+      semanticGraphCandidates
     );
+    const semanticGraph =
+      resolvedSemanticGraph.validationStatus ===
+      "validated_ai_relation_fallback"
+        ? resolvedSemanticGraph
+        : prioritizePrReviewSemanticGraph(
+            resolvedSemanticGraph,
+            normalizedFiles.map((file) => ({
+              filePath: file.filePath,
+              riskLevel: file.riskLevel
+            }))
+          );
+    if (semanticGraph.fallbackReason === "missing_ai_graph") {
+      this.logger.warn(
+        "PR Review semantic graph fallback category=flow reason=missing_ai_graph"
+      );
+    }
     if (semanticGraph.fallbackReason === "invalid_ai_graph") {
       this.logger.warn(
         "PR Review semantic graph fallback category=flow reason=invalid_ai_graph"

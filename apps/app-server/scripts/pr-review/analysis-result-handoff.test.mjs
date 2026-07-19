@@ -408,14 +408,14 @@ function semanticV2ResultBody() {
     ],
     flows: [
       {
-        title: "사용자 로직",
-        description: "구현과 테스트를 함께 검토합니다.",
-        reviewOrder: ["src/user.service.ts", "src/user.service.test.ts"]
-      },
-      {
         title: "사용자 문서",
         description: "문서를 별도 흐름으로 검토합니다.",
         reviewOrder: ["docs/users.md"]
+      },
+      {
+        title: "사용자 로직",
+        description: "테스트부터 구현을 검토합니다.",
+        reviewOrder: ["src/user.service.test.ts", "src/user.service.ts"]
       }
     ],
     relations: [
@@ -539,13 +539,35 @@ function createService(database, github) {
   assert.deepEqual(
     flowCalls.map((call) => call.values.slice(1, 3)),
     [
-      ["사용자 로직", "구현과 테스트를 함께 검토합니다."],
-      ["사용자 문서", "문서를 별도 흐름으로 검토합니다."]
+      ["사용자 문서", "문서를 별도 흐름으로 검토합니다."],
+      ["사용자 로직", "테스트부터 구현을 검토합니다."]
     ]
   );
-  assert.equal(membershipCalls.length, 3);
+  assert.deepEqual(
+    membershipCalls.map((call) => call.values),
+    [
+      [SESSION_ID, "flow-1", "file-3", 1],
+      [SESSION_ID, "flow-2", "file-2", 1],
+      [SESSION_ID, "flow-2", "file-1", 2]
+    ]
+  );
   assert.deepEqual(relationCalls.map((call) => call.values.slice(4, 6)), [
     ["tests", "rule"]
+  ]);
+}
+
+{
+  const warnings = [];
+  const service = createService(
+    new FakeDatabase(jobRow()),
+    new FakeGithubDependency()
+  );
+  service.logger = { warn: (message) => warnings.push(message) };
+
+  await service.storeAnalysisJobResult(JOB_ID, resultBody());
+
+  assert.deepEqual(warnings, [
+    "PR Review semantic graph fallback category=flow reason=missing_ai_graph"
   ]);
 }
 
