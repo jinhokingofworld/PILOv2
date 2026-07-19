@@ -168,7 +168,11 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
     monkeypatch.setattr(
         shared_ai_worker_runtime,
         "OpenAiTranscriptEmbedder",
-        lambda api_key, model_name: (api_key, model_name),
+        lambda api_key, model_name, timeout_seconds: (
+            api_key,
+            model_name,
+            timeout_seconds,
+        ),
     )
     monkeypatch.setattr(
         shared_ai_worker_runtime,
@@ -185,12 +189,12 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
 
     assert worker.meeting_transcript_embedding_processor == (
         "meeting-transcript-repository",
-        ("test-key", "text-embedding-3-small"),
+        ("test-key", "text-embedding-3-small", 30.0),
     )
     assert worker.settings.meeting_transcript_embedding_jobs_per_tick == 10
     assert worker.meeting_activity_evidence_embedding_processor == (
         "meeting-activity-evidence-repository",
-        ("test-key", "text-embedding-3-small"),
+        ("test-key", "text-embedding-3-small", 30.0),
     )
 
 

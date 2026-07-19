@@ -1,5 +1,6 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { badRequest } from "../../../common/api-error";
+import { DocumentSearchService } from "../../drive/document-search.service";
 import {
   MeetingPayload,
   MeetingReportDetailPayload,
@@ -13,6 +14,10 @@ import {
 } from "../../meeting/meeting-action-item-delivery.service";
 import { MeetingTranscriptRagService } from "../../meeting/meeting-transcript-rag.service";
 import { AgentCandidateSelectionService } from "../agent-candidate-selection.service";
+import {
+  EmbeddingTemporarilyUnavailableError,
+  InvalidEmbeddingResponseError
+} from "../grounding/query-embedding";
 import {
   type MeetingAgentResourceReference,
   type MeetingAgentResourceResolution,
@@ -362,6 +367,8 @@ const MAX_ACTION_ITEMS = 10;
 const ACTION_ITEM_TEXT_LIMIT = 500;
 const MAX_MEETING_ROOMS = 100;
 const MAX_MEETING_PARTICIPANTS = 100;
+const MAX_RELATED_DOCUMENTS = 3;
+const MAX_RELATED_DOCUMENT_QUERY_LENGTH = 1000;
 
 @Injectable()
 export class MeetingAgentToolsService {
@@ -370,7 +377,8 @@ export class MeetingAgentToolsService {
     private readonly meetingTranscriptRagService: MeetingTranscriptRagService,
     private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService,
     private readonly meetingAgentResourceResolver?: MeetingAgentResourceResolver,
-    private readonly agentCandidateSelectionService?: AgentCandidateSelectionService
+    private readonly agentCandidateSelectionService?: AgentCandidateSelectionService,
+    @Optional() private readonly documentSearchService?: DocumentSearchService
   ) {}
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
@@ -883,34 +891,104 @@ export class MeetingAgentToolsService {
           context.workspaceId,
           { query: draft.query, ...(reportId ? { reportId } : {}) }
         );
+        const meetingGroundingSources = sources.map((source) => ({
+          sourceType: source.sourceType === "transcript"
+            ? "meeting_transcript" as const
+            : "meeting_activity" as const,
+          sourceRef: source.sourceId,
+          excerpt: source.content,
+          score: source.score ?? 0,
+          resourceRef: this.toMeetingReportResourceRef(source.reportId)
+        }));
+        const relatedDocuments = await this.searchRelatedDocuments(
+          context,
+          draft.query,
+          sources
+        );
+        const documentGroundingSources = relatedDocuments.map((document) => ({
+          sourceType: "drive_document" as const,
+          sourceRef: `drive_chunk:${document.chunkId}`,
+          title: document.title,
+          excerpt: document.excerpt,
+          score: document.score,
+          resourceRef: {
+            domain: "drive",
+            resourceType: "document",
+            resourceId: document.documentId,
+            label: document.title,
+            url: `/files?documentId=${encodeURIComponent(document.documentId)}`,
+            metadata: { headingPath: document.headingPath }
+          }
+        }));
+        const groundingSources = [
+          ...meetingGroundingSources,
+          ...documentGroundingSources
+        ];
         const sourceTypes = [
-          ...new Set(sources.map((source) => source.sourceType))
+          ...new Set([
+            ...sources.map((source) => source.sourceType),
+            ...(documentGroundingSources.length > 0 ? ["drive_document"] : [])
+          ])
         ].sort();
+        const meetingReportIds = reportId
+          ? [reportId]
+          : [...new Set(sources.map((source) => source.reportId))];
         return {
           outputSummary: {
             status: "grounding_queued",
             groundingOutcome:
-              sources.length === 0 ? "no_relevant_sources" : "sources_found",
-            sourceCount: sources.length,
-            sourceTypes,
-            sourceIds: sources.map((source) => source.sourceId)
+              groundingSources.length === 0 ? "no_relevant_sources" : "sources_found",
+            sourceCount: groundingSources.length,
+            sourceTypes
           },
-          resourceRefs: reportId
-            ? [
-                {
-                  domain: "meeting",
-                  resourceType: "meeting_report",
-                  resourceId: reportId
-                }
-              ]
-            : sources.map((source) => ({
-                domain: "meeting",
-                resourceType: "meeting_report",
-                resourceId: source.reportId
-              })),
+          groundingSources,
+          resourceRefs: [
+            ...meetingReportIds.map((id) => this.toMeetingReportResourceRef(id)),
+            ...documentGroundingSources.map((source) => source.resourceRef)
+          ],
           status: "grounding_queued"
         };
       }
+    };
+  }
+
+  private async searchRelatedDocuments(
+    context: AgentToolContext,
+    query: string,
+    sources: Array<{ content: string }>
+  ) {
+    if (!this.documentSearchService || sources.length === 0) {
+      return [];
+    }
+
+    const relatedDocumentQuery = [query, ...sources.map((source) => source.content)]
+      .join("\n")
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, MAX_RELATED_DOCUMENT_QUERY_LENGTH);
+    try {
+      return await this.documentSearchService.search(
+        context.currentUserId,
+        context.workspaceId,
+        { query: relatedDocumentQuery, topK: MAX_RELATED_DOCUMENTS }
+      );
+    } catch (error) {
+      if (
+        error instanceof EmbeddingTemporarilyUnavailableError ||
+        error instanceof InvalidEmbeddingResponseError
+      ) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private toMeetingReportResourceRef(reportId: string): AgentResourceRef {
+    return {
+      domain: "meeting",
+      resourceType: "meeting_report",
+      resourceId: reportId,
+      url: `/report?reportId=${encodeURIComponent(reportId)}`
     };
   }
 
@@ -2093,9 +2171,7 @@ export class MeetingAgentToolsService {
 
   private toResourceRef(report: MeetingReportSummaryPayload): AgentResourceRef {
     return {
-      domain: "meeting",
-      resourceType: "meeting_report",
-      resourceId: report.id,
+      ...this.toMeetingReportResourceRef(report.id),
       status: report.status,
       metadata: {
         meetingId: report.meetingId

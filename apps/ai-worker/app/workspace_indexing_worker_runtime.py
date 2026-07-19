@@ -9,6 +9,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from app.embedding_failure import (
+    RetryableEmbeddingError,
+    TerminalEmbeddingError,
+    classify_openai_embedding_error,
+)
+
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_AWS_REGION = "ap-northeast-2"
@@ -59,6 +65,7 @@ class WorkspaceIndexingWorkerSettings:
     embedding_model: str
     wait_time_seconds: int
     visibility_timeout_seconds: int
+    embedding_timeout_seconds: float = 30.0
 
     @classmethod
     def from_env(cls) -> WorkspaceIndexingWorkerSettings:
@@ -80,10 +87,14 @@ class WorkspaceIndexingWorkerSettings:
                 "AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS",
                 DEFAULT_VISIBILITY_TIMEOUT_SECONDS,
             ),
+            embedding_timeout_seconds=_positive_float_env(
+                "OPENAI_INDEXING_EMBEDDING_TIMEOUT_SECONDS",
+                30.0,
+            ),
         )
 
 
-class DocumentEmbeddingError(Exception):
+class DocumentEmbeddingError(TerminalEmbeddingError):
     pass
 
 
@@ -125,10 +136,15 @@ class DocumentEmbeddingRepository(Protocol):
 class OpenAiDocumentEmbedder:
     model_version = 1
 
-    def __init__(self, api_key: str, model_name: str = DEFAULT_EMBEDDING_MODEL) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = DEFAULT_EMBEDDING_MODEL,
+        timeout_seconds: float = 30.0,
+    ) -> None:
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, timeout=timeout_seconds)
         self.model_name = model_name
 
     def embed_passages(self, texts: Sequence[str]) -> list[list[float]]:
@@ -145,7 +161,7 @@ class OpenAiDocumentEmbedder:
             )
             vectors = [[float(value) for value in item.embedding] for item in response.data]
         except Exception as error:
-            raise DocumentEmbeddingError("OpenAI document embedding failed") from error
+            raise classify_openai_embedding_error(error) from error
 
         if len(vectors) != len(normalized):
             raise DocumentEmbeddingError("OpenAI document embedding response count is invalid")
@@ -381,6 +397,18 @@ class DocumentEmbeddingProcessor:
 
             self.repository.complete_document_embedding_job(str(job["id"]))
             return "document_embedding_completed"
+        except RetryableEmbeddingError:
+            self.repository.requeue_document_embedding_job(
+                str(job["id"]),
+                "Document embedding could not be completed",
+            )
+            return "document_embedding_retryable_failure"
+        except TerminalEmbeddingError:
+            self.repository.fail_document_embedding_job(
+                str(job["id"]),
+                "Document embedding failed",
+            )
+            return "document_embedding_failed"
         except Exception:
             self.repository.requeue_document_embedding_job(
                 str(job["id"]),
@@ -489,6 +517,7 @@ def create_workspace_indexing_worker(
         OpenAiDocumentEmbedder(
             resolved_settings.openai_api_key,
             resolved_settings.embedding_model,
+            resolved_settings.embedding_timeout_seconds,
         ),
     )
     return WorkspaceIndexingWorker(
@@ -634,6 +663,19 @@ def _positive_int_env(key: str, default: int) -> int:
         return max(int(value), 1)
     except ValueError:
         return default
+
+
+def _positive_float_env(key: str, default: float) -> float:
+    value = _optional_env(key)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise RuntimeError(f"{key} must be a positive number") from error
+    if parsed <= 0:
+        raise RuntimeError(f"{key} must be a positive number")
+    return parsed
 
 
 if __name__ == "__main__":

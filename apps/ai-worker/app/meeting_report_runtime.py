@@ -1463,6 +1463,16 @@ class PgMeetingTranscriptEmbeddingRepository:
             (message[:4096], job_id),
         )
 
+    def requeue_transcript_embedding_job(self, job_id: str, message: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_transcript_embedding_jobs
+            SET status = 'pending', error_message = %s, completed_at = NULL, locked_at = NULL
+            WHERE id = %s AND status = 'processing'
+            """,
+            (message[:4096], job_id),
+        )
+
 
 class PgMeetingActivityEvidenceEmbeddingRepository:
     def __init__(self, database_url: str, database_ssl: bool) -> None:
@@ -1611,6 +1621,16 @@ class PgMeetingActivityEvidenceEmbeddingRepository:
             """
             UPDATE meeting_report_activity_evidence_embedding_jobs
             SET status = 'failed', error_message = %s, completed_at = now(), locked_at = NULL
+            WHERE id = %s AND status = 'processing'
+            """,
+            (message[:4096], job_id),
+        )
+
+    def requeue_activity_evidence_embedding_job(self, job_id: str, message: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_activity_evidence_embedding_jobs
+            SET status = 'pending', error_message = %s, completed_at = NULL, locked_at = NULL
             WHERE id = %s AND status = 'processing'
             """,
             (message[:4096], job_id),
@@ -2951,6 +2971,12 @@ class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
 
     def complete_grounded_answer_without_sources(self, run_id: str) -> None:
         self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/no-sources")
+
+    def complete_grounded_answer_security_refusal(self, run_id: str) -> None:
+        self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/security-refusal")
+
+    def fail_grounded_answer_citations(self, run_id: str) -> None:
+        self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/citation-failure")
 
     def _post(self, path: str) -> None:
         request = Request(

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from app.meeting_transcript_embedding_processor import TranscriptEmbeddingError
+from app.embedding_failure import RetryableEmbeddingError, TerminalEmbeddingError
 
 
 class ActivityEvidenceEmbedder(Protocol):
@@ -61,6 +61,8 @@ class MeetingActivityEvidenceEmbeddingRepository(Protocol):
 
     def fail_activity_evidence_embedding_job(self, job_id: str, message: str) -> None: ...
 
+    def requeue_activity_evidence_embedding_job(self, job_id: str, message: str) -> None: ...
+
 
 class MeetingActivityEvidenceEmbeddingProcessor:
     def __init__(
@@ -97,7 +99,19 @@ class MeetingActivityEvidenceEmbeddingProcessor:
 
             self.repository.complete_activity_evidence_embedding_job(job_id)
             return "meeting_activity_evidence_embedding_completed"
-        except TranscriptEmbeddingError as error:
+        except RetryableEmbeddingError:
+            if int(job.get("attempt_count", 1)) < 3:
+                self.repository.requeue_activity_evidence_embedding_job(
+                    job_id,
+                    "Meeting activity evidence embedding is temporarily unavailable",
+                )
+                return "meeting_activity_evidence_embedding_retryable_failure"
+            self.repository.fail_activity_evidence_embedding_job(
+                job_id,
+                "Meeting activity evidence embedding retry limit was reached",
+            )
+            return "meeting_activity_evidence_embedding_retry_exhausted"
+        except TerminalEmbeddingError as error:
             self.repository.fail_activity_evidence_embedding_job(job_id, str(error))
             return "meeting_activity_evidence_embedding_failed"
         except Exception:

@@ -19,6 +19,7 @@ import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
 import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
+import { EmbeddingTemporarilyUnavailableError } from "./grounding/query-embedding";
 import type {
   AgentJsonObject,
   AgentJsonPrimitive,
@@ -956,7 +957,7 @@ export class AgentExecutionService {
       }
 
       if (definition.requiresGroundedAnswer) {
-        await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs, executionLease: lease });
+        await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs, groundingSources: result.groundingSources, executionLease: lease });
         await this.agentGroundedAnswerOutboxPublisherService
           .publish(runId)
           .catch(() => undefined);
@@ -996,10 +997,13 @@ export class AgentExecutionService {
         ? { status: "completed", run: advanced.run }
         : { status: "waiting_user_input", run: advanced.run };
     } catch (error) {
-      const safeMessage = this.toSafeErrorMessage(
-        error,
-        "Agent tool execution failed"
-      );
+      const embeddingUnavailable = error instanceof EmbeddingTemporarilyUnavailableError;
+      const errorCode = embeddingUnavailable
+        ? error.code
+        : "AGENT_TOOL_EXECUTION_FAILED";
+      const safeMessage = embeddingUnavailable
+        ? error.message
+        : this.toSafeErrorMessage(error, "Agent tool execution failed");
 
       const failedStep = await this.agentLoggingService.failStep(
         currentUserId,
@@ -1007,7 +1011,7 @@ export class AgentExecutionService {
         {
           runId,
           stepId: step.id,
-          errorCode: "AGENT_TOOL_EXECUTION_FAILED",
+          errorCode,
           errorMessage: safeMessage,
           executionLease: lease
         }
@@ -1021,9 +1025,11 @@ export class AgentExecutionService {
         workspaceId,
         {
           runId,
-          errorCode: "AGENT_TOOL_EXECUTION_FAILED",
+          errorCode,
           errorMessage: safeMessage,
-          message: "Agent tool을 실행하지 못했습니다."
+          message: embeddingUnavailable
+            ? "근거 검색이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+            : "Agent tool을 실행하지 못했습니다."
         }
       );
 

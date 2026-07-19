@@ -1,5 +1,13 @@
 # Meeting API
 
+## Agent Meeting 근거 검색 안정성
+
+- Meeting Agent 검색은 각 MeetingReport의 최신 `completed` transcript hash와 activity-evidence hash에 속한 chunk만 사용한다.
+- cosine similarity가 Meeting 임계값보다 낮은 chunk는 직접 decision/action item 참조 여부와 관계없이 먼저 제외한다.
+- source가 없으면 관련 근거 없음으로 종료하며, query embedding timeout은 별도의 일시 장애로 처리한다.
+- 인덱싱 embedding 호출은 기본 30초 timeout과 최대 3회 시도를 사용한다. timeout·연결 오류·rate limit·5xx만 재시도하고, 잘못된 응답 개수·차원·비정상 숫자는 즉시 실패한다.
+- transcript 원문, Activity Log metadata, provider payload는 Agent step이나 citation registry에 저장하지 않는다.
+
 ## Recording-linked Canvas activity
 
 `meeting_recording_activity_links` is the only association between a Meeting

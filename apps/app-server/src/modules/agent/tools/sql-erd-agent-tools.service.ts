@@ -20,6 +20,8 @@ import { parseSqlErdSessionCandidates } from "../sql-erd-session-selection";
 import {
   buildSqlErdAgentSchemaProjection,
   createSqlErdModelFingerprint,
+  partitionSqlErdAgentContextTableRefs,
+  type SqlErdAgentContextEvidence,
   resolveSqlErdAgentTableFocus
 } from "./sql-erd-table-focus";
 
@@ -43,6 +45,7 @@ interface InspectSqlErdSchemaInput {
 interface FocusSqlErdReason {
   tableRef: string;
   reason: string;
+  evidence?: SqlErdAgentContextEvidence[];
 }
 
 interface FocusSqlErdTablesInput {
@@ -52,6 +55,7 @@ interface FocusSqlErdTablesInput {
   featureLabel: string;
   primaryTableRefs: string[];
   relatedTableRefs: string[];
+  contextTableRefs: string[];
   confidence: "high" | "medium" | "low";
   reasons: FocusSqlErdReason[];
 }
@@ -83,7 +87,18 @@ const MODEL_FINGERPRINT_PATTERN = /^fnv1a32:[0-9a-f]{8}$/;
 const FOCUS_CONFIDENCE_VALUES = ["high", "medium", "low"] as const;
 const MAX_PRIMARY_TABLES = 20;
 const MAX_RELATED_TABLES = 30;
-const MAX_FOCUS_REASONS = MAX_PRIMARY_TABLES + MAX_RELATED_TABLES;
+const MAX_CONTEXT_TABLES = 20;
+const MAX_CONTEXT_EVIDENCE_ITEMS = 5;
+const MAX_FOCUS_REASONS =
+  MAX_PRIMARY_TABLES + MAX_RELATED_TABLES + MAX_CONTEXT_TABLES;
+const CONTEXT_EVIDENCE_KINDS = [
+  "table_name",
+  "table_comment",
+  "column_name",
+  "column_comment",
+  "data_type",
+  "enum_value"
+] as const;
 
 const INSPECT_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
   type: "object",
@@ -106,6 +121,7 @@ const FOCUS_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
     "featureLabel",
     "primaryTableRefs",
     "relatedTableRefs",
+    "contextTableRefs",
     "confidence",
     "reasons"
   ],
@@ -131,6 +147,12 @@ const FOCUS_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
       uniqueItems: true,
       items: { type: "string", pattern: "^t[1-9][0-9]*$" }
     },
+    contextTableRefs: {
+      type: "array",
+      maxItems: MAX_CONTEXT_TABLES,
+      uniqueItems: true,
+      items: { type: "string", pattern: "^t[1-9][0-9]*$" }
+    },
     confidence: { type: "string", enum: [...FOCUS_CONFIDENCE_VALUES] },
     reasons: {
       type: "array",
@@ -142,7 +164,22 @@ const FOCUS_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
         additionalProperties: false,
         properties: {
           tableRef: { type: "string", pattern: "^t[1-9][0-9]*$" },
-          reason: { type: "string", minLength: 1, maxLength: 240 }
+          reason: { type: "string", minLength: 1, maxLength: 240 },
+          evidence: {
+            type: "array",
+            minItems: 1,
+            maxItems: MAX_CONTEXT_EVIDENCE_ITEMS,
+            items: {
+              type: "object",
+              required: ["kind", "value"],
+              additionalProperties: false,
+              properties: {
+                kind: { type: "string", enum: [...CONTEXT_EVIDENCE_KINDS] },
+                columnName: { type: "string", minLength: 1, maxLength: 80 },
+                value: { type: "string", minLength: 1, maxLength: 240 }
+              }
+            }
+          }
         }
       }
     }
@@ -355,7 +392,7 @@ export class SqlErdAgentToolsService {
     return {
       name: "inspect_sql_erd_schema",
       description:
-        "Workspace SQLtoERD session의 테이블 이름, 주요 컬럼과 FK 관계를 제한된 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용하며 session이 여러 개면 사용자가 선택할 후보를 반환합니다.",
+        "Workspace SQLtoERD session의 테이블 이름, 주요 컬럼, data type, 제한된 enum 값과 FK 관계를 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용하며 session이 여러 개면 사용자가 선택할 후보를 반환합니다.",
       riskLevel: "low",
       executionMode: "contextual",
       inputSchema: INSPECT_SQL_ERD_INPUT_SCHEMA,
@@ -371,7 +408,7 @@ export class SqlErdAgentToolsService {
     return {
       name: "focus_sql_erd_tables",
       description:
-        "inspect_sql_erd_schema 결과의 compact table ref를 model fingerprint로 검증하고 핵심 및 직접 관련 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session은 변경하지 않습니다.",
+        "inspect_sql_erd_schema 결과의 compact table ref와 schema evidence를 model fingerprint로 검증하고 핵심, 직접 FK 관련 및 문맥 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session과 실제 관계선은 변경하지 않습니다.",
       riskLevel: "low",
       executionMode: "auto",
       postExecutionDisposition: "complete_run",
@@ -605,7 +642,8 @@ export class SqlErdAgentToolsService {
     const { session } = resolution;
     const projection = buildSqlErdAgentSchemaProjection(
       session.modelJson,
-      input.featureQuery
+      input.featureQuery,
+      session.sourceText
     );
     const modelFingerprint = createSqlErdModelFingerprint(session.modelJson);
     return {
@@ -636,10 +674,23 @@ export class SqlErdAgentToolsService {
     if (modelFingerprint !== input.modelFingerprint) {
       throw conflict("SQLtoERD model changed; inspect the schema again");
     }
-    const resolved = resolveSqlErdAgentTableFocus(session.modelJson, input);
     const reasonByRef = new Map(
       input.reasons.map((item) => [item.tableRef, item.reason])
     );
+    const evidenceByRef = new Map(
+      input.reasons.map((item) => [item.tableRef, item.evidence ?? []])
+    );
+    resolveSqlErdAgentTableFocus(session.modelJson, input);
+    const contextEvidence = partitionSqlErdAgentContextTableRefs(
+      session.modelJson,
+      session.sourceText,
+      evidenceByRef,
+      input.contextTableRefs
+    );
+    const resolved = resolveSqlErdAgentTableFocus(session.modelJson, {
+      ...input,
+      contextTableRefs: contextEvidence.acceptedRefs
+    });
     const primaryTables = resolved.tables
       .filter((table) => table.role === "primary")
       .map((table) => ({
@@ -648,6 +699,12 @@ export class SqlErdAgentToolsService {
       }));
     const relatedTables = resolved.tables
       .filter((table) => table.role === "related")
+      .map((table) => ({
+        name: table.name,
+        reason: reasonByRef.get(table.ref) ?? ""
+      }));
+    const contextTables = resolved.tables
+      .filter((table) => table.role === "context")
       .map((table) => ({
         name: table.name,
         reason: reasonByRef.get(table.ref) ?? ""
@@ -664,6 +721,11 @@ export class SqlErdAgentToolsService {
         confidence: input.confidence,
         primaryTables,
         relatedTables,
+        contextTables,
+        ignoredContextTables: contextEvidence.ignoredTables.map((table) => ({
+          name: table.name,
+          reason: table.reason
+        })),
         relationCount: resolved.relationIds.length
       }),
       resourceRefs: [
@@ -682,6 +744,7 @@ export class SqlErdAgentToolsService {
             featureLabel: input.featureLabel,
             primaryTableIds: resolved.primaryTableIds,
             relatedTableIds: resolved.relatedTableIds,
+            contextTableIds: resolved.contextTableIds,
             relationIds: resolved.relationIds,
             confidence: input.confidence
           }
@@ -872,6 +935,7 @@ export class SqlErdAgentToolsService {
         "featureLabel",
         "primaryTableRefs",
         "relatedTableRefs",
+        "contextTableRefs",
         "confidence",
         "reasons"
       ],
@@ -903,6 +967,12 @@ export class SqlErdAgentToolsService {
       false,
       "relatedTableRefs"
     );
+    const contextTableRefs = this.readTableRefs(
+      input.contextTableRefs,
+      MAX_CONTEXT_TABLES,
+      false,
+      "contextTableRefs"
+    );
     if (
       typeof input.confidence !== "string" ||
       !FOCUS_CONFIDENCE_VALUES.includes(
@@ -921,14 +991,24 @@ export class SqlErdAgentToolsService {
       if (!this.isPlainObject(value)) {
         throw badRequest("focus reason must be an object");
       }
-      this.assertAllowedFields(value, ["tableRef", "reason"], "focus reason");
+      this.assertAllowedFields(
+        value,
+        ["tableRef", "reason", "evidence"],
+        "focus reason"
+      );
       const tableRef = this.readTableRef(value.tableRef, "reason.tableRef");
+      const evidence = this.validateContextEvidence(value.evidence);
       return {
         tableRef,
-        reason: this.readBoundedText(value.reason, 240, "reason")
+        reason: this.readBoundedText(value.reason, 240, "reason"),
+        ...(evidence ? { evidence } : {})
       };
     });
-    const selectedRefs = new Set([...primaryTableRefs, ...relatedTableRefs]);
+    const selectedRefs = new Set([
+      ...primaryTableRefs,
+      ...relatedTableRefs,
+      ...contextTableRefs
+    ]);
     const reasonRefs = new Set(reasons.map((reason) => reason.tableRef));
     if (
       reasonRefs.size !== reasons.length ||
@@ -949,9 +1029,68 @@ export class SqlErdAgentToolsService {
       ),
       primaryTableRefs,
       relatedTableRefs,
+      contextTableRefs,
       confidence: input.confidence as FocusSqlErdTablesInput["confidence"],
       reasons
     };
+  }
+
+  private validateContextEvidence(
+    value: unknown
+  ): SqlErdAgentContextEvidence[] | undefined {
+    if (value === undefined) return undefined;
+    if (
+      !Array.isArray(value) ||
+      value.length === 0 ||
+      value.length > MAX_CONTEXT_EVIDENCE_ITEMS
+    ) {
+      throw badRequest("focus evidence is invalid");
+    }
+
+    return value.map((item) => {
+      if (!this.isPlainObject(item)) {
+        throw badRequest("focus evidence must be an object");
+      }
+      this.assertAllowedFields(
+        item,
+        ["kind", "columnName", "value"],
+        "focus evidence"
+      );
+      if (
+        typeof item.kind !== "string" ||
+        !CONTEXT_EVIDENCE_KINDS.includes(
+          item.kind as (typeof CONTEXT_EVIDENCE_KINDS)[number]
+        )
+      ) {
+        throw badRequest("focus evidence kind is invalid");
+      }
+      const kind = item.kind as SqlErdAgentContextEvidence["kind"];
+      const requiresColumn = ![
+        "table_name",
+        "table_comment",
+        "column_name"
+      ].includes(kind);
+      if (requiresColumn !== (item.columnName !== undefined)) {
+        throw badRequest("focus evidence columnName is invalid");
+      }
+      return {
+        kind,
+        ...(requiresColumn
+          ? {
+              columnName: this.readBoundedText(
+                item.columnName,
+                80,
+                "evidence.columnName"
+              )
+            }
+          : {}),
+        value: this.readBoundedExactText(
+          item.value,
+          240,
+          "evidence.value"
+        )
+      };
+    });
   }
 
   private readTableRefs(
@@ -1001,6 +1140,21 @@ export class SqlErdAgentToolsService {
       throw badRequest(`${label} length is invalid`);
     }
     return normalized;
+  }
+
+  private readBoundedExactText(
+    value: unknown,
+    maxLength: number,
+    label: string
+  ): string {
+    if (
+      typeof value !== "string" ||
+      !value.trim() ||
+      [...value].length > maxLength
+    ) {
+      throw badRequest(`${label} length is invalid`);
+    }
+    return value;
   }
 
   private assertAllowedFields(

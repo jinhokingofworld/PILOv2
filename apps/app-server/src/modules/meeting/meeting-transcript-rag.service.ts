@@ -1,10 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import { badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
+import { embedGroundingQuery } from "../agent/grounding/query-embedding";
+import {
+  meetingRagMinimumSimilarity,
+  passesRelevanceThreshold
+} from "../agent/grounding/relevance-policy";
 import { WorkspaceService } from "../workspace/workspace.service";
 
-const OPENAI_EMBEDDINGS_URL = "https://api.openai.com/v1/embeddings";
-const EMBEDDING_MODEL = "text-embedding-3-small";
 const MAX_RESULTS = 5;
 const DIRECT_REFERENCE_DISTANCE_BOOST = 0.08;
 const SEMANTIC_DUPLICATE_DISTANCE = 0.12;
@@ -23,6 +26,8 @@ export interface MeetingEvidenceSource {
   action?: string;
   summary?: string;
   directlyReferenced: boolean;
+  /** Internal retrieval diagnostic. Never expose this value in a public tool summary. */
+  score?: number;
 }
 export type MeetingTranscriptSource = MeetingEvidenceSource;
 
@@ -36,8 +41,9 @@ export class MeetingTranscriptRagService {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
     const query = input.query.trim();
     if (!query || query.length > 1000 || (input.reportId && !UUID.test(input.reportId))) throw badRequest("Invalid Meeting evidence search input");
-    const embedding = await this.embed(query);
+    const embedding = await embedGroundingQuery(query);
     const vector = `[${embedding.join(",")}]`;
+    const minimumSimilarity = meetingRagMinimumSimilarity();
     const [transcriptRows, activityRows] = await Promise.all([
       this.database.query<{ id: string; meeting_report_id: string; started_at_ms: number; ended_at_ms: number; content: string; distance: number }>(`
         SELECT chunk.id, chunk.meeting_report_id, chunk.started_at_ms, chunk.ended_at_ms, chunk.content,
@@ -46,9 +52,11 @@ export class MeetingTranscriptRagService {
         JOIN meeting_reports report ON report.id = chunk.meeting_report_id
         JOIN meetings meeting ON meeting.id = report.meeting_id
         WHERE ${this.authorizedReportWhere("chunk.embedding IS NOT NULL")}
+          AND ${this.latestCompletedTranscriptIndexWhere()}
+          AND 1 - (chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector) >= $6
         ORDER BY chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
         LIMIT $5
-      `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS]),
+      `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS, minimumSimilarity]),
       this.database.query<{ id: string; meeting_report_id: string; occurred_at: Date | string; action: string; summary: string; content: string; distance: number; directly_referenced: boolean }>(`
         SELECT chunk.id, chunk.meeting_report_id, chunk.occurred_at, chunk.action, chunk.summary, chunk.content,
           chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector AS distance,
@@ -63,17 +71,21 @@ export class MeetingTranscriptRagService {
         JOIN meeting_reports report ON report.id = chunk.meeting_report_id
         JOIN meetings meeting ON meeting.id = report.meeting_id
         WHERE ${this.authorizedReportWhere("chunk.embedding IS NOT NULL")}
+          AND ${this.latestCompletedActivityIndexWhere()}
+          AND 1 - (chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector) >= $6
         ORDER BY chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
         LIMIT $5
-      `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS])
+      `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS, minimumSimilarity])
     ]);
     const candidates: CandidateSource[] = [
       ...transcriptRows.map((row) => ({ sourceId: `transcript:${row.id}`, sourceType: "transcript" as const, reportId: row.meeting_report_id, startedAtMs: Number(row.started_at_ms), endedAtMs: Number(row.ended_at_ms), content: row.content.slice(0, 600), directlyReferenced: false, distance: Number(row.distance) })),
       ...activityRows.map((row) => ({ sourceId: `activity:${row.id}`, sourceType: "activity" as const, reportId: row.meeting_report_id, occurredAt: this.toIso(row.occurred_at), action: row.action, summary: row.summary.slice(0, 500), content: row.content.slice(0, 600), directlyReferenced: Boolean(row.directly_referenced), distance: Number(row.distance) }))
-    ];
+    ].filter((candidate) =>
+      passesRelevanceThreshold(1 - candidate.distance, minimumSimilarity)
+    );
     const duplicatePairs = await this.findSemanticDuplicatePairs(
-      transcriptRows.map((row) => row.id),
-      activityRows.map((row) => row.id)
+      candidates.filter((candidate) => candidate.sourceType === "transcript").map((candidate) => candidate.sourceId.slice("transcript:".length)),
+      candidates.filter((candidate) => candidate.sourceType === "activity").map((candidate) => candidate.sourceId.slice("activity:".length))
     );
     return this.selectSources(candidates, duplicatePairs);
   }
@@ -91,6 +103,7 @@ export class MeetingTranscriptRagService {
         JOIN meeting_reports report ON report.id = chunk.meeting_report_id
         JOIN meetings meeting ON meeting.id = report.meeting_id
         WHERE chunk.id = ANY($4::uuid[]) AND ${this.authorizedReportWhere("true")}
+          AND ${this.latestCompletedTranscriptIndexWhere()}
       `, [workspaceId, null, currentUserId, transcriptIds]),
       activityIds.length === 0 ? Promise.resolve([]) : this.database.query<{ id: string; meeting_report_id: string; occurred_at: Date | string; action: string; summary: string; content: string; directly_referenced: boolean }>(`
         SELECT chunk.id, chunk.meeting_report_id, chunk.occurred_at, chunk.action, chunk.summary, chunk.content,
@@ -104,6 +117,7 @@ export class MeetingTranscriptRagService {
         JOIN meeting_reports report ON report.id = chunk.meeting_report_id
         JOIN meetings meeting ON meeting.id = report.meeting_id
         WHERE chunk.id = ANY($4::uuid[]) AND ${this.authorizedReportWhere("true")}
+          AND ${this.latestCompletedActivityIndexWhere()}
       `, [workspaceId, null, currentUserId, activityIds])
     ]);
     const bySourceId = new Map<string, MeetingEvidenceSource>();
@@ -135,6 +149,28 @@ export class MeetingTranscriptRagService {
         EXISTS (SELECT 1 FROM workspace_members member WHERE member.workspace_id = meeting.workspace_id AND member.user_id = $3::uuid AND member.role = 'owner')
         OR EXISTS (SELECT 1 FROM meeting_participants participant WHERE participant.meeting_id = meeting.id AND participant.user_id = $3::uuid)
       )`;
+  }
+
+  private latestCompletedTranscriptIndexWhere(): string {
+    return `chunk.transcript_hash = (
+      SELECT job.transcript_hash
+      FROM meeting_report_transcript_embedding_jobs job
+      WHERE job.meeting_report_id = chunk.meeting_report_id
+        AND job.status = 'completed'
+      ORDER BY job.completed_at DESC NULLS LAST, job.created_at DESC, job.id DESC
+      LIMIT 1
+    )`;
+  }
+
+  private latestCompletedActivityIndexWhere(): string {
+    return `chunk.evidence_hash = (
+      SELECT job.evidence_hash
+      FROM meeting_report_activity_evidence_embedding_jobs job
+      WHERE job.meeting_report_id = chunk.meeting_report_id
+        AND job.status = 'completed'
+      ORDER BY job.completed_at DESC NULLS LAST, job.created_at DESC, job.id DESC
+      LIMIT 1
+    )`;
   }
 
   private parseSourceId(sourceId: string): Array<{ type: MeetingEvidenceSourceType; id: string }> {
@@ -218,20 +254,14 @@ export class MeetingTranscriptRagService {
         selectedIds.add(candidate.sourceId);
       }
     }
-    return selected.map(({ distance: _distance, ...source }) => source);
+    return selected.map(({ distance, ...source }) => ({
+      ...source,
+      score: 1 - distance
+    }));
   }
 
   private relevanceScore(candidate: CandidateSource): number {
     return candidate.distance - (candidate.directlyReferenced ? DIRECT_REFERENCE_DISTANCE_BOOST : 0);
   }
 
-  private async embed(query: string): Promise<number[]> {
-    const apiKey = process.env.OPENAI_API_KEY?.trim();
-    if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
-    const response = await fetch(OPENAI_EMBEDDINGS_URL, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: EMBEDDING_MODEL, input: query, dimensions: 1536, encoding_format: "float" }) });
-    const payload = await response.json() as { data?: Array<{ embedding?: unknown }> };
-    const vector = payload.data?.[0]?.embedding;
-    if (!response.ok || !Array.isArray(vector) || vector.length !== 1536 || vector.some((value) => typeof value !== "number" || !Number.isFinite(value))) throw new Error("Meeting evidence query embedding failed");
-    return vector;
-  }
 }

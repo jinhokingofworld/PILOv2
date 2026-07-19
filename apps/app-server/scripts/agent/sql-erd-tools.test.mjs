@@ -102,11 +102,16 @@ function focusModelJson() {
   const modelColumn = (
     id,
     name,
-    { primaryKey = false, foreignKey = false, comment = null } = {}
+    {
+      primaryKey = false,
+      foreignKey = false,
+      comment = null,
+      dataType = "bigint"
+    } = {}
   ) => ({
     id,
     name,
-    dataType: "bigint",
+    dataType,
     nullable: false,
     primaryKey,
     foreignKey,
@@ -161,6 +166,24 @@ function focusModelJson() {
           "users",
           [modelColumn("internal-users-pk", "id", { primaryKey: true })],
           "사용자"
+        ),
+        table(
+          "internal-activity-logs-id",
+          "activity_logs",
+          [
+            modelColumn("internal-activity-logs-pk", "id", {
+              primaryKey: true,
+              dataType: "uuid"
+            }),
+            modelColumn("internal-activity-logs-action", "action", {
+              dataType: "activity_log_action",
+              comment: "기능별 활동 유형"
+            }),
+            modelColumn("internal-activity-logs-target", "target_id", {
+              dataType: "text"
+            })
+          ],
+          "워크스페이스 활동 이력"
         )
       ],
       relations: [
@@ -198,7 +221,13 @@ function focusModelJson() {
 
 const focusProjection = buildSqlErdAgentSchemaProjection(
   focusModelJson(),
-  "결제 기능"
+  "회의 기능",
+  `CREATE TYPE activity_log_action AS ENUM (
+    'workspace_created',
+    'meeting_started',
+    'meeting_ended',
+    'meeting_report_completed'
+  );`
 );
 assert.deepEqual(
   focusProjection.tables.map((table) => [table.ref, table.name]),
@@ -206,7 +235,8 @@ assert.deepEqual(
     ["t1", "orders"],
     ["t2", "payments"],
     ["t3", "payment_attempts"],
-    ["t4", "users"]
+    ["t4", "users"],
+    ["t5", "activity_logs"]
   ]
 );
 assert.deepEqual(focusProjection.edges, [
@@ -220,9 +250,40 @@ assert.equal(
   ),
   true
 );
+assert.deepEqual(
+  focusProjection.tables[4].columns.find((column) => column.name === "action"),
+  {
+    name: "action",
+    dataType: "activity_log_action",
+    enumValues: [
+      "workspace_created",
+      "meeting_started",
+      "meeting_ended",
+      "meeting_report_completed"
+    ],
+    primaryKey: false,
+    foreignKey: false,
+    comment: "기능별 활동 유형"
+  }
+);
 assert.equal(JSON.stringify(focusProjection).length <= 9_000, true);
 assert.equal(JSON.stringify(focusProjection).includes("internal-payments-id"), false);
 assert.equal(JSON.stringify(focusProjection).includes("internal-payments-pk"), false);
+
+const quotedEnumModel = structuredClone(focusModelJson());
+quotedEnumModel.schema.tables[4].columns[1].dataType = '"Activity Type"';
+const quotedEnumProjection = buildSqlErdAgentSchemaProjection(
+  quotedEnumModel,
+  "회의 기능",
+  `CREATE TYPE "Activity Type" AS ENUM ('Meeting  Started', 'O''Brien');
+  -- CREATE TYPE "Activity Type" AS ENUM ('meeting_deleted');`
+);
+assert.deepEqual(
+  quotedEnumProjection.tables[4].columns.find(
+    (column) => column.name === "action"
+  ).enumValues,
+  ["Meeting  Started", "O'Brien"]
+);
 
 const largeProjection = buildSqlErdAgentSchemaProjection(
   {
@@ -265,13 +326,15 @@ assert.equal(largeProjection.truncated, true);
 
 const resolvedFocus = resolveSqlErdAgentTableFocus(focusModelJson(), {
   primaryTableRefs: ["t2"],
-  relatedTableRefs: ["t1", "t3"]
+  relatedTableRefs: ["t1", "t3"],
+  contextTableRefs: ["t5"]
 });
 assert.deepEqual(resolvedFocus.primaryTableIds, ["internal-payments-id"]);
 assert.deepEqual(resolvedFocus.relatedTableIds, [
   "internal-orders-id",
   "internal-attempts-id"
 ]);
+assert.deepEqual(resolvedFocus.contextTableIds, ["internal-activity-logs-id"]);
 assert.deepEqual(resolvedFocus.relationIds, [
   "internal-order-payment-relation",
   "internal-payment-attempt-relation"
@@ -281,21 +344,44 @@ assert.deepEqual(
   [
     ["t2", "payments", "primary"],
     ["t1", "orders", "related"],
-    ["t3", "payment_attempts", "related"]
+    ["t3", "payment_attempts", "related"],
+    ["t5", "activity_logs", "context"]
   ]
 );
 
 for (const invalidSelection of [
-  { primaryTableRefs: [], relatedTableRefs: [] },
-  { primaryTableRefs: ["t2", "t2"], relatedTableRefs: [] },
-  { primaryTableRefs: ["t2"], relatedTableRefs: ["t2"] },
-  { primaryTableRefs: ["t99"], relatedTableRefs: [] },
-  { primaryTableRefs: ["t2"], relatedTableRefs: ["t4"] }
+  { primaryTableRefs: [], relatedTableRefs: [], contextTableRefs: [] },
+  {
+    primaryTableRefs: ["t2", "t2"],
+    relatedTableRefs: [],
+    contextTableRefs: []
+  },
+  {
+    primaryTableRefs: ["t2"],
+    relatedTableRefs: ["t2"],
+    contextTableRefs: []
+  },
+  {
+    primaryTableRefs: ["t2"],
+    relatedTableRefs: [],
+    contextTableRefs: ["t2"]
+  },
+  {
+    primaryTableRefs: ["t2"],
+    relatedTableRefs: ["t3"],
+    contextTableRefs: ["t3"]
+  },
+  { primaryTableRefs: ["t99"], relatedTableRefs: [], contextTableRefs: [] },
+  {
+    primaryTableRefs: ["t2"],
+    relatedTableRefs: ["t4"],
+    contextTableRefs: []
+  }
 ]) {
   assert.throws(
     () => resolveSqlErdAgentTableFocus(focusModelJson(), invalidSelection),
     (error) =>
-      /primary|related|reference|direct/i.test(
+      /primary|related|context|reference|direct/i.test(
         error.getResponse().error.message
       )
   );
@@ -588,8 +674,14 @@ assert.equal(replaced.resourceRefs[0].resourceId, SESSION_ID);
 
 const focusSqlErdService = new FakeSqlErdService();
 focusSqlErdService.session = sessionPayload({
+  sourceText: `CREATE TYPE activity_log_action AS ENUM (
+    'workspace_created',
+    'meeting_started',
+    'meeting_ended',
+    'meeting_report_completed'
+  );`,
   modelJson: focusModelJson(),
-  tableCount: 4,
+  tableCount: 5,
   relationCount: 3,
   revision: 7
 });
@@ -618,6 +710,7 @@ assert.deepEqual(focusDefinition.inputSchema.required, [
   "featureLabel",
   "primaryTableRefs",
   "relatedTableRefs",
+  "contextTableRefs",
   "confidence",
   "reasons"
 ]);
@@ -636,7 +729,18 @@ assert.equal(
   createSqlErdModelFingerprint(focusModelJson())
 );
 assert.equal(inspected.outputSummary.title, focusSqlErdService.session.title);
-assert.equal(inspected.outputSummary.projection.tables.length, 4);
+assert.equal(inspected.outputSummary.projection.tables.length, 5);
+assert.deepEqual(
+  inspected.outputSummary.projection.tables[4].columns.find(
+    (column) => column.name === "action"
+  ).enumValues,
+  [
+    "workspace_created",
+    "meeting_started",
+    "meeting_ended",
+    "meeting_report_completed"
+  ]
+);
 assert.equal(JSON.stringify(inspected.outputSummary).includes("CREATE TABLE"), false);
 assert.equal(JSON.stringify(inspected.outputSummary).includes("internal-payments-id"), false);
 assert.deepEqual(inspected.resourceRefs, []);
@@ -823,11 +927,23 @@ const focusInput = focusDefinition.validateInput({
   featureLabel: "결제 기능",
   primaryTableRefs: ["t2"],
   relatedTableRefs: ["t1", "t3"],
+  contextTableRefs: ["t5"],
   confidence: "medium",
   reasons: [
     { tableRef: "t2", reason: "결제 정보를 저장합니다." },
     { tableRef: "t1", reason: "결제 대상 주문입니다." },
-    { tableRef: "t3", reason: "결제 시도 이력입니다." }
+    { tableRef: "t3", reason: "결제 시도 이력입니다." },
+    {
+      tableRef: "t5",
+      reason: "회의 활동 이력을 기록합니다.",
+      evidence: [
+        {
+          kind: "enum_value",
+          columnName: "action",
+          value: "meeting_started"
+        }
+      ]
+    }
   ]
 });
 assert.throws(
@@ -849,6 +965,11 @@ assert.deepEqual(
   focused.outputSummary.relatedTables.map((table) => table.name),
   ["orders", "payment_attempts"]
 );
+assert.deepEqual(
+  focused.outputSummary.contextTables.map((table) => table.name),
+  ["activity_logs"]
+);
+assert.deepEqual(focused.outputSummary.ignoredContextTables, []);
 assert.deepEqual(focused.resourceRefs, [
   {
     domain: "sqltoerd",
@@ -865,6 +986,7 @@ assert.deepEqual(focused.resourceRefs, [
       featureLabel: "결제 기능",
       primaryTableIds: ["internal-payments-id"],
       relatedTableIds: ["internal-orders-id", "internal-attempts-id"],
+      contextTableIds: ["internal-activity-logs-id"],
       relationIds: [
         "internal-order-payment-relation",
         "internal-payment-attempt-relation"
@@ -875,6 +997,38 @@ assert.deepEqual(focused.resourceRefs, [
 ]);
 assert.equal(JSON.stringify(focused).includes("CREATE TABLE"), false);
 assert.equal(JSON.stringify(focused).includes('"modelJson"'), false);
+
+const focusWithUnverifiedContext = await focusDefinition.execute(
+  context,
+  focusDefinition.validateInput({
+    ...focusInput,
+    reasons: focusInput.reasons.map((reason) =>
+      reason.tableRef === "t5"
+        ? {
+            ...reason,
+            evidence: [
+              {
+                kind: "enum_value",
+                columnName: "action",
+                value: "meeting_deleted"
+              }
+            ]
+          }
+        : reason
+    )
+  })
+);
+assert.deepEqual(focusWithUnverifiedContext.outputSummary.contextTables, []);
+assert.deepEqual(focusWithUnverifiedContext.outputSummary.ignoredContextTables, [
+  {
+    name: "activity_logs",
+    reason: "schema_evidence_not_found"
+  }
+]);
+assert.deepEqual(
+  focusWithUnverifiedContext.resourceRefs[0].metadata.contextTableIds,
+  []
+);
 
 focusSqlErdService.session = sessionPayload({
   ...focusSqlErdService.session,
@@ -931,6 +1085,14 @@ const [agentApiContract, sqlErdApiContract] = await Promise.all([
   readFile(new URL("../../../../docs/api/agent-api.md", import.meta.url), "utf8"),
   readFile(new URL("../../../../docs/api/sqltoerd-api.md", import.meta.url), "utf8")
 ]);
+const tableFocusImplementation = await readFile(
+  new URL(
+    "../../src/modules/agent/tools/sql-erd-table-focus.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+assert.doesNotMatch(tableFocusImplementation, /activity_logs|meeting_started/);
 for (const contract of [agentApiContract, sqlErdApiContract]) {
   assert.match(contract, /generate_sql_erd/);
   assert.match(contract, /inspect_sql_erd_schema/);
@@ -938,6 +1100,10 @@ for (const contract of [agentApiContract, sqlErdApiContract]) {
   assert.match(contract, /table_focus/);
   assert.match(contract, /primaryTableIds/);
   assert.match(contract, /relatedTableIds/);
+  assert.match(contract, /contextTableRefs/);
+  assert.match(contract, /contextTableIds/);
+  assert.match(contract, /ignoredContextTables/);
+  assert.match(contract, /schema evidence/i);
   assert.match(contract, /sessionRevision/);
   assert.match(contract, /sessionSelectionToken/);
   assert.match(contract, /modelFingerprint/);

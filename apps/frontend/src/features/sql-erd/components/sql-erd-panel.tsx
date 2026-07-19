@@ -3654,6 +3654,9 @@ function AgentTableFocusBanner({
       <strong className="text-slate-950">{focus.featureLabel} 집중 보기</strong>
       <span>
         핵심 {focus.primaryTableIds.length} · 관련 {focus.relatedTableIds.length}
+        {focus.contextTableIds.length > 0
+          ? ` · 문맥 ${focus.contextTableIds.length}`
+          : ""}
       </span>
       <span>신뢰도 {confidenceLabel}</span>
       <button

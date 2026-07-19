@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from app.embedding_failure import RetryableEmbeddingError
 from app.meeting_transcript_embedding_processor import (
     OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS,
     MeetingTranscriptEmbeddingProcessor,
@@ -59,11 +60,13 @@ class FakeRepository:
             "id": "job-1",
             "meeting_report_id": "report-1",
             "transcript_hash": transcript_segments_hash(self.segments),
+            "attempt_count": 1,
         }
         self.completed_jobs: list[str] = []
         self.replaced: tuple[object, object, object, object, object] | None = None
         self.superseded_jobs: list[str] = []
         self.failed_jobs: list[tuple[str, str]] = []
+        self.requeued_jobs: list[tuple[str, str]] = []
 
     def claim_transcript_embedding_job(self):
         job, self.job = self.job, None
@@ -87,6 +90,14 @@ class FakeRepository:
 
     def fail_transcript_embedding_job(self, job_id, message):
         self.failed_jobs.append((job_id, message))
+
+    def requeue_transcript_embedding_job(self, job_id, message):
+        self.requeued_jobs.append((job_id, message))
+
+
+class TimeoutEmbedder(FakeEmbedder):
+    def embed_passage(self, _text: str) -> list[float]:
+        raise RetryableEmbeddingError("provider timeout")
 
 
 def test_processor_chunks_and_indexes_completed_transcript_segments() -> None:
@@ -120,6 +131,23 @@ def test_processor_supersedes_changed_segments_without_writing_chunks() -> None:
     assert processor.process_next() == "meeting_transcript_embedding_superseded"
     assert repository.superseded_jobs == ["job-1"]
     assert repository.replaced is None
+
+
+def test_processor_requeues_timeout_until_third_attempt() -> None:
+    repository = FakeRepository()
+    processor = MeetingTranscriptEmbeddingProcessor(repository, TimeoutEmbedder())
+
+    assert processor.process_next() == "meeting_transcript_embedding_retryable_failure"
+    assert repository.requeued_jobs[0][0] == "job-1"
+    assert repository.failed_jobs == []
+
+    repository = FakeRepository()
+    repository.job["attempt_count"] = 3
+    processor = MeetingTranscriptEmbeddingProcessor(repository, TimeoutEmbedder())
+
+    assert processor.process_next() == "meeting_transcript_embedding_retry_exhausted"
+    assert repository.requeued_jobs == []
+    assert repository.failed_jobs[0][0] == "job-1"
 
 
 def test_chunk_transcript_segments_keeps_boundaries_and_splits_only_oversized_segment() -> None:
