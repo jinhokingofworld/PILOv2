@@ -78,8 +78,23 @@ export class ScreenShareService {
   ): Promise<CurrentWorkspaceScreenSharePayload> {
     await this.workspaces.assertWorkspaceAccess(userId, workspaceId);
     const current = await this.state.getCurrent(workspaceId);
-    if (!current || current.status === "starting") {
+    if (!current) {
       return { session: null };
+    }
+
+    if (current.status === "starting") {
+      if (!(await this.rooms.hasActiveScreenTrack(current))) {
+        return { session: null };
+      }
+      const transition = await this.state.activate({
+        workspaceId: current.workspaceId,
+        sessionId: current.sessionId,
+        livekitRoomName: current.livekitRoomName,
+        startedAt: this.now().toISOString()
+      });
+      if (!transition) return { session: null };
+      await this.flushRealtimeOutbox();
+      return { session: this.toPublicSession(transition.session) };
     }
 
     if (await this.rooms.hasActiveScreenTrack(current)) {

@@ -3781,7 +3781,7 @@ export function SqlErdCanvas({
       {onLayoutPatch && !tableFocus ? (
         <button
           aria-label="자동 정렬"
-          className="absolute right-4 top-4 z-20 inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="absolute left-4 top-4 z-20 inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           data-sqltoerd-auto-layout
           onClick={handleAutoLayout}
           title="FK 관계를 기준으로 테이블 자동 정렬"

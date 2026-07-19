@@ -165,6 +165,7 @@ class FakeStateService {
 
   getCalls = [];
   reserveCalls = [];
+  activateCalls = [];
   endCalls = [];
   cleanupModes = [];
   pendingEvents = [];
@@ -189,6 +190,41 @@ class FakeStateService {
     this.current = session;
     this.rollbackAttemptId = rollbackAttemptId;
     return true;
+  }
+
+  async activate(input) {
+    this.activateCalls.push(input);
+    if (
+      this.current?.workspaceId !== input.workspaceId ||
+      this.current?.sessionId !== input.sessionId ||
+      this.current?.livekitRoomName !== input.livekitRoomName ||
+      this.current?.status !== "starting"
+    ) {
+      return null;
+    }
+    const session = {
+      ...this.current,
+      status: "active",
+      startedAt: input.startedAt
+    };
+    this.current = session;
+    const outboxId = `outbox-${this.pendingEvents.length + 1}`;
+    this.pendingEvents.push({
+      id: outboxId,
+      event: {
+        version: 1,
+        event: "workspace-screen-share:started",
+        workspaceId: session.workspaceId,
+        sessionId: session.sessionId,
+        sharer: {
+          userId: session.sharerUserId,
+          displayName: session.sharerDisplayName,
+          avatarUrl: session.sharerAvatarUrl
+        },
+        startedAt: session.startedAt
+      }
+    });
+    return { session, outboxId, cleanupId: null };
   }
 
   async terminateIfCurrent(input, cleanupMode = "revocation") {
@@ -491,6 +527,45 @@ const createHarness = ({
   assert.deepEqual(harness.workspaces.accessCalls, [
     { currentUserId: userId, workspaceId }
   ]);
+}
+
+{
+  const harness = createHarness({ current: startingSession() });
+  harness.rooms.active = true;
+  const result = await harness.service.getCurrent(otherUserId, workspaceId);
+  assert.equal(harness.state.current.status, "active");
+  assert.equal(result.session.id, sessionId);
+  assert.equal(harness.realtime.events[0].event, "workspace-screen-share:started");
+}
+
+{
+  const harness = createHarness({ current: startingSession() });
+  harness.rooms.active = false;
+  assert.equal(
+    (await harness.service.getCurrent(otherUserId, workspaceId)).session,
+    null
+  );
+  assert.equal(harness.state.activateCalls.length, 0);
+  assert.equal(harness.realtime.events.length, 0);
+}
+
+{
+  const replacement = activeSession({
+    sessionId: nextSessionId,
+    sharerLiveKitIdentity: `screen-share:${nextSessionId}:${otherUserId}`,
+    livekitRoomName: `pilo-screen-share-${nextSessionId}`,
+    sharerUserId: otherUserId
+  });
+  const harness = createHarness({ current: startingSession() });
+  harness.rooms.beforeActiveResult = () => {
+    harness.state.current = replacement;
+  };
+  assert.equal(
+    (await harness.service.getCurrent(userId, workspaceId)).session,
+    null
+  );
+  assert.deepEqual(harness.state.current, replacement);
+  assert.equal(harness.realtime.events.length, 0);
 }
 
 {

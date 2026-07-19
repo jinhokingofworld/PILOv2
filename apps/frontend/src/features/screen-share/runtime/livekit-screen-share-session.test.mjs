@@ -136,7 +136,7 @@ test("publisher captures video before reserving, connects, and publishes only sc
     audio: false,
     contentHint: "detail",
     preferCurrentTab: true,
-    resolution: { width: 1280, height: 720, frameRate: 15 },
+    resolution: { width: 1280, height: 720, frameRate: 5 },
     selfBrowserSurface: "include",
   });
   assert.deepEqual(order, ["capture"]);
@@ -157,8 +157,8 @@ test("publisher captures video before reserving, connects, and publishes only sc
       track,
       {
         screenShareEncoding: {
-          maxBitrate: 1_500_000,
-          maxFramerate: 15,
+          maxBitrate: 800_000,
+          maxFramerate: 5,
           priority: "medium",
         },
       },
