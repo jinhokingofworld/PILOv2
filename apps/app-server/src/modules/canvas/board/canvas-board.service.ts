@@ -7,15 +7,12 @@ import type {
   CanvasBoardPayload,
   CanvasRow,
   CanvasViewSettingPayload,
-  ConvertCanvasEngineRequest,
   CreateCanvasRequest,
   UpdateCanvasViewSettingRequest
 } from "../contracts/canvas.types";
 import { CanvasAccessService, CANVAS_WRITE_ACCESS_SQL } from "../policies/canvas-access.service";
 import { mapCanvas } from "../shape/canvas-shape.mapper";
 import {
-  validateCanvasEngineConversion,
-  validateCanvasEngineType,
   validateCanvasTitle,
   validateViewSetting
 } from "../shape/canvas-shape.validation";
@@ -41,9 +38,6 @@ export class CanvasBoardService {
           c.workspace_id,
           c.title,
           c.board_type,
-          c.engine_type,
-          c.engine_version,
-          c.source_canvas_id,
           c.zoom,
           c.viewport_x,
           c.viewport_y,
@@ -55,6 +49,7 @@ export class CanvasBoardService {
          AND s.deleted_at IS NULL
         WHERE c.workspace_id = $1
           AND c.board_type = 'freeform'
+          AND c.engine_type = 'classic'
         GROUP BY c.id
         ORDER BY c.updated_at DESC, c.id ASC
       `,
@@ -72,33 +67,27 @@ export class CanvasBoardService {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const title = validateCanvasTitle(input.title);
-    const engineType = validateCanvasEngineType(input.engineType);
     const canvas = await this.database.queryOne<CanvasRow>(
       `
         INSERT INTO canvas (
           workspace_id,
           title,
           board_type,
-          engine_type,
-          engine_version,
           created_by
         )
-        VALUES ($1, $2, 'freeform', $3, 1, $4)
+        VALUES ($1, $2, 'freeform', $3)
         RETURNING
           id,
           workspace_id,
           title,
           board_type,
-          engine_type,
-          engine_version,
-          source_canvas_id,
           zoom,
           viewport_x,
           viewport_y,
           updated_at,
           0::int AS shape_count
       `,
-      [workspaceId, title, engineType, currentUserId]
+      [workspaceId, title, currentUserId]
     );
 
     if (!canvas) {
@@ -106,72 +95,6 @@ export class CanvasBoardService {
     }
 
     return mapCanvas(canvas);
-  }
-
-  async convertCanvasEngine(
-    currentUserId: string,
-    workspaceId: string,
-    canvasId: string,
-    input: ConvertCanvasEngineRequest
-  ): Promise<CanvasBoardPayload> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-
-    const sourceCanvas = await this.canvasAccess.findCanvas(
-      workspaceId,
-      canvasId,
-      "write"
-    );
-    if (!sourceCanvas) {
-      throw notFound("Canvas not found");
-    }
-
-    const { targetEngineType } = validateCanvasEngineConversion(input);
-    const sourceEngineType = sourceCanvas.engine_type ?? "classic";
-
-    if (targetEngineType === sourceEngineType) {
-      throw badRequest("Canvas already uses the requested engineType");
-    }
-
-    const convertedCanvas = await this.database.queryOne<CanvasRow>(
-      `
-        INSERT INTO canvas (
-          workspace_id,
-          title,
-          board_type,
-          engine_type,
-          engine_version,
-          source_canvas_id,
-          created_by
-        )
-        VALUES ($1, $2, 'freeform', $3, 1, $4, $5)
-        RETURNING
-          id,
-          workspace_id,
-          title,
-          board_type,
-          engine_type,
-          engine_version,
-          source_canvas_id,
-          zoom,
-          viewport_x,
-          viewport_y,
-          updated_at,
-          0::int AS shape_count
-      `,
-      [
-        workspaceId,
-        `${sourceCanvas.title} 실시간`,
-        targetEngineType,
-        sourceCanvas.id,
-        currentUserId
-      ]
-    );
-
-    if (!convertedCanvas) {
-      throw badRequest("Canvas engine conversion could not be created");
-    }
-
-    return mapCanvas(convertedCanvas);
   }
 
   async getCanvas(
@@ -233,9 +156,6 @@ export class CanvasBoardService {
           workspace_id,
           title,
           board_type,
-          engine_type,
-          engine_version,
-          source_canvas_id,
           zoom,
           viewport_x,
           viewport_y,

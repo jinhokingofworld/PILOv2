@@ -2,7 +2,6 @@ import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 
 import { createRealtimeSessionService } from "./auth/session.service";
-import { createCanvasTldrawSyncRoomService } from "./canvas/sync/canvas-tldraw-sync-room.service";
 import { loadRealtimeServerConfig } from "./config/realtime-config";
 import { createRealtimeDatabase } from "./database/database";
 import { createDocumentAccessService } from "./documents/document-access.service";
@@ -45,11 +44,6 @@ async function bootstrap() {
             },
           },
           sync: {
-            canvas: {
-              endpoint: "/sync/canvas",
-              engine: "tldraw_sync",
-              ...tldrawSyncRoomService.getStats(),
-            },
             documents: {
               endpoint: "/sync/documents",
               engine: "hocuspocus",
@@ -68,9 +62,6 @@ async function bootstrap() {
     response.end(JSON.stringify({ error: "not_found" }));
   });
 
-  const tldrawSyncRoomService = createCanvasTldrawSyncRoomService({
-    database,
-  });
   const documentHocuspocusService = createDocumentHocuspocusService({
     accessService: createDocumentAccessService({ database }),
     checkpointService: createDocumentCheckpointService({
@@ -116,8 +107,7 @@ async function bootstrap() {
 
     const acceptsRealtimePath =
       url.pathname === "/ws" ||
-      url.pathname.startsWith("/ws/") ||
-      url.pathname.startsWith("/sync/");
+      url.pathname.startsWith("/ws/");
 
     if (!acceptsRealtimePath) {
       socket.destroy();
@@ -134,16 +124,6 @@ async function bootstrap() {
       request.url ?? "/",
       `http://${request.headers.host ?? "localhost"}`,
     );
-
-    if (url.pathname === "/sync/canvas") {
-      void tldrawSyncRoomService
-        .handleConnection(websocket, request)
-        .catch((error) => {
-          console.error("Canvas tldraw sync connection failed", error);
-          websocket.close(1011, "INTERNAL_ERROR");
-        });
-      return;
-    }
 
     websocket.send(
       JSON.stringify({
@@ -187,7 +167,6 @@ async function bootstrap() {
         });
       });
       await documentHocuspocusService.shutdown();
-      await tldrawSyncRoomService.close();
       await socketServer.close();
       await closeHttpServer;
       process.exit(0);

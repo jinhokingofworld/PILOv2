@@ -1,7 +1,6 @@
 # Realtime Canvas
 
-classic Canvas의 Socket.IO 입구, roomState, checkpoint, presence와 tldraw sync
-room을 관리한다.
+Classic Canvas의 Socket.IO 입구, roomState, checkpoint와 presence를 관리한다.
 
 API 계약은 `docs/api/canvas-api.md`를 따른다.
 
@@ -30,7 +29,6 @@ checkpoint version과 history를 한곳에서 소유한다. 하위 helper는 계
 - `presence/`: 커서, 선택, 편집 의도처럼 저장하지 않는 사용자 상태
 - `preview/`: 이동·크기 변경·삭제 중인 shape의 임시 미리보기
 - `review-lock/`: PR Review conflict draft에서만 사용하는 임시 lock
-- `sync/`: `tldraw_sync` Canvas의 sync room과 snapshot lifecycle
 
 루트의 `canvas-*.ts` 파일은 기존 import를 깨뜨리지 않기 위한 compatibility
 re-export다. 새 코드는 역할별 하위 폴더의 실제 구현을 직접 import한다.
@@ -74,15 +72,3 @@ draft의 임시 소유권 표시에만 사용한다.
 - CRDT 또는 Yjs 기반 classic Canvas 상태 병합
 - App Server의 shape API 계약과 DB schema 정의
 - `canvas_shape_operations`의 장기 operation 조회 API
-
-## tldraw sync room
-
-`sync/`는 `engine_type = 'tldraw_sync'`인 freeform Canvas만 다룬다.
-
-```text
-workspace:{workspaceId}:canvas:{canvasId}:tldraw-sync
-```
-
-접근 확인 후 room을 지연 생성하고, 복구 가능한 snapshot은
-`canvas_sync_documents`에 저장한다. 이 상태를 classic Canvas의
-`canvas_freeform_shapes`나 `canvas_shape_operations`에 섞지 않는다.

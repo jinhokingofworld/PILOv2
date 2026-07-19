@@ -21,17 +21,10 @@ const revocation = {
 
 const classicAccess = {
   boardType: "freeform",
-  engineType: "classic",
   readOnly: false,
 };
 const reviewAccess = {
   boardType: "review",
-  engineType: "classic",
-  readOnly: false,
-};
-const tldrawSyncAccess = {
-  boardType: "freeform",
-  engineType: "tldraw_sync",
   readOnly: false,
 };
 
@@ -150,7 +143,6 @@ function createHandler(sockets, { failLeaveRoom = null } = {}) {
 test("evicts only revoked user's classic Canvas rooms in the target Workspace", async () => {
   const classicRoom = { canvasId: "classic-canvas", workspaceId };
   const reviewRoom = { canvasId: "review-canvas", workspaceId };
-  const tldrawSyncRoom = { canvasId: "sync-canvas", workspaceId };
   const otherWorkspaceRoom = {
     canvasId: "other-classic-canvas",
     workspaceId: otherWorkspaceId,
@@ -158,7 +150,6 @@ test("evicts only revoked user's classic Canvas rooms in the target Workspace", 
   const revokedSocket = createSocket("revoked-tab", userId, [
     { access: classicAccess, room: classicRoom },
     { access: reviewAccess, room: reviewRoom },
-    { access: tldrawSyncAccess, room: tldrawSyncRoom },
     { access: classicAccess, room: otherWorkspaceRoom },
   ]);
   const joiningSocket = createSocket("joining-tab", userId);
@@ -180,7 +171,6 @@ test("evicts only revoked user's classic Canvas rooms in the target Workspace", 
   assert.equal(revokedSocket.data.canvasRoomsByName.has(classicRoomName), false);
   for (const preservedRoom of [
     reviewRoom,
-    tldrawSyncRoom,
     otherWorkspaceRoom,
   ]) {
     const preservedRoomName = createCanvasRoomName(preservedRoom);
@@ -230,14 +220,12 @@ test("disconnects the revoked socket when Classic Canvas room leave fails", asyn
   assert.equal(socket.data.canvasRoomAccess.has(classicRoomName), false);
 });
 
-test("rejects revoked Classic Canvas writes without changing Review or tldraw sync access", () => {
+test("rejects revoked Classic Canvas writes without changing Review access", () => {
   const classicRoom = { canvasId: "classic-canvas", workspaceId };
   const reviewRoom = { canvasId: "review-canvas", workspaceId };
-  const tldrawSyncRoom = { canvasId: "sync-canvas", workspaceId };
   const socket = createSocket("mixed-canvas-tab", userId, [
     { access: classicAccess, room: classicRoom },
     { access: reviewAccess, room: reviewRoom },
-    { access: tldrawSyncAccess, room: tldrawSyncRoom },
   ]);
   socket.data.revokedClassicCanvasWorkspaceIds.add(workspaceId);
 
@@ -247,10 +235,6 @@ test("rejects revoked Classic Canvas writes without changing Review or tldraw sy
   );
   assert.equal(
     assertCanvasRoomWritable(socket, createCanvasRoomName(reviewRoom)),
-    true,
-  );
-  assert.equal(
-    assertCanvasRoomWritable(socket, createCanvasRoomName(tldrawSyncRoom)),
     true,
   );
   assert.equal(socket.emitCalls.length, 1);

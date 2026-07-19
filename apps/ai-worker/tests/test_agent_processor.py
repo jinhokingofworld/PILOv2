@@ -3274,6 +3274,7 @@ def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:
                         "start": "2026-07-09",
                         "end": "2026-07-16",
                         "token": "must-not-leak",
+                        "sessionSelectionToken": "must-not-leak-for-other-tools",
                         "nested": {
                             "providerRawResponse": "must-not-leak",
                             "visible": "ok",
@@ -3293,6 +3294,56 @@ def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:
         "nested": {
             "visible": "ok",
         },
+    }
+
+
+def test_sql_erd_session_selection_token_survives_tool_input_sanitizing() -> None:
+    selection_token = "88888888-8888-4888-8888-888888888888"
+    decision = parse_agent_planner_output(
+        json.dumps(
+            {
+                "status": "tool_candidate",
+                "message": "선택한 SQL ERD 세션을 확인합니다.",
+                "finalAnswerDraft": None,
+                "toolName": "inspect_sql_erd_schema",
+                "inputJson": json.dumps(
+                    {
+                        "featureQuery": "회의 기능",
+                        "sessionSelectionToken": selection_token,
+                        "accessToken": "must-not-leak",
+                    }
+                ),
+                "requiresConfirmation": False,
+                "missingFields": [],
+                "unsupportedReason": None,
+            }
+        )
+    )
+    tools = [
+        tool_snapshot(
+            name="inspect_sql_erd_schema",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["featureQuery"],
+                "additionalProperties": False,
+                "properties": {
+                    "featureQuery": {"type": "string"},
+                    "sessionSelectionToken": {"type": "string", "format": "uuid"},
+                },
+            },
+        )
+    ]
+    job = parse_agent_run_job_payload(agent_payload(tools=tools))
+
+    assert decision.tool_input == {
+        "featureQuery": "회의 기능",
+        "sessionSelectionToken": selection_token,
+    }
+    normalized = normalize_agent_planner_decision(decision, job)
+    assert normalized.output_summary["input"] == {
+        "featureQuery": "회의 기능",
+        "sessionSelectionToken": selection_token,
     }
 
 
@@ -3330,6 +3381,109 @@ def test_agent_planner_schema_is_strict_closed_schema() -> None:
                 assert_closed_objects(value)
 
     assert_closed_objects(_agent_planner_schema())
+
+
+def test_sql_erd_planner_workflow_constraint_forces_focus_after_inspection(
+    monkeypatch,
+) -> None:
+    class FakeProviderError(Exception):
+        pass
+
+    class FakeResponses:
+        calls: list[dict[str, object]] = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                output_text=json.dumps(
+                    {
+                        "status": "tool_candidate",
+                        "message": "회의 관련 테이블을 집중 보기로 표시합니다.",
+                        "finalAnswerDraft": None,
+                        "toolName": "focus_sql_erd_tables",
+                        "inputJson": "{}",
+                        "requiresConfirmation": False,
+                        "missingFields": [],
+                        "unsupportedReason": None,
+                    }
+                ),
+                usage=None,
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs) -> None:
+            self.responses = FakeResponses()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "openai",
+        SimpleNamespace(
+            OpenAI=FakeOpenAI,
+            APIConnectionError=FakeProviderError,
+            APITimeoutError=FakeProviderError,
+            InternalServerError=FakeProviderError,
+            RateLimitError=FakeProviderError,
+        ),
+    )
+    tools = [
+        tool_snapshot(
+            name="inspect_sql_erd_schema",
+            executionMode="contextual",
+            inputSchema={"type": "object"},
+        ),
+        tool_snapshot(
+            name="focus_sql_erd_tables",
+            inputSchema={"type": "object"},
+        ),
+    ]
+    job = parse_agent_run_job_payload(agent_payload(tools=tools))
+    request = AgentPlanningRequest(
+        run_id=RUN_ID,
+        prompt="회의 관련 테이블만 집중해서 보여줘",
+        timezone="Asia/Seoul",
+        current_date="2026-07-20",
+        tool_schema_version=AGENT_TOOL_SCHEMA_VERSION,
+        tools=job.tools,
+        planning_context=sql_erd_inspection_planning_context("t22", "t23"),
+        context_surface="sql_erd",
+    )
+
+    OpenAiAgentPlannerClient("test-key", "gpt-test", 45).plan(request)
+
+    call = FakeResponses.calls[0]
+    user_payload = json.loads(call["input"][1]["content"])
+    response_schema = call["text"]["format"]["schema"]
+    assert user_payload.get("workflowConstraint") == {
+        "requiredToolName": "focus_sql_erd_tables",
+        "completionAllowed": False,
+    }
+    assert "completed" not in response_schema["properties"]["status"]["enum"]
+    assert response_schema["properties"]["toolName"]["enum"] == [
+        "focus_sql_erd_tables",
+        None,
+    ]
+
+    FakeResponses.calls.clear()
+    completed_request = AgentPlanningRequest(
+        run_id=request.run_id,
+        prompt=request.prompt,
+        timezone=request.timezone,
+        current_date=request.current_date,
+        tool_schema_version=request.tool_schema_version,
+        tools=request.tools,
+        planning_context=(
+            request.planning_context + '\ntool focus_sql_erd_tables: {"action":"focused"}'
+        ),
+        context_surface=request.context_surface,
+    )
+
+    OpenAiAgentPlannerClient("test-key", "gpt-test", 45).plan(completed_request)
+
+    completed_call = FakeResponses.calls[0]
+    completed_payload = json.loads(completed_call["input"][1]["content"])
+    completed_schema = completed_call["text"]["format"]["schema"]
+    assert completed_payload["workflowConstraint"] is None
+    assert "completed" in completed_schema["properties"]["status"]["enum"]
 
 
 def test_sql_erd_planner_contract_uses_structured_schema_without_raw_ddl() -> None:

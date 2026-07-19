@@ -7,7 +7,10 @@ const UUID_PATTERN =
 
 export const CANVAS_READ_ACCESS_SQL = `
   (
-    c.board_type = 'freeform'
+    (
+      c.board_type = 'freeform'
+      AND c.engine_type = 'classic'
+    )
     OR (
       c.board_type = 'review'
       AND EXISTS (
@@ -22,7 +25,10 @@ export const CANVAS_READ_ACCESS_SQL = `
 
 export const CANVAS_WRITE_ACCESS_SQL = `
   (
-    c.board_type = 'freeform'
+    (
+      c.board_type = 'freeform'
+      AND c.engine_type = 'classic'
+    )
     OR (
       c.board_type = 'review'
       AND EXISTS (
@@ -63,9 +69,6 @@ export class CanvasAccessService {
           c.workspace_id,
           c.title,
           c.board_type,
-          c.engine_type,
-          c.engine_version,
-          c.source_canvas_id,
           c.zoom,
           c.viewport_x,
           c.viewport_y,
