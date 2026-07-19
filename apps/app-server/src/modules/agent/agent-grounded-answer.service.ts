@@ -62,6 +62,10 @@ export class AgentGroundedAnswerService {
       sourceRef: source.sourceRef,
       resourceRef: this.boundResourceRef(source.resourceRef)
     }));
+    const resourceRefs = this.mergeResourceRefs(
+      input.resourceRefs,
+      registry.map((entry) => entry.resourceRef)
+    );
     const outputSummary: AgentJsonObject = {
       ...input.outputSummary,
       groundingOutcome:
@@ -97,7 +101,7 @@ export class AgentGroundedAnswerService {
            completed_at = now(), updated_at = now()
          WHERE id = $1 AND run_id = $2 AND status = 'running'
          RETURNING id`,
-        [input.stepId, input.runId, JSON.stringify(outputSummary), JSON.stringify(input.resourceRefs)]
+        [input.stepId, input.runId, JSON.stringify(outputSummary), JSON.stringify(resourceRefs)]
       );
       if (!completedStep) throw new Error("Agent grounded tool step could not be completed");
 
@@ -391,6 +395,31 @@ export class AgentGroundedAnswerService {
       ...(reference.url ? { url: reference.url.slice(0, 500) } : {}),
       ...(reference.status ? { status: reference.status.slice(0, 80) } : {})
     };
+  }
+
+  private mergeResourceRefs(
+    explicitRefs: AgentResourceRef[],
+    groundingRefs: AgentResourceRef[]
+  ): AgentResourceRef[] {
+    const byIdentity = new Map<string, AgentResourceRef>();
+    for (const reference of explicitRefs) {
+      const key = this.resourceRefIdentity(reference);
+      if (!byIdentity.has(key)) byIdentity.set(key, reference);
+    }
+    for (const reference of groundingRefs) {
+      const bounded = this.boundResourceRef(reference);
+      const key = this.resourceRefIdentity(bounded);
+      if (!byIdentity.has(key)) byIdentity.set(key, bounded);
+    }
+    return [...byIdentity.values()].slice(0, 100);
+  }
+
+  private resourceRefIdentity(reference: AgentResourceRef): string {
+    return JSON.stringify([
+      reference.domain,
+      reference.resourceType,
+      reference.resourceId
+    ]);
   }
 
   private isSourceType(value: unknown): value is GroundingSourceType {

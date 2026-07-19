@@ -325,6 +325,103 @@ try {
 
 {
   const executed = [];
+  const runId = "77777777-7777-4777-8777-777777777778";
+  const stepId = "88888888-8888-4888-8888-888888888889";
+  const leaseToken = "99999999-9999-4999-8999-999999999998";
+  const documentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01";
+  const database = {
+    async transaction(callback) { return callback(this); },
+    async queryOne(text, values) {
+      if (text.includes("FROM agent_runs") && text.includes("FOR UPDATE")) {
+        return {
+          id: values[0],
+          execution_lease_token: leaseToken,
+          execution_lease_generation: 1
+        };
+      }
+      if (text.includes("SELECT COALESCE(MAX(step_order)")) {
+        return { next_order: 2 };
+      }
+      if (text.includes("UPDATE agent_steps") && text.includes("SET status = 'completed'")) {
+        executed.push({ text, values });
+        return { id: values[0] };
+      }
+      return null;
+    },
+    async execute(text, values) { executed.push({ text, values }); }
+  };
+  const service = new AgentGroundedAnswerService(database, {
+    normalizeSourceIds() { return []; },
+    async loadAuthorizedSources() { return []; }
+  });
+
+  await service.completeToolAndQueue({
+    runId,
+    workspaceId: WORKSPACE_ID,
+    currentUserId: USER_ID,
+    stepId,
+    outputSummary: { status: "grounding_queued" },
+    resourceRefs: [
+      {
+        domain: "meeting",
+        resourceType: "meeting_report",
+        resourceId: REPORT_ID
+      }
+    ],
+    groundingSources: [
+      {
+        sourceType: "drive_document",
+        sourceRef: "drive_chunk:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb01",
+        title: "Async Processing Design",
+        excerpt: "Worker deployment order",
+        score: 0.91,
+        resourceRef: {
+          domain: "drive",
+          resourceType: "document",
+          resourceId: documentId,
+          label: "Async Processing Design",
+          url: `/files?documentId=${documentId}`
+        }
+      },
+      {
+        sourceType: "drive_document",
+        sourceRef: "drive_chunk:cccccccc-cccc-4ccc-8ccc-cccccccccc01",
+        title: "Async Processing Design",
+        excerpt: "Previous-version rollback",
+        score: 0.88,
+        resourceRef: {
+          domain: "drive",
+          resourceType: "document",
+          resourceId: documentId,
+          label: "Async Processing Design",
+          url: `/files?documentId=${documentId}`
+        }
+      }
+    ],
+    executionLease: { token: leaseToken, generation: 1 }
+  });
+
+  const completedStep = executed.find((call) =>
+    call.text.includes("UPDATE agent_steps") && call.text.includes("SET status = 'completed'")
+  );
+  assert.deepEqual(JSON.parse(completedStep.values[3]), [
+    {
+      domain: "meeting",
+      resourceType: "meeting_report",
+      resourceId: REPORT_ID
+    },
+    {
+      domain: "drive",
+      resourceType: "document",
+      resourceId: documentId,
+      label: "Async Processing Design",
+      url: `/files?documentId=${documentId}`
+    }
+  ]);
+}
+
+{
+  const executed = [];
   const database = {
     async transaction(callback) { return callback(this); },
     async queryOne(text, values) {

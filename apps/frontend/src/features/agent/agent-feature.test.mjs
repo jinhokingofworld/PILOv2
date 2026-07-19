@@ -743,6 +743,92 @@ assert.deepEqual(getAgentResourceLinks(completedRun), [
   }
 ]);
 
+const meetingReportId = "77777777-7777-4777-8777-777777777771";
+const relatedDocumentId = "88888888-8888-4888-8888-888888888881";
+assert.deepEqual(
+  getAgentResourceLinks({
+    status: "completed",
+    steps: [
+      {
+        id: "meeting-summary-step",
+        status: "completed",
+        outputSummary: {},
+        resourceRefs: [
+          {
+            domain: "meeting",
+            resourceType: "meeting_report",
+            resourceId: meetingReportId,
+            url: `/report?reportId=${meetingReportId}`,
+          },
+          {
+            domain: "drive",
+            resourceType: "document",
+            resourceId: relatedDocumentId,
+            label: "Async Processing Design",
+            url: `/files?documentId=${relatedDocumentId}`,
+          },
+        ],
+      },
+    ],
+  }),
+  [
+    {
+      href: `/report?reportId=${meetingReportId}`,
+      key: `meeting:report:${meetingReportId}`,
+      label: "회의록 보기",
+    },
+    {
+      href: `/files?documentId=${relatedDocumentId}`,
+      key: `drive:document:${relatedDocumentId}`,
+      label: "Async Processing Design 보기",
+    },
+  ],
+);
+
+for (const resourceRef of [
+  {
+    domain: "meeting",
+    resourceType: "meeting_report",
+    resourceId: meetingReportId,
+    url: `/report?reportId=${meetingReportId}&extra=1`,
+  },
+  {
+    domain: "meeting",
+    resourceType: "meeting_report",
+    resourceId: meetingReportId,
+    url: `https://example.com/report?reportId=${meetingReportId}`,
+  },
+  {
+    domain: "drive",
+    resourceType: "document",
+    resourceId: relatedDocumentId,
+    label: "Async Processing Design",
+    url: `/wrong?documentId=${relatedDocumentId}`,
+  },
+  {
+    domain: "drive",
+    resourceType: "document",
+    resourceId: relatedDocumentId,
+    label: "Async Processing Design",
+    url: `\\files?documentId=${relatedDocumentId}`,
+  },
+]) {
+  assert.deepEqual(
+    getAgentResourceLinks({
+      status: "completed",
+      steps: [
+        {
+          id: "unsafe-resource-step",
+          status: "completed",
+          outputSummary: {},
+          resourceRefs: [resourceRef],
+        },
+      ],
+    }),
+    [],
+  );
+}
+
 const focusedResourceRef = {
   ...validResourceRef,
   status: "focused",
