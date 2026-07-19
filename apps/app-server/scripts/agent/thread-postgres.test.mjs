@@ -124,7 +124,12 @@ try {
   assert.notEqual(await threadIdFor(staleResult.run.id), staleThreadId);
 
   await resetTables();
-  const pendingThreadId = await insertThread(new Date(Date.now() - 61 * 60 * 1000));
+  const recentThreadId = await insertThread(new Date());
+  const recentResult = await service.createRun(userId, workspaceId, { prompt: "독립 요청" });
+  assert.notEqual(await threadIdFor(recentResult.run.id), recentThreadId);
+
+  await resetTables();
+  const pendingThreadId = await insertThread(new Date());
   const pendingRunId = randomUUID();
   await client.query(
     `INSERT INTO agent_runs (id, workspace_id, requested_by_user_id, thread_id, prompt, timezone)
@@ -137,7 +142,7 @@ try {
     [pendingRunId]
   );
   const pendingResult = await service.createRun(userId, workspaceId, { prompt: "승인 전 후속 요청" });
-  assert.equal(await threadIdFor(pendingResult.run.id), pendingThreadId);
+  assert.notEqual(await threadIdFor(pendingResult.run.id), pendingThreadId);
 
   await client.query("ROLLBACK");
   console.log("Agent thread PostgreSQL policy test passed");

@@ -100,9 +100,7 @@ AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE = (
     "회의록 근거 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요."
 )
 AGENT_PLANNING_CONTEXT_MAX_CHARACTERS = 12_000
-AGENT_THREAD_CONTEXT_MAX_RUNS = 6
 AGENT_THREAD_CONTEXT_MAX_BYTES = 12 * 1024
-AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS = 12
 AGENT_TOOL_OUTPUT_MAX_CHARACTERS = 3_000
 SQL_ERD_INSPECTION_TOOL_NAME = "inspect_sql_erd_schema"
 LOCAL_APP_ENVS = {"local", "test", "development"}
@@ -192,11 +190,6 @@ def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
     return _serialize_bounded_agent_tool_output(output_json, max_size)
 
 
-SAFE_THREAD_RESOURCE_TYPES = {
-    "meeting",
-    "meeting_report",
-    "meeting_report_action_item",
-}
 UUID_TEXT_PATTERN = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
     re.IGNORECASE,
@@ -310,15 +303,6 @@ def _truncate_utf8(value: str, max_bytes: int) -> str:
         except UnicodeDecodeError:
             encoded = encoded[:-1]
     return ""
-
-
-def _agent_context_ref(thread_id: str, run_id: str, step_id: str, ref_index: int) -> str:
-    digest = hashlib.sha256(f"{thread_id}:{run_id}:{step_id}:{ref_index}".encode()).hexdigest()
-    return f"ctx_{digest[:24]}"
-
-
-def _thread_context_line(kind: str, **values: object) -> str:
-    return f"previous {kind}: {json.dumps(values, ensure_ascii=False, separators=(',', ':'))}"
 
 
 def _safe_meeting_candidate_resume_input(value: dict[object, object]) -> dict[str, object]:
@@ -1666,8 +1650,7 @@ class PgAgentRunRepository:
               run.status,
               run.prompt,
               run.timezone,
-              run.planner_turn_count,
-              run.thread_id
+              run.planner_turn_count
             FROM agent_runs AS run
             INNER JOIN agent_run_outbox AS outbox
               ON outbox.run_id = run.id
@@ -1690,110 +1673,6 @@ class PgAgentRunRepository:
 
         memory: list[str] = []
         untrusted_source_lines: list[tuple[str, PromptSecuritySource]] = []
-        thread_id = row["thread_id"]
-        if thread_id is not None:
-            thread_runs = self.connection.execute(
-                """
-                SELECT id, prompt, final_answer
-                FROM agent_runs
-                WHERE thread_id = %s
-                  AND id <> %s
-                  AND workspace_id = %s
-                  AND requested_by_user_id = %s
-                  AND status = 'completed'
-                  AND final_answer IS NOT NULL
-                ORDER BY created_at DESC, id DESC
-                LIMIT %s
-                """,
-                (
-                    thread_id,
-                    job.run_id,
-                    job.workspace_id,
-                    job.requested_by_user_id,
-                    AGENT_THREAD_CONTEXT_MAX_RUNS,
-                ),
-            ).fetchall()
-            thread_memory_newest: list[list[str]] = []
-            remaining_resource_refs = AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS
-            for newest_index, thread_run in enumerate(thread_runs):
-                turn_lines: list[str] = []
-                turn = len(thread_runs) - newest_index
-                prompt = _truncate_utf8(str(thread_run["prompt"]).strip(), 1000)
-                answer = _truncate_utf8(str(thread_run["final_answer"]).strip(), 2000)
-                if prompt:
-                    turn_lines.append(_thread_context_line("user", turn=turn, text=prompt))
-                if answer:
-                    turn_lines.append(_thread_context_line("assistant", turn=turn, text=answer))
-
-                ref_rows = self.connection.execute(
-                    """
-                    SELECT id, resource_refs
-                    FROM agent_steps
-                    WHERE run_id = %s
-                      AND step_type = 'tool'
-                      AND status = 'completed'
-                    ORDER BY step_order ASC, id ASC
-                    """,
-                    (thread_run["id"],),
-                ).fetchall()
-                resource_ordinals: dict[str, int] = {}
-                for ref_row in ref_rows:
-                    for ref_index, resource_ref in enumerate(ref_row["resource_refs"] or []):
-                        if remaining_resource_refs <= 0:
-                            break
-                        if not isinstance(resource_ref, dict):
-                            continue
-                        domain = resource_ref.get("domain")
-                        resource_type = resource_ref.get("resourceType")
-                        resource_id = resource_ref.get("resourceId")
-                        label = resource_ref.get("label")
-                        status = resource_ref.get("status")
-                        if not all(
-                            isinstance(value, str) and value.strip()
-                            for value in (domain, resource_type, resource_id)
-                        ):
-                            continue
-                        if domain != "meeting" or resource_type not in SAFE_THREAD_RESOURCE_TYPES:
-                            continue
-                        resource_ordinals[resource_type] = (
-                            resource_ordinals.get(resource_type, 0) + 1
-                        )
-                        resource_label = (
-                            _truncate_utf8(label.strip(), 300)
-                            if isinstance(label, str) and label.strip()
-                            else None
-                        )
-                        resource_line = _thread_context_line(
-                            "resource",
-                            turn=turn,
-                            contextRef=_agent_context_ref(
-                                str(thread_id),
-                                str(thread_run["id"]),
-                                str(ref_row["id"]),
-                                ref_index,
-                            ),
-                            resourceType=resource_type,
-                            ordinal=resource_ordinals[resource_type],
-                            **({"label": resource_label} if resource_label else {}),
-                            **(
-                                {"status": _truncate_utf8(status.strip(), 100)}
-                                if isinstance(status, str) and status.strip()
-                                else {}
-                            ),
-                        )
-                        turn_lines.append(resource_line)
-                        if resource_label:
-                            untrusted_source_lines.append(
-                                (
-                                    resource_line,
-                                    PromptSecuritySource("thread_resource", resource_label),
-                                )
-                            )
-                        remaining_resource_refs -= 1
-                thread_memory_newest.append(turn_lines)
-            for turn_lines in reversed(thread_memory_newest):
-                memory.extend(turn_lines)
-
         selected_candidate = self.connection.execute(
             """
             SELECT
