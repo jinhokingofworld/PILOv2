@@ -1490,7 +1490,7 @@ PR Review·Drive도 같은 gate로 순차 등록하고, 각 도메인의 조회 
 - [ ] `domain + read/write` flag, domain 단위 rollback, selector outcome·fallback·clarification reason의
   privacy-safe 관측을 추가한다.
 
-##### 5-B. Meeting reference adapter 품질 완료
+##### 5-B. Meeting reference adapter 코드·fixture 준비
 
 - [x] 회의방·active meeting·참여자 formatter는 사용자 timezone, 빈 목록·종료됨·녹음 중·권한 없음의
   상태를 일관되게 표시한다.
@@ -1501,8 +1501,10 @@ PR Review·Drive도 같은 gate로 순차 등록하고, 각 도메인의 조회 
   source·직접 연결되지 않은 decision evidence를 제거한다.
 - [x] source type, bounded citation 수, 빈 근거와 관련성 탈락 사유만 관측하고 raw evidence/provider payload는
   저장하지 않는다.
-- [x] canonical·held-out·counterexample·stateful follow-up에서 section 범위, citation relevance,
-  unsupported 오판, 0/1/N clarification, UUID 비노출을 검증한다.
+- [x] canonical·held-out·counterexample·stateful quality case와 0/1/N·UUID 비노출 metadata 계약을
+  fixture와 contract test로 고정한다.
+- [ ] 실제 provider evaluation에서 section 범위, citation relevance, unsupported 오판과 stateful
+  follow-up을 검증한다.
 
 2026-07-19 기준 Meeting formatter는 회의방·active Meeting의 시작 시각을 run timezone으로 표시하고,
 회의방의 녹음 상태를 회귀로 고정했다. 참여자의 참여 중·퇴장 상태와
@@ -1510,7 +1512,8 @@ PR Review·Drive도 같은 gate로 순차 등록하고, 각 도메인의 조회 
 regression catalog는 canonical·held-out·counterexample·stateful quality case에 명시적 unsupported
 반례를 포함하며, 0/1/N·동명이인 해소와 UUID 비노출은 catalog contract test로 고정한다. citation
 관련성과 scope 혼합 방지는 App Server grounded-answer/evidence regression이 담당한다. 실제 provider
-threshold와 dev smoke·rollback rehearsal은 Phase 4-E 실행 gate로 남아 있으므로 공개 완료와는 분리한다.
+evaluation·threshold, dev read/write smoke와 `shadow` rollback rehearsal은 아직 수행하지 않았으며
+Issue #1480의 공개 완료 조건으로 남긴다.
 
 ##### 5-C. 순차 도메인 공개
 
