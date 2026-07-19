@@ -408,9 +408,9 @@ class PgCanvasAgentRepository:
             )
             SELECT
               shape_id,
-              1 - (embedding <=> %s::extensions.vector) AS similarity
+              1 - (embedding OPERATOR(extensions.<=>) %s::extensions.vector) AS similarity
             FROM canvas_embeddings
-            ORDER BY embedding <=> %s::extensions.vector
+            ORDER BY embedding OPERATOR(extensions.<=>) %s::extensions.vector
             LIMIT %s
             """,
             (

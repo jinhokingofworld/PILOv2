@@ -281,7 +281,7 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
     observation = report["retrievalEvents"][0]
     assert observation["eventVersion"] == "agent-tool-retrieval-observation:v1"
     assert observation["catalogVersion"] == "agent-tool-capabilities:v1"
-    assert observation["retrieverVersion"] == "agent-tool-metadata-overlap:v2"
+    assert observation["retrieverVersion"] == "agent-tool-metadata-overlap:v3"
     assert observation["tokenUsage"]["providerTotalTokens"] == 150
     assert "shortlistToolNames" not in observation
     assert "prompt" not in observation
