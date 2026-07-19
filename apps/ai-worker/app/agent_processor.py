@@ -72,6 +72,11 @@ USER_VISIBLE_UUID_PATTERN = re.compile(
 )
 SQL_ERD_TABLE_REF_PATTERN = re.compile(r"^t[1-9][0-9]*$")
 SQL_ERD_PRIMARY_TABLE_REF_LIMIT = 20
+SQL_ERD_INSPECTION_TOOL_NAME = "inspect_sql_erd_schema"
+SQL_ERD_FOCUS_TOOL_NAME = "focus_sql_erd_tables"
+TOOL_INPUT_SENSITIVE_KEY_ALLOWLIST = {
+    SQL_ERD_INSPECTION_TOOL_NAME: frozenset({"sessionSelectionToken"}),
+}
 FORBIDDEN_JSON_KEY_PARTS = (
     "authorization",
     "cookie",
@@ -135,6 +140,11 @@ class AgentPlanningRequest:
     planning_context: str = ""
     context_surface: str | None = None
     routing: AgentRoutingDecision | None = None
+
+
+@dataclass(frozen=True)
+class AgentPlannerWorkflowConstraint:
+    required_tool_name: str
 
 
 @dataclass(frozen=True)
@@ -1346,7 +1356,7 @@ def normalize_agent_planner_decision(
                 "riskLevel": tool.risk_level,
                 "executionMode": tool.execution_mode,
                 "requiresConfirmation": requires_confirmation,
-                "input": _sanitize_json_value(decision.tool_input),
+                "input": _sanitize_tool_input(tool.name, decision.tool_input),
                 "toolInputValidation": "app_server_required",
             }
         )
@@ -2706,6 +2716,7 @@ class OpenAiAgentPlannerClient:
         self.model = model
 
     def plan(self, request: AgentPlanningRequest) -> AgentPlannerDecision:
+        workflow_constraint = _agent_planner_workflow_constraint(request)
         try:
             response = self.client.responses.create(
                 model=self.model,
@@ -2716,7 +2727,7 @@ class OpenAiAgentPlannerClient:
                     },
                     {
                         "role": "user",
-                        "content": _agent_planner_user_prompt(request),
+                        "content": _agent_planner_user_prompt(request, workflow_constraint),
                     },
                 ],
                 text={
@@ -2724,7 +2735,7 @@ class OpenAiAgentPlannerClient:
                         "type": "json_schema",
                         "name": "agent_planner_result",
                         "strict": True,
-                        "schema": _agent_planner_schema(),
+                        "schema": _agent_planner_schema(workflow_constraint),
                     }
                 },
             )
@@ -2768,7 +2779,10 @@ def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
     message = _planner_string(payload, "message")
     final_answer_draft = _planner_optional_string(payload, "finalAnswerDraft")
     tool_name = _planner_optional_string(payload, "toolName")
-    tool_input = _parse_planner_input_json(_planner_optional_string(payload, "inputJson"))
+    tool_input = _parse_planner_input_json(
+        _planner_optional_string(payload, "inputJson"),
+        tool_name=tool_name,
+    )
     requires_confirmation = payload.get("requiresConfirmation") is True
     missing_fields = _planner_string_list(payload.get("missingFields"))
     unsupported_reason = _planner_optional_string(payload, "unsupportedReason")
@@ -2789,6 +2803,8 @@ def _agent_planner_system_prompt() -> str:
     return (
         "You are the PILO Workspace Agent planner. "
         "Return only JSON that matches the schema. "
+        "When workflowConstraint is present, select its requiredToolName instead of returning "
+        "completed; use needs_clarification only when its grounded input cannot be determined. "
         "When routing is present, use its validated domains, capabilityIds, and intentSummary "
         "to choose the next tool from the provided shortlist. "
         "Choose only tools from the provided tool list. "
@@ -2925,7 +2941,11 @@ def _agent_planner_system_prompt() -> str:
     )
 
 
-def _agent_planner_user_prompt(request: AgentPlanningRequest) -> str:
+def _agent_planner_user_prompt(
+    request: AgentPlanningRequest,
+    workflow_constraint: AgentPlannerWorkflowConstraint | None = None,
+) -> str:
+    constraint = workflow_constraint or _agent_planner_workflow_constraint(request)
     tools = [
         {
             "name": tool.name,
@@ -2956,12 +2976,31 @@ def _agent_planner_user_prompt(request: AgentPlanningRequest) -> str:
             ),
             "prompt": request.prompt,
             "planningContext": request.planning_context,
+            "workflowConstraint": (
+                {
+                    "requiredToolName": constraint.required_tool_name,
+                    "completionAllowed": False,
+                }
+                if constraint is not None
+                else None
+            ),
         },
         ensure_ascii=False,
     )
 
 
-def _agent_planner_schema() -> dict[str, object]:
+def _agent_planner_schema(
+    workflow_constraint: AgentPlannerWorkflowConstraint | None = None,
+) -> dict[str, object]:
+    statuses = (
+        ["tool_candidate", "needs_clarification"]
+        if workflow_constraint is not None
+        else ["tool_candidate", "needs_clarification", "completed", "unsupported"]
+    )
+    tool_name_schema: dict[str, object] = {"type": ["string", "null"]}
+    if workflow_constraint is not None:
+        tool_name_schema["enum"] = [workflow_constraint.required_tool_name, None]
+
     return {
         "type": "object",
         "additionalProperties": False,
@@ -2978,16 +3017,11 @@ def _agent_planner_schema() -> dict[str, object]:
         "properties": {
             "status": {
                 "type": "string",
-                "enum": [
-                    "tool_candidate",
-                    "needs_clarification",
-                    "completed",
-                    "unsupported",
-                ],
+                "enum": statuses,
             },
             "message": {"type": "string"},
             "finalAnswerDraft": {"type": ["string", "null"]},
-            "toolName": {"type": ["string", "null"]},
+            "toolName": tool_name_schema,
             "inputJson": {"type": ["string", "null"]},
             "requiresConfirmation": {"type": "boolean"},
             "missingFields": {
@@ -2997,6 +3031,47 @@ def _agent_planner_schema() -> dict[str, object]:
             "unsupportedReason": {"type": ["string", "null"]},
         },
     }
+
+
+def _agent_planner_workflow_constraint(
+    request: AgentPlanningRequest,
+) -> AgentPlannerWorkflowConstraint | None:
+    if not any(tool.name == SQL_ERD_FOCUS_TOOL_NAME for tool in request.tools):
+        return None
+
+    latest_tool_result = _latest_planning_tool_result(request.planning_context)
+    if latest_tool_result is None:
+        return None
+    tool_name, output = latest_tool_result
+    if tool_name != SQL_ERD_INSPECTION_TOOL_NAME:
+        return None
+
+    projection = output.get("projection")
+    if not isinstance(projection, dict) or not isinstance(projection.get("tables"), list):
+        return None
+
+    return AgentPlannerWorkflowConstraint(required_tool_name=SQL_ERD_FOCUS_TOOL_NAME)
+
+
+def _latest_planning_tool_result(
+    planning_context: str,
+) -> tuple[str, dict[str, object]] | None:
+    prefix = "tool "
+    separator = ": "
+    for line in reversed(planning_context.splitlines()):
+        if not line.startswith(prefix):
+            continue
+        tool_result = line[len(prefix) :]
+        tool_name, found, output_json = tool_result.partition(separator)
+        if not found or not tool_name:
+            continue
+        try:
+            output = json.loads(output_json)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(output, dict):
+            return tool_name, output
+    return None
 
 
 def _safe_text(value: str | None, fallback: str) -> str:
@@ -3028,7 +3103,11 @@ def _planner_string_list(value: object) -> list[str]:
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
-def _parse_planner_input_json(value: str | None) -> dict[str, object]:
+def _parse_planner_input_json(
+    value: str | None,
+    *,
+    tool_name: str | None = None,
+) -> dict[str, object]:
     if value is None:
         return {}
 
@@ -3040,11 +3119,20 @@ def _parse_planner_input_json(value: str | None) -> dict[str, object]:
     if not isinstance(parsed, dict):
         raise AgentPlannerOutputError("Agent planner inputJson must be a JSON object")
 
-    return _sanitize_json_value(parsed)
+    return _sanitize_tool_input(tool_name, parsed)
 
 
-def _sanitize_json_value(value: object) -> dict[str, object]:
-    sanitized = _sanitize_any_json_value(value)
+def _sanitize_tool_input(tool_name: str | None, value: object) -> dict[str, object]:
+    allowed_root_keys = TOOL_INPUT_SENSITIVE_KEY_ALLOWLIST.get(tool_name or "", frozenset())
+    return _sanitize_json_value(value, allowed_root_keys=allowed_root_keys)
+
+
+def _sanitize_json_value(
+    value: object,
+    *,
+    allowed_root_keys: frozenset[str] = frozenset(),
+) -> dict[str, object]:
+    sanitized = _sanitize_any_json_value(value, allowed_root_keys=allowed_root_keys)
     if isinstance(sanitized, dict):
         return sanitized
     return {}
@@ -3118,11 +3206,17 @@ def _current_date_for_timezone(timezone: str) -> date:
         raise AgentPlannerOutputError("Agent run timezone is invalid") from error
 
 
-def _sanitize_any_json_value(value: object) -> object:
+def _sanitize_any_json_value(
+    value: object,
+    *,
+    allowed_root_keys: frozenset[str] = frozenset(),
+) -> object:
     if isinstance(value, dict):
         result: dict[str, object] = {}
         for key, item in value.items():
-            if not isinstance(key, str) or _is_forbidden_json_key(key):
+            if not isinstance(key, str) or (
+                _is_forbidden_json_key(key) and key not in allowed_root_keys
+            ):
                 continue
             result[key] = _sanitize_any_json_value(item)
         return result
