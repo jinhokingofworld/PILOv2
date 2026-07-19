@@ -24,6 +24,7 @@ export type SqlErdSchemaMutationResult =
     };
 
 export type SqlErdSchemaMutationRequest =
+  | { type: "delete_batch"; tableIds: readonly string[]; relationIds: readonly string[] }
   | { type: "delete_table"; tableId: string }
   | { type: "delete_column"; tableId: string; columnId: string }
   | { type: "rename_table"; tableId: string; name: string }
@@ -51,6 +52,10 @@ export function applySqlErdSchemaMutation(
   modelJson: SqltoerdModelJsonV1,
   request: SqlErdSchemaMutationRequest
 ) {
+  if (request.type === "delete_batch") {
+    return applySqlErdBatchSchemaDelete(modelJson, request);
+  }
+
   if (request.type === "delete_table") {
     return deleteSqlErdTable(modelJson, request.tableId);
   }
@@ -99,6 +104,59 @@ export function applySqlErdSchemaMutation(
     request.tableId,
     request.columnId,
     request.dataType
+  );
+}
+
+export function applySqlErdBatchSchemaDelete(
+  modelJson: SqltoerdModelJsonV1,
+  request: {
+    tableIds: readonly string[];
+    relationIds: readonly string[];
+  }
+): SqlErdSchemaMutationResult {
+  const tableIds = new Set(request.tableIds);
+  const relationIds = new Set(request.relationIds);
+  const knownTableIds = new Set(
+    modelJson.schema.tables.map((table) => table.id)
+  );
+  const knownRelationIds = new Set(
+    modelJson.schema.relations.map((relation) => relation.id)
+  );
+
+  if (
+    [...tableIds].some((tableId) => !knownTableIds.has(tableId)) ||
+    [...relationIds].some((relationId) => !knownRelationIds.has(relationId))
+  ) {
+    return failure("NOT_FOUND");
+  }
+
+  if (
+    tableIds.size > 0 &&
+    modelJson.schema.tables.length - tableIds.size < 1
+  ) {
+    return failure("LAST_TABLE");
+  }
+
+  const tables = modelJson.schema.tables.filter(
+    (table) => !tableIds.has(table.id)
+  );
+  const relations = modelJson.schema.relations.filter(
+    (relation) =>
+      !relationIds.has(relation.id) &&
+      !tableIds.has(relation.fromTableId) &&
+      !tableIds.has(relation.toTableId)
+  );
+  const affectedConstraintCount = modelJson.schema.tables
+    .filter((table) => tableIds.has(table.id))
+    .reduce((count, table) => count + table.constraints.length, 0);
+
+  return success(
+    normalizeColumnConstraintFlags({
+      ...modelJson,
+      schema: { relations, tables }
+    }),
+    modelJson.schema.relations.length - relations.length,
+    affectedConstraintCount
   );
 }
 

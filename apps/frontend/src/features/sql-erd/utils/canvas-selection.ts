@@ -4,6 +4,7 @@ import { isSqlErdAnnotationShape } from "@/features/sql-erd/shapes/sql-erd-annot
 import { isSqlErdFrameShape } from "@/features/sql-erd/shapes/sql-erd-frame-shape";
 import { isSqlErdNoteShape } from "@/features/sql-erd/shapes/sql-erd-note-shape";
 import { isSqlErdTextShape } from "@/features/sql-erd/shapes/sql-erd-text-shape";
+import { isSqlErdStrokeShape } from "@/features/sql-erd/shapes/sql-erd-stroke-shape";
 import { isSqlErdRelationShape } from "@/features/sql-erd/shapes/sql-erd-relation-shape";
 import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 import type {
@@ -154,6 +155,48 @@ export function getSqlErdSelectionFromSelectedShapes(
   }
 
   return { type: "none" };
+}
+
+export type SqlErdDeleteBatch = {
+  tableIds: string[];
+  relationIds: string[];
+  deleteLinkIds: string[];
+  deleteNoteIds: string[];
+  deleteFrameIds: string[];
+  deleteTextIds: string[];
+  deleteStrokeIds: string[];
+};
+
+export function getSqlErdDeleteBatchFromSelectedShapes(
+  selectedShapes: TLShape[]
+): SqlErdDeleteBatch {
+  const tableIds = new Set<string>();
+  const relationIds = new Set<string>();
+  const deleteLinkIds = new Set<string>();
+  const deleteNoteIds = new Set<string>();
+  const deleteFrameIds = new Set<string>();
+  const deleteTextIds = new Set<string>();
+  const deleteStrokeIds = new Set<string>();
+
+  for (const shape of selectedShapes) {
+    if (isSqlErdTableShape(shape)) tableIds.add(shape.props.tableId);
+    else if (isSqlErdRelationShape(shape)) relationIds.add(shape.props.relationId);
+    else if (isSqlErdAnnotationShape(shape)) deleteLinkIds.add(shape.props.annotationId);
+    else if (isSqlErdNoteShape(shape)) deleteNoteIds.add(shape.props.noteId);
+    else if (isSqlErdFrameShape(shape)) deleteFrameIds.add(shape.props.frameId);
+    else if (isSqlErdTextShape(shape)) deleteTextIds.add(shape.props.textId);
+    else if (isSqlErdStrokeShape(shape)) deleteStrokeIds.add(shape.props.strokeId);
+  }
+
+  return {
+    deleteFrameIds: [...deleteFrameIds],
+    deleteLinkIds: [...deleteLinkIds],
+    deleteNoteIds: [...deleteNoteIds],
+    deleteStrokeIds: [...deleteStrokeIds],
+    deleteTextIds: [...deleteTextIds],
+    relationIds: [...relationIds],
+    tableIds: [...tableIds]
+  };
 }
 
 export function selectSqlErdCanvasShapeAtPoint(

@@ -150,6 +150,7 @@ import {
   createSqlErdTablePinState,
   pinSqlErdTable
 } from "@/features/sql-erd/utils/table-pin";
+import type { SqlErdDeleteBatch } from "@/features/sql-erd/utils/canvas-selection";
 import {
   createSqlErdParseWorkerCancellation,
   ParseWorkerRequest,
@@ -205,6 +206,7 @@ import {
   createSqlErdVerifiedNormalizedSnapshot,
   isSqlErdNormalizedSqlPreviewCurrent,
   isSqlErdViewSessionCurrent,
+  rebaseSqlErdNormalizedSqlPreviewAfterSave,
   recordSqlErdModelSqlHistory,
   redoSqlErdModelSqlHistory,
   undoSqlErdModelSqlHistory,
@@ -574,10 +576,24 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     useState<SqltoerdSourceMap | null>(null);
   const [sourceNavigationRequest, setSourceNavigationRequest] =
     useState<SqlErdSourceNavigationRequest | null>(null);
-  const [normalizedSqlPreview, setNormalizedSqlPreview] =
+  const [normalizedSqlPreview, setNormalizedSqlPreviewState] =
     useState<SqlErdNormalizedSqlPreview | null>(null);
+  const normalizedSqlPreviewRef = useRef(normalizedSqlPreview);
+  normalizedSqlPreviewRef.current = normalizedSqlPreview;
+  const setNormalizedSqlPreview = useCallback(
+    (nextPreview: SqlErdNormalizedSqlPreview | null) => {
+      normalizedSqlPreviewRef.current = nextPreview;
+      setNormalizedSqlPreviewState(nextPreview);
+    },
+    []
+  );
   const [normalizedSqlApplyError, setNormalizedSqlApplyError] = useState<
     string | null
+  >(null);
+  const [pendingSchemaDeleteLayoutPatch, setPendingSchemaDeleteLayoutPatch] =
+    useState<SqltoerdLayoutPatch | null>(null);
+  const handleLayoutPatchRef = useRef<
+    ((patch: SqltoerdLayoutPatch, context?: SqlErdLayoutPatchContext) => boolean | void) | null
   >(null);
   const [isNormalizedSqlApplying, setIsNormalizedSqlApplying] =
     useState(false);
@@ -587,6 +603,36 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const isSessionReady =
     sqlErdViewSession.id === sessionId &&
     sqlErdViewSession.revision !== null;
+  const isSourceMutationSavePending = pendingSourceAutosaveSnapshot !== null;
+  const reconcileNormalizedSqlPreviewAfterSave = useCallback(
+    (savedSession: SqlErdViewSession) => {
+      const currentPreview = normalizedSqlPreviewRef.current;
+      if (!currentPreview) return;
+
+      const rebased = rebaseSqlErdNormalizedSqlPreviewAfterSave(
+        currentPreview,
+        savedSession
+      );
+      if (!rebased) {
+        normalizedSqlPreviewRef.current = null;
+        setNormalizedSqlPreview(null);
+        setNormalizedSqlApplyError(null);
+        setPendingSchemaDeleteLayoutPatch(null);
+        return;
+      }
+
+      const nextPreview = {
+        ...rebased,
+        layoutJson: createSqltoerdLayoutForModel(
+          rebased.modelJson,
+          savedSession.layoutJson
+        )
+      };
+      normalizedSqlPreviewRef.current = nextPreview;
+      setNormalizedSqlPreview(nextPreview);
+    },
+    []
+  );
   const activeAgentTableFocus =
     agentTableFocus &&
     isSqlErdAgentTableFocusCurrent(
@@ -1115,6 +1161,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     ): SqlErdSchemaMutationResult | null => {
       const currentSnapshot =
         sqlErdEditStateRef.current.lastSuccessfulSnapshot;
+      setPendingSchemaDeleteLayoutPatch(null);
       const resolvedDialect =
         lastResolvedDialect ??
         (currentSnapshot.dialect === "auto" ? null : currentSnapshot.dialect);
@@ -1187,6 +1234,56 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           tone: "error"
         });
       }
+    },
+    [handlePreviewSchemaMutation]
+  );
+  const handlePreviewSchemaDeleteBatch = useCallback(
+    (batch: SqlErdDeleteBatch) => {
+      const visualPatch: SqltoerdLayoutPatch = {
+        deleteFrameIds: batch.deleteFrameIds,
+        deleteLinkIds: batch.deleteLinkIds,
+        deleteNoteIds: batch.deleteNoteIds,
+        deleteStrokeIds: batch.deleteStrokeIds,
+        deleteTextIds: batch.deleteTextIds
+      };
+      const hasVisualDeletes = Object.values(visualPatch).some(
+        (ids) => Boolean(ids?.length)
+      );
+      const hasSchemaDeletes =
+        batch.tableIds.length > 0 || batch.relationIds.length > 0;
+
+      if (!hasSchemaDeletes) {
+        if (hasVisualDeletes) {
+          handleLayoutPatchRef.current?.(visualPatch);
+        }
+        return;
+      }
+
+      const result = handlePreviewSchemaMutation({
+        type: "delete_batch",
+        relationIds: batch.relationIds,
+        tableIds: batch.tableIds
+      });
+
+      if (!result) {
+        setSessionLoadState({
+          label: "Edit unavailable",
+          message: "현재 SQL을 Generate하고 source 변경을 저장한 뒤 다시 시도하세요.",
+          tone: "error"
+        });
+        return;
+      }
+
+      if (!result.ok) {
+        setSessionLoadState({
+          label: "Edit blocked",
+          message: getSchemaMutationFailureMessage(result.reason),
+          tone: "error"
+        });
+        return;
+      }
+
+      setPendingSchemaDeleteLayoutPatch(hasVisualDeletes ? visualPatch : null);
     },
     [handlePreviewSchemaMutation]
   );
@@ -1390,7 +1487,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         !sourceLock.canEdit) ||
       !normalizedSqlPreview ||
       !normalizedSqlPreview.hasChanges ||
-      isNormalizedSqlApplying
+      isNormalizedSqlApplying ||
+      isSourceMutationSavePending
     ) {
       return;
     }
@@ -1414,7 +1512,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         setModelSqlHistory((currentHistory) =>
           recordSqlErdModelSqlHistory(currentHistory, baseSnapshot)
         );
+        const stagedLayoutPatch = pendingSchemaDeleteLayoutPatch;
+        setPendingSchemaDeleteLayoutPatch(null);
         setNormalizedSqlPreview(null);
+        if (stagedLayoutPatch) {
+          handleLayoutPatchRef.current?.(stagedLayoutPatch);
+        }
       },
       sourceMapModelJson: normalizedSqlPreview.modelJson,
       targetSnapshot: {
@@ -1427,8 +1530,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, [
     applyNormalizedSqlSnapshot,
     isNormalizedSqlApplying,
+    isSourceMutationSavePending,
     isWriteProtocolMismatch,
     normalizedSqlPreview,
+    pendingSchemaDeleteLayoutPatch,
     sourceLock.canEdit,
     sqlErdViewSession.writeProtocol
   ]);
@@ -1603,6 +1708,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       sqlErdViewSession.writeProtocol
     ]
   );
+  handleLayoutPatchRef.current = handleLayoutPatch;
   const handleRetryLayoutAutosaveOnce = useCallback(() => {
     if (
       !pendingLayoutAutosaveJson &&
@@ -1898,6 +2004,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
             sessionId: requestSessionId
           };
           applySqlErdEditAction({ snapshot, type: "operation_saved" });
+          reconcileNormalizedSqlPreviewAfterSave(snapshot);
           await sourceLock.renew();
           if (pendingSourceAutosaveSnapshotRef.current === requestParsedSnapshot) {
             setPendingSourceAutosaveSnapshot(null);
@@ -1945,10 +2052,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           return;
         }
 
+        const savedViewSession = createWorkspaceSqlErdViewSession(savedSession);
         applySqlErdEditAction({
-          snapshot: createWorkspaceSqlErdViewSession(savedSession),
+          snapshot: savedViewSession,
           type: "source_autosave_saved"
         });
+        reconcileNormalizedSqlPreviewAfterSave(savedViewSession);
         if (
           pendingSourceAutosaveSnapshotRef.current === requestParsedSnapshot
         ) {
@@ -2033,6 +2142,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     isCurrentAutosaveRequest,
     layoutAutosaveBlockReason,
     pendingSourceAutosaveSnapshot,
+    reconcileNormalizedSqlPreviewAfterSave,
     setPendingSourceAutosaveSnapshot,
     sourceLock,
     sourceAutosaveRetryAttempt,
@@ -2538,6 +2648,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           }}
           onLayoutPatch={handleLayoutPatch}
           onSchemaDelete={handleDeleteSchemaSelection}
+          onSchemaDeleteBatch={handlePreviewSchemaDeleteBatch}
           onReloadSession={handleReloadPausedSession}
           onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
           onSelectionChange={setSelectedSqlErdObject}
@@ -2615,6 +2726,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       <NormalizedSqlPreviewDialog
         error={normalizedSqlApplyError}
         isApplying={isNormalizedSqlApplying}
+        isSavePending={isSourceMutationSavePending}
         isReadOnly={
           isWriteProtocolMismatch ||
           (sqlErdViewSession.writeProtocol === "operations_v1" &&
@@ -2635,6 +2747,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           if (!open && !isNormalizedSqlApplying) {
             setNormalizedSqlPreview(null);
             setNormalizedSqlApplyError(null);
+            setPendingSchemaDeleteLayoutPatch(null);
           }
         }}
         preview={normalizedSqlPreview}
@@ -2646,6 +2759,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 function NormalizedSqlPreviewDialog({
   error,
   isApplying,
+  isSavePending,
   isReadOnly,
   onApply,
   onOpenChange,
@@ -2654,6 +2768,7 @@ function NormalizedSqlPreviewDialog({
 }: {
   error: string | null;
   isApplying: boolean;
+  isSavePending: boolean;
   isReadOnly: boolean;
   onApply: () => void;
   onOpenChange: (open: boolean) => void;
@@ -2714,11 +2829,21 @@ function NormalizedSqlPreviewDialog({
           </button>
           <button
             className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:pointer-events-none disabled:opacity-50"
-            disabled={isReadOnly || !preview || !preview.hasChanges || isApplying}
+            disabled={
+              isReadOnly ||
+              !preview ||
+              !preview.hasChanges ||
+              isApplying ||
+              isSavePending
+            }
             onClick={onApply}
             type="button"
           >
-            {isApplying ? "적용 중" : "SQL 변경 적용"}
+            {isApplying
+              ? "적용 중"
+              : isSavePending
+                ? "이전 변경 저장 중"
+                : "SQL 변경 적용"}
           </button>
         </div>
       </DialogContent>
@@ -3421,6 +3546,7 @@ type CanvasShellProps = {
   onSchemaDelete: (
     selection: Extract<SqlErdSelection, { type: "table" | "column" }>
   ) => void;
+  onSchemaDeleteBatch: (batch: SqlErdDeleteBatch) => void;
   onReloadSession: () => void;
   onRetryLayoutAutosaveOnce: () => void;
   onSelectionChange: (selection: SqlErdSelection) => void;
@@ -3446,6 +3572,7 @@ function CanvasShell({
   onDeleteForeignKey,
   onLayoutPatch,
   onSchemaDelete,
+  onSchemaDeleteBatch,
   onReloadSession,
   onRetryLayoutAutosaveOnce,
   onSelectionChange,
@@ -3471,6 +3598,7 @@ function CanvasShell({
         onDeleteForeignKey={(relationId) => onDeleteForeignKey({ relationId })}
         onLayoutPatch={onLayoutPatch}
         onSchemaDelete={onSchemaDelete}
+        onSchemaDeleteBatch={onSchemaDeleteBatch}
         onSelectionChange={onSelectionChange}
         pinNavigationRequestId={pinNavigationRequestId}
         pinnedTableId={pinnedTableId}

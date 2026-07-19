@@ -36,6 +36,10 @@ declare module "@tldraw/tlschema" { interface TLGlobalShapePropsMap { [SQLTOERD_
 const frameClasses: Record<SqltoerdCanvasFrameColor, string> = {
   slate: "border-slate-400 bg-slate-100/35 text-slate-700", blue: "border-blue-400 bg-blue-100/35 text-blue-800", green: "border-emerald-400 bg-emerald-100/35 text-emerald-800", amber: "border-amber-400 bg-amber-100/35 text-amber-800", rose: "border-rose-400 bg-rose-100/35 text-rose-800"
 };
+
+export function getSqlErdFrameControlScale(width: number, height: number) {
+  return Math.min(2, Math.max(1, Math.min(width / 640, height / 420)));
+}
 export class SqlErdFrameShapeUtil extends ShapeUtil<SqlErdFrameShape> {
   static override type = SQLTOERD_FRAME_SHAPE_TYPE;
   static override props = { w: T.number, h: T.number, frameId: T.string, title: T.string, color: T.string, isLocked: T.boolean };
@@ -59,6 +63,7 @@ export class SqlErdFrameShapeUtil extends ShapeUtil<SqlErdFrameShape> {
 
 function SqlErdFrameBox({ shape }: { shape: SqlErdFrameShape }) {
   const editor = useEditor();
+  const controlScale = getSqlErdFrameControlScale(shape.props.w, shape.props.h);
   const [title, setTitle] = useState(shape.props.title);
   useEffect(() => setTitle(shape.props.title), [shape.props.title]);
   function emit(patch: SqlErdFrameChangeEventDetail["patch"]) {
@@ -78,7 +83,15 @@ function SqlErdFrameBox({ shape }: { shape: SqlErdFrameShape }) {
 
   return <HTMLContainer style={{ height: shape.props.h, pointerEvents: "none", width: shape.props.w }}>
     <div className={`h-full w-full rounded-md border-2 ${frameClasses[shape.props.color]}`} data-sqltoerd-frame-id={shape.props.frameId}>
-      <div className="flex items-center gap-1 px-3 py-2" style={{ pointerEvents: "auto" }}>
+      <div
+        className="flex items-center gap-1 px-3 py-2"
+        style={{
+          pointerEvents: "auto",
+          transform: `scale(${controlScale})`,
+          transformOrigin: "top left",
+          width: `${100 / controlScale}%`
+        }}
+      >
         <input aria-label="프레임 제목" className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none" maxLength={200} onBlur={() => title !== shape.props.title && emit({ title })} onChange={(event) => setTitle(event.target.value)} onPointerDown={stopCanvasPointerHandling} value={title} />
         <select aria-label="프레임 색상" className="rounded border bg-white/80 text-xs" onChange={(event) => emit({ color: event.target.value as SqltoerdCanvasFrameColor })} onPointerDown={stopCanvasPointerHandling} value={shape.props.color}>
           <option value="slate">회색</option><option value="blue">파랑</option><option value="green">초록</option><option value="amber">노랑</option><option value="rose">분홍</option>
