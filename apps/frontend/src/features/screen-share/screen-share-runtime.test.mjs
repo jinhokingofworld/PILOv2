@@ -34,36 +34,46 @@ test("Workspace layout mounts screen share beside the Meeting runtime", () => {
   );
 });
 
-test("current session loads on mount and reloads on socket reconnect", () => {
-  assert.match(provider, /const requestCurrent = \(\) => \{/);
-  assert.match(provider, /const reloadCurrent = useCallback\(\(\) => \{\s*requestCurrentRef\.current\(\);\s*\}, \[\]\)/);
-  assert.match(provider, /socket\.on\("connect", reloadCurrent\)/);
-  assert.match(provider, /socket\.off\("connect", reloadCurrent\)/);
+test("current-session coordinator serializes invalidations into one follow-up snapshot", async () => {
+  const { ScreenShareCurrentSessionCoordinator } = await import(
+    "./runtime/screen-share-current-session-coordinator.ts"
+  );
+  const requests = [];
+  const snapshots = [];
+  const coordinator = new ScreenShareCurrentSessionCoordinator({
+    getCurrent: () => new Promise((resolve) => requests.push(resolve)),
+    isCurrentWorkspace: () => true,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+    workspaceId: "workspace-1",
+  });
+
+  coordinator.invalidate();
+  coordinator.invalidate();
+  coordinator.invalidate();
+  assert.equal(requests.length, 1);
+
+  requests.shift()({ session: "stale" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requests.length, 1);
+  assert.deepEqual(snapshots, []);
+
+  requests.shift()({ session: "fresh" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(snapshots, [{ session: "fresh" }]);
+});
+
+test("current session loads on scope activation and invalidates after presence joins", () => {
+  assert.match(provider, /new ScreenShareCurrentSessionCoordinator/);
+  assert.match(provider, /requestCurrentRef\.current = invalidateCurrent;\s*invalidateCurrent\(\);/);
+  assert.match(provider, /workspacePresenceServerEvents\.joined/);
+  assert.match(provider, /const handleJoined[\s\S]{0,180}payload\.workspaceId !== workspaceId/);
+  assert.doesNotMatch(provider, /socket\.on\("connect"/);
   assert.equal((provider.match(/\.getCurrent\(/g) ?? []).length, 1);
   assert.match(provider, /workspace-screen-share:started/);
   assert.match(provider, /workspace-screen-share:ended/);
-  assert.match(
-    provider,
-    /const handleStarted[\s\S]{0,300}reloadAttemptRef\.current \+= 1/,
-  );
-  assert.match(
-    provider,
-    /const handleEnded[\s\S]{0,300}reloadAttemptRef\.current \+= 1/,
-  );
+  assert.match(provider, /handleScreenShareInvalidated/);
 });
 
-test("active session keeps the shared request coordinator for socket reconnect only", () => {
-  assert.doesNotMatch(provider, /if \(activeSession \|\| !workspaceId\) return;/);
-  assert.match(
-    provider,
-    /useEffect\(\(\) => \{\s*if \(!workspaceId\) return;[\s\S]*requestCurrentRef\.current = requestCurrent;\s*if \(!activeSession\) requestCurrent\(\);/,
-  );
-  assert.match(
-    provider,
-    /\.catch\(\(\) => \{\s*shouldPoll = activeSessionRef\.current === null;\s*\}\)/,
-  );
-  assert.equal((provider.match(/\.getCurrent\(/g) ?? []).length, 1);
-});
 
 test("started reconciliation keeps the active session but suppresses the sharer's toast", async () => {
   const { reconcileStartedScreenShare } = await loadPurePolicy(
@@ -127,26 +137,10 @@ test("current-session reconciliation reuses the once-per-session toast policy", 
   });
 });
 
-test("current-session polling is bounded to an inactive workspace lifecycle", () => {
-  const pollingStart = provider.indexOf("const requestCurrent = () => {");
-  const pollingEnd = provider.indexOf("\n\n  useEffect(() => {", pollingStart);
-  const polling = provider.slice(pollingStart, pollingEnd);
-
-  assert.notEqual(pollingStart, -1);
-  assert.notEqual(pollingEnd, -1);
+test("current-session synchronization has no timer polling", () => {
   assert.match(provider, /const reconcileCurrentSession[\s\S]*reconcileCurrentScreenShare/);
-  assert.doesNotMatch(provider, /useEffect\(\(\) => \{\s*void reloadCurrent\(\);/);
-  assert.match(
-    polling,
-    /const requestCurrent = \(\) => \{[\s\S]*api[\s\S]*\.getCurrent\([\s\S]*\.finally\(\(\) => \{[\s\S]*inFlight = false;[\s\S]*schedulePoll\(\)[\s\S]*const schedulePoll = \(\) => \{[\s\S]*setTimeout\(\(\) => \{[\s\S]*requestCurrent\(\)[\s\S]*\}, 5_000\)[\s\S]*requestCurrent\(\);/,
-  );
-  assert.match(provider, /let timeoutId: ReturnType<typeof setTimeout> \| null = null/);
-  assert.match(
-    polling,
-    /const requestCurrent = \(\) => \{[\s\S]*const attempt = \+\+reloadAttemptRef\.current;[\s\S]*isCurrentScreenShareRequest/,
-  );
-  assert.match(polling, /if \(cancelled \|\| inFlight\) return;/);
-  assert.match(polling, /return \(\) => \{\s*cancelled = true;[\s\S]*clearTimeout\(timeoutId\)/);
+  assert.doesNotMatch(provider, /setTimeout|schedulePoll|5_000/);
+  assert.match(provider, /coordinator\.dispose\(\)/);
 });
 
 test("viewing guard rejects the current user's active share", async () => {
@@ -201,35 +195,13 @@ test("ended reconciliation removes only matching state and viewer", async () => 
   assert.doesNotMatch(provider, /toast\.(success|info)\([^)]*종료/);
 });
 
-test("Task 4 browser payloads activate and close the matching screen share", async () => {
-  const {
-    reconcileEndedScreenSharePayload,
-    reconcileStartedScreenSharePayload,
-  } = await loadPurePolicy(provider, "screen-share-runtime-pure");
-  const session = screenShareSession("session-wire");
-  const started = reconcileStartedScreenSharePayload({
-    currentUserId: "user-3",
-    notifiedSessionIds: new Set(),
-    payload: {
-      event: "workspace-screen-share:started",
-      session,
-    },
-  });
-
-  assert.equal(started.activeSession, session);
-  assert.equal(started.shouldToast, true);
-  assert.deepEqual(
-    reconcileEndedScreenSharePayload({
-      activeSession: started.activeSession,
-      payload: {
-        event: "workspace-screen-share:ended",
-        sessionId: "session-wire",
-      },
-      viewerSessionId: "session-wire",
-    }),
-    { activeSession: null, shouldDisconnectViewer: true },
+test("screen-share socket payloads only invalidate the authoritative snapshot", () => {
+  assert.match(
+    provider,
+    /const handleScreenShareInvalidated = \(\) => requestCurrentRef\.current\(\);/,
   );
-  assert.doesNotMatch(provider, /payload\.workspaceId/);
+  assert.doesNotMatch(provider, /const handleStarted/);
+  assert.doesNotMatch(provider, /const handleEnded/);
 });
 
 test("Workspace changes clean up publisher and viewer independently", async () => {

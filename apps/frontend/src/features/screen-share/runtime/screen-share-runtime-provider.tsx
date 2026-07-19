@@ -29,6 +29,7 @@ import {
   type PublisherSession,
   type ViewerSession
 } from "@/features/screen-share/runtime/livekit-screen-share-session";
+import { ScreenShareCurrentSessionCoordinator } from "@/features/screen-share/runtime/screen-share-current-session-coordinator";
 import {
   initialScreenShareState,
   reduceScreenShareState,
@@ -38,6 +39,7 @@ import {
 } from "@/features/screen-share/runtime/screen-share-reducer";
 import type { PublicScreenShareSession } from "@/features/screen-share/types";
 import { useRealtimeSocket } from "@/shared/realtime/realtime-provider";
+import { workspacePresenceServerEvents } from "@/shared/workspace-presence/workspace-presence-events";
 
 // <screen-share-runtime-pure>
 type RuntimePolicySession = {
@@ -50,15 +52,7 @@ type RuntimePolicySession = {
   startedAt: string;
 };
 
-type StartedPayload = {
-  event: "workspace-screen-share:started";
-  session: RuntimePolicySession;
-};
-
-type EndedPayload = {
-  event: "workspace-screen-share:ended";
-  sessionId: string;
-};
+type WorkspacePresenceJoinedPayload = { workspaceId: string };
 
 export function reconcileStartedScreenShare({
   currentUserId,
@@ -118,22 +112,6 @@ export function reconcileEndedScreenShare({
   };
 }
 
-export function reconcileStartedScreenSharePayload({
-  currentUserId,
-  notifiedSessionIds,
-  payload
-}: {
-  currentUserId: string | null;
-  notifiedSessionIds: Set<string>;
-  payload: StartedPayload;
-}) {
-  return reconcileStartedScreenShare({
-    currentUserId,
-    notifiedSessionIds,
-    session: payload.session
-  });
-}
-
 export function canStartViewingScreenShare({
   activeSession,
   currentUserId,
@@ -147,22 +125,6 @@ export function canStartViewingScreenShare({
     activeSession?.id === sessionId &&
     activeSession.sharer.userId === currentUserId
   );
-}
-
-export function reconcileEndedScreenSharePayload({
-  activeSession,
-  payload,
-  viewerSessionId
-}: {
-  activeSession: RuntimePolicySession | null;
-  payload: EndedPayload;
-  viewerSessionId: string | null;
-}) {
-  return reconcileEndedScreenShare({
-    activeSession,
-    sessionId: payload.sessionId,
-    viewerSessionId
-  });
 }
 
 export function getWorkspaceScreenShareCleanup({
@@ -270,7 +232,6 @@ export function ScreenShareRuntimeProvider({
   const viewerTargetSessionIdRef = useRef<string | null>(null);
   const publisherAttemptRef = useRef(0);
   const viewerAttemptRef = useRef(0);
-  const reloadAttemptRef = useRef(0);
   const requestCurrentRef = useRef<() => void>(() => undefined);
   const notifiedSessionIdsRef = useRef(new Set<string>());
   const workspaceIdRef = useRef(workspaceId);
@@ -539,114 +500,60 @@ export function ScreenShareRuntimeProvider({
     [currentUserId]
   );
 
-  const reloadCurrent = useCallback(() => {
-    requestCurrentRef.current();
-  }, []);
-
   useEffect(() => {
     if (!workspaceId) return;
 
     const requestWorkspaceId = workspaceId;
-    let cancelled = false;
-    let inFlight = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    const requestCurrent = () => {
-      if (cancelled || inFlight) return;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      inFlight = true;
-      const attempt = ++reloadAttemptRef.current;
-      let shouldPoll = false;
-      void api
-        .getCurrent(requestWorkspaceId)
-        .then(({ session }) => {
-          if (!isCurrentScreenShareRequest({
-            attempt,
-            currentAttempt: reloadAttemptRef.current,
-            currentWorkspaceId: workspaceIdRef.current,
-            requestWorkspaceId
-          })) {
-            shouldPoll = activeSessionRef.current === null;
-            return;
-          }
-          if (cancelled) {
-            return;
-          }
-          const result = reconcileCurrentSession(session);
-          if (result.shouldToast && session) {
-            toast(`${session.sharer.displayName}님이 화면 공유를 시작했어요`, {
-              action: {
-                label: "시청하기",
-                onClick: () => startViewingRef.current(session.id)
-              }
-            });
-          }
-          shouldPoll = !session;
-        })
-        .catch(() => {
-          shouldPoll = activeSessionRef.current === null;
-        })
-        .finally(() => {
-          inFlight = false;
-          if (shouldPoll) schedulePoll();
-        });
-    };
-    const schedulePoll = () => {
-      if (cancelled || timeoutId) return;
-      timeoutId = setTimeout(() => {
-        timeoutId = null;
-        requestCurrent();
-      }, 5_000);
-    };
+    const coordinator = new ScreenShareCurrentSessionCoordinator({
+      getCurrent: (id) => api.getCurrent(id),
+      isCurrentWorkspace: (id) => workspaceIdRef.current === id,
+      onSnapshot: ({ session }) => {
+        const result = reconcileCurrentSession(session);
+        if (result.shouldToast && session) {
+          toast(`${session.sharer.displayName}님이 화면 공유를 시작했어요`, {
+            action: {
+              label: "시청하기",
+              onClick: () => startViewingRef.current(session.id)
+            }
+          });
+        }
+        const staleViewerSessionId = !session
+          ? viewerTargetSessionIdRef.current
+          : null;
+        if (staleViewerSessionId) {
+          void stopViewerResource(staleViewerSessionId, "ended");
+        }
+      },
+      workspaceId: requestWorkspaceId
+    });
 
-    requestCurrentRef.current = requestCurrent;
-    if (!activeSession) requestCurrent();
+    const invalidateCurrent = () => coordinator.invalidate();
+    requestCurrentRef.current = invalidateCurrent;
+    invalidateCurrent();
     return () => {
-      cancelled = true;
+      coordinator.dispose();
       requestCurrentRef.current = () => undefined;
-      if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [activeSession, api, reconcileCurrentSession, workspaceId]);
+  }, [api, reconcileCurrentSession, stopViewerResource, workspaceId]);
 
   useEffect(() => {
     if (!socket || !workspaceId) return;
 
-    const handleStarted = (payload: StartedPayload) => {
-      reloadAttemptRef.current += 1;
-      const result = reconcileCurrentSession(payload.session);
-      if (result.shouldToast) {
-        toast(`${payload.session.sharer.displayName}님이 화면 공유를 시작했어요.`, {
-          action: {
-            label: "시청하기",
-            onClick: () => startViewingRef.current(payload.session.id)
-          }
-        });
-      }
+    const handleJoined = (payload: WorkspacePresenceJoinedPayload) => {
+      if (payload.workspaceId !== workspaceId) return;
+      requestCurrentRef.current();
     };
-    const handleEnded = (payload: EndedPayload) => {
-      reloadAttemptRef.current += 1;
-      const result = reconcileEndedScreenSharePayload({
-        activeSession: activeSessionRef.current,
-        payload,
-        viewerSessionId: viewerTargetSessionIdRef.current
-      });
-      setActiveSession(result.activeSession);
-      if (result.shouldDisconnectViewer) {
-        void stopViewerResource(payload.sessionId, "ended");
-      }
-    };
+    const handleScreenShareInvalidated = () => requestCurrentRef.current();
 
-    socket.on("connect", reloadCurrent);
-    socket.on("workspace-screen-share:started", handleStarted);
-    socket.on("workspace-screen-share:ended", handleEnded);
+    socket.on(workspacePresenceServerEvents.joined, handleJoined);
+    socket.on("workspace-screen-share:started", handleScreenShareInvalidated);
+    socket.on("workspace-screen-share:ended", handleScreenShareInvalidated);
     return () => {
-      socket.off("connect", reloadCurrent);
-      socket.off("workspace-screen-share:started", handleStarted);
-      socket.off("workspace-screen-share:ended", handleEnded);
+      socket.off(workspacePresenceServerEvents.joined, handleJoined);
+      socket.off("workspace-screen-share:started", handleScreenShareInvalidated);
+      socket.off("workspace-screen-share:ended", handleScreenShareInvalidated);
     };
-  }, [reconcileCurrentSession, reloadCurrent, socket, stopViewerResource, workspaceId]);
+  }, [socket, workspaceId]);
 
   useEffect(() => {
     const previousWorkspaceId = previousWorkspaceIdRef.current;
