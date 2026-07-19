@@ -48,8 +48,8 @@ function createRoomHarness({ connectError, publishError } = {}) {
     connectCalls: [],
     disconnectCalls: 0,
     localParticipant: {
-      async publishTrack(track) {
-        published.push(track);
+      async publishTrack(track, options) {
+        published.push([track, options]);
         if (publishError) throw publishError;
       },
       async unpublishTrack(track) {
@@ -132,7 +132,13 @@ test("publisher captures video before reserving, connects, and publishes only sc
   });
 
   await Promise.resolve();
-  assert.deepEqual(captureOptions, { audio: false });
+  assert.deepEqual(captureOptions, {
+    audio: false,
+    contentHint: "detail",
+    preferCurrentTab: true,
+    resolution: { width: 1280, height: 720, frameRate: 15 },
+    selfBrowserSurface: "include",
+  });
   assert.deepEqual(order, ["capture"]);
   capture.resolve([track]);
   const session = await creating;
@@ -146,7 +152,18 @@ test("publisher captures video before reserving, connects, and publishes only sc
   assert.deepEqual(room.connectCalls, [
     ["wss://livekit.example.com", "publisher-token"],
   ]);
-  assert.deepEqual(published, [track]);
+  assert.deepEqual(published, [
+    [
+      track,
+      {
+        screenShareEncoding: {
+          maxBitrate: 1_500_000,
+          maxFramerate: 15,
+          priority: "medium",
+        },
+      },
+    ],
+  ]);
   assert.equal(session.sessionId, "session-1");
   await session.stop();
 });

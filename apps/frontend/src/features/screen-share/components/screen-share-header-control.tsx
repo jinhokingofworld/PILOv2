@@ -22,7 +22,13 @@ type HeaderScreenShareAction =
   | { kind: "start"; label: "화면 공유" }
   | { kind: "starting"; label: "공유 준비 중" }
   | { kind: "stop"; label: "공유 종료" }
-  | { kind: "view"; label: string; sessionId: string };
+  | {
+      kind: "view";
+      label: string;
+      sessionId: string;
+      sharerLabel: string;
+      watchLabel: "시청하기";
+    };
 
 export function getHeaderScreenShareAction({
   activeSession,
@@ -53,10 +59,13 @@ export function getHeaderScreenShareAction({
     return { kind: "stop", label: "공유 종료" };
   }
   if (activeSession) {
+    const sharerLabel = `${activeSession.sharer.displayName}님 공유 중`;
     return {
       kind: "view",
-      label: `${activeSession.sharer.displayName}님 공유 중`,
-      sessionId: activeSession.id
+      label: `${sharerLabel} · 시청하기`,
+      sessionId: activeSession.id,
+      sharerLabel,
+      watchLabel: "시청하기"
     };
   }
   return { kind: "start", label: "화면 공유" };
@@ -88,6 +97,7 @@ export function ScreenShareHeaderControl({
       aria-label={action.label}
       className={cn(
         "shrink-0",
+        action.kind === "view" && mode === "header" && "max-w-52",
         mode === "floating" && "bg-background/95 shadow-lg backdrop-blur"
       )}
       disabled={isStarting}
@@ -96,7 +106,7 @@ export function ScreenShareHeaderControl({
         if (action.kind === "stop") stopSharing();
         if (action.kind === "view") startViewing(action.sessionId);
       }}
-      size={mode === "header" ? "icon" : "sm"}
+      size={mode === "header" && action.kind !== "view" ? "icon" : "sm"}
       type="button"
       variant={action.kind === "stop" ? "destructive" : "outline"}
     >
@@ -106,7 +116,21 @@ export function ScreenShareHeaderControl({
       ) : null}
       {action.kind === "stop" ? <Square aria-hidden="true" /> : null}
       {action.kind === "view" ? <Eye aria-hidden="true" /> : null}
-      {mode === "floating" ? <span>{action.label}</span> : null}
+      {action.kind === "view" ? (
+        <>
+          <span
+            className={cn(
+              "min-w-0 truncate",
+              mode === "header" ? "hidden sm:inline" : "inline"
+            )}
+          >
+            {action.sharerLabel}
+          </span>
+          <span className="shrink-0">{action.watchLabel}</span>
+        </>
+      ) : mode === "floating" ? (
+        <span>{action.label}</span>
+      ) : null}
     </Button>
   );
 }

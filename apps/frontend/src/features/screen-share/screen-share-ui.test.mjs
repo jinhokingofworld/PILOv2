@@ -71,14 +71,31 @@ test("header policy maps start, starting, stop, and another sharer's view", asyn
     }),
     {
       kind: "view",
-      label: "민준님 공유 중",
+      label: "민준님 공유 중 · 시청하기",
+      sharerLabel: "민준님 공유 중",
       sessionId: "session-theirs",
+      watchLabel: "시청하기",
     },
+  );
+  assert.match(
+    headerControl,
+    /action\.kind === "view" && mode === "header" && "max-w-52"/,
+  );
+  assert.match(
+    headerControl,
+    /mode === "header" \? "hidden sm:inline" : "inline"/,
+  );
+  assert.match(
+    headerControl,
+    /<span className="shrink-0">\{action\.watchLabel\}<\/span>/,
   );
 });
 
 test("notification policy hides the current user's active share", async () => {
-  const { shouldShowScreenShareNotification } = await loadPurePolicy(
+  const {
+    getScreenShareNotificationUnreadCount,
+    shouldShowScreenShareNotification,
+  } = await loadPurePolicy(
     notificationItem,
     "screen-share-notification-pure",
   );
@@ -100,6 +117,20 @@ test("notification policy hides the current user's active share", async () => {
     }),
     false,
   );
+  assert.equal(
+    getScreenShareNotificationUnreadCount({
+      activeSession: screenShareSession("session-1", "user-2", "민준"),
+      currentUserId: "user-1",
+    }),
+    1,
+  );
+  assert.equal(
+    getScreenShareNotificationUnreadCount({
+      activeSession: screenShareSession("session-1", "user-1", "나"),
+      currentUserId: "user-1",
+    }),
+    0,
+  );
   assert.match(dropdown, /<ScreenShareNotificationItem/);
   assert.match(dropdown, /shouldShowScreenShareNotification/);
   assert.match(
@@ -111,6 +142,7 @@ test("notification policy hides the current user's active share", async () => {
     /workspaceInvitations\.length === 0[\s\S]{0,300}!screenShareNotificationSession/,
   );
   assert.match(dropdown, /startViewing\(session\.id\)/);
+  assert.match(dropdown, /const screenShareUnread = getScreenShareNotificationUnreadCount/);
   assert.doesNotMatch(notificationItem, /localStorage|mark.*Read|history/i);
 });
 

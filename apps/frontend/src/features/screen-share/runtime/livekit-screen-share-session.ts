@@ -1,4 +1,10 @@
-import { RoomEvent, Track } from "livekit-client";
+import {
+  RoomEvent,
+  ScreenSharePresets,
+  Track,
+  type ScreenShareCaptureOptions,
+  type TrackPublishOptions
+} from "livekit-client";
 
 import type { ScreenShareApiClient } from "../api/client.ts";
 import type { LiveKitJoin, StartScreenSharePayload } from "../types.ts";
@@ -26,7 +32,10 @@ type TrackPublication = {
 
 type ScreenShareRoom = {
   localParticipant: {
-    publishTrack(track: LocalScreenTrack): Promise<unknown>;
+    publishTrack(
+      track: LocalScreenTrack,
+      options?: TrackPublishOptions
+    ): Promise<unknown>;
     unpublishTrack(track: LocalScreenTrack): Promise<unknown>;
   };
   connect(url: string, token: string): Promise<void>;
@@ -41,15 +50,27 @@ type ScreenShareRoom = {
   ): ScreenShareRoom;
 };
 
+export const screenShareCaptureOptions = {
+  audio: false,
+  contentHint: "detail",
+  preferCurrentTab: true,
+  resolution: { width: 1280, height: 720, frameRate: 15 },
+  selfBrowserSurface: "include"
+} satisfies ScreenShareCaptureOptions;
+
+export const screenSharePublishOptions = {
+  screenShareEncoding: ScreenSharePresets.h720fps15.encoding
+} satisfies TrackPublishOptions;
+
 type PublisherApi = Pick<ScreenShareApiClient, "start" | "end">;
 type ViewerApi = Pick<ScreenShareApiClient, "createViewerToken">;
 
 type PublisherDependencies = {
   workspaceId: string;
   api: PublisherApi;
-  createLocalScreenTracks(options: {
-    audio: false;
-  }): Promise<LocalScreenTrack[]>;
+  createLocalScreenTracks(
+    options: ScreenShareCaptureOptions
+  ): Promise<LocalScreenTrack[]>;
   createRoom(): ScreenShareRoom;
   onNativeStop(): void;
   onReserving?(): void;
@@ -99,7 +120,7 @@ export async function createPublisherSession({
   onConnecting,
   onSharing
 }: PublisherDependencies): Promise<PublisherSession> {
-  const tracks = await createLocalScreenTracks({ audio: false });
+  const tracks = await createLocalScreenTracks(screenShareCaptureOptions);
   let room: ScreenShareRoom | null = null;
   let start: StartScreenSharePayload | null = null;
   let stopped = false;
@@ -150,7 +171,7 @@ export async function createPublisherSession({
     room = createRoom();
     onConnecting?.(start.id);
     await room.connect(start.livekitUrl, start.livekitToken);
-    await room.localParticipant.publishTrack(screenTrack);
+    await room.localParticipant.publishTrack(screenTrack, screenSharePublishOptions);
     published = true;
     const publisherSession = {
       sessionId: start.id,

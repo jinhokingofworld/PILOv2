@@ -76,8 +76,8 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
 | 요약·논의사항·결정사항·후속 작업 후보만 정리한다 | **현재 구현** `summarize_meeting_report`.<br>report ID가 없으면 우선 `list_meeting_reports`로 최신 후보를 찾는다. | “어제 회의 결정사항과 후속 작업만 알려줘” | 자동 실행. summary/discussion/decisions와 `actionItemCandidates`를 bounded projection으로 반환 |
 | 회의 발언·실제 활동 근거로 회의 내용을 질문한다 | **현재 구현** `search_meeting_transcript` | “왜 다음 주로 미뤘고, 실제로 무엇을 했어?” | MeetingReport selector가 있으면 단일 report를 재검증한 뒤 그 범위에서만 검색한다. transcript·Activity를 각각 최소 한 건 보존하고 의미 중복은 source type별 대표로 묶어 별도 grounded-answer 경로로 사용 |
 | 결정사항을 Activity evidence까지 포함해 검증한다 | `get_meeting_decision_evidence` | “v2 결정의 transcript와 Activity 근거를 함께 보여줘” | 자동. 같은 decision sourceIndex에 직접 연결된 evidence만 반환 |
-| 내 담당 후속 작업을 상태·담당자 기준으로 찾는다 | **현재 구현** `find_action_items` | “내가 맡은 회의 후속 작업이 뭐야?” | 자동 실행. 저장된 후속작업을 담당자·상태 기준으로 조회 |
-| 후속 작업을 수정·승인·반려한다 | `update_meeting_report_action_item`, `approve_meeting_report_action_item`, `dismiss_meeting_report_action_item` | “2번 할 일을 은재에게 넘기고 승인해줘” | 확인 후 실행. 승인은 하나의 Calendar 일정 또는 Board issue를 생성하고 관계를 저장한다 |
+| 내 담당 후속 작업을 상태·담당자 기준으로 찾는다 | **현재 구현** `find_action_items` | “내가 맡은 회의 후속 작업이 뭐야?” | 자동 실행. report를 생략하면 Workspace 전체에서 담당자·상태·제목·기간·정렬 selector로 조회 |
+| 후속 작업을 수정·승인·반려한다 | `update_meeting_report_action_item`, `approve_meeting_report_action_item`, `dismiss_meeting_report_action_item` | “2번 할 일을 은재에게 넘기고 승인해줘” | 동일한 직전 결과의 1-based 순번 또는 server-owned reference를 확인 후 재검증해 실행. 승인은 하나의 Calendar 일정 또는 Board issue를 생성하고 관계를 저장한다 |
 | 회의록에 없는 새 후속 작업을 만든다 | **미구현** — 제안된 `create_meeting_report_action_item`에 대응하는 현재 Meeting API도 없음 | “회의록에 문서 정리 할 일을 추가해줘” | 미구현. 먼저 Meeting API/저장 모델 계약이 필요하며, 이후 확인 후 실행 |
 | 후속 작업을 일정으로 만든다 | `approve_meeting_report_action_item`의 `calendar_event` delivery | “이 할 일을 금요일 3시에 일정으로 잡아줘” | 확인 후 Calendar badge 하나를 생성하고 action item relation을 저장한다 |
 | 기존 일정을 수정한다 | **현재 구현** `update_calendar_event` | “금요일 문서 정리 일정을 4시로 미뤄줘” | 확인 후 실행. 제목·명시적 날짜로 후보가 정확히 하나일 때만 실행 |
@@ -98,7 +98,7 @@ Meeting API endpoint가 존재하더라도 Agent tool adapter가 없으면 **미
 - `get_meeting_report`: UUID `reportId`의 상세와 상태를 조회한다.
 - `summarize_meeting_report`: 한 회의록의 요약·논의·결정·후속 작업 후보를 Agent용으로 축약한다.
 - `search_meeting_transcript`: raw UUID 대신 MeetingReport selector를 해소한 범위에서 transcript와 안전한 Activity evidence를 검색하고 source type을 구분한 근거 답변 생성 경로를 시작한다.
-- `find_action_items`: 저장된 후속작업을 담당자·상태 기준으로 조회한다.
+- `find_action_items`: 저장된 후속작업을 Workspace 범위의 report·담당자·상태·제목·기간·정렬 조건으로 조회한다.
 - `get_meeting_decision_evidence`: 같은 decision item에 직접 연결된 근거만 조회한다.
 - `update_meeting_report_action_item`: 저장된 후속작업을 확인 후 수정한다.
 - `dismiss_meeting_report_action_item`: 저장된 후속작업을 확인 후 반려한다.

@@ -4,9 +4,9 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "7291eefdcc2605d531888acda00246c436e765c27d7e29fa42dd33dd987cf1e3",
-    "catalogSha256": "76957cf3fd897a3f94bebd74f26f56e2ca9a95820183a6ef1e24738bf2c15632",
-    "eligibleSnapshotSha256": "6d63fdac6443645ed05c4fd1821950a42c3d102c280f9434b9ba7284c6d92fb8"
+    "inventorySha256": "c59def06e2e255b931757a511709e151870fde114fa1ab8b00af752f0ac7b6a3",
+    "catalogSha256": "6036aa6058405cee87c24c55b1e0efb5d8cb4f38ca4ff1ba7315a30dd86567d7",
+    "eligibleSnapshotSha256": "2a396b2efef711beb2c0ac2c505c2ff8f28b74c0f4b1587b2b0793119b33e64b"
   },
   "privacySensitiveValues": [
     "11111111-1111-4111-8111-111111111111",
@@ -273,6 +273,38 @@
           "type": "string",
           "pattern": "^ctx_[0-9a-f]{24}$"
         },
+        "useSelectedMeetingReportCandidate": {
+          "type": "boolean",
+          "const": true
+        },
+        "assigneeSelf": {
+          "type": "boolean",
+          "const": true
+        },
+        "assigneeDisplayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "useSelectedWorkspaceMemberCandidate": {
+          "type": "boolean",
+          "const": true
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "DELIVERING",
+            "DELIVERY_FAILED",
+            "APPROVED",
+            "DISMISSED"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
         "from": {
           "type": "string",
           "format": "date-time"
@@ -281,25 +313,17 @@
           "type": "string",
           "format": "date-time"
         },
-        "status": {
+        "sort": {
           "type": "string",
           "enum": [
-            "QUEUED",
-            "TRANSCRIBING",
-            "SUMMARIZING",
-            "PROCESSING",
-            "COMPLETED",
-            "FAILED"
+            "newest",
+            "oldest"
           ]
         },
-        "roomName": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 100
-        },
-        "useSelectedMeetingReportCandidate": {
-          "type": "boolean",
-          "const": true
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
         }
       }
     },
@@ -1470,17 +1494,18 @@
             "HIGH"
           ]
         },
-        "assigneeUserId": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "uuid"
+        "assigneeSelf": {
+          "type": "boolean",
+          "const": true
         },
         "assigneeDisplayName": {
           "type": "string",
           "minLength": 1,
           "maxLength": 120
+        },
+        "clearAssignee": {
+          "type": "boolean",
+          "const": true
         },
         "useSelectedWorkspaceMemberCandidate": {
           "type": "boolean",
@@ -1491,7 +1516,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "76957cf3fd897a3f94bebd74f26f56e2ca9a95820183a6ef1e24738bf2c15632",
+    "sha256": "6036aa6058405cee87c24c55b1e0efb5d8cb4f38ca4ff1ba7315a30dd86567d7",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -3507,12 +3532,17 @@
           "담당자 변경만 하거나 반려하는 요청"
         ],
         "acceptedSelectorFields": [
+          "assigneeDisplayName",
+          "assigneeSelf",
           "contextRef",
           "from",
-          "roomName",
+          "limit",
+          "sort",
           "status",
+          "title",
           "to",
-          "useSelectedMeetingReportCandidate"
+          "useSelectedMeetingReportCandidate",
+          "useSelectedWorkspaceMemberCandidate"
         ],
         "selectorKinds": [
           "action_item",
@@ -3528,7 +3558,7 @@
         "executionMode": "contextual",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "0042ad2c5c74f7307f22d5daa78e865a0915696814a0c86437b436c04f05cc48"
+        "inputSchemaSha256": "926db9b052bfc9a386ae1532a1e231826a9d76329f34130a8de4a1a3d5d50d70"
       },
       {
         "toolName": "focus_sql_erd_tables",
@@ -4393,7 +4423,8 @@
         "acceptedSelectorFields": [
           "actionItemContextRef",
           "assigneeDisplayName",
-          "assigneeUserId",
+          "assigneeSelf",
+          "clearAssignee",
           "description",
           "ordinal",
           "priority",
@@ -4416,7 +4447,7 @@
         "executionMode": "confirmation_required",
         "requiresConfirmation": true,
         "contextSurface": null,
-        "inputSchemaSha256": "c26d0aed5532ac8262b2f96ed974af0259442d04d45eb6610f84e58547bb0d05"
+        "inputSchemaSha256": "fd67790a9ae6bf42a615584b05670bbaaddf560775a0d7c4268c41c30b7b35d3"
       }
     ]
   },

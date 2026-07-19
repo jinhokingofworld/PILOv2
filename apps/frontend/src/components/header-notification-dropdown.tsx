@@ -41,6 +41,7 @@ import { useRealtimeSocket } from "@/shared/realtime/realtime-provider";
 import { enqueueMeetingConnectionAction } from "@/features/meeting/stores/meeting-connection-action-store";
 import {
   ScreenShareNotificationItem,
+  getScreenShareNotificationUnreadCount,
   shouldShowScreenShareNotification
 } from "@/features/screen-share/components/screen-share-notification-item";
 import { useScreenShareRuntime } from "@/features/screen-share/runtime/screen-share-runtime-provider";
@@ -91,19 +92,24 @@ export function HeaderNotificationDropdown() {
         (invitation) => !readInvitationIds.has(invitation.id)
       ).length
     : 0;
-  const unreadCount = getNotificationUnreadCount({
-    invitationUnread: invitationUnreadCount,
-    mentionUnread: summary.mentionUnreadCount,
-    meetingUnread: meetingNotifications.filter((item) => item.readAt === null)
-      .length
-  });
-  const notificationLabel =
-    unreadCount > 0 ? `읽지 않은 알림 ${unreadCount}개` : "알림";
   const screenShareNotificationSession =
     activeSession &&
     shouldShowScreenShareNotification({ activeSession, currentUserId })
       ? activeSession
       : null;
+  const screenShareUnread = getScreenShareNotificationUnreadCount({
+    activeSession,
+    currentUserId
+  });
+  const unreadCount =
+    getNotificationUnreadCount({
+    invitationUnread: invitationUnreadCount,
+    mentionUnread: summary.mentionUnreadCount,
+    meetingUnread: meetingNotifications.filter((item) => item.readAt === null)
+      .length
+    }) + screenShareUnread;
+  const notificationLabel =
+    unreadCount > 0 ? `읽지 않은 알림 ${unreadCount}개` : "알림";
 
   useEffect(() => {
     if (!authSession) {

@@ -755,6 +755,16 @@ class SmokeMeetingService {
     };
   }
 
+  async listActionItemsForAgent(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listActionItemsForAgent",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return { actionItems: this.report.actionItems };
+  }
+
   async getMeetingReportDecisionItem(
     currentUserId,
     workspaceId,

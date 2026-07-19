@@ -24,6 +24,13 @@ export function shouldShowScreenShareNotification(
     activeSession !== null && activeSession.sharer.userId !== currentUserId
   );
 }
+
+export function getScreenShareNotificationUnreadCount(input: {
+  activeSession: NotificationPolicySession | null;
+  currentUserId: string | null;
+}) {
+  return shouldShowScreenShareNotification(input) ? 1 : 0;
+}
 // </screen-share-notification-pure>
 
 export function ScreenShareNotificationItem({

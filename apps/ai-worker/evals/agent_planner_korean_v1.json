@@ -613,7 +613,7 @@
     },
     {
       "name": "find_action_items",
-      "description": "특정 MeetingReport에 저장된 후속작업의 상태와 담당자를 조회합니다.",
+      "description": "Workspace의 회의 후속작업을 회의록, 담당자, 상태, 제목, 기간 조건으로 조회합니다.",
       "riskLevel": "low",
       "executionMode": "contextual",
       "inputSchema": {
@@ -624,6 +624,38 @@
             "type": "string",
             "pattern": "^ctx_[0-9a-f]{24}$"
           },
+          "useSelectedMeetingReportCandidate": {
+            "type": "boolean",
+            "const": true
+          },
+          "assigneeSelf": {
+            "type": "boolean",
+            "const": true
+          },
+          "assigneeDisplayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "useSelectedWorkspaceMemberCandidate": {
+            "type": "boolean",
+            "const": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "DELIVERING",
+              "DELIVERY_FAILED",
+              "APPROVED",
+              "DISMISSED"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
           "from": {
             "type": "string",
             "format": "date-time"
@@ -632,25 +664,17 @@
             "type": "string",
             "format": "date-time"
           },
-          "status": {
+          "sort": {
             "type": "string",
             "enum": [
-              "QUEUED",
-              "TRANSCRIBING",
-              "SUMMARIZING",
-              "PROCESSING",
-              "COMPLETED",
-              "FAILED"
+              "newest",
+              "oldest"
             ]
           },
-          "roomName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
-          },
-          "useSelectedMeetingReportCandidate": {
-            "type": "boolean",
-            "const": true
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
           }
         }
       }
@@ -743,17 +767,18 @@
               "HIGH"
             ]
           },
-          "assigneeUserId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
+          "assigneeSelf": {
+            "type": "boolean",
+            "const": true
           },
           "assigneeDisplayName": {
             "type": "string",
             "minLength": 1,
             "maxLength": 120
+          },
+          "clearAssignee": {
+            "type": "boolean",
+            "const": true
           },
           "useSelectedWorkspaceMemberCandidate": {
             "type": "boolean",
