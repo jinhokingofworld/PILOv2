@@ -666,6 +666,75 @@ const completedRun = {
   ]
 };
 
+const canvasResourceCanvasId = "44444444-4444-4444-8444-444444444444";
+const canvasResourceRunId = "55555555-5555-4555-8555-555555555555";
+const canvasResourceRef = {
+  domain: "canvas",
+  resourceType: "canvas_agent_run",
+  resourceId: canvasResourceRunId,
+  url: `/canvas?canvasId=${canvasResourceCanvasId}&canvasAgentRunId=${canvasResourceRunId}`,
+  metadata: { canvasId: canvasResourceCanvasId }
+};
+assert.deepEqual(
+  getAgentResourceLinks({
+    status: "completed",
+    steps: [
+      {
+        id: "canvas-step",
+        status: "completed",
+        outputSummary: {},
+        resourceRefs: [canvasResourceRef]
+      }
+    ]
+  }),
+  [
+    {
+      href: canvasResourceRef.url,
+      key: `canvas:agent-run:${canvasResourceRunId}`,
+      label: "캔버스에서 열기"
+    }
+  ]
+);
+assert.deepEqual(
+  getAgentResourceLinks({
+    status: "completed",
+    steps: [
+      {
+        id: "canvas-drive-step",
+        status: "completed",
+        outputSummary: { clientActionType: "insert_drive_file" },
+        resourceRefs: [canvasResourceRef]
+      }
+    ]
+  }),
+  [
+    {
+      href: canvasResourceRef.url,
+      key: `canvas:agent-run:${canvasResourceRunId}`,
+      label: "캔버스에 추가하고 열기"
+    }
+  ]
+);
+assert.deepEqual(
+  getAgentResourceLinks({
+    status: "completed",
+    steps: [
+      {
+        id: "canvas-unsafe-step",
+        status: "completed",
+        outputSummary: {},
+        resourceRefs: [
+          {
+            ...canvasResourceRef,
+            url: `/canvas?canvasId=${canvasResourceCanvasId}`
+          }
+        ]
+      }
+    ]
+  }),
+  []
+);
+
 assert.deepEqual(getAgentResourceLinks(completedRun), [
   {
     href: `/sql-erd/session?sessionId=${resourceSessionId}`,

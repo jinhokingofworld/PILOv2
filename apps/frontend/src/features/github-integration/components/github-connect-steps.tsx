@@ -44,8 +44,6 @@ type StepsProps = {
   onConfirmDeleteInstallation: () => void;
 };
 
-const completedDisconnectButtonClassName =
-  "h-10 rounded-[8px] border-[#b8e8ca] bg-white px-4 text-[#14532d] hover:bg-[#ecfdf3]";
 const completedDestructiveButtonClassName =
   "h-10 rounded-[8px] border-[#ffc9c9] bg-white px-4 text-[#b42318] hover:bg-[#fff1f1]";
 
@@ -104,11 +102,11 @@ export function GithubConnectSteps({
         tone="connection"
       >
         <div className="mt-1 divide-y divide-[#e4e7ec]">
-          <div className={`relative grid grid-cols-[26px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 border-b border-[#edf0f4] py-3 before:absolute before:left-[9px] before:top-8 before:h-[calc(100%-16px)] before:w-px before:bg-[#d9dee8] ${connected ? "bg-[#f8fcf9]" : "bg-[#fffaf0]"}`}>
+          <div className={`relative grid grid-cols-[26px_minmax(0,1fr)_auto_minmax(0,1fr)_26px] items-center gap-x-2 gap-y-2 border-b border-[#edf0f4] py-3 before:absolute before:left-[9px] before:top-8 before:h-[calc(100%-16px)] before:w-px before:bg-[#d9dee8] max-[45rem]:grid-cols-[26px_minmax(0,1fr)_auto] ${connected ? "bg-[#f8fcf9]" : "bg-[#fffaf0]"}`}>
             <span aria-hidden="true" className="relative z-10 text-[#247044]">
               {connected ? <CheckCircle2 className="size-5" /> : <CircleDotDashed className="size-5 text-[#9a5f00]" />}
             </span>
-            <div className="col-start-2 flex min-w-0 items-start justify-between gap-3">
+            <div className="col-start-2 min-w-0">
               <div className="min-w-0">
                 <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
                   OAuth
@@ -117,18 +115,19 @@ export function GithubConnectSteps({
                   1. GitHub 계정 연결
                 </h3>
               </div>
-              <GithubConnectPill
-                tone={access.githubStepStatus === "complete" ? "success" : "warning"}
-              >
-                {connected ? "연결됨" : "미연결"}
-              </GithubConnectPill>
             </div>
-            <p className="col-start-2 text-[12px] leading-4 text-[#687184]">
+            <GithubConnectPill
+              className="col-start-3 row-start-1 justify-self-center max-[45rem]:col-start-2 max-[45rem]:row-start-2 max-[45rem]:justify-self-start"
+              tone={access.githubStepStatus === "complete" ? "success" : "warning"}
+            >
+              {connected ? "연결됨" : "미연결"}
+            </GithubConnectPill>
+            <p className="col-start-2 row-start-2 text-[12px] leading-4 text-[#687184] max-[45rem]:row-start-3">
               사용자 OAuth 토큰으로 GitHub App 설치 URL을 발급하고 연결 상태를 검증합니다.
             </p>
-            <div className="col-start-3 row-span-2 row-start-1 flex shrink-0 flex-wrap gap-2">
+            <div className="col-start-4 row-span-2 row-start-1 justify-self-end flex shrink-0 flex-wrap gap-2 max-[45rem]:col-span-2 max-[45rem]:col-start-2 max-[45rem]:row-span-1 max-[45rem]:row-start-4 max-[45rem]:justify-end">
               {connected ? (
-                <Button className={completedDisconnectButtonClassName} disabled={isDisconnecting || isLoading} onClick={onDisconnectOAuth} type="button" variant="outline">
+                <Button className={completedDestructiveButtonClassName} disabled={isDisconnecting || isLoading} onClick={onDisconnectOAuth} type="button" variant="outline">
                   {isDisconnecting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Unplug data-icon="inline-start" />}
                   연결 해제
                 </Button>
@@ -141,23 +140,23 @@ export function GithubConnectSteps({
             </div>
           </div>
 
-          <div className={`relative grid grid-cols-[26px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 border-b border-[#edf0f4] py-3 before:absolute before:left-[9px] before:top-8 before:h-[calc(100%-16px)] before:w-px before:bg-[#d9dee8] ${hasInstallation ? "bg-[#f8fcf9]" : access.canInstallGithubApp ? "bg-[#f8f9ff]" : "opacity-55"}`}>
+          <div className={`relative grid grid-cols-[26px_minmax(0,1fr)_auto_minmax(0,1fr)_26px] items-center gap-x-2 gap-y-2 border-b border-[#edf0f4] py-3 before:absolute before:left-[9px] before:top-8 before:h-[calc(100%-16px)] before:w-px before:bg-[#d9dee8] max-[45rem]:grid-cols-[26px_minmax(0,1fr)_auto] ${hasInstallation ? "bg-[#f8fcf9]" : access.canInstallGithubApp ? "bg-[#f8f9ff]" : "opacity-55"}`}>
             <span aria-hidden="true" className="relative z-10 text-[#3658c7]">
               {hasInstallation ? <CheckCircle2 className="size-5 text-[#247044]" /> : access.canInstallGithubApp ? <CircleDotDashed className="size-5" /> : <LockKeyhole className="size-5 text-[#6f7887]" />}
             </span>
-            <div className="col-start-2 flex min-w-0 items-start justify-between gap-3">
+            <div className="col-start-2 min-w-0">
               <div className="min-w-0">
                 <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">GitHub App</p>
                 <h3 className="mt-0.5 text-[14px] font-semibold text-[#101828]">2. GitHub App 설치</h3>
               </div>
-              <GithubConnectPill tone={access.installationStepStatus === "complete" ? "success" : "warning"}>
-                {hasInstallation ? "설치됨" : access.canInstallGithubApp ? "필요" : "1단계 필요"}
-              </GithubConnectPill>
             </div>
-            <p className="col-start-2 text-[12px] leading-4 text-[#687184]">
+            <GithubConnectPill className="col-start-3 row-start-1 justify-self-center max-[45rem]:col-start-2 max-[45rem]:row-start-2 max-[45rem]:justify-self-start" tone={access.installationStepStatus === "complete" ? "success" : "warning"}>
+              {hasInstallation ? "설치됨" : access.canInstallGithubApp ? "필요" : "1단계 필요"}
+            </GithubConnectPill>
+            <p className="col-start-2 row-start-2 text-[12px] leading-4 text-[#687184] max-[45rem]:row-start-3">
               설치 후 백엔드가 저장소, Pull Request, Projects v2 데이터를 동기화합니다.
             </p>
-            <div className="col-start-3 row-span-2 row-start-1 flex shrink-0 flex-wrap gap-2">
+            <div className="col-start-4 row-span-2 row-start-1 justify-self-end flex shrink-0 flex-wrap gap-2 max-[45rem]:col-span-2 max-[45rem]:col-start-2 max-[45rem]:row-span-1 max-[45rem]:row-start-4 max-[45rem]:justify-end">
               {hasInstallation ? (
                 <Button className={completedDestructiveButtonClassName} disabled={isDeletingInstallation || isLoading} onClick={onRequestDeleteInstallation} type="button" variant="outline">
                   {isDeletingInstallation ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Trash2 data-icon="inline-start" />}
@@ -194,25 +193,25 @@ export function GithubConnectSteps({
             ) : null}
           </div>
 
-          <div className={`relative grid grid-cols-[26px_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 py-3 ${projectOAuthConnected ? "bg-[#f8fcf9]" : access.canConnectProjectOAuth ? "bg-[#f8f9ff]" : "opacity-55"}`}>
+          <div className={`relative grid grid-cols-[26px_minmax(0,1fr)_auto_minmax(0,1fr)_26px] items-center gap-x-2 gap-y-2 py-3 max-[45rem]:grid-cols-[26px_minmax(0,1fr)_auto] ${projectOAuthConnected ? "bg-[#f8fcf9]" : access.canConnectProjectOAuth ? "bg-[#f8f9ff]" : "opacity-55"}`}>
             <span aria-hidden="true" className="relative z-10 text-[#3658c7]">
               {projectOAuthConnected ? <CheckCircle2 className="size-5 text-[#247044]" /> : access.canConnectProjectOAuth ? <CircleDotDashed className="size-5" /> : <LockKeyhole className="size-5 text-[#6f7887]" />}
             </span>
-            <div className="col-start-2 flex min-w-0 items-start justify-between gap-3">
+            <div className="col-start-2 min-w-0">
               <div className="min-w-0">
                 <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">ProjectV2 OAuth</p>
                 <h3 className="mt-0.5 text-[14px] font-semibold text-[#101828]">3. Project 작업 권한</h3>
               </div>
-              <GithubConnectPill className="shrink-0" tone={projectOAuthConnected ? "success" : "warning"}>
-                {projectOAuthConnected ? "연결됨" : access.canConnectProjectOAuth ? "보드 편집 권한 필요" : "2단계 필요"}
-              </GithubConnectPill>
             </div>
-            <p className="col-start-2 text-[12px] leading-4 text-[#687184]">
+            <GithubConnectPill className="col-start-3 row-start-1 justify-self-center max-[45rem]:col-start-2 max-[45rem]:row-start-2 max-[45rem]:justify-self-start" tone={projectOAuthConnected ? "success" : "warning"}>
+              {projectOAuthConnected ? "연결됨" : access.canConnectProjectOAuth ? "보드 편집 권한 필요" : "2단계 필요"}
+            </GithubConnectPill>
+            <p className="col-start-2 row-start-2 text-[12px] leading-4 text-[#687184] max-[45rem]:row-start-3">
               Project 조회 · 확장 → 카드 이동 → 댓글 생성 작업에 필요한 권한입니다.
             </p>
-            <div className="col-start-3 row-span-2 row-start-1 flex shrink-0 flex-wrap gap-2">
+            <div className="col-start-4 row-span-2 row-start-1 justify-self-end flex shrink-0 flex-wrap gap-2 max-[45rem]:col-span-2 max-[45rem]:col-start-2 max-[45rem]:row-span-1 max-[45rem]:row-start-4 max-[45rem]:justify-end">
               {projectOAuthConnected ? (
-                <Button className={completedDisconnectButtonClassName} disabled={isDisconnectingProjectOAuth || isLoading} onClick={onDisconnectGithubProjectOAuth} type="button" variant="outline">
+                <Button className={completedDestructiveButtonClassName} disabled={isDisconnectingProjectOAuth || isLoading} onClick={onDisconnectGithubProjectOAuth} type="button" variant="outline">
                   {isDisconnectingProjectOAuth ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Unplug data-icon="inline-start" />}
                   연결 해제
                 </Button>

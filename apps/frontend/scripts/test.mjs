@@ -227,6 +227,13 @@ const canvasAgentToolStepPlayback = await readFile(
   ),
   "utf8"
 );
+const canvasAgentDeepLinkHandler = await readFile(
+  new URL(
+    "../src/features/canvas/agent/CanvasAgentDeepLinkHandler.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const piloCanvasArrowBindings = await readFile(
   new URL(
     "../src/features/canvas/engine/editor/canvas-arrow-bindings.ts",
@@ -1102,6 +1109,10 @@ assert.match(canvasAgentToolStepPlayback, /playbackState/);
 assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("playing"\)/);
 assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("complete"\)/);
 assert.match(canvasAgentToolStepPlayback, /new Set<string>\(\)/);
+assert.match(canvasAgentDeepLinkHandler, /loadRootShapeIds/);
+assert.match(canvasAgentDeepLinkHandler, /onFrameSubtreeRequest/);
+assert.match(canvasAgentDeepLinkHandler, /Promise\.allSettled/);
+assert.match(canvasAgentDeepLinkHandler, /focusLoadedShapes/);
 assert.match(piloTldrawCanvas, /removeStaleSerializedArrowBindings/);
 assert.match(piloTldrawCanvas, /editor\.getContainer\(\)/);
 assert.match(piloTldrawCanvas, /editor\.screenToPage/);

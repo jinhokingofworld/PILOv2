@@ -182,6 +182,17 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("sql_erd.inspect", "sql_erd", ["inspect_sql_erd_schema", "focus_sql_erd_tables"], "SQLtoERD schema나 특정 table을 살펴볼 때", ["schema 생성 요청"]),
   capability("sql_erd.generate", "sql_erd", ["generate_sql_erd"], "SQL로 ERD를 생성할 때", ["기존 schema inspection 요청"]),
   capability("canvas.delegate", "canvas", ["delegate_canvas_agent"], "Canvas 작업을 Agent에게 위임할 때", ["SQLtoERD 또는 Board 요청"]),
+  capability(
+    "canvas.drive_images.import",
+    "canvas",
+    ["delegate_canvas_agent"],
+    "Workspace Drive의 기존 이미지를 Canvas에 가져올 때",
+    ["일반 문서 검색 또는 Canvas 도형 직접 수정 요청"],
+    [
+      "드라이브에서 아키텍처 이미지를 캔버스에 올려줘",
+      "공유 드라이브의 팀 로고 이미지를 캔버스에 추가해줘"
+    ]
+  ),
   capability("pr_review.focus", "pr_review", ["recommend_pr_review_focus"], "PR review에서 우선 확인할 변경을 추천받을 때", ["Board 또는 Meeting 요청"]),
   capability("drive.documents.search", "drive", ["search_workspace_documents"], "Workspace 문서를 검색할 때", ["회의 transcript 또는 Board issue 검색 요청"]),
   unsupportedCapability("meeting.action_items.create", "meeting", "회의록에 없는 새 후속 작업을 추가할 때", ["새 회의 할 일 추가", "회의록에 액션 아이템 넣어줘"]),

@@ -107,8 +107,15 @@ export interface CanvasAgentShapeRow extends QueryResultRow {
   y: number | string;
   width: number | string | null;
   height: number | string | null;
+  parent_shape_id: string | null;
+  rotation: number | string;
   revision: number | string;
   raw_shape: Record<string, unknown>;
+}
+
+export interface CanvasAgentShapeAncestorRow extends CanvasAgentShapeRow {
+  depth: number | string;
+  source_shape_id: string;
 }
 
 export interface CanvasAgentViewport {
@@ -225,6 +232,7 @@ export interface CanvasAgentRequestContext {
 export interface CanvasAgentProgressPayload {
   message: string;
   highlightedShapeIds: string[];
+  loadRootShapeIds: string[];
   targetViewport: CanvasAgentViewport | null;
   toolTarget: string | null;
   toolTargetLabel: string | null;

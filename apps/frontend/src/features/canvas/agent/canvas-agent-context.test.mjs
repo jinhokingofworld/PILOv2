@@ -5,6 +5,11 @@ import {
 } from "./canvas-agent-shape-context.ts";
 import { focusCanvasAgentResult } from "./canvas-agent-camera.ts";
 import {
+  buildCanvasAgentDeepLink,
+  getCanvasAgentDriveShapeId,
+  readCanvasAgentDeepLinkRunId,
+} from "./canvas-agent-deep-link.ts";
+import {
   buildCanvasAgentHtmlInsertionPlan,
   buildHtmlFileName,
 } from "./canvas-agent-html-insertion-plan.ts";
@@ -21,6 +26,35 @@ function shape(id, x, text) {
     x,
     y: 20,
   };
+}
+
+{
+  const canvasId = "44444444-4444-4444-8444-444444444444";
+  const runId = "55555555-5555-4555-8555-555555555555";
+  const href = buildCanvasAgentDeepLink(canvasId, runId);
+  assert.equal(
+    href,
+    `/canvas?canvasId=${canvasId}&canvasAgentRunId=${runId}`,
+  );
+  assert.equal(
+    readCanvasAgentDeepLinkRunId(new URL(href, "https://pilo.local").searchParams, canvasId),
+    runId,
+  );
+  assert.equal(
+    readCanvasAgentDeepLinkRunId(new URLSearchParams(`canvasId=${canvasId}`), canvasId),
+    null,
+  );
+  assert.equal(
+    readCanvasAgentDeepLinkRunId(
+      new URLSearchParams(`canvasId=${canvasId}&canvasAgentRunId=${runId}`),
+      "66666666-6666-4666-8666-666666666666",
+    ),
+    null,
+  );
+  assert.equal(
+    getCanvasAgentDriveShapeId(runId),
+    `shape:pilo-canvas-agent-drive-${runId}`,
+  );
 }
 
 {

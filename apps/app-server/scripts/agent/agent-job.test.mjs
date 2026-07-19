@@ -67,7 +67,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "4a2d24c5950e0ccd34ad8eb35f83d686f5dfa7fd60fa06a39f540442620282b3";
+  "fdc6ba14d197fbc266e308f37e0330e3fd5139d092589bab42e23fb84993c872";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -227,6 +227,23 @@ const fullRegistry = new AgentToolRegistryService(
     new CanvasAgentDelegationToolsService({}, {}),
   new DriveAgentToolsService({})
 );
+{
+  const fullCapabilityCatalog = fullRegistry.listCapabilityCatalogForContext(null);
+  const canvasDriveImageImport = fullCapabilityCatalog.capabilities.find(
+    (capability) => capability.id === "canvas.drive_images.import"
+  );
+  assert.deepEqual(canvasDriveImageImport?.toolNames, ["delegate_canvas_agent"]);
+  assert.ok(
+    canvasDriveImageImport?.positiveExamples.includes(
+      "드라이브에서 아키텍처 이미지를 캔버스에 올려줘"
+    )
+  );
+  assert.ok(
+    fullCapabilityCatalog.descriptors
+      .find((descriptor) => descriptor.toolName === "delegate_canvas_agent")
+      ?.capabilityIds.includes("canvas.drive_images.import")
+  );
+}
 {
   const sqlErdContext = {
     surface: "sql_erd",

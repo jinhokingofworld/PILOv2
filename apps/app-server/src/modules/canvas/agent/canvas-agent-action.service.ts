@@ -4,6 +4,7 @@ import { DriveService } from "../../drive/drive.service";
 import { CanvasAgentRepository } from "./canvas-agent.repository";
 import { findCanvasAgentToolTarget } from "./canvas-agent-tool-targets";
 import { CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE } from "./canvas-agent.constants";
+import { buildCanvasAgentSearchFocus } from "./canvas-agent-geometry";
 import type {
   CanvasAgentHtmlArtifact,
   CanvasAgentClientAction,
@@ -232,7 +233,7 @@ export class CanvasAgentActionService {
     const explicitIds = this.readStringArray(input.shapeIds);
     const shapes = await this.resolveShapes(run, explicitIds, input);
     const shapeIds = shapes.map((shape) => shape.id);
-    const viewport = this.viewportForShapes(shapes);
+    const focus = await this.searchFocus(run, shapes, input);
     const routingPrefix = this.routingPrefix(input);
     const summary = shapes.length
       ? `${routingPrefix}“${query}” 관련 도형 ${shapes.length}개를 찾았습니다.`
@@ -242,7 +243,14 @@ export class CanvasAgentActionService {
       summary,
       resourceRefs: shapeIds,
       shouldContinue: input.continuePlanning === true && shapes.length === 0,
-      progress: this.progress(summary, shapeIds, viewport)
+      progress: this.progress(
+        shapes.length ? "검색 결과를 불러오고 있습니다." : summary,
+        focus.highlightedShapeIds,
+        focus.targetViewport,
+        null,
+        null,
+        focus.loadRootShapeIds
+      )
     };
   }
 
@@ -252,6 +260,7 @@ export class CanvasAgentActionService {
   ): Promise<CanvasAgentActionResult> {
     const shapes = await this.selectedShapes(run, input);
     const shapeIds = shapes.map((shape) => shape.id);
+    const focus = await this.searchFocus(run, shapes, input);
     const summary = shapeIds.length
       ? `${shapeIds.length}개 도형을 선택했습니다.`
       : "선택할 도형을 찾지 못했습니다.";
@@ -259,7 +268,14 @@ export class CanvasAgentActionService {
       summary,
       resourceRefs: shapeIds,
       shouldContinue: false,
-      progress: this.progress(summary, shapeIds, this.viewportForShapes(shapes))
+      progress: this.progress(
+        summary,
+        focus.highlightedShapeIds,
+        focus.targetViewport,
+        null,
+        null,
+        focus.loadRootShapeIds
+      )
     };
   }
 
@@ -268,16 +284,23 @@ export class CanvasAgentActionService {
     input: Record<string, unknown>
   ): Promise<CanvasAgentActionResult> {
     const shapes = await this.selectedShapes(run, input);
-    const viewport = this.viewportForShapes(shapes);
+    const focus = await this.searchFocus(run, shapes, input);
     const shapeIds = shapes.map((shape) => shape.id);
-    const summary = viewport
+    const summary = focus.targetViewport
       ? "요청한 도형 위치로 화면을 이동했습니다."
       : "이동할 도형을 찾지 못했습니다.";
     return {
       summary,
       resourceRefs: shapeIds,
       shouldContinue: false,
-      progress: this.progress(summary, shapeIds, viewport)
+      progress: this.progress(
+        summary,
+        focus.highlightedShapeIds,
+        focus.targetViewport,
+        null,
+        null,
+        focus.loadRootShapeIds
+      )
     };
   }
 
@@ -345,6 +368,8 @@ export class CanvasAgentActionService {
       y: summary.y,
       width: summary.width,
       height: summary.height,
+      parent_shape_id: null,
+      rotation: 0,
       revision: 0,
       raw_shape: {}
     };
@@ -355,18 +380,29 @@ export class CanvasAgentActionService {
     highlightedShapeIds: string[],
     targetViewport: CanvasAgentViewport | null,
     toolTarget: string | null = null,
-    toolTargetLabel: string | null = null
+    toolTargetLabel: string | null = null,
+    loadRootShapeIds: string[] = []
   ): CanvasAgentProgressPayload {
-    return { message, highlightedShapeIds, targetViewport, toolTarget, toolTargetLabel };
+    return {
+      message,
+      highlightedShapeIds,
+      loadRootShapeIds,
+      targetViewport,
+      toolTarget,
+      toolTargetLabel
+    };
   }
 
-  private viewportForShapes(shapes: CanvasAgentShapeRow[]): CanvasAgentViewport | null {
-    if (!shapes.length) return null;
-    const left = Math.min(...shapes.map((shape) => Number(shape.x)));
-    const top = Math.min(...shapes.map((shape) => Number(shape.y)));
-    const right = Math.max(...shapes.map((shape) => Number(shape.x) + Number(shape.width ?? 180)));
-    const bottom = Math.max(...shapes.map((shape) => Number(shape.y) + Number(shape.height ?? 100)));
-    return { x: left - 80, y: top - 80, width: Math.max(320, right - left + 160), height: Math.max(240, bottom - top + 160) };
+  private async searchFocus(
+    run: CanvasAgentRunRow,
+    shapes: CanvasAgentShapeRow[],
+    input: Record<string, unknown>
+  ) {
+    const shapeIds = shapes.map((shape) => shape.id);
+    const ancestors = shapeIds.length && input.routingSource !== "client_shape_context"
+      ? await this.repository.findShapeAncestors(run.canvas_id, shapeIds)
+      : [];
+    return buildCanvasAgentSearchFocus(shapes, ancestors);
   }
 
   private queryFromPrompt(prompt: string): string {

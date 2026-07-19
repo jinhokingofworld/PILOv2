@@ -5,6 +5,9 @@ const require = createRequire(import.meta.url);
 const { CanvasAgentActionService } = require(
   "../../dist/modules/canvas/agent/canvas-agent-action.service.js"
 );
+const { buildCanvasAgentSearchFocus } = require(
+  "../../dist/modules/canvas/agent/canvas-agent-geometry.js"
+);
 const { CanvasAgentDraftService } = require(
   "../../dist/modules/canvas/agent/canvas-agent-draft.service.js"
 );
@@ -25,6 +28,8 @@ function shape(id, overrides = {}) {
     y: 20,
     width: 180,
     height: 100,
+    parent_shape_id: null,
+    rotation: 0,
     revision: 1,
     raw_shape: {},
     ...overrides,
@@ -34,12 +39,19 @@ function shape(id, overrides = {}) {
 class FakeRepository {
   constructor() {
     this.findByIdCalls = [];
+    this.findAncestorCalls = [];
+    this.ancestors = [];
     this.shapesById = [];
   }
 
   async findShapesByIds(canvasId, shapeIds) {
     this.findByIdCalls.push({ canvasId, shapeIds });
     return this.shapesById;
+  }
+
+  async findShapeAncestors(canvasId, shapeIds) {
+    this.findAncestorCalls.push({ canvasId, shapeIds });
+    return this.ancestors;
   }
 }
 
@@ -63,6 +75,50 @@ function run(prompt = "인증 메모 찾아줘", context = {}) {
     prompt,
     context_json: { selectedShapeIds: [], shapeSummaries: [], viewport: null, ...context },
   };
+}
+
+{
+  const target = shape("shape:target", {
+    height: 10,
+    parent_shape_id: "shape:parent",
+    width: 20,
+    x: 10,
+    y: 0,
+  });
+  const parent = {
+    ...shape("shape:parent", {
+      height: 300,
+      rotation: Math.PI / 2,
+      shape_type: "frame",
+      width: 400,
+      x: 100,
+      y: 100,
+    }),
+    depth: 1,
+    source_shape_id: target.id,
+  };
+
+  const focus = buildCanvasAgentSearchFocus([target], [parent]);
+
+  assert.deepEqual(focus.highlightedShapeIds, [target.id]);
+  assert.deepEqual(focus.loadRootShapeIds, [parent.id]);
+  assert.deepEqual(focus.targetViewport, {
+    x: 10,
+    y: 30,
+    width: 320,
+    height: 240,
+  });
+}
+
+{
+  const focus = buildCanvasAgentSearchFocus([
+    shape("shape:first", { height: 100, width: 100, x: 0, y: 0 }),
+    shape("shape:distant", { height: 100, width: 100, x: 10_000, y: 0 }),
+  ], []);
+
+  assert.deepEqual(focus.highlightedShapeIds, ["shape:first"]);
+  assert.equal(focus.targetViewport.x, -80);
+  assert.equal(focus.targetViewport.width, 320);
 }
 
 {
@@ -553,6 +609,7 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
   );
 
   assert.deepEqual(repository.findByIdCalls, []);
+  assert.deepEqual(repository.findAncestorCalls, []);
   assert.deepEqual(result.resourceRefs, ["shape:dashboard"]);
   assert.match(result.summary, /현재 캔버스에서/);
 }
@@ -711,6 +768,9 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
   );
 
   assert.deepEqual(repository.findByIdCalls, [
+    { canvasId: "canvas-1", shapeIds: ["shape:auth", "shape:login"] },
+  ]);
+  assert.deepEqual(repository.findAncestorCalls, [
     { canvasId: "canvas-1", shapeIds: ["shape:auth", "shape:login"] },
   ]);
   assert.equal(result.shouldContinue, false);

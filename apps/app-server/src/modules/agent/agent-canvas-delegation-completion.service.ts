@@ -23,6 +23,7 @@ interface CompletedDelegationRow extends QueryResultRow {
   result_summary: string | null;
   error_message: string | null;
   has_artifact: boolean;
+  client_action_type: string | null;
 }
 
 interface ActiveDelegationRow extends QueryResultRow {
@@ -149,7 +150,8 @@ export class AgentCanvasDelegationCompletionService
           child.status AS canvas_status,
           child.result_summary,
           child.error_message,
-          (child.result_json ? 'artifact') AS has_artifact
+          (child.result_json ? 'artifact') AS has_artifact,
+          child.result_json -> 'clientAction' ->> 'type' AS client_action_type
         FROM agent_steps AS step
         JOIN agent_runs AS agent_run
           ON agent_run.id = step.run_id
@@ -188,7 +190,11 @@ export class AgentCanvasDelegationCompletionService
               canvasId: row.canvas_id,
               status: row.canvas_status,
               summary: finalAnswer,
-              hasArtifact: row.has_artifact
+              hasArtifact: row.has_artifact,
+              clientActionType:
+                row.client_action_type === "insert_drive_file"
+                  ? row.client_action_type
+                  : null
             }
           }
         );

@@ -15,6 +15,7 @@ import {
   buildFreeformShapeMap,
   getFreeformShapeId,
 } from "./canvas-runtime-utils";
+import { orderCanvasShapesByParentDependency } from "./canvas-shape-dependency-order";
 
 const PILO_ARROW_BINDINGS_META_KEY = "piloArrowBindingsV1";
 
@@ -254,6 +255,7 @@ export function applyCanvasRemoteOperation({
 export function applyCanvasRoomShapePatch({
   currentShapes,
   deletedShapeIds,
+  pendingShapeIds = new Set<string>(),
   respectViewport = true,
   shapeDetailCache,
   upsertShapes,
@@ -261,6 +263,7 @@ export function applyCanvasRoomShapePatch({
 }: {
   currentShapes: PiloCanvasFreeformShape[];
   deletedShapeIds: string[];
+  pendingShapeIds?: ReadonlySet<string>;
   respectViewport?: boolean;
   shapeDetailCache: Map<string, PiloCanvasFreeformShape>;
   upsertShapes: PiloCanvasFreeformShape[];
@@ -288,52 +291,68 @@ export function applyCanvasRoomShapePatch({
     });
   }
 
-  const orderedUpsertShapes = [
-    ...upsertShapes.filter((shape) => shape.type === "frame"),
-    ...upsertShapes.filter((shape) => shape.type !== "frame"),
-  ];
-
-  orderedUpsertShapes.forEach((incomingShape) => {
+  upsertShapes.forEach((incomingShape) => {
     const shapeId = getFreeformShapeId(incomingShape);
 
     if (!shapeId || deletedShapeIdSet.has(shapeId)) {
       return;
     }
 
-    const visibleShapeMap = buildFreeformShapeMap(nextShapes);
-    const currentShape = visibleShapeMap.get(shapeId);
+    const currentShape = previousShapeMap.get(shapeId);
     const previousShape =
       previousShapeMap.get(shapeId) ?? previousCachedShapeMap.get(shapeId);
     const nextShape = preserveArrowBindingMeta(
       currentShape ?? previousShape,
       cloneShape(incomingShape),
     );
-    const parentId =
-      typeof nextShape.parentId === "string" ? nextShape.parentId : null;
     shapeDetailCache.set(shapeId, nextShape);
+  });
 
-    if (isShapeParentId(parentId)) {
-      const hasVisibleParent = visibleShapeMap.has(parentId);
+  const candidateShapeIds = new Set([
+    ...pendingShapeIds,
+    ...upsertShapes.flatMap((shape) => {
+      const shapeId = getFreeformShapeId(shape);
+      return shapeId ? [shapeId] : [];
+    }),
+  ]);
+  deletedShapeIdSet.forEach((shapeId) => candidateShapeIds.delete(shapeId));
+  const currentVisibleShapeMap = buildFreeformShapeMap(nextShapes);
 
-      if (!hasVisibleParent) {
-        unloadedShapeIds.add(shapeId);
+  candidateShapeIds.forEach((shapeId) => {
+    const candidateShape = shapeDetailCache.get(shapeId);
+    const currentShape = currentVisibleShapeMap.get(shapeId);
 
-        if (currentShape) {
-          nextShapes = nextShapes.filter(
-            (shape) => getFreeformShapeId(shape) !== shapeId,
-          );
-          changed = true;
-        }
-
-        return;
-      }
-    } else if (
-      respectViewport &&
-      !currentShape &&
-      !intersectsViewport(nextShape, viewportBounds)
-    ) {
+    if (!candidateShape) {
+      candidateShapeIds.delete(shapeId);
       return;
     }
+    if (
+      !isShapeParentId(candidateShape.parentId) &&
+      respectViewport &&
+      !currentShape &&
+      !intersectsViewport(candidateShape, viewportBounds)
+    ) {
+      candidateShapeIds.delete(shapeId);
+    }
+  });
+
+  const initiallyVisibleShapeIds = new Set(currentVisibleShapeMap.keys());
+  candidateShapeIds.forEach((shapeId) => initiallyVisibleShapeIds.delete(shapeId));
+  const candidateShapes = [...candidateShapeIds].flatMap((shapeId) => {
+    const shape = shapeDetailCache.get(shapeId);
+    return shape ? [shape] : [];
+  });
+  const { orderedShapeIds, unresolvedShapeIds } =
+    orderCanvasShapesByParentDependency({
+      candidateShapes,
+      visibleShapeIds: initiallyVisibleShapeIds,
+    });
+
+  orderedShapeIds.forEach((shapeId) => {
+    const nextShape = shapeDetailCache.get(shapeId);
+    if (!nextShape) return;
+    const visibleShapeMap = buildFreeformShapeMap(nextShapes);
+    const currentShape = visibleShapeMap.get(shapeId);
 
     nextShapes = currentShape
       ? nextShapes.map((shape) =>
@@ -349,6 +368,21 @@ export function applyCanvasRoomShapePatch({
       getPiloChildShapeCount(nextShape) > 0
     ) {
       frameIdsToLoad.add(shapeId);
+    }
+  });
+
+  unresolvedShapeIds.forEach((shapeId) => {
+    const pendingShape = shapeDetailCache.get(shapeId);
+    const parentId = pendingShape?.parentId;
+
+    if (!isShapeParentId(parentId)) return;
+    unloadedShapeIds.add(shapeId);
+
+    if (buildFreeformShapeMap(nextShapes).has(shapeId)) {
+      nextShapes = nextShapes.filter(
+        (shape) => getFreeformShapeId(shape) !== shapeId,
+      );
+      changed = true;
     }
   });
 

@@ -76,7 +76,7 @@ export function toCanvasShapePayload(
   return {
     height: readNullableSize(props.h),
     id: typeof shape.id === "string" ? shape.id : "",
-    parentShapeId: resolveParentShapeId(shape.parentId),
+    parentShapeId: resolveParentShapeId(shape.parentId, shape.id),
     rawShape,
     rotation: readFiniteNumber(shape.rotation, 0),
     shapeType: typeof shape.type === "string" ? shape.type : "",
@@ -89,13 +89,16 @@ export function toCanvasShapePayload(
   };
 }
 
-function resolveParentShapeId(parentId: unknown) {
+export function resolveParentShapeId(parentId: unknown, shapeId?: unknown) {
   if (typeof parentId !== "string") return null;
-  if (!parentId.startsWith("shape:")) return null;
+  const normalizedParentId = parentId.trim();
+  if (!normalizedParentId.startsWith("shape:")) return null;
+  if (normalizedParentId === "shape:") return null;
+  if (typeof shapeId === "string" && normalizedParentId === shapeId.trim()) {
+    return null;
+  }
 
-  const shapeId = parentId.slice("shape:".length).trim();
-
-  return shapeId || null;
+  return normalizedParentId;
 }
 
 function readFiniteNumber(value: unknown, fallback: number) {

@@ -28,6 +28,7 @@ import {
 const ACTIVE_STATUSES = new Set(["queued", "planning", "executing"]);
 const COMPLETED_PROGRESS_HIDE_DELAY_MS = 8000;
 const LONG_RUNNING_NOTICE_DELAY_MS = 25_000;
+const FOCUS_RETRY_DELAYS_MS = [700, 1_400, 2_800] as const;
 function buildLastTaskContext(run: CanvasAgentRun | null, draft: CanvasAgentDraft | null) {
   if (!run) return null;
   return {
@@ -56,7 +57,7 @@ export function useCanvasAgent({
     fileId: string;
     fileName: string;
     mimeType: string;
-  }) => boolean;
+  }, runId: string) => boolean;
   onFrameSubtreeRequest?: (frameId: string) => Promise<void> | void;
   workspaceId: string;
 }) {
@@ -96,9 +97,10 @@ export function useCanvasAgent({
     (nextRun: CanvasAgentRun) => {
       setRun(nextRun);
       if (
+        nextRun.presentationMode !== "background" &&
         nextRun.clientAction?.type === "insert_drive_file" &&
         !insertedDriveFileRunIdsRef.current.has(nextRun.id) &&
-        onDriveFileInsert(nextRun.clientAction.file)
+        onDriveFileInsert(nextRun.clientAction.file, nextRun.id)
       ) {
         insertedDriveFileRunIdsRef.current.add(nextRun.id);
       }
@@ -141,21 +143,49 @@ export function useCanvasAgent({
       if (progress.toolTarget) {
         dispatchCanvasAgentToolTarget(progress.toolTarget);
       }
-      if (progress.highlightedShapeIds.length) {
-        editor.select(...(progress.highlightedShapeIds as TLShapeId[]));
-      }
-      if (progress.targetViewport || progress.highlightedShapeIds.length) {
+      const focusProgressResult = (attempt = 0) => {
+        if (runIdRef.current !== nextRun.id) return;
+        const loadedShapeIds = progress.highlightedShapeIds.filter((shapeId) =>
+          editor.getShape(shapeId as TLShapeId),
+        );
+        if (loadedShapeIds.length) {
+          editor.select(...(loadedShapeIds as TLShapeId[]));
+        }
         const usedLoadedBounds = focusCanvasAgentResult(
           editor,
-          progress.highlightedShapeIds,
-          progress.targetViewport,
+          loadedShapeIds,
+          null,
         );
-        if (!usedLoadedBounds && progress.highlightedShapeIds.length) {
+        if (usedLoadedBounds) {
+          setVisibleProgress({
+            ...progress,
+            message: "검색 결과로 이동했습니다.",
+          });
+        } else if (
+          progress.highlightedShapeIds.length &&
+          attempt < FOCUS_RETRY_DELAYS_MS.length
+        ) {
           focusRetryTimerRef.current = window.setTimeout(() => {
-            focusCanvasAgentResult(editor, progress.highlightedShapeIds, null);
             focusRetryTimerRef.current = null;
-          }, 800);
+            focusProgressResult(attempt + 1);
+          }, FOCUS_RETRY_DELAYS_MS[attempt]);
+        } else if (progress.highlightedShapeIds.length) {
+          setVisibleProgress({
+            ...progress,
+            message: "검색 결과는 찾았지만 화면에 불러오지 못했습니다.",
+          });
         }
+      };
+      if (progress.targetViewport) {
+        focusCanvasAgentResult(editor, [], progress.targetViewport);
+      }
+      const loadRootShapeIds = progress.loadRootShapeIds ?? [];
+      if (loadRootShapeIds.length && onFrameSubtreeRequest) {
+        void Promise.allSettled(
+          loadRootShapeIds.map((shapeId) => onFrameSubtreeRequest(shapeId)),
+        ).then(() => focusProgressResult());
+      } else if (progress.targetViewport || progress.highlightedShapeIds.length) {
+        focusProgressResult();
       }
     },
     [
@@ -164,6 +194,7 @@ export function useCanvasAgent({
       clearProgressHideTimer,
       editor,
       onDriveFileInsert,
+      onFrameSubtreeRequest,
     ],
   );
 

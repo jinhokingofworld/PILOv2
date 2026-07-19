@@ -574,7 +574,7 @@ Request:
 | `selectedScene` | No | Up to 160 normalized selected shapes and 50000 bytes. Required for `generate_html`; omitted when there is no selection or the snapshot is incomplete. Coordinates are relative to the real or virtual root bounds. |
 | `selectedSceneError` | No | Bounded client-side selection/hydration error. A `generate_html` intent returns this message without producing partial HTML. |
 | `viewport` | No | Current visible Canvas bounds used only to create minimal planning context. |
-| `presentationMode` | No | `interactive` shows requester-only progress, pointer, highlight, and viewport focus on the Canvas surface. `background` creates the same read-only run without Canvas-local playback. Defaults to `interactive`. |
+| `presentationMode` | No | `interactive` shows requester-only progress, pointer, highlight, and viewport focus on the Canvas surface. `background` suppresses automatic Canvas-local playback. A requester who explicitly opens a validated `canvasAgentRunId` deep link can still consume its search focus or Drive insertion once. Defaults to `interactive`. |
 | `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, classify among general or selection-scoped chat, existing-shape search, Workspace Drive image import, selected-scene HTML generation, and unsupported mutation or external-domain requests. Defaults to `false`. |
 | `conversationContext` | No | Short-lived same-panel chat memory. `messages` contains up to 10 recent user/assistant messages, and `lastTask` can describe the previous Canvas Agent run for follow-up prompts such as “why?”, “another way?”, or an explicit retry. The current prompt remains authoritative. Legacy draft id/title fields remain nullable for compatibility. |
 | `clientRequestId` | No | Stable retry idempotency key, up to 128 bytes. |
@@ -697,8 +697,26 @@ For a completed and unambiguous `import_drive_file` run, `run.clientAction` is:
 ```
 
 The action never contains an S3 bucket, object key, credential, or presigned
-URL. The requesting Canvas client deduplicates by run id and creates the
-`file_node` through its ordinary editor/realtime path.
+URL. A Canvas deep link carries only `canvasId` and `canvasAgentRunId`. The
+requesting client reads the requester-only run, revalidates the Drive file by
+requesting a fresh preview grant, and creates the `file_node` through its
+ordinary editor/realtime path. The file node uses a deterministic shape id
+derived from the run id, so refreshes or repeated link clicks converge on the
+same roomState record instead of creating duplicates. The consumed run query is
+removed after a successful insertion.
+
+For a completed `find_shapes` run opened through the same deep link, the client
+first focuses `run.progress.targetViewport` so lazy loading can hydrate the
+area. `run.progress.loadRootShapeIds` contains the validated top-level frame ids
+whose descendants must be hydrated before focusing a nested result. The client
+loads those frame subtrees, retries `highlightedShapeIds`, selects only the
+matched shapes that are loaded, and centers their actual combined editor bounds.
+The App Server fallback viewport composes the stored parent translations and
+rotations, but `editor.getShapePageBounds()` remains authoritative after load.
+If matched shapes are too far apart for a useful combined viewport, progress
+focuses the highest-ranked result while `resourceRefs` retains every match.
+This explicit navigation does not change the automatic playback rule for
+`presentationMode=background`.
 
 Main errors: `401 UNAUTHORIZED`, `403 FORBIDDEN`, `404 CANVAS_AGENT_RUN_NOT_FOUND`.
 
@@ -797,9 +815,13 @@ Response: `200 OK`
 
 The requesting Canvas client polls the run detail endpoint while a run is
 non-terminal. A response may include `progress` with a message, highlighted
-shape ids, and an optional target viewport. The client renders any virtual
-pointer and selection highlight locally; it does not publish those
-values through shared Canvas presence or store pointer coordinates in the DB.
+shape ids, optional root frame ids to hydrate, and an optional target viewport.
+For shape search, a DB match reports that the result is loading until the target
+exists in the editor. The client reports focus completion only after it can
+derive actual editor bounds; a bounded retry timeout does not claim that screen
+navigation succeeded. The client renders any virtual pointer and selection
+highlight locally; it does not publish those values through shared Canvas
+presence or store pointer coordinates in the DB.
 
 When an authorized requester polls an `executing` run, App Server also attempts
 to claim and execute that run's pending action before returning the refreshed

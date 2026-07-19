@@ -194,6 +194,35 @@ test("already missing delete checkpoint keeps a recent persisted tombstone", asy
   }
 });
 
+test("checkpoint는 shape 부모 ID의 접두사를 그대로 보존한다", () => {
+  const nestedRoom = { ...room, canvasId: "canvas-parent-checkpoint-test" };
+  const service = createCanvasRoomStateService();
+  const parent = {
+    ...createNote("parent", "shape:parent"),
+    props: { h: 300, w: 400 },
+    type: "frame",
+  };
+  const child = {
+    ...createNote("child", "shape:child"),
+    parentId: parent.id,
+  };
+
+  service.applyShapePatch(nestedRoom, {
+    deletedShapeIds: [],
+    upsertShapes: [parent, child],
+  });
+  const checkpoint = service.getCheckpointSnapshot(nestedRoom);
+  const childOperation = checkpoint.operations.find(
+    (operation) => operation.shapeId === child.id,
+  );
+  const parentOperation = checkpoint.operations.find(
+    (operation) => operation.shapeId === parent.id,
+  );
+
+  assert.equal(childOperation?.payload?.parentShapeId, "shape:parent");
+  assert.equal(parentOperation?.payload?.parentShapeId, null);
+});
+
 test("DB viewport hydrate는 같은 ID의 최신 roomState를 덮어쓰지 않는다", () => {
   const hydrationRoom = { ...room, canvasId: "canvas-hydration-merge-test" };
   const service = createCanvasRoomStateService();

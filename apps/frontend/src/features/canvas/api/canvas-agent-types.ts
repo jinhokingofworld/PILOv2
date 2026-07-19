@@ -82,6 +82,7 @@ export type CanvasAgentConversationContext = {
 export type CanvasAgentProgress = {
   message: string;
   highlightedShapeIds: string[];
+  loadRootShapeIds?: string[];
   targetViewport: CanvasAgentViewport | null;
   toolTarget: string | null;
   toolTargetLabel: string | null;
