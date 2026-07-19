@@ -2,7 +2,6 @@ import json
 from uuid import UUID
 
 from app.embedding_failure import TerminalEmbeddingError
-
 from app.workspace_indexing_worker_runtime import (
     DocumentEmbeddingProcessor,
     DocumentEmbeddingSource,

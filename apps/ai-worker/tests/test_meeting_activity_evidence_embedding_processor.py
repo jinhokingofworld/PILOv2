@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 
 from app.embedding_failure import RetryableEmbeddingError
-
 from app.meeting_activity_evidence_embedding_processor import (
     MeetingActivityEvidenceEmbeddingProcessor,
     activity_evidence_chunks,

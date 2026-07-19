@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 
 from app.embedding_failure import RetryableEmbeddingError
-
 from app.meeting_transcript_embedding_processor import (
     OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS,
     MeetingTranscriptEmbeddingProcessor,
