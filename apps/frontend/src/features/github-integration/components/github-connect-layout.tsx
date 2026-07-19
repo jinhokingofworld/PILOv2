@@ -10,6 +10,7 @@ import type {
   GithubSyncRun,
   GithubSyncTarget
 } from "@/features/github-integration/types";
+import { hasRequiredGithubProjectOAuthScopes } from "@/features/github-integration/utils/github-project-oauth-scope";
 
 import { GithubConnectProject } from "./github-connect-project";
 import { GithubConnectRepositories } from "./github-connect-repositories";
@@ -115,6 +116,10 @@ export function GithubConnectLayout({
   onSyncTargetChange,
   onStartSync
 }: GithubConnectLayoutProps) {
+  const projectOAuthHasRequiredScopes = hasRequiredGithubProjectOAuthScopes(
+    projectOAuth?.tokenScope
+  );
+
   return (
     <div className="github-connect-root @container text-foreground">
       <div className="grid gap-4">
@@ -186,7 +191,7 @@ export function GithubConnectLayout({
           isActivating={isActivatingProjectV2}
           isWorkspaceOwner={isWorkspaceOwner}
           onActivateProjectV2={onActivateProjectV2}
-          projectOAuthConnected={projectOAuth?.connected === true}
+          projectOAuthConnected={projectOAuth?.connected === true && projectOAuthHasRequiredScopes}
           projects={projects}
           selectedRepository={selectedRepository}
         />

@@ -26,8 +26,16 @@ for (const [scope, expected] of [
   );
 }
 
-const [panel, steps] = await Promise.all([
+const [panel, layout, project, steps] = await Promise.all([
   readFile(new URL("./components/github-panel.tsx", import.meta.url), "utf8"),
+  readFile(
+    new URL("./components/github-connect-layout.tsx", import.meta.url),
+    "utf8"
+  ),
+  readFile(
+    new URL("./components/github-connect-project.tsx", import.meta.url),
+    "utf8"
+  ),
   readFile(
     new URL("./components/github-connect-steps.tsx", import.meta.url),
     "utf8"
@@ -37,6 +45,13 @@ const [panel, steps] = await Promise.all([
 for (const component of [panel, steps]) {
   assert.match(component, /hasRequiredGithubProjectOAuthScopes/);
 }
+
+assert.match(layout, /hasRequiredGithubProjectOAuthScopes/);
+assert.match(
+  layout,
+  /projectOAuthConnected=\{projectOAuth\?\.connected === true && projectOAuthHasRequiredScopes\}/
+);
+assert.match(project, /projectOAuthConnected: boolean/);
 
 assert.doesNotMatch(panel, /function hasProjectScope/);
 assert.match(
