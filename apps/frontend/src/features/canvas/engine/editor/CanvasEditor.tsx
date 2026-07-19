@@ -958,6 +958,21 @@ function getArrowAtPoint(editor: Editor, pagePoint: { x: number; y: number }) {
     .find((shape) => shape.type === "arrow");
 }
 
+function getVisibleFrameHeadingShape(
+  editor: Editor,
+  target: EventTarget | null,
+) {
+  if (!(target instanceof Element)) return null;
+
+  const shapeElement = target
+    .closest(".tl-frame-heading")
+    ?.closest<HTMLElement>("[data-shape-id]");
+  const shapeId = shapeElement?.dataset.shapeId;
+  const shape = shapeId ? editor.getShape(shapeId as TLShapeId) : undefined;
+
+  return isPiloFrameShape(shape) ? shape : null;
+}
+
 export function CanvasEditor({
   board,
   cameraResetVersion,
@@ -2225,11 +2240,13 @@ export function CanvasEditor({
       return;
     }
 
-    const directShape = editor.getShapeAtPoint(pagePoint, {
-      hitInside: true,
-      hitLabels: true,
-      hitLocked: true,
-    });
+    const directShape =
+      getVisibleFrameHeadingShape(editor, event.target) ??
+      editor.getShapeAtPoint(pagePoint, {
+        hitInside: true,
+        hitLabels: true,
+        hitLocked: true,
+      });
     // Frames are filled hit targets, so getShapeAtPoint can return the frame
     // even when the pointer is directly on an arrow inside it. Prefer the
     // arrow here so a connector remains selectable.

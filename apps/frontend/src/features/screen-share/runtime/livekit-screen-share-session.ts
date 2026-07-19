@@ -1,6 +1,5 @@
 import {
   RoomEvent,
-  ScreenSharePresets,
   Track,
   type ScreenShareCaptureOptions,
   type TrackPublishOptions
@@ -8,6 +7,8 @@ import {
 
 import type { ScreenShareApiClient } from "../api/client.ts";
 import type { LiveKitJoin, StartScreenSharePayload } from "../types.ts";
+// @ts-expect-error Node's strip-types test runner requires the explicit extension.
+import { screenShareCaptureOptions, screenSharePublishOptions } from "./screen-share-livekit-options.ts";
 
 type LocalScreenTrack = {
   source: Track.Source;
@@ -49,18 +50,6 @@ type ScreenShareRoom = {
     handler: (track: RemoteScreenTrack, publication: TrackPublication) => void
   ): ScreenShareRoom;
 };
-
-export const screenShareCaptureOptions = {
-  audio: false,
-  contentHint: "detail",
-  preferCurrentTab: true,
-  resolution: { width: 1280, height: 720, frameRate: 5 },
-  selfBrowserSurface: "include"
-} satisfies ScreenShareCaptureOptions;
-
-export const screenSharePublishOptions = {
-  screenShareEncoding: ScreenSharePresets.h720fps5.encoding
-} satisfies TrackPublishOptions;
 
 type PublisherApi = Pick<ScreenShareApiClient, "start" | "end">;
 type ViewerApi = Pick<ScreenShareApiClient, "createViewerToken">;

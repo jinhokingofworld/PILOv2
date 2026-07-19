@@ -29,6 +29,10 @@ import {
   type PublisherSession,
   type ViewerSession
 } from "@/features/screen-share/runtime/livekit-screen-share-session";
+import {
+  publisherScreenShareRoomOptions,
+  viewerScreenShareRoomOptions
+} from "@/features/screen-share/runtime/screen-share-livekit-options";
 import { ScreenShareCurrentSessionCoordinator } from "@/features/screen-share/runtime/screen-share-current-session-coordinator";
 import { bindScreenShareCurrentSessionInvalidations } from "@/features/screen-share/runtime/screen-share-current-session-events";
 import { getCurrentScreenShareSnapshotOutcome } from "@/features/screen-share/runtime/screen-share-current-session-policy";
@@ -209,8 +213,12 @@ type ScreenShareRoom = ReturnType<
   Parameters<typeof createPublisherSession>[0]["createRoom"]
 >;
 
-function createScreenShareRoom() {
-  return new Room() as unknown as ScreenShareRoom;
+function createPublisherScreenShareRoom() {
+  return new Room(publisherScreenShareRoomOptions) as unknown as ScreenShareRoom;
+}
+
+function createViewerScreenShareRoom() {
+  return new Room(viewerScreenShareRoomOptions) as unknown as ScreenShareRoom;
 }
 
 export function ScreenShareRuntimeProvider({
@@ -284,7 +292,7 @@ export function ScreenShareRuntimeProvider({
 
       void createViewerSession<HTMLVideoElement>({
         api,
-        createRoom: createScreenShareRoom,
+        createRoom: createViewerScreenShareRoom,
         mediaElements: {
           attach(track) {
             (track as RemoteTrack).attach(mediaElement);
@@ -398,7 +406,7 @@ export function ScreenShareRuntimeProvider({
     void createPublisherSession({
       api,
       createLocalScreenTracks,
-      createRoom: createScreenShareRoom,
+      createRoom: createPublisherScreenShareRoom,
       onReserving: () => {
         if (
           isCurrentScreenShareRequest({

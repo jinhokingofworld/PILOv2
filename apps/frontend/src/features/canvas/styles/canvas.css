@@ -1000,6 +1000,12 @@
   padding: 0 2px;
 }
 
+.pilo-tldraw-canvas
+  .pilo-frame-shape--heading-hidden
+  > .tl-frame-heading {
+  display: none;
+}
+
 /* Selection toolbars */
 
 .pilo-group-toolbar {

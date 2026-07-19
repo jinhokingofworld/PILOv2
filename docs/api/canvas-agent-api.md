@@ -58,7 +58,7 @@ The same runtime also accepts internal delegation from PILO Agent:
 
 ```text
 PILO Agent planner -> delegate_canvas_agent App Server tool
-  -> resolve one Workspace Canvas and keep the latest user prompt unchanged
+  -> resolve the Workspace's single freeform Canvas and keep the latest user prompt unchanged
   -> CanvasAgentService creates a child run
      (source=general_agent_delegate, parentAgentRunId=PILO Agent run id)
   -> normal Canvas Agent routing and handlers

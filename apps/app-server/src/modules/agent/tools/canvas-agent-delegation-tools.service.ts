@@ -13,34 +13,17 @@ import type {
   AgentToolPreparationResult
 } from "../types/agent-tool.types";
 
-type CanvasDelegationInput = {
-  canvasId: string | null;
-  canvasTitle: string | null;
-};
+type CanvasDelegationInput = Record<string, never>;
 
 type CanvasCandidate = {
   id: string;
   title: string;
 };
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 const INPUT_SCHEMA: AgentToolInputSchema = {
   type: "object",
   additionalProperties: false,
-  properties: {
-    canvasId: {
-      type: ["string", "null"],
-      description:
-        "Exact Canvas UUID only when it is already known. Never invent this value."
-    },
-    canvasTitle: {
-      type: ["string", "null"],
-      description:
-        "Canvas title only when the user explicitly named one. Omit it for the active Canvas."
-    }
-  }
+  properties: {}
 };
 
 @Injectable()
@@ -55,7 +38,7 @@ export class CanvasAgentDelegationToolsService {
       {
         name: "delegate_canvas_agent",
         description:
-          "Use for requests about Canvas content or the active Canvas selection: finding existing shapes, Canvas toolbar help when the UI context enables toolHelpMode, and generating static HTML/CSS from an explicit Canvas selection. This tool delegates the user's original wording to Canvas AI; it does not create diagrams or arbitrary Canvas shapes. Do not rewrite the prompt or include a prompt in the tool input.",
+          "Use for requests about the Workspace Canvas or its active selection: finding existing shapes, Canvas toolbar help when the UI context enables toolHelpMode, and generating static HTML/CSS from an explicit Canvas selection. The App Server resolves the Workspace's single freeform Canvas and delegates the user's original wording to Canvas AI. It does not create diagrams or arbitrary Canvas shapes. Do not rewrite the prompt or include identifiers in the tool input.",
         riskLevel: "low",
         executionMode: "contextual",
         inputSchema: INPUT_SCHEMA,
@@ -72,66 +55,26 @@ export class CanvasAgentDelegationToolsService {
     if (!this.isRecord(input)) {
       throw badRequest("delegate_canvas_agent input must be an object");
     }
-    const unexpected = Object.keys(input).find(
-      (key) => key !== "canvasId" && key !== "canvasTitle"
-    );
+    const unexpected = Object.keys(input)[0];
     if (unexpected) {
       throw badRequest(`delegate_canvas_agent input field is invalid: ${unexpected}`);
     }
-    const canvasId = this.optionalString(input.canvasId, 64);
-    if (canvasId && !UUID_PATTERN.test(canvasId)) {
-      throw badRequest("delegate_canvas_agent canvasId is invalid");
-    }
-    return {
-      canvasId,
-      canvasTitle: this.optionalString(input.canvasTitle, 200)
-    };
+    return {};
   }
 
   private async prepareExecution(
     context: AgentToolContext,
-    input: CanvasDelegationInput
+    _input: CanvasDelegationInput
   ): Promise<AgentToolPreparationResult> {
-    const candidates = await this.resolveCanvasCandidates(context, input);
-    if (candidates.length === 1) {
-      return { kind: "execute" };
-    }
-
-    const available = await this.listCanvasCandidates(context.workspaceId);
-    const question = candidates.length > 1
-      ? "같은 이름의 캔버스가 여러 개입니다. 어느 캔버스에 적용할지 알려주세요."
-      : available.length
-        ? "어느 캔버스에서 처리할까요? 캔버스 이름을 알려주세요."
-        : "현재 워크스페이스에 사용할 수 있는 캔버스가 없습니다.";
-    return {
-      kind: "needs_clarification",
-      outputSummary: {
-        question,
-        canvases: available.slice(0, 10).map((canvas) => ({
-          id: canvas.id,
-          title: canvas.title
-        }))
-      },
-      resourceRefs: []
-    };
+    await this.resolveWorkspaceCanvas(context);
+    return { kind: "execute" };
   }
 
   private async execute(
     context: AgentToolContext,
-    input: CanvasDelegationInput
+    _input: CanvasDelegationInput
   ): Promise<AgentToolExecutionResult> {
-    const candidates = await this.resolveCanvasCandidates(context, input);
-    if (candidates.length !== 1) {
-      return {
-        status: "needs_clarification",
-        outputSummary: {
-          question: "어느 캔버스에서 처리할지 캔버스 이름을 알려주세요."
-        },
-        resourceRefs: []
-      };
-    }
-
-    const canvas = candidates[0];
+    const canvas = await this.resolveWorkspaceCanvas(context);
     const prompt = await this.readOriginalPrompt(context.runId);
     const canvasContext =
       context.requestContext?.surface === "canvas" &&
@@ -202,67 +145,31 @@ export class CanvasAgentDelegationToolsService {
     return request as CreateCanvasAgentRunRequest;
   }
 
-  private async resolveCanvasCandidates(
-    context: AgentToolContext,
-    input: CanvasDelegationInput
-  ): Promise<CanvasCandidate[]> {
-    if (input.canvasId) {
-      return this.database.query<CanvasCandidate>(
-        `
-          SELECT id, title
-          FROM canvas
-          WHERE id = $1
-            AND workspace_id = $2
-            AND board_type = 'freeform'
-        `,
-        [input.canvasId, context.workspaceId]
-      );
-    }
-    if (input.canvasTitle) {
-      return this.database.query<CanvasCandidate>(
-        `
-          SELECT id, title
-          FROM canvas
-          WHERE workspace_id = $1
-            AND board_type = 'freeform'
-            AND lower(btrim(title)) = lower(btrim($2))
-          ORDER BY updated_at DESC, id ASC
-          LIMIT 11
-        `,
-        [context.workspaceId, input.canvasTitle]
-      );
-    }
-    const contextCanvasId =
-      context.requestContext?.surface === "canvas"
-        ? context.requestContext.canvasId
-        : null;
-    if (!contextCanvasId) {
-      return [];
-    }
-    return this.database.query<CanvasCandidate>(
-      `
-        SELECT id, title
-        FROM canvas
-        WHERE id = $1
-          AND workspace_id = $2
-          AND board_type = 'freeform'
-      `,
-      [contextCanvasId, context.workspaceId]
-    );
-  }
-
-  private listCanvasCandidates(workspaceId: string): Promise<CanvasCandidate[]> {
-    return this.database.query<CanvasCandidate>(
+  private async resolveWorkspaceCanvas(
+    context: AgentToolContext
+  ): Promise<CanvasCandidate> {
+    const canvases = await this.database.query<CanvasCandidate>(
       `
         SELECT id, title
         FROM canvas
         WHERE workspace_id = $1
           AND board_type = 'freeform'
-        ORDER BY updated_at DESC, id ASC
-        LIMIT 10
+        ORDER BY id ASC
+        LIMIT 2
       `,
-      [workspaceId]
+      [context.workspaceId]
     );
+    if (canvases.length !== 1) {
+      throw badRequest("Workspace must have exactly one freeform Canvas");
+    }
+    const canvas = canvases[0];
+    if (
+      context.requestContext?.surface === "canvas" &&
+      context.requestContext.canvasId !== canvas.id
+    ) {
+      throw badRequest("Canvas request context does not match the Workspace Canvas");
+    }
+    return canvas;
   }
 
   private async readOriginalPrompt(runId: string): Promise<string> {
@@ -288,16 +195,6 @@ export class CanvasAgentDelegationToolsService {
       throw badRequest("Agent prompt is unavailable");
     }
     return row.prompt.trim();
-  }
-
-  private optionalString(value: unknown, maxLength: number): string | null {
-    if (value === undefined || value === null) {
-      return null;
-    }
-    if (typeof value !== "string" || !value.trim() || value.length > maxLength) {
-      throw badRequest("delegate_canvas_agent input contains invalid text");
-    }
-    return value.trim();
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

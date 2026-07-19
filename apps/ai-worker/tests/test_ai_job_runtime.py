@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 
 from app.agent_processor import AGENT_TOOL_SCHEMA_VERSION, parse_agent_run_job_payload
 from app.agent_prompt_security import PromptSecuritySource
@@ -1140,7 +1139,7 @@ def test_agent_repository_preserves_complete_entries_from_large_general_tool_out
     assert len(tool_line[len(prefix) :]) <= 3_000
 
 
-def test_agent_repository_adds_only_bounded_same_thread_memory() -> None:
+def test_agent_repository_excludes_completed_thread_memory() -> None:
     repository = object.__new__(PgAgentRunRepository)
     thread_runs = [
         {"id": f"run-{index}", "prompt": f"prompt-{index}", "final_answer": f"answer-{index}"}
@@ -1189,42 +1188,12 @@ def test_agent_repository_adds_only_bounded_same_thread_memory() -> None:
     context = repository.get_run_context(job)
 
     assert context is not None
-    assert 'previous user: {"turn":1,"text":"prompt-6"}' in context.planning_context
-    assert 'previous user: {"turn":6,"text":"prompt-1"}' in context.planning_context
-    resource_line = next(
-        line
-        for line in context.planning_context.splitlines()
-        if line.startswith("previous resource: ")
-    )
-    resource = json.loads(resource_line.removeprefix("previous resource: "))
-    assert resource == {
-        "turn": 1,
-        "contextRef": resource["contextRef"],
-        "resourceType": "meeting_report",
-        "ordinal": 1,
-        "label": "최근 회의",
-    }
-    assert re.fullmatch(r"ctx_[0-9a-f]{24}", resource["contextRef"])
-    assert context.untrusted_context_sources == (
-        PromptSecuritySource("thread_resource", "최근 회의"),
-    )
-    assert "report-6" not in context.planning_context
-    assert len(context.planning_context.encode("utf-8")) <= 12 * 1024
-    thread_query, thread_values = connection.executed[1]
-    assert "workspace_id = %s" in thread_query
-    assert "requested_by_user_id = %s" in thread_query
-    assert "ORDER BY created_at DESC, id DESC" in thread_query
-    assert "LIMIT %s" in thread_query
-    assert thread_values == (
-        "thread-1",
-        job.run_id,
-        job.workspace_id,
-        job.requested_by_user_id,
-        6,
-    )
+    assert context.planning_context == ""
+    assert context.untrusted_context_sources == ()
+    assert not any("AND status = 'completed'" in query for query, _ in connection.executed)
 
 
-def test_agent_repository_redacts_ids_and_limits_thread_resource_refs() -> None:
+def test_agent_repository_excludes_completed_thread_resources() -> None:
     repository = object.__new__(PgAgentRunRepository)
     exposed_uuid = "99999999-9999-4999-8999-999999999999"
     resource_refs = [
@@ -1271,14 +1240,11 @@ def test_agent_repository_redacts_ids_and_limits_thread_resource_refs() -> None:
     context = repository.get_run_context(job)
 
     assert context is not None
-    assert len(context.planning_context.encode("utf-8")) <= 12 * 1024
-    assert context.planning_context.count("previous resource: ") == 12
+    assert context.planning_context == ""
     assert exposed_uuid not in context.planning_context
-    assert "report-0" not in context.planning_context
-    assert "[resource]" in context.planning_context
 
 
-def test_agent_repository_redacts_credentials_from_prior_thread_text() -> None:
+def test_agent_repository_excludes_completed_thread_text_with_credentials() -> None:
     repository = object.__new__(PgAgentRunRepository)
     sensitive_values = [
         "sk-" + "proj-private-value",
@@ -1350,10 +1316,8 @@ def test_agent_repository_redacts_credentials_from_prior_thread_text() -> None:
     context = repository.get_run_context(job)
 
     assert context is not None
-    assert "[secret]" in context.planning_context
     assert all(value not in context.planning_context for value in sensitive_values)
-    assert "monkey=banana123" in context.planning_context
-    assert "public_key=public-material" in context.planning_context
+    assert context.planning_context == ""
 
 
 def test_agent_repository_exposes_only_safe_selected_candidate_context() -> None:

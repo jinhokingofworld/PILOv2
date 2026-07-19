@@ -66,8 +66,9 @@ const CANVAS_RUN_ID = "55555555-5555-4555-8555-555555555555";
 }
 
 const database = {
-  async query(sql) {
-    if (sql.includes("FROM canvas") && sql.includes("WHERE id = $1")) {
+  async query(sql, parameters) {
+    if (sql.includes("FROM canvas") && sql.includes("LIMIT 2")) {
+      assert.deepEqual(parameters, [WORKSPACE_ID]);
       return [{ id: CANVAS_ID, title: "대시보드" }];
     }
     return [];
@@ -91,6 +92,7 @@ const [definition] = tools.listDefinitions();
 assert.equal(definition.name, "delegate_canvas_agent");
 assert.equal(definition.executionMode, "contextual");
 assert.doesNotMatch(JSON.stringify(definition.inputSchema), /prompt/);
+assert.deepEqual(definition.inputSchema.properties, {});
 
 const context = {
   currentUserId: USER_ID,
@@ -117,6 +119,68 @@ assert.equal(delegatedCalls[0][2], CANVAS_ID);
 assert.equal(delegatedCalls[0][3], AGENT_RUN_ID);
 assert.equal(delegatedCalls[0][4].prompt, "선택한 화면을 HTML로 만들어줘");
 assert.deepEqual(delegatedCalls[0][4].selectedShapeIds, ["shape:frame"]);
+
+const outsideCanvasContext = {
+  currentUserId: USER_ID,
+  workspaceId: WORKSPACE_ID,
+  runId: AGENT_RUN_ID,
+  requestContext: null,
+};
+assert.deepEqual(await definition.prepareExecution(outsideCanvasContext, {}), {
+  kind: "execute",
+});
+const outsideCanvasResult = await definition.execute(outsideCanvasContext, {});
+assert.equal(outsideCanvasResult.status, "delegated");
+assert.equal(delegatedCalls.length, 2);
+assert.equal(delegatedCalls[1][2], CANVAS_ID);
+assert.equal(delegatedCalls[1][4].presentationMode, "background");
+assert.equal("selectedShapeIds" in delegatedCalls[1][4], false);
+assert.throws(
+  () => definition.prepareExecution(outsideCanvasContext, { canvasTitle: "디자인" }),
+  (error) =>
+    error?.response?.error?.message ===
+    "delegate_canvas_agent input field is invalid: canvasTitle",
+);
+
+for (const canvases of [
+  [],
+  [
+    { id: CANVAS_ID, title: "대시보드" },
+    { id: "77777777-7777-4777-8777-777777777777", title: "중복" },
+  ],
+]) {
+  const [invalidDefinition] = new CanvasAgentDelegationToolsService(
+    canvasAgentService,
+    {
+      async query() {
+        return canvases;
+      },
+    },
+  ).listDefinitions();
+  await assert.rejects(
+    () => invalidDefinition.prepareExecution(outsideCanvasContext, {}),
+    (error) =>
+      error?.response?.error?.message ===
+      "Workspace must have exactly one freeform Canvas",
+  );
+}
+
+await assert.rejects(
+  () =>
+    definition.prepareExecution(
+      {
+        ...context,
+        requestContext: {
+          ...context.requestContext,
+          canvasId: "88888888-8888-4888-8888-888888888888",
+        },
+      },
+      {},
+    ),
+  (error) =>
+    error?.response?.error?.message ===
+    "Canvas request context does not match the Workspace Canvas",
+);
 
 const settleCalls = [];
 const completionDatabase = {

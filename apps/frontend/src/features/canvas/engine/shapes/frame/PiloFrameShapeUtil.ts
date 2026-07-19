@@ -1,5 +1,7 @@
 "use client";
 
+import { createElement } from "react";
+import { useValue } from "@tldraw/state-react";
 import { FrameShapeUtil, type Editor, type TLShape } from "tldraw";
 
 import {
@@ -63,6 +65,37 @@ const PiloBaseFrameShapeUtil = FrameShapeUtil.configure({
 export class PiloFrameShapeUtil extends PiloBaseFrameShapeUtil {
   override shouldClipChild(_child: TLShape) {
     return false;
+  }
+
+  override component(shape: PiloFrameShape) {
+    const frameComponent = super.component(shape);
+    // ShapeUtil components render inside tldraw's tracked React component.
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const showHeading = useValue(
+      `pilo-frame-heading:${shape.id}`,
+      () => {
+        const parentShape = this.editor.getShape(shape.parentId);
+        const isNestedFrame = isPiloFrameShape(parentShape);
+
+        return (
+          !isNestedFrame ||
+          this.editor.getSelectedShapeIds().includes(shape.id) ||
+          this.editor.getEditingShapeId() === shape.id
+        );
+      },
+      [this.editor, shape.id, shape.parentId],
+    );
+
+    return createElement(
+      "div",
+      {
+        className: showHeading
+          ? "pilo-frame-shape"
+          : "pilo-frame-shape pilo-frame-shape--heading-hidden",
+        style: { display: "contents" },
+      },
+      frameComponent,
+    );
   }
 }
 
