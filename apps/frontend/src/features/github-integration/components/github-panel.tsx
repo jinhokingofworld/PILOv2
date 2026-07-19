@@ -644,7 +644,9 @@ export function GithubPanel() {
         return;
       }
       if (discovery.connectionRequired) {
-        await handleStartGithubProjectOAuth();
+        setActionMessage(
+          "개인 Project v2를 조회하려면 3단계에서 Project 작업 권한을 연결하세요."
+        );
         return;
       }
       setSelectedInstallationId(installationId);
@@ -793,26 +795,12 @@ export function GithubPanel() {
     setSelectedProjectV2Id(projectV2Id);
   }
 
-  async function handleSaveProjectV2Selections() {
+  async function handleActivateProjectV2(projectV2Id: string) {
     if (!workspaceId || !selectedRepositoryId) {
-      setActionError("활성 워크스페이스를 확인할 수 없습니다.");
-      return;
+      throw new Error("repository를 먼저 선택해 주세요.");
     }
-    const repository = snapshot.repositories.find(
-      (candidate) => candidate.id === selectedRepositoryId
-    );
-    if (!repository) {
-      setActionError("선택한 저장소를 확인할 수 없습니다.");
-      return;
-    }
-
     if (!isWorkspaceOwner) {
-      setActionError("Only the workspace owner can change the active Board source.");
-      return;
-    }
-    if (!selectedProjectV2Id) {
-      setActionError("Choose a ProjectV2 before switching the Board.");
-      return;
+      throw new Error("Workspace Owner만 활성 Board를 변경할 수 있습니다.");
     }
 
     setIsSavingProjectV2Selections(true);
@@ -824,19 +812,26 @@ export function GithubPanel() {
         workspaceId,
         {
           repositoryId: selectedRepositoryId,
-          projectV2Id: selectedProjectV2Id
+          projectV2Id
         }
       );
-      setActionMessage("ProjectV2를 현재 보드로 전환했습니다.");
-      await Promise.all([
-        loadGithubProjectV2s(selectedRepositoryId),
-        refreshGithubSyncRuns()
-      ]);
+      setSelectedProjectV2Id(projectV2Id);
+      setActionMessage("활성 Board를 변경했습니다.");
+      void refreshGithubSyncRuns().catch(() => undefined);
     } catch (error) {
       setActionError(getErrorMessage(error));
+      throw error;
     } finally {
       setIsSavingProjectV2Selections(false);
     }
+  }
+
+  function handleSaveProjectV2Selections() {
+    if (!selectedProjectV2Id) {
+      setActionError("ProjectV2를 선택한 뒤 Board를 변경하세요.");
+      return;
+    }
+    void handleActivateProjectV2(selectedProjectV2Id);
   }
 
   async function handleStartGithubSyncRun() {
