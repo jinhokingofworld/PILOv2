@@ -215,6 +215,73 @@ function v2Analysis({ flows, relations = [], files } = {}) {
 }
 
 {
+  const candidates = v2Candidates();
+  const lockedRelation = candidates.relations[0];
+  const result = resolvePrReviewSemanticGraph(
+    v2Analysis({
+      relations: [
+        {
+          candidateKey: null,
+          fromFilePath: lockedRelation.fromFilePath,
+          toFilePath: lockedRelation.toFilePath,
+          relationType: lockedRelation.relationType,
+          reason: "기존 locked 후보를 새 AI relation으로 중복 제안합니다."
+        }
+      ]
+    }),
+    candidates
+  );
+
+  assert.equal(result.validationStatus, "validated_ai_relation_fallback");
+  assert.equal(result.fallbackReason, "invalid_ai_relations");
+  assert.deepEqual(result.flows.map((flow) => flow.title), ["작업 생성", "Worker 처리"]);
+  assert.deepEqual(
+    result.relations.map((relation) => ({
+      relationType: relation.relationType,
+      source: relation.source,
+      confidence: relation.confidence,
+      reason: relation.reason
+    })),
+    [
+      {
+        relationType: "tests",
+        source: "rule",
+        confidence: 90,
+        reason: "matching_test_filename"
+      }
+    ]
+  );
+}
+
+{
+  const result = resolvePrReviewSemanticGraph(
+    v2Analysis({
+      relations: [
+        {
+          candidateKey: null,
+          fromFilePath: "apps/app-server/src/job.ts",
+          toFilePath: "apps/app-server/src/job.test.ts",
+          relationType: "depends_on",
+          reason: "기존 후보와 다른 새 AI relation입니다."
+        }
+      ]
+    }),
+    v2Candidates()
+  );
+
+  assert.equal(result.validationStatus, "validated_ai");
+  assert.equal(
+    result.relations.some(
+      (relation) =>
+        relation.source === "ai" &&
+        relation.relationType === "depends_on" &&
+        relation.reason === "기존 후보와 다른 새 AI relation입니다."
+    ),
+    true
+  );
+}
+
+{
   const result = resolvePrReviewSemanticGraph(
     v2Analysis({
       relations: [

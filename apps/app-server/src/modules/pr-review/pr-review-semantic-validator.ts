@@ -350,6 +350,15 @@ function validateRelations(
   flowKeyByFilePath: Map<string, string>
 ): PrReviewValidatedGraphRelation[] {
   const relationIdentities = new Set<string>();
+  const candidateRelationIdentities = new Set(
+    [...candidateRelationByKey.values()].map((candidate) =>
+      relationCandidateIdentity(
+        candidate.fromFilePath,
+        candidate.toFilePath,
+        candidate.relationType
+      )
+    )
+  );
   return rawRelations.map((value) => {
     const relation = requireRecord(value);
     const fromFilePath = requireText(relation.fromFilePath, 4000);
@@ -385,6 +394,14 @@ function validateRelations(
           : undefined;
     if (candidate === undefined) {
       throw new Error("Semantic graph relation candidate is invalid");
+    }
+    if (
+      candidateKey === null &&
+      candidateRelationIdentities.has(
+        relationCandidateIdentity(fromFilePath, toFilePath, relationType)
+      )
+    ) {
+      throw new Error("Semantic graph new relation overlaps a candidate");
     }
     if (
       candidate &&
@@ -706,6 +723,14 @@ function relationIdentity(
   relationType: PrReviewRelationType
 ): string {
   return `${flowKey}:${fromFilePath}->${toFilePath}:${relationType}`;
+}
+
+function relationCandidateIdentity(
+  fromFilePath: string,
+  toFilePath: string,
+  relationType: PrReviewRelationType
+): string {
+  return JSON.stringify([fromFilePath, toFilePath, relationType]);
 }
 
 function find(parent: number[], index: number): number {
