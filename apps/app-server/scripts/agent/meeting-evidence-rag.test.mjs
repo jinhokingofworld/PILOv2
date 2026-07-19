@@ -90,7 +90,9 @@ try {
   assert.equal(database.queries.length, 3);
   assert.match(database.queries[1].text, /meeting_report_activity_evidence_chunks/);
   assert.match(database.queries[1].text, /source_type IN \('decision', 'action_item'\)/);
-  assert.match(database.queries[2].text, /transcript\.embedding <=> activity\.embedding <= \$3/);
+  assert.match(database.queries[0].text, /chunk\.embedding OPERATOR\(extensions\.<=>\) \$4::extensions\.vector/);
+  assert.match(database.queries[1].text, /chunk\.embedding OPERATOR\(extensions\.<=>\) \$4::extensions\.vector/);
+  assert.match(database.queries[2].text, /transcript\.embedding OPERATOR\(extensions\.<=>\) activity\.embedding <= \$3/);
   assert.equal(workspaceService.calls.length, 1);
 
   const crowdedDatabase = new FakeDatabase({

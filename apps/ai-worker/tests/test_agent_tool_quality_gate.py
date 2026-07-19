@@ -49,7 +49,7 @@ def test_quality_gate_records_reproducible_passing_baseline_without_sensitive_in
             "2a396b2efef711beb2c0ac2c505c2ff8f28b74c0f4b1587b2b0793119b33e64b"
         ),
         "modelVersion": "deterministic:no-provider",
-        "retrieverVersion": "agent-tool-metadata-overlap:v2",
+        "retrieverVersion": "agent-tool-metadata-overlap:v3",
         "topK": 8,
         "defaultSchemaTokenBudget": 8000,
     }
