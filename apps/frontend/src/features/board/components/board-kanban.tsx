@@ -1,26 +1,15 @@
 "use client";
 
-import {
-  Clock3,
-  ExternalLink,
-  GitPullRequestArrow
-} from "lucide-react";
+import { ExternalLink, GitPullRequestArrow } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { BoardIssueCard } from "@/features/board/components/board-issue-card";
 import type {
   BoardColumnPayload,
   BoardDetailPayload,
   BoardIssueCardPayload
 } from "@/features/board/types";
-import {
-  formatBoardDateTime,
-  formatBoardIssueNumber,
-  formatBoardIssueState,
-  readBoardAssigneeLogin,
-  readBoardLabelColor,
-  readBoardLabelName
-} from "@/features/board/utils/board-format";
 import { cn } from "@/lib/utils";
 import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
@@ -54,141 +43,6 @@ function columnToneClassName(index: number) {
   ];
 
   return tones[index % tones.length];
-}
-
-function issueStateClassName(issue: BoardIssueCardPayload) {
-  if (issue.state === "closed") {
-    return "bg-emerald-50 text-emerald-700";
-  }
-
-  return "bg-violet-50 text-violet-700";
-}
-
-function readAssigneeInitials(login: string) {
-  return login
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
-}
-
-function BoardIssueCard({
-  issue,
-  moving,
-  onOpenIssue,
-  onDragEnd,
-  onDragStart,
-  selected
-}: {
-  issue: BoardIssueCardPayload;
-  moving: boolean;
-  onOpenIssue: (issue: BoardIssueCardPayload) => void;
-  onDragEnd: () => void;
-  onDragStart: (issue: BoardIssueCardPayload) => void;
-  selected: boolean;
-}) {
-  const visibleLabels = issue.labels
-    .map((label) => ({
-      color: readBoardLabelColor(label),
-      name: readBoardLabelName(label)
-    }))
-    .filter((label): label is { color: string | null; name: string } =>
-      Boolean(label.name)
-    )
-    .slice(0, 3);
-  const visibleAssignees = issue.assignees
-    .map(readBoardAssigneeLogin)
-    .filter((login): login is string => Boolean(login))
-    .slice(0, 3);
-
-  return (
-    <button
-      {...pageCursorTargetAttributes({
-        id: issue.id,
-        label: issue.title,
-        type: "board_issue"
-      })}
-      type="button"
-      draggable={!moving}
-      className={cn(
-        "issue-card flex min-h-36 w-full cursor-grab flex-col items-stretch gap-3 rounded-[14px] border border-slate-200 bg-white p-4 text-left text-slate-950 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 active:cursor-grabbing",
-        selected && "border-violet-400 ring-2 ring-violet-200",
-        moving && "pointer-events-none opacity-60"
-      )}
-      aria-busy={moving}
-      onClick={() => onOpenIssue(issue)}
-      onDragEnd={onDragEnd}
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData(
-          "application/x-pilo-board-issue",
-          JSON.stringify({
-            issueId: issue.id,
-            previousColumnId: issue.columnId
-          } satisfies DraggedIssue)
-        );
-        onDragStart(issue);
-      }}
-    >
-      <span className="card-top flex items-center justify-between gap-3">
-        <span className="issue-key font-mono text-[17.25px] font-bold text-slate-500">
-          {formatBoardIssueNumber(issue)}
-        </span>
-        <span
-          className={cn(
-            "state inline-flex min-h-[33px] items-center rounded-full px-2 text-[15.75px] font-extrabold",
-            issueStateClassName(issue)
-          )}
-        >
-          {formatBoardIssueState(issue.state)}
-        </span>
-      </span>
-
-      <strong className="card-title line-clamp-2 text-[23.25px] font-bold leading-8 tracking-normal">
-        {issue.title}
-      </strong>
-
-      {visibleLabels.length ? (
-        <span className="tags flex min-h-9 flex-wrap items-center gap-1.5">
-          {visibleLabels.map((label) => (
-            <span
-              key={label.name}
-              className="tag inline-flex min-h-[33px] max-w-32 items-center truncate rounded-full border border-slate-200 bg-slate-50 px-2 text-[15.75px] font-bold text-slate-600"
-              style={{
-                borderColor: label.color ?? undefined,
-                color: label.color ?? undefined
-              }}
-            >
-              {label.name}
-            </span>
-          ))}
-        </span>
-      ) : null}
-
-      <span className="card-footer mt-auto flex items-center justify-between gap-2 text-[17.25px] text-slate-400">
-        <span className="avatars flex items-center">
-          {visibleAssignees.length ? (
-            visibleAssignees.map((login) => (
-              <span
-                key={login}
-                className="avatar -ml-1.5 first:ml-0 grid size-6 place-items-center rounded-full border-2 border-white bg-violet-500 font-mono text-[14.25px] font-extrabold text-white"
-                title={`@${login}`}
-              >
-                {readAssigneeInitials(login) || "?"}
-              </span>
-            ))
-          ) : (
-            <span className="font-semibold">담당자 없음</span>
-          )}
-        </span>
-        <span className="stats flex min-w-0 items-center justify-end gap-1.5">
-          <Clock3 className="size-3.5 shrink-0" />
-          <span className="truncate">{formatBoardDateTime(issue.githubUpdatedAt)}</span>
-        </span>
-      </span>
-    </button>
-  );
 }
 
 export function BoardKanban({

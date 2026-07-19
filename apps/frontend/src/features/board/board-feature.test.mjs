@@ -15,6 +15,7 @@ const [
   boardDataHook,
   boardPanel,
   boardKanban,
+  boardIssueCard,
   boardIssueSheet,
   boardIssueCreateForm,
   boardIssueCreateDialog,
@@ -25,6 +26,7 @@ const [
   readFeatureFile("./hooks/use-board-workspace-data.ts"),
   readFeatureFile("./components/board-panel.tsx"),
   readFeatureFile("./components/board-kanban.tsx"),
+  readFeatureFile("./components/board-issue-card.tsx"),
   readFeatureFile("./components/board-issue-sheet.tsx"),
   readFeatureFile("./components/board-issue-create-form.tsx"),
   readFeatureFile("./components/board-issue-create-dialog.tsx"),
@@ -138,7 +140,7 @@ assert.match(
 assert.doesNotMatch(boardPanel, />Board 선택</);
 assert.match(boardPanel, /text-\[18\.75px\]/);
 assert.match(boardPanel, /text-\[17\.25px\]/);
-assert.match(boardKanban, /text-\[23\.25px\]/);
+assert.match(boardIssueCard, /text-base/);
 assert.match(boardKanban, /text-\[21\.75px\]/);
 assert.match(boardIssueCreateForm, /text-\[21px\]/);
 assert.match(boardIssueCreateDialog, /text-\[27px\]/);
@@ -168,11 +170,8 @@ assert.match(
   boardIssueAssigneeSelector,
   /<Input\s+className="[^"]*text-\[21px\][^"]*md:text-\[21px\]/
 );
-assert.match(
-  boardKanban,
-  /avatar[^\n]*size-6[^\n]*text-\[14\.25px\]/
-);
-assert.doesNotMatch(boardKanban, /avatar[^\n]*size-9/);
+assert.match(boardIssueCard, /avatar[^\n]*size-6[^\n]*text-\[10px\]/);
+assert.doesNotMatch(boardIssueCard, /avatar[^\n]*size-9/);
 assert.doesNotMatch(boardPanel, /board-title/);
 assert.doesNotMatch(boardPanel, /board-icon/);
 assert.doesNotMatch(boardPanel, /board-issue-create-dock/);
@@ -199,7 +198,7 @@ assert.match(boardKanban, /columns/);
 assert.match(boardKanban, /issuesByColumnId/);
 assert.match(boardKanban, /onOpenIssue/);
 assert.match(boardKanban, /onMoveIssue/);
-assert.match(boardKanban, /draggable/);
+assert.match(boardIssueCard, /draggable/);
 assert.match(boardKanban, /onDrop/);
 assert.match(boardKanban, /kanban-scroll/);
 assert.match(boardKanban, /kanban-board/);
@@ -207,6 +206,16 @@ assert.match(boardKanban, /lane-header/);
 assert.match(boardKanban, /lane-stack/);
 assert.match(boardKanban, /issue-card/);
 assert.doesNotMatch(boardKanban, /읽기 전용/);
+
+assert.match(boardIssueCard, /from "@\/components\/ui\/card"/);
+assert.match(boardIssueCard, /<Card/);
+assert.match(boardIssueCard, /visibleLabels/);
+assert.match(boardIssueCard, /visibleAssignees/);
+assert.match(boardIssueCard, /담당자 없음/);
+assert.match(boardIssueCard, /role="button"/);
+assert.match(boardIssueCard, /tabIndex=\{0\}/);
+assert.match(boardIssueCard, /Enter/);
+assert.match(boardIssueCard, /application\/x-pilo-board-issue/);
 
 assert.match(boardIssueSheet, /DialogPrimitive/);
 assert.match(boardIssueSheet, /DialogPrimitive\.Popup/);
