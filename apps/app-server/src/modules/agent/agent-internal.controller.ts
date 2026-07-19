@@ -12,6 +12,7 @@ import { AgentExecutionService } from "./agent-execution.service";
 import { AgentExecutionHandoffGuard } from "./agent-execution-handoff.guard";
 import { AgentConfirmationService } from "./agent-confirmation.service";
 import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
+import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import { MeetingActionItemDeliveryService } from "../meeting/meeting-action-item-delivery.service";
 
 @Controller("internal/agent")
@@ -21,6 +22,7 @@ export class AgentInternalController {
     private readonly agentExecutionService: AgentExecutionService,
     private readonly agentConfirmationService: AgentConfirmationService,
     private readonly agentGroundedAnswerService: AgentGroundedAnswerService,
+    private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
     private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService
   ) {}
 
@@ -33,6 +35,7 @@ export class AgentInternalController {
   @Post("stale-executions/recover")
   @HttpCode(HttpStatus.NO_CONTENT)
   async recoverStaleExecutions(): Promise<void> {
+    await this.agentOutboxPublisherService.recoverStalePlanningRuns();
     await this.agentConfirmationService.recoverStaleApprovedExecutions();
     await this.meetingActionItemDeliveryService.recoverStaleDeliveries();
   }

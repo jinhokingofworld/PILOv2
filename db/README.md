@@ -120,6 +120,7 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/094_create_meeting_recording_activity_links.sql` links safe Canvas Activity Logs to the recording selected at Realtime receive time, preserves `captured_at`/`receive_seq`, enforces capture idempotency, and keeps the server-only RLS boundary.
 - `migrations/099_create_agent_candidate_selections.sql` adds short-lived, one-time server-owned Agent clarification candidates bound to their originating tool step. Browser clients receive only the opaque candidate ID; resource references remain behind the App Server and all-deny RLS.
 - `migrations/100_fix_canvas_agent_pgcrypto_digest_schema.sql` aligns the Canvas Agent embedding trigger with RDS pgcrypto installed in `public`, restoring Canvas checkpoint writes without moving the extension or changing the API schema.
+- `migrations/101_add_agent_outbox_planning_started_at.sql` records the server-owned start time of each Agent planning turn so publisher claim/retry updates cannot extend its terminal deadline.
 
 ## Operational Data Repairs
 

@@ -10,7 +10,6 @@ from app.meeting_report_runtime import (
     DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS,
     DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS,
     DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
-    DEFAULT_VISIBILITY_TIMEOUT_SECONDS,
     DEFAULT_WAIT_TIME_SECONDS,
     HttpAgentExecutionHandoffClient,
     PgAgentRunRepository,
@@ -24,6 +23,8 @@ from app.meeting_report_runtime import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+DEFAULT_AGENT_WORKER_VISIBILITY_TIMEOUT_SECONDS = 90
 
 
 @dataclass(frozen=True)
@@ -73,7 +74,7 @@ class AgentWorkerSettings:
             ),
             visibility_timeout_seconds=_positive_int_env(
                 "AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS",
-                DEFAULT_VISIBILITY_TIMEOUT_SECONDS,
+                DEFAULT_AGENT_WORKER_VISIBILITY_TIMEOUT_SECONDS,
             ),
         )
 

@@ -73,6 +73,7 @@ type AgentConfirmationActionState = {
 type AgentChatBusyState = "idle" | "polling" | "submitting";
 
 const AGENT_RUN_POLL_INTERVAL_MS = 1800;
+const AGENT_PLANNING_POLL_TIMEOUT_MS = 190_000;
 const DEFAULT_AGENT_TIMEZONE = "Asia/Seoul";
 const MAX_MEETING_CLIENT_ACTION_EXPIRY_SECONDS = 300;
 
@@ -125,6 +126,12 @@ function isAbortError(error: unknown) {
   return error instanceof Error && error.name === "AbortError";
 }
 
+function createAgentPlanningPollingTimeoutError() {
+  return new Error(
+    "요청 처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
+  );
+}
+
 function waitForAgentRunPollInterval(signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     if (signal.aborted) {
@@ -154,6 +161,15 @@ function shouldStopPolling(run: AgentRun) {
     run.status === "completed" ||
     run.status === "failed" ||
     run.status === "cancelled"
+  );
+}
+
+function getActivePlannerStepId(run: AgentRun) {
+  return (
+    [...run.steps]
+      .reverse()
+      .find((step) => step.type === "planner" && step.status === "running")
+      ?.id ?? null
   );
 }
 
@@ -423,6 +439,11 @@ export function AgentChatWidget() {
     signal: AbortSignal
   ) {
     let currentRun = initialRun;
+    let planningDeadlineAt =
+      currentRun.status === "planning"
+        ? Date.now() + AGENT_PLANNING_POLL_TIMEOUT_MS
+        : null;
+    let activePlannerStepId = getActivePlannerStepId(currentRun);
     rememberAgentRunId(window.sessionStorage, currentRun.workspaceId, currentRun.id);
     handleRunClientAction(currentRun);
     updateAssistantMessage(
@@ -436,6 +457,13 @@ export function AgentChatWidget() {
     }
 
     while (!shouldStopPolling(currentRun)) {
+      if (
+        currentRun.status === "planning" &&
+        planningDeadlineAt !== null &&
+        Date.now() >= planningDeadlineAt
+      ) {
+        throw createAgentPlanningPollingTimeoutError();
+      }
       await waitForAgentRunPollInterval(signal);
       const runPayload = await agentApiClient.getRun(
         currentRun.workspaceId,
@@ -444,7 +472,20 @@ export function AgentChatWidget() {
           signal
         }
       );
+      const previousStatus = currentRun.status;
       currentRun = runPayload.run;
+      const nextActivePlannerStepId = getActivePlannerStepId(currentRun);
+      if (
+        currentRun.status === "planning" &&
+        (previousStatus !== "planning" ||
+          (nextActivePlannerStepId !== null &&
+            nextActivePlannerStepId !== activePlannerStepId))
+      ) {
+        planningDeadlineAt = Date.now() + AGENT_PLANNING_POLL_TIMEOUT_MS;
+      } else if (currentRun.status !== "planning") {
+        planningDeadlineAt = null;
+      }
+      activePlannerStepId = nextActivePlannerStepId;
       rememberAgentRunId(window.sessionStorage, currentRun.workspaceId, currentRun.id);
       handleRunClientAction(currentRun);
       updateAssistantMessage(
@@ -496,7 +537,11 @@ export function AgentChatWidget() {
         await pollAgentRunUntilStop(run, assistantMessageId, abortController.signal);
       } catch (error) {
         if (!isAbortError(error)) {
-          forgetAgentRunId(window.sessionStorage, workspaceId);
+          updateAssistantMessage(
+            assistantMessageId,
+            getAgentRequestErrorMessage(error),
+            null
+          );
         }
       } finally {
         if (activeRunAbortControllerRef.current === abortController) {
@@ -512,7 +557,13 @@ export function AgentChatWidget() {
         activeRunAbortControllerRef.current = null;
       }
     };
-  }, [accessToken, agentApiClient, pollAgentRunUntilStop, workspaceId]);
+  }, [
+    accessToken,
+    agentApiClient,
+    pollAgentRunUntilStop,
+    updateAssistantMessage,
+    workspaceId
+  ]);
 
   async function appendRunInput(
     targetMessage: AgentChatMessage,
@@ -623,7 +674,7 @@ export function AgentChatWidget() {
           updateAssistantMessage(
             assistantMessageId,
             getAgentRequestErrorMessage(pollingError),
-            refreshRun
+            null
           );
         }
         return;
@@ -632,7 +683,7 @@ export function AgentChatWidget() {
       updateAssistantMessage(
         assistantMessageId,
         getAgentRequestErrorMessage(error),
-        refreshRun ?? run
+        null
       );
     } finally {
       if (activeRunAbortControllerRef.current === abortController) {
@@ -714,7 +765,8 @@ export function AgentChatWidget() {
       if (!isAbortError(error)) {
         updateAssistantMessage(
           assistantMessageId,
-          getAgentRequestErrorMessage(error)
+          getAgentRequestErrorMessage(error),
+          null
         );
       }
     } finally {

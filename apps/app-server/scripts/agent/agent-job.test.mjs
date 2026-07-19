@@ -409,15 +409,19 @@ class TestAgentJobService extends AgentJobService {
 }
 
 class FakeOutboxDatabaseService {
-  constructor({ claim, dueRows = [], terminalRun = null } = {}) {
+  constructor({ claim, dueRows = [], stalePlanningRuns = [], terminalRun = null } = {}) {
     this.claim = claim ?? null;
     this.dueRows = dueRows;
+    this.stalePlanningRuns = stalePlanningRuns;
     this.terminalRun = terminalRun;
     this.calls = [];
   }
 
   async query(text, values = []) {
     this.calls.push({ method: "query", text, values });
+    if (text.includes("WITH stale_runs")) {
+      return this.stalePlanningRuns;
+    }
     return this.dueRows;
   }
 
@@ -651,6 +655,44 @@ try {
 
   {
     const database = new FakeOutboxDatabaseService({
+      stalePlanningRuns: [
+        {
+          id: payload.runId,
+          workspace_id: payload.workspaceId,
+          turn_sequence: 1
+        }
+      ]
+    });
+    const publisher = new AgentOutboxPublisherService(
+      database,
+      new FakeOutboxJobService(),
+      new FakeOutboxToolRegistryService()
+    );
+
+    await publisher.recoverStalePlanningRuns();
+
+    const terminalize = database.calls.find(
+      (call) => call.method === "query" && call.text.includes("WITH stale_runs")
+    );
+    assert.match(
+      terminalize.text,
+      /outbox\.planning_started_at <= now\(\) - \(\$1 \* INTERVAL '1 second'\)/
+    );
+    assert.match(terminalize.text, /FOR UPDATE OF run, outbox SKIP LOCKED/);
+    assert.match(terminalize.text, /outbox\.turn_sequence/);
+    assert.match(terminalize.text, /SET status = 'failed'/);
+    assert.match(terminalize.text, /AND step\.status IN \('pending', 'running'\)/);
+    assert.match(terminalize.text, /'planning_timeout'/);
+    assert.deepEqual(terminalize.values, [
+      120,
+      20,
+      "AGENT_PLANNING_TIMEOUT",
+      "요청 처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
+    ]);
+  }
+
+  {
+    const database = new FakeOutboxDatabaseService({
       claim: createOutboxClaim(),
       dueRows: [{ run_id: payload.runId }]
     });
@@ -717,7 +759,10 @@ try {
       /outbox\.turn_sequence/
     );
     assert.match(
-      database.calls.find((call) => call.method === "query").text,
+      database.calls.find(
+        (call) =>
+          call.method === "query" && call.text.includes("next_attempt_at <= now()")
+      ).text,
       /outbox.status = 'publishing'/
     );
     const delivered = database.calls.find(
