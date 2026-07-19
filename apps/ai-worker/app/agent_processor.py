@@ -1376,7 +1376,10 @@ def _meeting_report_tool_requires_legacy_id(tool: AgentToolSchema) -> bool:
 
 
 _MEETING_REPORT_SUMMARY_SECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("summary", re.compile(r"요약|요점|핵심|정리")),
+    (
+        "summary",
+        re.compile(r"(?:요약|요점|핵심)(?!\s*에서)|정리\s*(?:내용|부분|항목)"),
+    ),
     ("discussionPoints", re.compile(r"논의\s*사항|논의|토론")),
     ("decisions", re.compile(r"결정\s*사항|결정|합의|결론")),
     (

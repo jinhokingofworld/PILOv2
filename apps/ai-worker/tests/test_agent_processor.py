@@ -1,6 +1,7 @@
 import json
 import sys
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -2607,6 +2608,46 @@ def test_normalizer_uses_summary_tool_for_explicit_meeting_report_sections() -> 
     assert normalized.status == "tool_candidate"
     assert normalized.output_summary["toolName"] == "summarize_meeting_report"
     assert normalized.output_summary["input"] == {"sections": ["decisions"]}
+
+
+def test_normalizer_matches_meeting_section_quality_fixture_contract() -> None:
+    fixture_path = Path(__file__).parents[1] / "evals" / "meeting_agent_capability_catalog_v1.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {"sections": {"type": "array"}},
+                    },
+                )
+            ]
+        )
+    )
+
+    for case in fixture["qualityCases"]:
+        expectation = case["expected"]
+        expected_input = expectation.get("inputContains")
+        if not isinstance(expected_input, dict) or "sections" not in expected_input:
+            continue
+
+        normalized = normalize_agent_planner_decision(
+            planner_decision(tool_name="summarize_meeting_report", tool_input={}),
+            job,
+            prompt=case["prompt"],
+            planning_context=(
+                'previous resource: {"turn":2,"contextRef":"ctx_0123456789abcdef01234567",'
+                '"resourceType":"meeting_report","ordinal":1}'
+                if case["id"] == "meeting_summary_sections_context"
+                else ""
+            ),
+        )
+
+        assert normalized.output_summary["input"]["sections"] == expected_input["sections"]
 
 
 @pytest.mark.parametrize(
