@@ -569,52 +569,50 @@ export function ScreenShareRuntimeProvider({
   }, [api, reconcileCurrentSession, workspaceId]);
 
   useEffect(() => {
-    void reloadCurrent();
-  }, [reloadCurrent]);
-
-  useEffect(() => {
     if (activeSession || !workspaceId) return;
 
     const requestWorkspaceId = workspaceId;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    const schedulePoll = () => {
+    const requestCurrent = () => {
       if (cancelled) return;
       const attempt = ++reloadAttemptRef.current;
-      timeoutId = setTimeout(() => {
-        void api
-          .getCurrent(requestWorkspaceId)
-          .then(({ session }) => {
-            if (!isCurrentScreenShareRequest({
-              attempt,
-              currentAttempt: reloadAttemptRef.current,
-              currentWorkspaceId: workspaceIdRef.current,
-              requestWorkspaceId
-            })) {
-              if (activeSessionRef.current === null) schedulePoll();
-              return;
-            }
-            if (cancelled) {
-              return;
-            }
-            const result = reconcileCurrentSession(session);
-            if (result.shouldToast && session) {
-              toast(`${session.sharer.displayName}님이 화면 공유를 시작했어요`, {
-                action: {
-                  label: "시청하기",
-                  onClick: () => startViewingRef.current(session.id)
-                }
-              });
-            }
-            if (!session) schedulePoll();
-          })
-          .catch(() => {
-            schedulePoll();
-          });
-      }, 5_000);
+      void api
+        .getCurrent(requestWorkspaceId)
+        .then(({ session }) => {
+          if (!isCurrentScreenShareRequest({
+            attempt,
+            currentAttempt: reloadAttemptRef.current,
+            currentWorkspaceId: workspaceIdRef.current,
+            requestWorkspaceId
+          })) {
+            if (activeSessionRef.current === null) schedulePoll();
+            return;
+          }
+          if (cancelled) {
+            return;
+          }
+          const result = reconcileCurrentSession(session);
+          if (result.shouldToast && session) {
+            toast(`${session.sharer.displayName}님이 화면 공유를 시작했어요`, {
+              action: {
+                label: "시청하기",
+                onClick: () => startViewingRef.current(session.id)
+              }
+            });
+          }
+          if (!session) schedulePoll();
+        })
+        .catch(() => {
+          schedulePoll();
+        });
+    };
+    const schedulePoll = () => {
+      if (cancelled) return;
+      timeoutId = setTimeout(requestCurrent, 5_000);
     };
 
-    schedulePoll();
+    requestCurrent();
     return () => {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);

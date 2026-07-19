@@ -35,7 +35,7 @@ test("Workspace layout mounts screen share beside the Meeting runtime", () => {
 });
 
 test("current session loads on mount and reloads on socket reconnect", () => {
-  assert.match(provider, /void reloadCurrent\(\)/);
+  assert.match(provider, /const requestCurrent = \(\) => \{/);
   assert.match(provider, /socket\.on\("connect", reloadCurrent\)/);
   assert.match(provider, /socket\.off\("connect", reloadCurrent\)/);
   assert.match(provider, /workspace-screen-share:started/);
@@ -113,21 +113,22 @@ test("current-session reconciliation reuses the once-per-session toast policy", 
 });
 
 test("current-session polling is bounded to an inactive workspace lifecycle", () => {
-  const pollingStart = provider.indexOf("const schedulePoll = () => {");
+  const pollingStart = provider.indexOf("const requestCurrent = () => {");
   const pollingEnd = provider.indexOf("\n\n  useEffect(() => {", pollingStart);
   const polling = provider.slice(pollingStart, pollingEnd);
 
   assert.notEqual(pollingStart, -1);
   assert.notEqual(pollingEnd, -1);
   assert.match(provider, /const reconcileCurrentSession[\s\S]*reconcileCurrentScreenShare/);
+  assert.doesNotMatch(provider, /useEffect\(\(\) => \{\s*void reloadCurrent\(\);/);
   assert.match(
-    provider,
-    /useEffect\(\(\) => \{\s*if \(activeSession \|\| !workspaceId\) return;[\s\S]*setTimeout\(\(\) => \{[\s\S]*\}, 5_000\)/,
+    polling,
+    /const requestCurrent = \(\) => \{[\s\S]*api[\s\S]*\.getCurrent\([\s\S]*schedulePoll\(\)[\s\S]*const schedulePoll = \(\) => \{[\s\S]*setTimeout\(requestCurrent, 5_000\)[\s\S]*requestCurrent\(\);/,
   );
   assert.match(provider, /let timeoutId: ReturnType<typeof setTimeout> \| null = null/);
   assert.match(
     polling,
-    /const attempt = \+\+reloadAttemptRef\.current;[\s\S]*isCurrentScreenShareRequest/,
+    /const requestCurrent = \(\) => \{[\s\S]*const attempt = \+\+reloadAttemptRef\.current;[\s\S]*isCurrentScreenShareRequest/,
   );
   assert.match(polling, /\.then\([\s\S]*schedulePoll\(\)[\s\S]*\.catch\([\s\S]*schedulePoll\(\)/);
   assert.match(polling, /return \(\) => \{\s*cancelled = true;[\s\S]*clearTimeout\(timeoutId\)/);
