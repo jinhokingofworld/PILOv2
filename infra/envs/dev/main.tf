@@ -1,6 +1,16 @@
 locals {
   name_prefix = "${var.project_name}-${var.environment}"
 
+  agent_router_timeout_ms                = 45000
+  agent_planner_timeout_ms               = 60000
+  agent_handoff_timeout_seconds          = 10
+  agent_sqs_visibility_timeout_seconds   = 180
+  agent_sqs_visibility_heartbeat_seconds = 45
+  agent_planning_timeout_seconds         = 240
+  agent_execution_lease_seconds          = 180
+  agent_execution_heartbeat_seconds      = 30
+  agent_grounded_answer_timeout_seconds  = 300
+
   common_tags = {
     Project     = var.project_name
     Environment = var.environment
@@ -108,7 +118,8 @@ module "ecr" {
 module "sqs" {
   source = "../../modules/sqs"
 
-  name_prefix = local.name_prefix
+  name_prefix                      = local.name_prefix
+  agent_visibility_timeout_seconds = local.agent_sqs_visibility_timeout_seconds
 }
 
 module "secrets" {
@@ -204,44 +215,48 @@ module "ecs" {
       task_role_arn      = module.iam.app_server_task_role_arn
       target_group_arn   = module.alb.app_target_group_arn
       environment = {
-        APP_ENV                              = var.environment
-        AWS_REGION                           = var.aws_region
-        PORT                                 = tostring(var.app_server_port)
-        DATABASE_SSL                         = "true"
-        DATABASE_POOL_MAX                    = "2"
-        DATABASE_POOL_IDLE_TIMEOUT_MS        = "10000"
-        DATABASE_POOL_CONNECTION_TIMEOUT_MS  = "5000"
-        DATABASE_APPLICATION_NAME            = "pilo-dev-app-server"
-        S3_UPLOADS_BUCKET                    = module.s3.uploads_bucket_name
-        SQS_AI_JOBS_QUEUE_URL                = module.sqs.ai_jobs_queue_url
-        SQS_AGENT_JOBS_QUEUE_URL             = module.sqs.agent_jobs_queue_url
-        SQS_MEETING_JOBS_QUEUE_URL           = module.sqs.meeting_jobs_queue_url
-        SQS_PR_REVIEW_ANALYSIS_QUEUE_URL     = module.sqs.pr_review_analysis_queue_url
-        SQS_GITHUB_WEBHOOKS_QUEUE_URL        = module.sqs.github_webhooks_queue_url
-        SQS_GITHUB_SYNC_JOBS_QUEUE_URL       = module.sqs.github_sync_jobs_queue_url
-        SQS_WORKSPACE_INDEXING_QUEUE_URL     = module.sqs.workspace_indexing_queue_url
-        FRONTEND_URL                         = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
-        API_PUBLIC_ORIGIN                    = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
-        API_BASE_PATH                        = "/api/v1"
-        LIVEKIT_RECORDING_MODE               = "room_audio_only"
-        LIVEKIT_EGRESS_S3_PREFIX             = "recordings/meetings"
-        OPENAI_PR_REVIEW_MODEL               = "gpt-5.5"
-        OPENAI_PR_REVIEW_TIMEOUT_MS          = "45000"
-        SQL_ERD_OPERATIONS_V1_ENABLED        = tostring(var.sql_erd_operations_v1_enabled)
-        AGENT_DOMAIN_MEETING_READ_ENABLED    = "true"
-        AGENT_DOMAIN_MEETING_WRITE_ENABLED   = "true"
-        AGENT_DOMAIN_CALENDAR_READ_ENABLED   = "false"
-        AGENT_DOMAIN_CALENDAR_WRITE_ENABLED  = "false"
-        AGENT_DOMAIN_BOARD_READ_ENABLED      = "false"
-        AGENT_DOMAIN_BOARD_WRITE_ENABLED     = "false"
-        AGENT_DOMAIN_CANVAS_READ_ENABLED     = "false"
-        AGENT_DOMAIN_CANVAS_WRITE_ENABLED    = "false"
-        AGENT_DOMAIN_SQL_ERD_READ_ENABLED    = "false"
-        AGENT_DOMAIN_SQL_ERD_WRITE_ENABLED   = "false"
-        AGENT_DOMAIN_DRIVE_READ_ENABLED      = "false"
-        AGENT_DOMAIN_DRIVE_WRITE_ENABLED     = "false"
-        AGENT_DOMAIN_PR_REVIEW_READ_ENABLED  = "false"
-        AGENT_DOMAIN_PR_REVIEW_WRITE_ENABLED = "false"
+        APP_ENV                               = var.environment
+        AWS_REGION                            = var.aws_region
+        PORT                                  = tostring(var.app_server_port)
+        DATABASE_SSL                          = "true"
+        DATABASE_POOL_MAX                     = "2"
+        DATABASE_POOL_IDLE_TIMEOUT_MS         = "10000"
+        DATABASE_POOL_CONNECTION_TIMEOUT_MS   = "5000"
+        DATABASE_APPLICATION_NAME             = "pilo-dev-app-server"
+        S3_UPLOADS_BUCKET                     = module.s3.uploads_bucket_name
+        SQS_AI_JOBS_QUEUE_URL                 = module.sqs.ai_jobs_queue_url
+        SQS_AGENT_JOBS_QUEUE_URL              = module.sqs.agent_jobs_queue_url
+        SQS_MEETING_JOBS_QUEUE_URL            = module.sqs.meeting_jobs_queue_url
+        SQS_PR_REVIEW_ANALYSIS_QUEUE_URL      = module.sqs.pr_review_analysis_queue_url
+        SQS_GITHUB_WEBHOOKS_QUEUE_URL         = module.sqs.github_webhooks_queue_url
+        SQS_GITHUB_SYNC_JOBS_QUEUE_URL        = module.sqs.github_sync_jobs_queue_url
+        SQS_WORKSPACE_INDEXING_QUEUE_URL      = module.sqs.workspace_indexing_queue_url
+        FRONTEND_URL                          = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
+        API_PUBLIC_ORIGIN                     = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        API_BASE_PATH                         = "/api/v1"
+        LIVEKIT_RECORDING_MODE                = "room_audio_only"
+        LIVEKIT_EGRESS_S3_PREFIX              = "recordings/meetings"
+        OPENAI_PR_REVIEW_MODEL                = "gpt-5.5"
+        OPENAI_PR_REVIEW_TIMEOUT_MS           = "45000"
+        SQL_ERD_OPERATIONS_V1_ENABLED         = tostring(var.sql_erd_operations_v1_enabled)
+        AGENT_PLANNING_TIMEOUT_SECONDS        = tostring(local.agent_planning_timeout_seconds)
+        AGENT_EXECUTION_LEASE_SECONDS         = tostring(local.agent_execution_lease_seconds)
+        AGENT_EXECUTION_HEARTBEAT_SECONDS     = tostring(local.agent_execution_heartbeat_seconds)
+        AGENT_GROUNDED_ANSWER_TIMEOUT_SECONDS = tostring(local.agent_grounded_answer_timeout_seconds)
+        AGENT_DOMAIN_MEETING_READ_ENABLED     = "true"
+        AGENT_DOMAIN_MEETING_WRITE_ENABLED    = "true"
+        AGENT_DOMAIN_CALENDAR_READ_ENABLED    = "false"
+        AGENT_DOMAIN_CALENDAR_WRITE_ENABLED   = "false"
+        AGENT_DOMAIN_BOARD_READ_ENABLED       = "false"
+        AGENT_DOMAIN_BOARD_WRITE_ENABLED      = "false"
+        AGENT_DOMAIN_CANVAS_READ_ENABLED      = "false"
+        AGENT_DOMAIN_CANVAS_WRITE_ENABLED     = "false"
+        AGENT_DOMAIN_SQL_ERD_READ_ENABLED     = "false"
+        AGENT_DOMAIN_SQL_ERD_WRITE_ENABLED    = "false"
+        AGENT_DOMAIN_DRIVE_READ_ENABLED       = "false"
+        AGENT_DOMAIN_DRIVE_WRITE_ENABLED      = "false"
+        AGENT_DOMAIN_PR_REVIEW_READ_ENABLED   = "false"
+        AGENT_DOMAIN_PR_REVIEW_WRITE_ENABLED  = "false"
       }
       secrets = module.secrets.app_server_ecs_secrets
     }
@@ -288,7 +303,8 @@ module "ecs" {
         SQS_AI_JOBS_QUEUE_URL           = module.sqs.ai_jobs_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL   = module.sqs.github_webhooks_queue_url
         AGENT_TOOL_RETRIEVAL_MODE       = "llm_router"
-        OPENAI_AGENT_PLANNER_TIMEOUT_MS = "60000"
+        OPENAI_AGENT_PLANNER_TIMEOUT_MS = tostring(local.agent_planner_timeout_ms)
+        OPENAI_AGENT_ROUTER_TIMEOUT_MS  = tostring(local.agent_router_timeout_ms)
         LEGACY_MEETING_DRAIN_ENABLED    = tostring(var.legacy_meeting_drain_enabled)
         LEGACY_AGENT_DRAIN_ENABLED      = tostring(var.legacy_agent_drain_enabled)
         }, var.legacy_meeting_drain_enabled ? {
@@ -300,7 +316,7 @@ module "ecs" {
         OPENAI_MEETING_REPORT_MODEL          = "gpt-5.4-mini"
         } : {}, var.legacy_agent_drain_enabled ? {
         AGENT_EXECUTION_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
-        AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = "10"
+        AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = tostring(local.agent_handoff_timeout_seconds)
       } : {})
       secrets = merge(
         var.legacy_meeting_drain_enabled ? module.secrets.ai_worker_legacy_meeting_drain_ecs_secrets : module.secrets.ai_worker_ecs_secrets,
@@ -319,15 +335,17 @@ module "ecs" {
       task_role_arn      = module.iam.agent_worker_task_role_arn
       target_group_arn   = null
       environment = {
-        APP_ENV                                  = var.environment
-        AWS_REGION                               = var.aws_region
-        DATABASE_SSL                             = "true"
-        SQS_AGENT_JOBS_QUEUE_URL                 = module.sqs.agent_jobs_queue_url
-        AGENT_EXECUTION_HANDOFF_BASE_URL         = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
-        AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS  = "10"
-        OPENAI_AGENT_PLANNER_TIMEOUT_MS          = "60000"
-        AGENT_TOOL_RETRIEVAL_MODE                = "llm_router"
-        AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS = "90"
+        APP_ENV                                    = var.environment
+        AWS_REGION                                 = var.aws_region
+        DATABASE_SSL                               = "true"
+        SQS_AGENT_JOBS_QUEUE_URL                   = module.sqs.agent_jobs_queue_url
+        AGENT_EXECUTION_HANDOFF_BASE_URL           = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS    = tostring(local.agent_handoff_timeout_seconds)
+        OPENAI_AGENT_PLANNER_TIMEOUT_MS            = tostring(local.agent_planner_timeout_ms)
+        OPENAI_AGENT_ROUTER_TIMEOUT_MS             = tostring(local.agent_router_timeout_ms)
+        AGENT_TOOL_RETRIEVAL_MODE                  = "llm_router"
+        AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS   = tostring(local.agent_sqs_visibility_timeout_seconds)
+        AI_WORKER_SQS_VISIBILITY_HEARTBEAT_SECONDS = tostring(local.agent_sqs_visibility_heartbeat_seconds)
       }
       secrets = module.secrets.agent_worker_ecs_secrets
     }

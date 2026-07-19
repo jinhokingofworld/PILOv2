@@ -200,16 +200,19 @@ def test_agent_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None
     settings = AgentWorkerSettings.from_env()
 
     assert settings.sqs_queue_url == "https://sqs.example.com/agent-jobs"
-    assert settings.visibility_timeout_seconds == 90
+    assert settings.visibility_timeout_seconds == 180
+    assert settings.visibility_heartbeat_seconds == 45
     assert settings.openai_agent_router_model == settings.openai_agent_planner_model
 
 
 def test_agent_worker_dispatcher_has_no_meeting_or_pr_review_processor() -> None:
-    dispatcher = create_agent_dispatcher(object())
+    grounded_answer_processor = object()
+    dispatcher = create_agent_dispatcher(object(), grounded_answer_processor)
 
     assert dispatcher.meeting_report_processor is None
     assert dispatcher.canvas_agent_processor is None
     assert dispatcher.pr_review_analysis_processor is None
+    assert dispatcher.grounded_answer_processor is grounded_answer_processor
 
 
 def test_pr_review_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None:

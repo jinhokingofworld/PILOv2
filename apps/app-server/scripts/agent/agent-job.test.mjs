@@ -285,6 +285,32 @@ const fullRegistry = new AgentToolRegistryService(
     }
   }
 }
+{
+  const previousAppEnv = process.env.APP_ENV;
+  const previousMeetingRead = process.env.AGENT_DOMAIN_MEETING_READ_ENABLED;
+  const previousBoardRead = process.env.AGENT_DOMAIN_BOARD_READ_ENABLED;
+  try {
+    process.env.APP_ENV = "dev";
+    delete process.env.AGENT_DOMAIN_MEETING_READ_ENABLED;
+    delete process.env.AGENT_DOMAIN_BOARD_READ_ENABLED;
+    const flags = new AgentDomainFeatureFlagService();
+    assert.equal(flags.isEnabled("meeting", "read"), true);
+    assert.equal(
+      flags.isEnabled("board", "read"),
+      false,
+      "dev must fail closed to the Terraform rollout when task env flags drift"
+    );
+  } finally {
+    if (previousAppEnv === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = previousAppEnv;
+    if (previousMeetingRead === undefined)
+      delete process.env.AGENT_DOMAIN_MEETING_READ_ENABLED;
+    else process.env.AGENT_DOMAIN_MEETING_READ_ENABLED = previousMeetingRead;
+    if (previousBoardRead === undefined)
+      delete process.env.AGENT_DOMAIN_BOARD_READ_ENABLED;
+    else process.env.AGENT_DOMAIN_BOARD_READ_ENABLED = previousBoardRead;
+  }
+}
 const inventory = fullRegistry.listToolInventory();
   const legacyFixtureToolNames = new Set(suite.tools.map((tool) => tool.name));
   const legacyExpectedToolSelections = Object.fromEntries(
@@ -733,7 +759,7 @@ try {
     assert.match(terminalize.text, /AND step\.status IN \('pending', 'running'\)/);
     assert.match(terminalize.text, /'planning_timeout'/);
     assert.deepEqual(terminalize.values, [
-      120,
+      240,
       20,
       "AGENT_PLANNING_TIMEOUT",
       "요청 처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
@@ -882,7 +908,7 @@ try {
 
   {
     const database = new FakeOutboxDatabaseService({
-      claim: createOutboxClaim({ attempt_count: 6 }),
+      claim: createOutboxClaim({ attempt_count: 5 }),
       terminalRun: { id: payload.runId }
     });
     const publisher = new AgentOutboxPublisherService(

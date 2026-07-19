@@ -98,6 +98,16 @@ class FakeDatabaseService {
     this.calls = [];
   }
 
+  async query(text) {
+    this.calls.push({ text, values: [] });
+    if (text.includes("SELECT DISTINCT tool_name")) {
+      return (this.state.completedToolNames ?? []).map((tool_name) => ({
+        tool_name
+      }));
+    }
+    throw new Error(`Unhandled query: ${text}`);
+  }
+
   async queryOne(text, values = []) {
     this.calls.push({ text, values });
 
@@ -168,6 +178,31 @@ class FakeAgentLoggingService {
     };
   }
 
+  async startNextToolExecutionClaimIfAbsent(
+    currentUserId,
+    workspaceId,
+    input
+  ) {
+    const step = await this.startNextToolStepIfAbsent(
+      currentUserId,
+      workspaceId,
+      input
+    );
+    return step
+      ? {
+          step,
+          lease: {
+            token: "66666666-6666-4666-8666-666666666666",
+            generation: 1
+          }
+        }
+      : null;
+  }
+
+  async heartbeatExecutionLease() {
+    return true;
+  }
+
   async completeStep(currentUserId, workspaceId, input) {
     this.calls.push({
       method: "completeStep",
@@ -191,10 +226,16 @@ class FakeAgentLoggingService {
       input
     });
 
+    const disposition = input.postExecutionDisposition ?? "continue_planning";
     const queuedNextPlannerTurn =
-      input.waitForUserInput !== true &&
+      disposition === "continue_planning" &&
       this.state.toolCallLimitReached !== true;
-    const status = queuedNextPlannerTurn ? "planning" : "waiting_user_input";
+    const status =
+      disposition === "complete_run"
+        ? "completed"
+        : queuedNextPlannerTurn
+          ? "planning"
+          : "waiting_user_input";
     return {
       step: {
         id: input.stepId,
@@ -213,11 +254,12 @@ class FakeAgentLoggingService {
         message: queuedNextPlannerTurn
           ? "다음 작업을 확인하고 있습니다."
           : input.waitingMessage,
-        finalAnswer: null,
+        finalAnswer: status === "completed" ? input.waitingMessage : null,
         errorCode: null,
         errorMessage: null,
         expiresAt: "2026-08-09T00:00:00.000Z",
-        completedAt: null,
+        completedAt:
+          status === "completed" ? "2026-07-10T00:00:00.000Z" : null,
         createdAt: "2026-07-10T00:00:00.000Z",
         updatedAt: "2026-07-10T00:00:00.000Z"
       },
@@ -400,7 +442,7 @@ class FakeAgentToolRegistryService {
       description: "fake tool",
       riskLevel,
       executionMode,
-      completesRunAfterExecution: this.state.completesRunAfterExecution === true,
+      postExecutionDisposition: this.state.postExecutionDisposition,
       inputSchema: {},
       validateInput: (input) => {
         this.calls.push({ method: "validateInput", input });
@@ -1024,6 +1066,7 @@ function createService({
   executionStarted = false,
   requestContext = null,
   toolCallLimitReached = false,
+  completedToolNames = [],
   publisherError = null,
   candidateSelectionService = undefined
 } = {}) {
@@ -1042,7 +1085,8 @@ function createService({
       output_json: planner
     },
     executionStarted,
-    toolCallLimitReached
+    toolCallLimitReached,
+    completedToolNames
   };
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
@@ -1128,7 +1172,8 @@ function formatterMeetingReport(index, overrides = {}) {
     resourceRefs: []
   });
 
-  assert.match(answer, /로그 관련 테이블에 집중 표시했습니다/);
+  assert.match(answer, /로그 관련 집중 보기 결과를 준비했습니다/);
+  assert.doesNotMatch(answer, /집중 표시했습니다/);
   assert.match(answer, /핵심 테이블: activity_logs/);
   assert.match(answer, /관련 테이블: users/);
 }
@@ -1493,7 +1538,7 @@ function formatterMeetingReport(index, overrides = {}) {
 {
   const { service, loggingService, outboxPublisherService } = createService({
     registryState: {
-      completesRunAfterExecution: true,
+      postExecutionDisposition: "complete_run",
       name: "focus_sql_erd_tables"
     },
     planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
@@ -1501,14 +1546,55 @@ function formatterMeetingReport(index, overrides = {}) {
 
   const result = await service.executeReadyRun(RUN_ID);
 
-  assert.equal(result.status, "waiting_user_input");
-  assert.equal(result.run.status, "waiting_user_input");
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
   assert.deepEqual(outboxPublisherService.calls, []);
   const completion = loggingService.calls.find(
     (call) => call.method === "completeToolStepAndAdvance"
   );
-  assert.equal(completion.input.waitForUserInput, true);
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
   assert.match(completion.input.waitingMessage, /focus_sql_erd_tables 실행을 완료했습니다/);
+}
+
+{
+  const { service, loggingService, outboxPublisherService } = createService({
+    planner: plannerOutput({
+      toolRouting: {
+        capabilityIds: ["calendar.events.list"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
+  assert.deepEqual(outboxPublisherService.calls, []);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
+}
+
+{
+  const { service, loggingService } = createService({
+    completedToolNames: ["list_calendar_events"],
+    registryState: { name: "update_calendar_event" },
+    planner: plannerOutput({
+      toolName: "update_calendar_event",
+      toolRouting: {
+        capabilityIds: ["calendar.events.update"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
 }
 
 {
@@ -2011,7 +2097,10 @@ function formatterMeetingReport(index, overrides = {}) {
     ["Untitled ERD", "Untitled ERD"]
   );
   assert.equal(JSON.stringify(outputSummary).includes(SQL_ERD_SESSION_ID), false);
-  assert.equal(loggingService.calls[1].input.waitForUserInput, true);
+  assert.equal(
+    loggingService.calls[1].input.postExecutionDisposition,
+    "wait_for_user_input"
+  );
 
   const selectedToken = SQL_ERD_SECOND_SESSION_ID;
   const resumedExecution = createExecutionServiceWithRegistry(
@@ -2140,7 +2229,10 @@ function formatterMeetingReport(index, overrides = {}) {
     ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
   );
   assert.equal(loggingService.calls[1].input.outputSummary.selection, "multiple");
-  assert.equal(loggingService.calls[1].input.waitForUserInput, true);
+  assert.equal(
+    loggingService.calls[1].input.postExecutionDisposition,
+    "wait_for_user_input"
+  );
 }
 
 {

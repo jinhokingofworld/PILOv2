@@ -1,30 +1,12 @@
 import { badRequest } from "../../../common/api-error";
 
+export { createSqlErdModelFingerprint } from "../../sql-erd/sql-erd-model-fingerprint";
+
 const PROJECTION_MAX_CHARACTERS = 9_000;
 const CATALOG_NAME_LIMITS = [64, 48, 32, 24, 16, 8] as const;
 const OPTIONAL_TEXT_LIMIT = 120;
 const COLUMN_NAME_LIMIT = 80;
 const MAX_COLUMNS_PER_PROJECTED_TABLE = 12;
-
-export function createSqlErdModelFingerprint(modelJson: unknown): string {
-  const serialized = JSON.stringify(modelJson, (_key, value) => {
-    if (!isPlainObject(value)) {
-      return value;
-    }
-    return Object.keys(value)
-      .sort()
-      .reduce<Record<string, unknown>>((result, key) => {
-        result[key] = value[key];
-        return result;
-      }, {});
-  });
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < serialized.length; index += 1) {
-    hash ^= serialized.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, "0")}`;
-}
 
 type SqlErdModelColumn = {
   name: string;

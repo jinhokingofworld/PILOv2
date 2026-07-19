@@ -121,7 +121,7 @@ function formatSqlErdTableFocus(input: AgentReadResultFormatterInput): string | 
   }
 
   return [
-    `${title ?? "현재 ERD"}에서 ${featureLabel ?? "요청한 기능"} 관련 테이블에 집중 표시했습니다.`,
+    `${title ?? "현재 ERD"}에서 ${featureLabel ?? "요청한 기능"} 관련 집중 보기 결과를 준비했습니다.`,
     `핵심 테이블: ${primaryTables.join(", ") || "없음"}`,
     ...(relatedTables.length > 0 ? [`관련 테이블: ${relatedTables.join(", ")}`] : [])
   ].join("\n");

@@ -382,7 +382,8 @@ class FakeSqlErdService {
     workspaceId,
     sessionId,
     agentRunId,
-    input
+    input,
+    expectedState
   ) {
     this.calls.push({
       method: "replaceAgentGeneratedSchema",
@@ -390,7 +391,8 @@ class FakeSqlErdService {
       workspaceId,
       sessionId,
       agentRunId,
-      input
+      input,
+      expectedState
     });
     this.session = sessionPayload({ revision: 2, latestOpSeq: 1 });
     return {
@@ -459,6 +461,11 @@ assert.deepEqual(
   ["new_session", "replace_current"]
 );
 assert.equal(contextualPreparation.plan.call.currentSessionId, SESSION_ID);
+assert.equal(contextualPreparation.plan.call.expectedSessionRevision, 1);
+assert.equal(
+  contextualPreparation.plan.call.expectedModelFingerprint,
+  createSqlErdModelFingerprint({ version: 1 })
+);
 
 const snapshotSqlErdService = new FakeSqlErdService();
 snapshotSqlErdService.session = sessionPayload({ writeProtocol: "snapshot" });
@@ -494,8 +501,17 @@ assert.deepEqual(
   {
     schemaSpec: schemaSpec(),
     currentSessionId: SESSION_ID,
+    expectedSessionRevision: 1,
+    expectedModelFingerprint: createSqlErdModelFingerprint({ version: 1 }),
     targetMode: "replace_current"
   }
+);
+const legacyReplacePlan = structuredClone(contextualPreparation.plan);
+delete legacyReplacePlan.call.expectedSessionRevision;
+delete legacyReplacePlan.call.expectedModelFingerprint;
+assert.throws(
+  () => definition.buildConfirmationInput(legacyReplacePlan, "replace_current"),
+  (error) => /revision|fingerprint|stale/i.test(error.getResponse().error.message)
 );
 assert.throws(
   () =>
@@ -560,7 +576,11 @@ assert.deepEqual(
     workspaceId: WORKSPACE_ID,
     sessionId: SESSION_ID,
     agentRunId: RUN_ID,
-    input: schemaSpec()
+    input: schemaSpec(),
+    expectedState: {
+      revision: 1,
+      modelFingerprint: createSqlErdModelFingerprint({ version: 1 })
+    }
   }
 );
 assert.equal(replaced.outputSummary.action, "replaced");

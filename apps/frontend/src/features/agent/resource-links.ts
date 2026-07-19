@@ -11,6 +11,11 @@ export type AgentResourceLink = {
   label: string;
 };
 
+type AgentSqlErdRequestContext = {
+  surface: string;
+  sessionId: string;
+};
+
 export type SqlErdSessionCandidate = {
   selectionToken: string;
   title: string;
@@ -233,6 +238,41 @@ export function getAgentResourceLinks(
   }
 
   return [...links.values()];
+}
+
+export function applyAgentSqlErdTableFocus(
+  run: Pick<AgentRun, "id" | "status" | "steps"> | null | undefined,
+  requestContext: AgentSqlErdRequestContext | null | undefined,
+  appliedActionKeys: Set<string>,
+  applyFocus: (focus: SqlErdAgentTableFocus) => void
+): boolean {
+  if (
+    run?.status !== "completed" ||
+    requestContext?.surface !== "sql_erd"
+  ) {
+    return false;
+  }
+
+  for (const step of [...run.steps].reverse()) {
+    if (step.status !== "completed") {
+      continue;
+    }
+    for (const resourceRef of [...step.resourceRefs].reverse()) {
+      const focus = toSqlErdSessionLink(resourceRef)?.focus;
+      if (!focus || focus.sessionId !== requestContext.sessionId) {
+        continue;
+      }
+      const actionKey = `${run.id}:${step.id}:${focus.modelFingerprint}`;
+      if (appliedActionKeys.has(actionKey)) {
+        return false;
+      }
+      applyFocus(focus);
+      appliedActionKeys.add(actionKey);
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function toCanvasLink(

@@ -13,10 +13,12 @@ import {
 import {
   AgentLoggingService,
   AgentRunPayload,
-  AgentStepPayload
+  type AgentExecutionLease,
+  type AgentToolExecutionClaim
 } from "./agent-logging.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
+import { isTerminalAgentCapabilityTool } from "./agent-tool-capability-catalog";
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
@@ -25,6 +27,7 @@ import type {
   AgentRiskLevel,
   AgentToolDefinition,
   AgentToolExecutionResult,
+  AgentToolPostExecutionDisposition,
   AgentRunRequestContext,
   AgentChoiceConfirmationPlan
 } from "./types/agent-tool.types";
@@ -83,6 +86,8 @@ interface StaleAgentExecutionRow extends QueryResultRow {
   requested_by_user_id: string;
   tool_step_id: string | null;
   tool_step_status: string | null;
+  execution_lease_token: string;
+  execution_lease_generation: number | string;
 }
 
 export interface CreateAgentConfirmationInput {
@@ -124,7 +129,10 @@ export interface AgentConfirmationActionPayload {
 }
 
 const CONFIRMATION_TTL_MS = 15 * 60 * 1000;
-const STALE_AGENT_EXECUTION_SECONDS = 120;
+const EXECUTION_HEARTBEAT_SECONDS = positiveIntegerEnvironment(
+  "AGENT_EXECUTION_HEARTBEAT_SECONDS",
+  30
+);
 const FORBIDDEN_JSON_KEY_PARTS = [
   "authorization",
   "cookie",
@@ -137,6 +145,11 @@ const FORBIDDEN_JSON_KEY_PARTS = [
   "transcript",
   "transcripttext"
 ];
+
+function positiveIntegerEnvironment(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 @Injectable()
 export class AgentConfirmationService {
@@ -294,7 +307,7 @@ export class AgentConfirmationService {
         message: "승인된 작업을 실행하고 있습니다.",
         completed: false
       });
-      const step = await this.agentLoggingService.createToolExecutionClaim(
+      const claim = await this.agentLoggingService.createToolExecutionClaim(
         transaction,
         workspaceId,
         {
@@ -318,7 +331,7 @@ export class AgentConfirmationService {
           run_message: run.message
         },
         toolExecution,
-        step
+        claim
       } as const;
     });
 
@@ -332,7 +345,7 @@ export class AgentConfirmationService {
       runId,
       result.confirmation,
       result.toolExecution,
-      result.step
+      result.claim
     );
   }
 
@@ -405,27 +418,23 @@ export class AgentConfirmationService {
   }
 
   async recoverStaleApprovedExecutions(): Promise<number> {
-    const candidates = await this.database.query<{ run_id: string }>(
+    const candidates = await this.database.query<{
+      run_id: string;
+      execution_lease_token: string;
+      execution_lease_generation: number | string;
+    }>(
       `
-        SELECT r.id AS run_id
+        SELECT
+          r.id AS run_id,
+          r.execution_lease_token,
+          r.execution_lease_generation
         FROM agent_runs r
-        JOIN agent_confirmations c
-          ON c.run_id = r.id
-          AND c.status = 'approved'
-        LEFT JOIN LATERAL (
-          SELECT id, status
-          FROM agent_steps
-          WHERE run_id = r.id
-            AND step_type = 'tool'
-          ORDER BY step_order DESC
-          LIMIT 1
-        ) s ON true
         WHERE r.status = 'running'
-          AND r.updated_at <= now() - make_interval(secs => $1)
-        ORDER BY r.updated_at ASC
+          AND r.execution_lease_token IS NOT NULL
+          AND r.execution_lease_expires_at <= now()
+        ORDER BY r.execution_lease_expires_at ASC
         LIMIT 50
-      `,
-      [STALE_AGENT_EXECUTION_SECONDS]
+      `
     );
 
     let recoveredCount = 0;
@@ -438,11 +447,10 @@ export class AgentConfirmationService {
               r.workspace_id,
               r.requested_by_user_id,
               s.id AS tool_step_id,
-              s.status AS tool_step_status
+              s.status AS tool_step_status,
+              r.execution_lease_token,
+              r.execution_lease_generation
             FROM agent_runs r
-            JOIN agent_confirmations c
-              ON c.run_id = r.id
-              AND c.status = 'approved'
             LEFT JOIN LATERAL (
               SELECT id, status
               FROM agent_steps
@@ -453,10 +461,16 @@ export class AgentConfirmationService {
             ) s ON true
             WHERE r.id = $1
               AND r.status = 'running'
-              AND r.updated_at <= now() - make_interval(secs => $2)
+              AND r.execution_lease_token = $2::uuid
+              AND r.execution_lease_generation = $3
+              AND r.execution_lease_expires_at <= now()
             FOR UPDATE OF r
           `,
-          [candidate.run_id, STALE_AGENT_EXECUTION_SECONDS]
+          [
+            candidate.run_id,
+            candidate.execution_lease_token,
+            Number(candidate.execution_lease_generation)
+          ]
         );
 
         if (!row || row.tool_step_status === "completed") {
@@ -489,13 +503,23 @@ export class AgentConfirmationService {
             SET status = 'failed',
                 error_code = 'AGENT_EXECUTION_STALE',
                 error_message = 'Agent execution did not finish before the recovery timeout',
-                message = '승인된 작업이 시간 안에 완료되지 않아 실행을 종료했습니다.',
-                completed_at = now()
+                message = '작업이 시간 안에 완료되지 않아 실행을 종료했습니다.',
+                completed_at = now(),
+                execution_lease_token = NULL,
+                execution_lease_expires_at = NULL,
+                execution_heartbeat_at = NULL,
+                updated_at = now()
             WHERE id = $1
               AND status = 'running'
+              AND execution_lease_token = $2::uuid
+              AND execution_lease_generation = $3
             RETURNING id
           `,
-          [row.run_id]
+          [
+            row.run_id,
+            row.execution_lease_token,
+            Number(row.execution_lease_generation)
+          ]
         );
 
         return run !== null;
@@ -577,7 +601,11 @@ export class AgentConfirmationService {
         UPDATE agent_runs
         SET status = $2,
             message = $3,
-            completed_at = CASE WHEN $4 THEN now() ELSE completed_at END
+            completed_at = CASE WHEN $4 THEN now() ELSE completed_at END,
+            execution_lease_token = CASE WHEN $2 = 'running' THEN execution_lease_token ELSE NULL END,
+            execution_lease_expires_at = CASE WHEN $2 = 'running' THEN execution_lease_expires_at ELSE NULL END,
+            execution_heartbeat_at = CASE WHEN $2 = 'running' THEN execution_heartbeat_at ELSE NULL END,
+            updated_at = now()
         WHERE id = $1
         RETURNING id, status, message
       `,
@@ -752,20 +780,42 @@ export class AgentConfirmationService {
     runId: string,
     confirmation: AgentConfirmationWithRunRow,
     toolExecution: ApprovedToolExecution,
-    step: AgentStepPayload
+    claim: AgentToolExecutionClaim
   ): Promise<AgentConfirmationActionPayload> {
+    const { step, lease } = claim;
     try {
-      const result = await toolExecution.definition.execute(
-        {
-          currentUserId,
-          workspaceId,
-          runId,
-          requestContext: confirmation.run_request_context_json ?? null
-        },
-        toolExecution.toolInput
+      const result = await this.executeWithLeaseHeartbeat(
+        runId,
+        lease,
+        () =>
+          toolExecution.definition.execute(
+            {
+              currentUserId,
+              workspaceId,
+              runId,
+              requestContext: confirmation.run_request_context_json ?? null
+            },
+            toolExecution.toolInput
+          )
       );
       const outputSummary = this.buildOutputSummary(result);
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
+      const capabilityIds = await this.findLatestPlannerCapabilityIds(runId);
+      const completedToolNames =
+        capabilityIds.length > 0
+          ? await this.findCompletedToolNames(runId)
+          : [];
+      const postExecutionDisposition: AgentToolPostExecutionDisposition =
+        capabilityIds.length > 0
+          ? isTerminalAgentCapabilityTool(
+              capabilityIds,
+              toolExecution.definition.name,
+              completedToolNames
+            )
+            ? "complete_run"
+            : "continue_planning"
+          : toolExecution.definition.postExecutionDisposition ??
+            "continue_planning";
 
       const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
         currentUserId,
@@ -776,8 +826,14 @@ export class AgentConfirmationService {
           outputSummary,
           resourceRefs,
           riskLevel: confirmation.risk_level,
-          waitingMessage:
-            "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요."
+          waitingMessage: postExecutionDisposition === "complete_run"
+            ? this.buildFinalAnswer(
+                toolExecution.definition.name,
+                resourceRefs
+              )
+            : "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.",
+          postExecutionDisposition,
+          executionLease: lease
         }
       );
       if (advanced.queuedNextPlannerTurn) {
@@ -797,7 +853,8 @@ export class AgentConfirmationService {
           runId,
           stepId: step.id,
           errorCode: "AGENT_TOOL_EXECUTION_FAILED",
-          errorMessage: message
+          errorMessage: message,
+          executionLease: lease
         }
       );
       if (failedStep.status === "completed") {
@@ -952,6 +1009,73 @@ export class AgentConfirmationService {
     }
 
     return outputSummary;
+  }
+
+  private async findLatestPlannerCapabilityIds(runId: string): Promise<string[]> {
+    const row = await this.database.queryOne<{ output_json: AgentJsonObject }>(
+      `
+        SELECT output_json
+        FROM agent_steps
+        WHERE run_id = $1
+          AND step_type = 'planner'
+          AND status = 'completed'
+        ORDER BY step_order DESC
+        LIMIT 1
+      `,
+      [runId]
+    );
+    const toolRouting = row?.output_json?.toolRouting;
+    if (!this.isPlainObject(toolRouting) || !Array.isArray(toolRouting.capabilityIds)) {
+      return [];
+    }
+    return toolRouting.capabilityIds.filter(
+      (value): value is string => typeof value === "string" && value.length > 0
+    );
+  }
+
+  private async findCompletedToolNames(runId: string): Promise<string[]> {
+    const rows = await this.database.query<{ tool_name: string }>(
+      `
+        SELECT DISTINCT tool_name
+        FROM agent_steps
+        WHERE run_id = $1
+          AND step_type = 'tool'
+          AND status = 'completed'
+          AND tool_name IS NOT NULL
+      `,
+      [runId]
+    );
+    return rows.map((row) => row.tool_name);
+  }
+
+  private async executeWithLeaseHeartbeat<T>(
+    runId: string,
+    lease: AgentExecutionLease,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    let leaseLost = false;
+    let heartbeatInFlight: Promise<void> | null = null;
+    const heartbeat = setInterval(() => {
+      if (heartbeatInFlight) return;
+      heartbeatInFlight = this.agentLoggingService
+        .heartbeatExecutionLease(runId, lease)
+        .then((renewed) => {
+          if (!renewed) leaseLost = true;
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          heartbeatInFlight = null;
+        });
+    }, EXECUTION_HEARTBEAT_SECONDS * 1000);
+
+    try {
+      const result = await operation();
+      if (heartbeatInFlight) await heartbeatInFlight;
+      if (leaseLost) throw new Error("Agent execution lease was fenced");
+      return result;
+    } finally {
+      clearInterval(heartbeat);
+    }
   }
 
   private sanitizeResourceRefs(input: unknown): AgentResourceRef[] {

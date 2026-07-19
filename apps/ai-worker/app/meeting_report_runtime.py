@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -1862,7 +1863,18 @@ class PgAgentRunRepository:
         }
         row = self.connection.execute(
             """
-            WITH claimed_run AS (
+            WITH orphaned_steps AS (
+              UPDATE agent_steps
+              SET status = 'failed',
+                  error_code = 'AGENT_PLANNER_DELIVERY_INTERRUPTED',
+                  error_message = 'The previous planner delivery ended before completion',
+                  completed_at = now(),
+                  updated_at = now()
+              WHERE run_id = %s
+                AND step_type = 'planner'
+                AND status = 'running'
+              RETURNING id
+            ), claimed_run AS (
               UPDATE agent_runs
               SET planner_turn_count = planner_turn_count + 1,
                   updated_at = now()
@@ -1901,7 +1913,13 @@ class PgAgentRunRepository:
             FROM next_step, claimed_run
             RETURNING id
             """,
-            (job.run_id, job.run_id, job.run_id, json.dumps(input_summary, ensure_ascii=False)),
+            (
+                job.run_id,
+                job.run_id,
+                job.run_id,
+                job.run_id,
+                json.dumps(input_summary, ensure_ascii=False),
+            ),
         ).fetchone()
         if row is None:
             raise InfrastructureError("Could not start Agent planner step")
@@ -2586,7 +2604,10 @@ class SqsAiJobWorker:
                     message.get("MessageId"),
                     self._receive_count(message),
                 )
-            result = self.dispatcher.process_message(body)
+            result = self._process_message_with_visibility_heartbeat(
+                body,
+                receipt_handle,
+            )
 
             if meeting_correlation is not None:
                 LOGGER.info(
@@ -2625,6 +2646,46 @@ class SqsAiJobWorker:
                 )
 
         return len(messages)
+
+    def _process_message_with_visibility_heartbeat(
+        self,
+        body: str,
+        receipt_handle: str | None,
+    ) -> Any:
+        heartbeat_seconds = int(
+            getattr(
+                self.settings,
+                "visibility_heartbeat_seconds",
+                max(1, self.settings.visibility_timeout_seconds // 3),
+            )
+        )
+        if not receipt_handle or heartbeat_seconds <= 0:
+            return self.dispatcher.process_message(body)
+
+        stopped = threading.Event()
+
+        def extend_visibility() -> None:
+            while not stopped.wait(heartbeat_seconds):
+                try:
+                    self.sqs_client.change_message_visibility(
+                        QueueUrl=self.settings.sqs_queue_url,
+                        ReceiptHandle=receipt_handle,
+                        VisibilityTimeout=self.settings.visibility_timeout_seconds,
+                    )
+                except Exception:
+                    LOGGER.exception("ai job visibility heartbeat failed")
+
+        heartbeat = threading.Thread(
+            target=extend_visibility,
+            name="ai-job-visibility-heartbeat",
+            daemon=True,
+        )
+        heartbeat.start()
+        try:
+            return self.dispatcher.process_message(body)
+        finally:
+            stopped.set()
+            heartbeat.join(timeout=min(1, heartbeat_seconds))
 
     def process_canvas_embedding_jobs(self) -> int:
         if self.canvas_embedding_processor is None:

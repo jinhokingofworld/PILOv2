@@ -173,12 +173,20 @@ try {
     async transaction(callback) {
       return callback(this);
     },
-    async queryOne(text) {
-      if (text.includes("SELECT id FROM agent_runs")) {
-        return { id: "77777777-7777-4777-8777-777777777777" };
+    async queryOne(text, values) {
+      if (text.includes("FROM agent_runs") && text.includes("FOR UPDATE")) {
+        return {
+          id: "77777777-7777-4777-8777-777777777777",
+          execution_lease_token: "99999999-9999-4999-8999-999999999999",
+          execution_lease_generation: 1
+        };
       }
       if (text.includes("SELECT COALESCE(MAX(step_order)")) {
         return { next_order: 2 };
+      }
+      if (text.includes("UPDATE agent_steps SET status = 'completed'")) {
+        executed.push({ text, values });
+        return { id: values[0] };
       }
       return null;
     },
@@ -227,7 +235,11 @@ try {
         resourceType: "meeting_report",
         resourceId: REPORT_ID
       }
-    ]
+    ],
+    executionLease: {
+      token: "99999999-9999-4999-8999-999999999999",
+      generation: 1
+    }
   });
 
   const completedStep = executed.find((call) =>

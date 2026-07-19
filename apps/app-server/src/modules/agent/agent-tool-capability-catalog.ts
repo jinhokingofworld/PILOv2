@@ -193,6 +193,36 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   unsupportedCapability("pr_review.submit", "pr_review", "GitHub PR Review를 제출하거나 merge할 때", ["PR 리뷰 제출", "PR 머지"])
 ];
 
+export function getAgentCapabilityToolNames(
+  capabilityId: string
+): readonly string[] | null {
+  return (
+    CAPABILITY_DEFINITIONS.find(
+      (capability) =>
+        capability.id === capabilityId &&
+        capability.availability === "supported"
+    )?.toolNames ?? null
+  );
+}
+
+export function isTerminalAgentCapabilityTool(
+  capabilityIds: readonly string[],
+  toolName: string,
+  completedToolNames: readonly string[] = []
+): boolean {
+  if (capabilityIds.length === 0) {
+    return false;
+  }
+  const chains = capabilityIds.map(getAgentCapabilityToolNames);
+  const satisfiedToolNames = new Set([...completedToolNames, toolName]);
+  return (
+    chains.every((chain) => chain !== null && chain.length > 0) &&
+    chains.every((chain) =>
+      chain?.every((requiredToolName) => satisfiedToolNames.has(requiredToolName))
+    )
+  );
+}
+
 export function buildAgentToolCapabilityCatalog(
   definitions: AgentToolDefinition<unknown>[]
 ): AgentToolCapabilityCatalogSnapshot {

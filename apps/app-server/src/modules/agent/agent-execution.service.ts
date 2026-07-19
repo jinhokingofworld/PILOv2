@@ -9,8 +9,10 @@ import {
 } from "./agent-confirmation.service";
 import {
   AgentLoggingService,
-  AgentRunPayload
+  AgentRunPayload,
+  type AgentExecutionLease
 } from "./agent-logging.service";
+import { isTerminalAgentCapabilityTool } from "./agent-tool-capability-catalog";
 import { buildAgentReadResultAnswer } from "./agent-read-result-formatter";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
@@ -28,6 +30,7 @@ import type {
   AgentToolClarificationResult,
   AgentToolExecutionMode,
   AgentToolExecutionResult,
+  AgentToolPostExecutionDisposition,
   AgentRunRequestContext,
   AgentToolPreparationResult
 } from "./types/agent-tool.types";
@@ -79,11 +82,16 @@ interface PlannedToolCandidate {
   riskLevel: AgentRiskLevel;
   executionMode: AgentToolExecutionMode;
   requiresConfirmation: boolean | null;
+  capabilityIds: string[];
 }
 
 const RISK_LEVELS = ["low", "medium", "high"] as const;
 const EXECUTION_MODES = ["auto", "confirmation_required", "contextual"] as const;
 const LEGACY_MEETING_REPORT_SCHEMA_VERSION = "agent-tools:v6";
+const EXECUTION_HEARTBEAT_SECONDS = positiveIntegerEnvironment(
+  "AGENT_EXECUTION_HEARTBEAT_SECONDS",
+  30
+);
 const FORBIDDEN_JSON_KEY_PARTS = [
   "authorization",
   "cookie",
@@ -96,6 +104,11 @@ const FORBIDDEN_JSON_KEY_PARTS = [
   "transcript",
   "transcripttext"
 ];
+
+function positiveIntegerEnvironment(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 @Injectable()
 export class AgentExecutionService {
@@ -210,6 +223,20 @@ export class AgentExecutionService {
         message: "현재 화면에서는 요청을 처리할 수 있는 Agent 도구가 없습니다."
       });
     }
+    const completedToolNames =
+      candidate.capabilityIds.length > 0
+        ? await this.findCompletedToolNames(runId)
+        : [];
+    const postExecutionDisposition: AgentToolPostExecutionDisposition =
+      candidate.capabilityIds.length > 0
+        ? isTerminalAgentCapabilityTool(
+            candidate.capabilityIds,
+            definition.name,
+            completedToolNames
+          )
+          ? "complete_run"
+          : "continue_planning"
+        : definition.postExecutionDisposition ?? "continue_planning";
 
     const isLegacyMeetingReportPlan = this.isLegacyMeetingReportPlan(
       candidate,
@@ -253,7 +280,8 @@ export class AgentExecutionService {
         validatedInput.plannerInput,
         requestContext,
         input.prompt,
-        input.timezone
+        input.timezone,
+        postExecutionDisposition
       );
     }
 
@@ -280,7 +308,8 @@ export class AgentExecutionService {
       validatedInput.plannerInput,
       requestContext,
       input.prompt,
-      input.timezone
+      input.timezone,
+      postExecutionDisposition
     );
   }
 
@@ -311,6 +340,21 @@ export class AgentExecutionService {
     }
 
     return this.findLatestPlannerStep(runId);
+  }
+
+  private async findCompletedToolNames(runId: string): Promise<string[]> {
+    const rows = await this.database.query<{ tool_name: string }>(
+      `
+        SELECT DISTINCT tool_name
+        FROM agent_steps
+        WHERE run_id = $1
+          AND step_type = 'tool'
+          AND status = 'completed'
+          AND tool_name IS NOT NULL
+      `,
+      [runId]
+    );
+    return rows.map((row) => row.tool_name);
   }
 
   private async findRunRequestContext(
@@ -414,8 +458,18 @@ export class AgentExecutionService {
       input: this.readPlainObject(output.input, "input"),
       riskLevel,
       executionMode,
-      requiresConfirmation
+      requiresConfirmation,
+      capabilityIds: this.readCapabilityIds(output.toolRouting)
     };
+  }
+
+  private readCapabilityIds(value: AgentJsonValue | undefined): string[] {
+    if (!this.isPlainObject(value) || !Array.isArray(value.capabilityIds)) {
+      return [];
+    }
+    return value.capabilityIds.filter(
+      (item): item is string => typeof item === "string" && item.length > 0
+    );
   }
 
   private matchesRegistry(
@@ -520,7 +574,9 @@ export class AgentExecutionService {
     plannerInput: AgentJsonObject,
     requestContext: AgentRunRequestContext,
     prompt?: string,
-    timezone?: string
+    timezone?: string,
+    postExecutionDisposition: AgentToolPostExecutionDisposition =
+      "continue_planning"
   ): Promise<AgentExecutionResult> {
     if (!definition.prepareExecution) {
       return this.failRun(currentUserId, workspaceId, runId, {
@@ -578,7 +634,8 @@ export class AgentExecutionService {
         plannerInput,
         requestContext,
         prompt,
-        timezone
+        timezone,
+        postExecutionDisposition
       );
     } catch (error) {
       if (this.isAgentErrorCode(error, "CONFIRMATION_NOT_PENDING")) {
@@ -817,7 +874,7 @@ export class AgentExecutionService {
         resourceRefs,
         riskLevel: definition.riskLevel,
         waitingMessage: answer,
-        waitForUserInput: true
+        postExecutionDisposition: "wait_for_user_input"
       }
     );
 
@@ -836,9 +893,11 @@ export class AgentExecutionService {
     plannerInput: AgentJsonObject,
     requestContext: AgentRunRequestContext,
     prompt?: string,
-    timezone?: string
+    timezone?: string,
+    postExecutionDisposition: AgentToolPostExecutionDisposition =
+      "continue_planning"
   ): Promise<AgentExecutionResult> {
-    const step = await this.agentLoggingService.startNextToolStepIfAbsent(
+    const claim = await this.agentLoggingService.startNextToolExecutionClaimIfAbsent(
       currentUserId,
       workspaceId,
       {
@@ -853,22 +912,28 @@ export class AgentExecutionService {
         }
       }
     );
-    if (!step) {
+    if (!claim) {
       return {
         status: "skipped",
         reason: "already_started"
       };
     }
+    const { step, lease } = claim;
 
     try {
-      const result = await definition.execute(
-        {
-          currentUserId,
-          workspaceId,
-          runId,
-          requestContext
-        },
-        validatedInput
+      const result = await this.executeWithLeaseHeartbeat(
+        runId,
+        lease,
+        () =>
+          definition.execute(
+            {
+              currentUserId,
+              workspaceId,
+              runId,
+              requestContext
+            },
+            validatedInput
+          )
       );
       const outputSummary = this.buildOutputSummary(result);
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
@@ -883,14 +948,15 @@ export class AgentExecutionService {
             outputSummary,
             resourceRefs,
             riskLevel: definition.riskLevel,
-            message: "Canvas AI가 요청을 처리하고 있습니다."
+            message: "Canvas AI가 요청을 처리하고 있습니다.",
+            executionLease: lease
           }
         );
         return { status: "skipped", reason: "already_started" };
       }
 
       if (definition.requiresGroundedAnswer) {
-        await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs });
+        await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs, executionLease: lease });
         await this.agentGroundedAnswerOutboxPublisherService
           .publish(runId)
           .catch(() => undefined);
@@ -906,7 +972,7 @@ export class AgentExecutionService {
           outputSummary,
           resourceRefs,
           riskLevel: definition.riskLevel,
-          waitingMessage: definition.completesRunAfterExecution
+          waitingMessage: postExecutionDisposition === "complete_run"
             ? buildAgentReadResultAnswer({
                 toolName: definition.name,
                 outputSummary,
@@ -915,7 +981,8 @@ export class AgentExecutionService {
                 timezone
               })
             : "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.",
-          waitForUserInput: definition.completesRunAfterExecution === true
+          postExecutionDisposition,
+          executionLease: lease
         }
       );
       if (advanced.queuedNextPlannerTurn) {
@@ -925,10 +992,9 @@ export class AgentExecutionService {
         return { status: "skipped", reason: "already_started" };
       }
 
-      return {
-        status: "waiting_user_input",
-        run: advanced.run
-      };
+      return advanced.run.status === "completed"
+        ? { status: "completed", run: advanced.run }
+        : { status: "waiting_user_input", run: advanced.run };
     } catch (error) {
       const safeMessage = this.toSafeErrorMessage(
         error,
@@ -942,7 +1008,8 @@ export class AgentExecutionService {
           runId,
           stepId: step.id,
           errorCode: "AGENT_TOOL_EXECUTION_FAILED",
-          errorMessage: safeMessage
+          errorMessage: safeMessage,
+          executionLease: lease
         }
       );
       if (failedStep.status === "completed") {
@@ -976,6 +1043,44 @@ export class AgentExecutionService {
     }
 
     return outputSummary;
+  }
+
+  private async executeWithLeaseHeartbeat<T>(
+    runId: string,
+    lease: AgentExecutionLease,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    let leaseLost = false;
+    let heartbeatInFlight: Promise<void> | null = null;
+    const heartbeat = setInterval(() => {
+      if (heartbeatInFlight) {
+        return;
+      }
+      heartbeatInFlight = this.agentLoggingService
+        .heartbeatExecutionLease(runId, lease)
+        .then((renewed) => {
+          if (!renewed) {
+            leaseLost = true;
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          heartbeatInFlight = null;
+        });
+    }, EXECUTION_HEARTBEAT_SECONDS * 1000);
+
+    try {
+      const result = await operation();
+      if (heartbeatInFlight) {
+        await heartbeatInFlight;
+      }
+      if (leaseLost) {
+        throw new Error("Agent execution lease was fenced");
+      }
+      return result;
+    } finally {
+      clearInterval(heartbeat);
+    }
   }
 
   private isClarificationResult(

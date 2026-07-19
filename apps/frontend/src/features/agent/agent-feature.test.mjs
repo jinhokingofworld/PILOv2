@@ -171,7 +171,7 @@ assert.match(
 );
 assert.match(agentChatWidget, /const canSend = draft\.trim\(\)\.length > 0 && !hasActiveAgentRequest/);
 assert.match(agentChatWidget, /AGENT_RUN_POLL_INTERVAL_MS/);
-assert.match(agentChatWidget, /AGENT_PLANNING_POLL_TIMEOUT_MS = 190_000/);
+assert.match(agentChatWidget, /AGENT_PLANNING_POLL_TIMEOUT_MS = 270_000/);
 assert.match(agentChatWidget, /createAgentPlanningPollingTimeoutError/);
 assert.match(agentChatWidget, /currentRun\.status === "planning"/);
 assert.match(agentChatWidget, /previousStatus !== "planning"/);
@@ -195,6 +195,8 @@ assert.match(agentChatWidget, /\{ \.\.\.input, message: displayMessage \}/);
 assert.match(agentChatWidget, /latestAssistantMessage/);
 assert.match(agentChatWidget, /같은 요청을 이어서 처리합니다/);
 assert.match(agentChatWidget, /enqueueMeetingConnectionAction/);
+assert.match(agentChatWidget, /applyAgentSqlErdTableFocus/);
+assert.match(agentChatWidget, /appliedSqlErdFocusActionKeysRef/);
 assert.match(agentChatWidget, /clientAction/);
 assert.match(agentChatWidget, /connect_meeting/);
 assert.match(agentChatWidget, /router\.push\("\/meeting"\)/);
@@ -653,6 +655,7 @@ const validResourceRef = {
   url: `/sql-erd/session?sessionId=${resourceSessionId}`
 };
 const completedRun = {
+  id: "run-focus",
   status: "completed",
   steps: [
     {
@@ -730,6 +733,87 @@ assert.deepEqual(
     }
   ]
 );
+
+{
+  const applyFocus = agentResourceUtilities.applyAgentSqlErdTableFocus;
+  const appliedActionKeys = new Set();
+  const appliedFocuses = [];
+  const focusedRun = {
+    ...completedRun,
+    steps: [{ ...completedRun.steps[0], resourceRefs: [focusedResourceRef] }]
+  };
+  const result =
+    typeof applyFocus === "function"
+      ? {
+          calls: [
+            applyFocus(
+              focusedRun,
+              { surface: "sql_erd", sessionId: resourceSessionId },
+              appliedActionKeys,
+              (focus) => appliedFocuses.push(focus)
+            ),
+            applyFocus(
+              focusedRun,
+              { surface: "sql_erd", sessionId: resourceSessionId },
+              appliedActionKeys,
+              (focus) => appliedFocuses.push(focus)
+            )
+          ],
+          appliedFocuses
+        }
+      : null;
+
+  assert.deepEqual(result, {
+    calls: [true, false],
+    appliedFocuses: [expectedFocus]
+  });
+}
+
+{
+  const applyFocus = agentResourceUtilities.applyAgentSqlErdTableFocus;
+  const appliedFocuses = [];
+  const result =
+    typeof applyFocus === "function"
+      ? applyFocus(
+          {
+            ...completedRun,
+            steps: [
+              { ...completedRun.steps[0], resourceRefs: [focusedResourceRef] }
+            ]
+          },
+          {
+            surface: "sql_erd",
+            sessionId: "99999999-9999-4999-8999-999999999999"
+          },
+          new Set(),
+          (focus) => appliedFocuses.push(focus)
+        )
+      : null;
+
+  assert.equal(result, false);
+  assert.deepEqual(appliedFocuses, []);
+}
+
+{
+  const appliedFocuses = [];
+  const result = agentResourceUtilities.applyAgentSqlErdTableFocus(
+    {
+      ...completedRun,
+      steps: [
+        {
+          ...completedRun.steps[0],
+          resourceRefs: [{ ...focusedResourceRef, domain: "calendar" }]
+        }
+      ]
+    },
+    { surface: "sql_erd", sessionId: resourceSessionId },
+    new Set(),
+    (focus) => appliedFocuses.push(focus)
+  );
+
+  assert.equal(result, false);
+  assert.deepEqual(appliedFocuses, []);
+}
 assert.deepEqual(
   getAgentResourceLinks({
     ...completedRun,

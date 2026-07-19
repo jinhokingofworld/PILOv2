@@ -21,9 +21,12 @@ import type {
 const OUTBOX_SWEEP_INTERVAL_MS = 15_000;
 const OUTBOX_CLAIM_TIMEOUT_SECONDS = 60;
 const OUTBOX_SWEEP_BATCH_SIZE = 20;
-const AGENT_PLANNING_TIMEOUT_SECONDS = 120;
-const OUTBOX_MAX_RETRIES = 5;
-const OUTBOX_RETRY_DELAYS_MS = [60_000, 120_000, 240_000, 480_000, 960_000];
+const AGENT_PLANNING_TIMEOUT_SECONDS = positiveIntegerEnvironment(
+  "AGENT_PLANNING_TIMEOUT_SECONDS",
+  240
+);
+const OUTBOX_MAX_ATTEMPTS = 5;
+const OUTBOX_RETRY_DELAYS_MS = [60_000, 120_000, 240_000, 480_000];
 const OUTBOX_PUBLISH_FAILURE_CODE = "AGENT_OUTBOX_PUBLISH_FAILED";
 const OUTBOX_PUBLISH_FAILURE_MESSAGE =
   "Agent planning job could not be published";
@@ -42,6 +45,11 @@ interface AgentOutboxClaimRow extends QueryResultRow {
   attempt_count: number | string;
   claim_token: string;
   turn_sequence: number | string;
+}
+
+function positiveIntegerEnvironment(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 @Injectable()
@@ -339,7 +347,7 @@ export class AgentOutboxPublisherService
   private async markPublishFailure(claim: AgentOutboxClaimRow): Promise<void> {
     const attemptCount = Number(claim.attempt_count);
 
-    if (attemptCount <= OUTBOX_MAX_RETRIES) {
+    if (attemptCount < OUTBOX_MAX_ATTEMPTS) {
       const retryDelayMs = OUTBOX_RETRY_DELAYS_MS[attemptCount - 1];
       await this.database.execute(
         `

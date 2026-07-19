@@ -4,6 +4,9 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 require("reflect-metadata");
 const { SqlErdService } = require("../../dist/modules/sql-erd/sql-erd.service.js");
+const { createSqlErdModelFingerprint } = require(
+  "../../dist/modules/agent/tools/sql-erd-table-focus.js"
+);
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const actorUserId = "22222222-2222-4222-8222-222222222222";
@@ -109,6 +112,13 @@ function sessionRow(overrides = {}) {
     updated_at: now,
     deleted_at: null,
     ...overrides
+  };
+}
+
+function expectedSessionState(row = sessionRow()) {
+  return {
+    revision: Number(row.revision),
+    modelFingerprint: createSqlErdModelFingerprint(row.model_json)
   };
 }
 
@@ -324,6 +334,69 @@ const replaceService = new SqlErdService(
   workspaceService,
   replaceActivityLogService
 );
+const staleRevisionDatabase = new MutationDatabase("replace");
+const staleRevisionActivityLogService = new FakeActivityLogService();
+await assert.rejects(
+  () =>
+    new SqlErdService(
+      staleRevisionDatabase,
+      workspaceService,
+      staleRevisionActivityLogService
+    ).replaceAgentGeneratedSchema(
+      actorUserId,
+      workspaceId,
+      sessionId,
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      schemaSpec(),
+      { ...expectedSessionState(), revision: 4 }
+    ),
+  (error) => {
+    assert.equal(error.getStatus(), 409);
+    assert.match(error.getResponse().error.message, /changed|revision/i);
+    return true;
+  }
+);
+assert.equal(
+  staleRevisionDatabase.executedSql.some((sql) =>
+    sql.startsWith("UPDATE sql_erd_sessions")
+  ),
+  false
+);
+assert.equal(staleRevisionActivityLogService.calls.length, 0);
+
+const staleFingerprintDatabase = new MutationDatabase("replace");
+const staleFingerprintActivityLogService = new FakeActivityLogService();
+await assert.rejects(
+  () =>
+    new SqlErdService(
+      staleFingerprintDatabase,
+      workspaceService,
+      staleFingerprintActivityLogService
+    ).replaceAgentGeneratedSchema(
+      actorUserId,
+      workspaceId,
+      sessionId,
+      "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      schemaSpec(),
+      {
+        ...expectedSessionState(),
+        modelFingerprint: createSqlErdModelFingerprint({ version: 2 })
+      }
+    ),
+  (error) => {
+    assert.equal(error.getStatus(), 409);
+    assert.match(error.getResponse().error.message, /changed|fingerprint/i);
+    return true;
+  }
+);
+assert.equal(
+  staleFingerprintDatabase.executedSql.some((sql) =>
+    sql.startsWith("UPDATE sql_erd_sessions")
+  ),
+  false
+);
+assert.equal(staleFingerprintActivityLogService.calls.length, 0);
+
 const replacement = await replaceService.replaceAgentGeneratedSchema(
   actorUserId,
   workspaceId,
@@ -352,7 +425,8 @@ const replacement = await replaceService.replaceAgentGeneratedSchema(
         toColumnKeys: ["id"]
       }
     ]
-  })
+  }),
+  expectedSessionState()
 );
 assert.equal(replacement.operation.type, "source_snapshot");
 assert.equal(replacement.operation.clientOperationId, agentRunId);
@@ -415,7 +489,8 @@ const replacementRetry = await replaceService.replaceAgentGeneratedSchema(
         toColumnKeys: ["id"]
       }
     ]
-  })
+  }),
+  expectedSessionState()
 );
 assert.equal(replacementRetry.operation.id, replacement.operation.id);
 assert.equal(
@@ -438,7 +513,8 @@ await assert.rejects(
       workspaceId,
       sessionId,
       agentRunId,
-      schemaSpec({ title: "Different replacement input" })
+      schemaSpec({ title: "Different replacement input" }),
+      expectedSessionState()
     ),
   (error) => {
     assert.equal(error.getStatus(), 409);
@@ -469,7 +545,8 @@ await assert.rejects(
       workspaceId,
       sessionId,
       "99999999-9999-4999-8999-999999999999",
-      schemaSpec()
+      schemaSpec(),
+      expectedSessionState()
     ),
   (error) => {
     assert.equal(error.getStatus(), 409);
@@ -491,7 +568,8 @@ await assert.rejects(
       workspaceId,
       sessionId,
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      schemaSpec()
+      schemaSpec(),
+      expectedSessionState(snapshotDatabase.session)
     ),
   (error) => {
     assert.equal(error.getStatus(), 409);
@@ -515,7 +593,8 @@ await assert.rejects(
       workspaceId,
       sessionId,
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-      schemaSpec({ requestedDialect: "mysql" })
+      schemaSpec({ requestedDialect: "mysql" }),
+      expectedSessionState()
     ),
   (error) => {
     assert.equal(error.getStatus(), 409);
@@ -535,7 +614,8 @@ const autoDialectReplacement = await new SqlErdService(
   workspaceId,
   sessionId,
   "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-  schemaSpec({ requestedDialect: "mysql" })
+  schemaSpec({ requestedDialect: "mysql" }),
+  expectedSessionState(autoDialectDatabase.session)
 );
 assert.equal(autoDialectReplacement.snapshot.dialect, "auto");
 assert.match(autoDialectReplacement.snapshot.sourceText, /CREATE TABLE `users`/);

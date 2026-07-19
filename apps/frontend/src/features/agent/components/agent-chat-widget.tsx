@@ -38,6 +38,7 @@ import { AgentConfirmationCard } from "@/features/agent/components/agent-confirm
 import { AgentCandidateSelections } from "@/features/agent/components/agent-candidate-selections";
 import { AgentResourceLinks } from "@/features/agent/components/agent-resource-links";
 import { AgentCanvasArtifact } from "@/features/agent/components/agent-canvas-artifact";
+import { applyAgentSqlErdTableFocus } from "@/features/agent/resource-links";
 import {
   getCanvasAgentDelegationAdapter,
   subscribeCanvasAgentDelegationAdapter,
@@ -49,6 +50,7 @@ import {
 } from "@/features/agent/run-input-recovery";
 import type { AgentRun, SubmitAgentRunInput } from "@/features/agent/types";
 import { enqueueMeetingConnectionAction } from "@/features/meeting/stores/meeting-connection-action-store";
+import { stageSqlErdAgentTableFocus } from "@/features/sql-erd/utils/agent-table-focus";
 import { cn } from "@/lib/utils";
 
 type AgentChatMessage = {
@@ -67,7 +69,7 @@ type AgentConfirmationActionState = {
 type AgentChatBusyState = "idle" | "polling" | "submitting";
 
 const AGENT_RUN_POLL_INTERVAL_MS = 1800;
-const AGENT_PLANNING_POLL_TIMEOUT_MS = 190_000;
+const AGENT_PLANNING_POLL_TIMEOUT_MS = 270_000;
 const DEFAULT_AGENT_TIMEZONE = "Asia/Seoul";
 const MAX_MEETING_CLIENT_ACTION_EXPIRY_SECONDS = 300;
 
@@ -371,6 +373,7 @@ export function AgentChatWidget() {
     useState<AgentConfirmationActionState | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const activeRunAbortControllerRef = useRef<AbortController | null>(null);
+  const appliedSqlErdFocusActionKeysRef = useRef(new Set<string>());
   const canvasDelegationAdapter = useSyncExternalStore(
     subscribeCanvasAgentDelegationAdapter,
     getCanvasAgentDelegationAdapter,
@@ -444,6 +447,16 @@ export function AgentChatWidget() {
 
   const handleRunClientAction = useCallback(
     (run: AgentRun) => {
+      applyAgentSqlErdTableFocus(
+        run,
+        readAgentRequestContext(
+          window.location.pathname,
+          window.location.search
+        ),
+        appliedSqlErdFocusActionKeysRef.current,
+        stageSqlErdAgentTableFocus
+      );
+
       const action = getMeetingConnectionAction(run);
       if (!action || !enqueueMeetingConnectionAction(action)) {
         return;

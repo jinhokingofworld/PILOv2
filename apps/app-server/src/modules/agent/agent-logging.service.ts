@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
@@ -11,7 +12,8 @@ import type {
   AgentJsonObject,
   AgentResourceRef,
   AgentRiskLevel,
-  AgentRunRequestContext
+  AgentRunRequestContext,
+  AgentToolPostExecutionDisposition
 } from "./types/agent-tool.types";
 
 export type AgentRunStatus =
@@ -82,6 +84,7 @@ export interface FailAgentStepInput {
   stepId: string;
   errorCode?: string | null;
   errorMessage: string;
+  executionLease?: AgentExecutionLease;
 }
 
 export interface CompleteAgentRunInput {
@@ -118,7 +121,8 @@ export interface CompleteAgentToolStepAndAdvanceInput
   extends CompleteAgentStepInput {
   riskLevel?: AgentRiskLevel | null;
   waitingMessage: string;
-  waitForUserInput?: boolean;
+  postExecutionDisposition?: AgentToolPostExecutionDisposition;
+  executionLease?: AgentExecutionLease;
 }
 
 export interface CompleteAgentToolStepAndAdvanceResult {
@@ -127,9 +131,20 @@ export interface CompleteAgentToolStepAndAdvanceResult {
   queuedNextPlannerTurn: boolean;
 }
 
+export interface AgentExecutionLease {
+  token: string;
+  generation: number;
+}
+
+export interface AgentToolExecutionClaim {
+  step: AgentStepPayload;
+  lease: AgentExecutionLease;
+}
+
 export interface DeferAgentToolStepInput extends CompleteAgentStepInput {
   message: string;
   riskLevel?: AgentRiskLevel | null;
+  executionLease?: AgentExecutionLease;
 }
 
 export interface SettleDelegatedAgentToolInput extends CompleteAgentStepInput {
@@ -195,6 +210,10 @@ interface AgentRunRow extends QueryResultRow {
   completed_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  execution_lease_token: string | null;
+  execution_lease_generation: number | string;
+  execution_lease_expires_at: Date | string | null;
+  execution_heartbeat_at: Date | string | null;
 }
 
 interface AgentStepRow extends QueryResultRow {
@@ -218,6 +237,10 @@ interface AgentStepRow extends QueryResultRow {
 
 const DEFAULT_TIMEZONE = "Asia/Seoul";
 const DEFAULT_RUN_MESSAGE = "요청을 분석하고 있습니다.";
+const EXECUTION_LEASE_SECONDS = positiveIntegerEnvironment(
+  "AGENT_EXECUTION_LEASE_SECONDS",
+  180
+);
 
 const INPUT_JSON_MAX_BYTES = 32768;
 const OUTPUT_JSON_MAX_BYTES = 65536;
@@ -237,6 +260,11 @@ const FORBIDDEN_JSON_KEY_PARTS = [
   "transcript",
   "transcripttext"
 ];
+
+function positiveIntegerEnvironment(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 @Injectable()
 export class AgentLoggingService {
@@ -549,6 +577,55 @@ export class AgentLoggingService {
     });
   }
 
+  async startNextToolExecutionClaimIfAbsent(
+    currentUserId: string,
+    workspaceId: string,
+    input: Omit<StartNextAgentStepInput, "type">
+  ): Promise<AgentToolExecutionClaim | null> {
+    const inputSummary = this.assertSafeObject(
+      input.inputSummary ?? {},
+      INPUT_JSON_MAX_BYTES,
+      "step input"
+    );
+
+    return this.database.transaction(async (transaction) => {
+      await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      const existing = await transaction.queryOne<{ id: string }>(
+        `
+          SELECT id
+          FROM agent_steps
+          WHERE run_id = $1
+            AND step_type = 'tool'
+            AND status = 'running'
+          LIMIT 1
+        `,
+        [input.runId]
+      );
+      if (existing) {
+        return null;
+      }
+
+      const lease = await this.acquireExecutionLease(transaction, input.runId);
+      const nextOrder = await transaction.queryOne<{
+        next_order: number | string;
+      }>(
+        `SELECT COALESCE(MAX(step_order), 0) + 1 AS next_order FROM agent_steps WHERE run_id = $1`,
+        [input.runId]
+      );
+      const step = await this.insertRunningStep(transaction, workspaceId, {
+        ...input,
+        type: "tool",
+        order: Number(nextOrder?.next_order ?? 1),
+        inputSummary
+      });
+      return { step, lease };
+    });
+  }
+
   async waitForUserInput(
     currentUserId: string,
     workspaceId: string,
@@ -657,7 +734,7 @@ export class AgentLoggingService {
     transaction: DatabaseTransaction,
     workspaceId: string,
     input: Omit<StartNextAgentStepInput, "type" | "order">
-  ): Promise<AgentStepPayload> {
+  ): Promise<AgentToolExecutionClaim> {
     const inputSummary = this.assertSafeObject(
       input.inputSummary ?? {},
       INPUT_JSON_MAX_BYTES,
@@ -672,12 +749,35 @@ export class AgentLoggingService {
       [input.runId]
     );
 
-    return this.insertRunningStep(transaction, workspaceId, {
+    const lease = await this.acquireExecutionLease(transaction, input.runId);
+    const step = await this.insertRunningStep(transaction, workspaceId, {
       ...input,
       type: "tool",
       order: Number(nextOrder?.next_order ?? 1),
       inputSummary
     });
+    return { step, lease };
+  }
+
+  async heartbeatExecutionLease(
+    runId: string,
+    lease: AgentExecutionLease
+  ): Promise<boolean> {
+    const row = await this.database.queryOne<{ id: string }>(
+      `
+        UPDATE agent_runs
+        SET execution_heartbeat_at = now(),
+            execution_lease_expires_at = now() + ($4 * INTERVAL '1 second'),
+            updated_at = now()
+        WHERE id = $1
+          AND status = 'running'
+          AND execution_lease_token = $2::uuid
+          AND execution_lease_generation = $3
+        RETURNING id
+      `,
+      [runId, lease.token, lease.generation, EXECUTION_LEASE_SECONDS]
+    );
+    return row !== null;
   }
 
   async completeStep(
@@ -776,6 +876,14 @@ export class AgentLoggingService {
       if (run.status !== "running") {
         throw new Error("Agent run is not running");
       }
+      if (
+        input.executionLease &&
+        (run.execution_lease_token !== input.executionLease.token ||
+          Number(run.execution_lease_generation) !==
+            input.executionLease.generation)
+      ) {
+        throw new Error("Agent execution lease was fenced");
+      }
       const step = await transaction.queryOne<AgentStepRow>(
         `
           UPDATE agent_steps
@@ -804,6 +912,9 @@ export class AgentLoggingService {
           UPDATE agent_runs
           SET message = $2,
               risk_level = COALESCE($3, risk_level),
+              execution_lease_token = NULL,
+              execution_lease_expires_at = NULL,
+              execution_heartbeat_at = NULL,
               updated_at = now()
           WHERE id = $1
             AND status = 'running'
@@ -946,6 +1057,8 @@ export class AgentLoggingService {
       input.waitingMessage,
       "waiting message"
     );
+    const postExecutionDisposition =
+      input.postExecutionDisposition ?? "continue_planning";
 
     return this.database.transaction(async (transaction) => {
       const lockedRun = await this.findOwnedRunForUpdate(transaction, {
@@ -955,6 +1068,14 @@ export class AgentLoggingService {
       });
       if (lockedRun.status !== "running") {
         throw new Error("Agent run is not running");
+      }
+      if (
+        input.executionLease &&
+        (lockedRun.execution_lease_token !== input.executionLease.token ||
+          Number(lockedRun.execution_lease_generation) !==
+            input.executionLease.generation)
+      ) {
+        throw new Error("Agent execution lease was fenced");
       }
 
       const step = await transaction.queryOne<AgentStepRow>(
@@ -999,7 +1120,75 @@ export class AgentLoggingService {
         resourceRefs
       });
 
-      if (!input.waitForUserInput) {
+      if (postExecutionDisposition === "complete_run") {
+        const completedRun = await transaction.queryOne<AgentRunRow>(
+          `
+            UPDATE agent_runs
+            SET status = 'completed',
+                tool_call_count = LEAST(tool_call_count + 1, 5),
+                risk_level = COALESCE($2, risk_level),
+                message = $3,
+                final_answer = $3,
+                error_code = NULL,
+                error_message = NULL,
+                completed_at = now(),
+                execution_lease_token = NULL,
+                execution_lease_expires_at = NULL,
+                execution_heartbeat_at = NULL,
+                updated_at = now()
+            WHERE id = $1
+              AND status = 'running'
+              AND (
+                $4::uuid IS NULL
+                OR (
+                  execution_lease_token = $4::uuid
+                  AND execution_lease_generation = $5
+                )
+              )
+            RETURNING *
+          `,
+          [
+            input.runId,
+            input.riskLevel ?? null,
+            waitingMessage,
+            input.executionLease?.token ?? null,
+            input.executionLease?.generation ?? 0
+          ]
+        );
+        if (!completedRun) {
+          throw new Error("Agent run completion was fenced");
+        }
+        const nextSequence = await transaction.queryOne<{
+          sequence: number | string;
+        }>(
+          `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+          [input.runId]
+        );
+        await transaction.execute(
+          `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'assistant', $3)`,
+          [input.runId, Number(nextSequence?.sequence ?? 1), waitingMessage]
+        );
+        await this.insertLog(transaction, {
+          workspaceId,
+          runId: input.runId,
+          actorType: "app_server",
+          actorUserId: null,
+          level: "info",
+          eventType: "run_completed",
+          message: "Agent run completed",
+          metadata: {
+            finalAnswerLength: waitingMessage.length
+          },
+          resourceRefs
+        });
+        return {
+          step: this.mapStep(step),
+          run: this.mapRun(completedRun),
+          queuedNextPlannerTurn: false
+        };
+      }
+
+      if (postExecutionDisposition === "continue_planning") {
         const planningRun = await transaction.queryOne<AgentRunRow>(
           `
             UPDATE agent_runs
@@ -1011,6 +1200,9 @@ export class AgentLoggingService {
                 error_code = NULL,
                 error_message = NULL,
                 completed_at = NULL,
+                execution_lease_token = NULL,
+                execution_lease_expires_at = NULL,
+                execution_heartbeat_at = NULL,
                 updated_at = now()
             WHERE id = $1
               AND status = 'running'
@@ -1062,6 +1254,9 @@ export class AgentLoggingService {
               message = $3,
               final_answer = NULL,
               completed_at = NULL,
+              execution_lease_token = NULL,
+              execution_lease_expires_at = NULL,
+              execution_heartbeat_at = NULL,
               updated_at = now()
           WHERE id = $1
             AND status = 'running'
@@ -1071,7 +1266,7 @@ export class AgentLoggingService {
           input.runId,
           input.riskLevel ?? null,
           waitingMessage,
-          input.waitForUserInput === true
+          postExecutionDisposition === "wait_for_user_input"
         ]
       );
       if (!waitingRun) {
@@ -1129,11 +1324,29 @@ export class AgentLoggingService {
     const errorCode = this.normalizeOptionalText(input.errorCode);
 
     return this.database.transaction(async (transaction) => {
-      await this.findOwnedRunForUpdate(transaction, {
+      const lockedRun = await this.findOwnedRunForUpdate(transaction, {
         currentUserId,
         workspaceId,
         runId: input.runId
       });
+      if (["completed", "failed", "cancelled"].includes(lockedRun.status)) {
+        const terminalStep = await transaction.queryOne<AgentStepRow>(
+          `SELECT * FROM agent_steps WHERE id = $1 AND run_id = $2`,
+          [input.stepId, input.runId]
+        );
+        if (!terminalStep) {
+          throw notFound("Agent step not found");
+        }
+        return this.mapStep(terminalStep);
+      }
+      if (
+        input.executionLease &&
+        (lockedRun.execution_lease_token !== input.executionLease.token ||
+          Number(lockedRun.execution_lease_generation) !==
+            input.executionLease.generation)
+      ) {
+        throw new Error("Agent execution lease was fenced");
+      }
 
       const step = await transaction.queryOne<AgentStepRow>(
         `
@@ -1159,6 +1372,26 @@ export class AgentLoggingService {
           throw notFound("Agent step not found");
         }
         return this.mapStep(terminalStep);
+      }
+
+      if (input.executionLease) {
+        await transaction.execute(
+          `
+            UPDATE agent_runs
+            SET execution_lease_token = NULL,
+                execution_lease_expires_at = NULL,
+                execution_heartbeat_at = NULL,
+                updated_at = now()
+            WHERE id = $1
+              AND execution_lease_token = $2::uuid
+              AND execution_lease_generation = $3
+          `,
+          [
+            input.runId,
+            input.executionLease.token,
+            input.executionLease.generation
+          ]
+        );
       }
 
       await this.insertLog(transaction, {
@@ -1209,7 +1442,10 @@ export class AgentLoggingService {
               final_answer = $5,
               error_code = NULL,
               error_message = NULL,
-              completed_at = now()
+              completed_at = now(),
+              execution_lease_token = NULL,
+              execution_lease_expires_at = NULL,
+              execution_heartbeat_at = NULL
           WHERE id = $1
             AND workspace_id = $2
             AND status = 'running'
@@ -1271,7 +1507,10 @@ export class AgentLoggingService {
               message = $3,
               error_code = $4,
               error_message = $5,
-              completed_at = now()
+              completed_at = now(),
+              execution_lease_token = NULL,
+              execution_lease_expires_at = NULL,
+              execution_heartbeat_at = NULL
           WHERE id = $1
             AND workspace_id = $2
           RETURNING *
@@ -1326,7 +1565,10 @@ export class AgentLoggingService {
           UPDATE agent_runs
           SET status = 'cancelled',
               message = $3,
-              completed_at = now()
+              completed_at = now(),
+              execution_lease_token = NULL,
+              execution_lease_expires_at = NULL,
+              execution_heartbeat_at = NULL
           WHERE id = $1
             AND workspace_id = $2
           RETURNING *
@@ -1424,6 +1666,40 @@ export class AgentLoggingService {
     });
 
     return this.mapStep(step);
+  }
+
+  private async acquireExecutionLease(
+    transaction: DatabaseTransaction,
+    runId: string
+  ): Promise<AgentExecutionLease> {
+    const token = randomUUID();
+    const row = await transaction.queryOne<{
+      execution_lease_generation: number | string;
+    }>(
+      `
+        UPDATE agent_runs
+        SET execution_lease_token = $2::uuid,
+            execution_lease_generation = execution_lease_generation + 1,
+            execution_heartbeat_at = now(),
+            execution_lease_expires_at = now() + ($3 * INTERVAL '1 second'),
+            updated_at = now()
+        WHERE id = $1
+          AND status = 'running'
+          AND (
+            execution_lease_token IS NULL
+            OR execution_lease_expires_at <= now()
+          )
+        RETURNING execution_lease_generation
+      `,
+      [runId, token, EXECUTION_LEASE_SECONDS]
+    );
+    if (!row) {
+      throw new Error("Agent execution lease could not be acquired");
+    }
+    return {
+      token,
+      generation: Number(row.execution_lease_generation)
+    };
   }
 
   private async findOwnedRunForUpdate(

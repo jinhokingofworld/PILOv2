@@ -39,6 +39,7 @@ interface UpdateCalendarEventInput {
 interface ResolvedUpdateCalendarEventInput {
   eventId: string;
   changes: Partial<CreateCalendarEventInput>;
+  expectedUpdatedAt: string;
 }
 
 interface CalendarEventTarget {
@@ -73,7 +74,11 @@ const CREATE_INPUT_FIELDS = [
   "endTime"
 ];
 const UPDATE_INPUT_FIELDS = ["target", "changes"];
-const RESOLVED_UPDATE_INPUT_FIELDS = ["eventId", "changes"];
+const RESOLVED_UPDATE_INPUT_FIELDS = [
+  "eventId",
+  "changes",
+  "expectedUpdatedAt"
+];
 const UPDATE_TARGET_FIELDS = [
   "title",
   "startDate",
@@ -227,6 +232,7 @@ export class CalendarAgentToolsService {
         }
       },
       validateInput: (input) => this.validateUpdateInput(input),
+      buildConfirmationInput: (plan) => this.buildResolvedUpdateInput(plan),
       validateConfirmationInput: (input) =>
         this.validateResolvedUpdateInput(input),
       buildConfirmation: (context, input) =>
@@ -292,7 +298,8 @@ export class CalendarAgentToolsService {
       context.currentUserId,
       context.workspaceId,
       input.eventId,
-      this.toCalendarBody(input.changes)
+      this.toCalendarBody(input.changes),
+      { expectedUpdatedAt: input.expectedUpdatedAt }
     );
 
     return {
@@ -370,8 +377,27 @@ export class CalendarAgentToolsService {
         method: "PATCH",
         path: "/api/v1/workspaces/{workspaceId}/calendar/events/{eventId}",
         eventId: String(event.id),
+        expectedUpdatedAt: event.updatedAt,
         body: this.toCalendarBody(input.changes)
       }
+    };
+  }
+
+  private buildResolvedUpdateInput(plan: AgentConfirmationPlan): AgentJsonObject {
+    if (plan.toolName !== "update_calendar_event" || !("after" in plan)) {
+      throw badRequest("Calendar update confirmation plan is invalid");
+    }
+
+    const resolved = this.validateResolvedUpdateInput({
+      eventId: plan.call.eventId,
+      changes: plan.after,
+      expectedUpdatedAt: plan.call.expectedUpdatedAt
+    });
+
+    return {
+      eventId: resolved.eventId,
+      changes: resolved.changes as AgentJsonObject,
+      expectedUpdatedAt: resolved.expectedUpdatedAt
     };
   }
 
@@ -483,7 +509,11 @@ export class CalendarAgentToolsService {
 
     return {
       eventId: this.requireEventId(draft.eventId),
-      changes: this.validateUpdateChanges(changes)
+      changes: this.validateUpdateChanges(changes),
+      expectedUpdatedAt: this.requireIsoTimestamp(
+        draft.expectedUpdatedAt,
+        "expectedUpdatedAt"
+      )
     };
   }
 
@@ -688,6 +718,19 @@ export class CalendarAgentToolsService {
   private requirePlainObject(input: unknown, label: string): AgentJsonObject {
     if (!this.isPlainObject(input)) {
       throw badRequest(`${label} must be an object`);
+    }
+
+    return input;
+  }
+
+  private requireIsoTimestamp(input: unknown, field: string): string {
+    if (typeof input !== "string") {
+      throw badRequest(`${field} is required`);
+    }
+
+    const date = new Date(input);
+    if (Number.isNaN(date.getTime()) || date.toISOString() !== input) {
+      throw badRequest(`${field} must be an ISO 8601 timestamp`);
     }
 
     return input;

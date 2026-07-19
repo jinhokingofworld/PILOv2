@@ -1,5 +1,7 @@
 import json
 import logging
+import time
+from dataclasses import replace
 
 from app.agent_processor import AGENT_TOOL_SCHEMA_VERSION, parse_agent_run_job_payload
 from app.agent_prompt_security import PromptSecuritySource
@@ -25,6 +27,7 @@ class FakeSqsClient:
     def __init__(self) -> None:
         self.deleted: list[dict[str, str]] = []
         self.receive_calls: list[dict[str, object]] = []
+        self.visibility_changes: list[dict[str, object]] = []
 
     def receive_message(self, **kwargs):
         self.receive_calls.append(kwargs)
@@ -45,6 +48,9 @@ class FakeSqsClient:
 
     def delete_message(self, **kwargs) -> None:
         self.deleted.append(kwargs)
+
+    def change_message_visibility(self, **kwargs) -> None:
+        self.visibility_changes.append(kwargs)
 
 
 class FakeStaleExecutionRecovery:
@@ -330,6 +336,49 @@ def test_sqs_worker_deletes_only_dispatcher_completed_messages() -> None:
     ]
     assert sqs_client.receive_calls[0]["AttributeNames"] == ["ApproximateReceiveCount"]
     assert sqs_client.receive_calls[0]["MaxNumberOfMessages"] == 1
+
+
+def test_sqs_worker_heartbeats_visibility_while_dispatching() -> None:
+    class SlowDispatcher(FakeDispatcher):
+        def process_message(self, body: str) -> JobProcessResult:
+            time.sleep(1.1)
+            return super().process_message(body)
+
+    dispatcher = SlowDispatcher(
+        [
+            JobProcessResult(
+                delete_message=True,
+                reason="completed",
+                job_type="meeting_report",
+                resource_id="report-1",
+            )
+        ]
+    )
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **_kwargs: {
+        "Messages": [
+            {
+                "Body": '{"jobType":"meeting_report"}',
+                "ReceiptHandle": "receipt-heartbeat",
+                "MessageId": "message-heartbeat",
+            }
+        ]
+    }
+    worker = SqsAiJobWorker(
+        replace(runtime_settings(), visibility_timeout_seconds=3),
+        dispatcher,
+        sqs_client,
+    )
+
+    worker.run_once()
+
+    assert sqs_client.visibility_changes == [
+        {
+            "QueueUrl": "https://sqs.example.com/jobs",
+            "ReceiptHandle": "receipt-heartbeat",
+            "VisibilityTimeout": 3,
+        }
+    ]
 
 
 def test_sqs_worker_logs_meeting_report_correlation(caplog) -> None:
