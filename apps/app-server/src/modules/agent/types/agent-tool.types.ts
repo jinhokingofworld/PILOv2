@@ -136,6 +136,11 @@ export interface AgentToolExecutionResult {
   status?: string;
 }
 
+export type AgentToolPostExecutionDisposition =
+  | "continue_planning"
+  | "wait_for_user_input"
+  | "complete_run";
+
 export interface AgentToolDefinition<TInput> {
   name: string;
   description: string;
@@ -143,11 +148,7 @@ export interface AgentToolDefinition<TInput> {
   executionMode: AgentToolExecutionMode;
   contextRequirement?: AgentToolContextRequirement;
   requiresGroundedAnswer?: boolean;
-  /**
-   * The tool result is itself the final response for this run. Avoid another
-   * planner pass when no follow-up tool decision is needed.
-   */
-  completesRunAfterExecution?: boolean;
+  postExecutionDisposition?: AgentToolPostExecutionDisposition;
   inputSchema: AgentToolInputSchema;
   validateInput: (input: unknown) => TInput;
   /**

@@ -817,7 +817,7 @@ export class AgentExecutionService {
         resourceRefs,
         riskLevel: definition.riskLevel,
         waitingMessage: answer,
-        waitForUserInput: true
+        postExecutionDisposition: "wait_for_user_input"
       }
     );
 
@@ -897,6 +897,8 @@ export class AgentExecutionService {
         return { status: "skipped", reason: "already_started" };
       }
 
+      const postExecutionDisposition =
+        definition.postExecutionDisposition ?? "continue_planning";
       const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
         currentUserId,
         workspaceId,
@@ -906,7 +908,7 @@ export class AgentExecutionService {
           outputSummary,
           resourceRefs,
           riskLevel: definition.riskLevel,
-          waitingMessage: definition.completesRunAfterExecution
+          waitingMessage: postExecutionDisposition === "complete_run"
             ? buildAgentReadResultAnswer({
                 toolName: definition.name,
                 outputSummary,
@@ -915,7 +917,7 @@ export class AgentExecutionService {
                 timezone
               })
             : "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.",
-          waitForUserInput: definition.completesRunAfterExecution === true
+          postExecutionDisposition
         }
       );
       if (advanced.queuedNextPlannerTurn) {
@@ -923,6 +925,13 @@ export class AgentExecutionService {
           .publishCreatedRun(runId)
           .catch(() => undefined);
         return { status: "skipped", reason: "already_started" };
+      }
+
+      if (advanced.run.status === "completed") {
+        return {
+          status: "completed",
+          run: advanced.run
+        };
       }
 
       return {
