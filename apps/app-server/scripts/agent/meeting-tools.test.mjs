@@ -221,6 +221,7 @@ function createReport(overrides = {}) {
     id: REPORT_ID,
     meetingId: MEETING_ID,
     recordingId: RECORDING_ID,
+    title: "Backend meeting",
     status: "COMPLETED",
     failedStep: null,
     errorMessage: null,
@@ -447,8 +448,13 @@ class FakeMeetingService {
       workspaceId,
       query
     });
+    const reports = query.reportTitle
+      ? this.reports.filter(
+          (report) => report.title.toLowerCase() === query.reportTitle.toLowerCase()
+        )
+      : this.reports;
     return {
-      reports: this.reports.slice(0, query.limit ?? this.reports.length).map((report) =>
+      reports: reports.slice(0, query.limit ?? reports.length).map((report) =>
         toSummaryReport(report)
       )
     };
@@ -1361,6 +1367,10 @@ class FakeCandidateSelectionDatabase {
     const ambiguousReport = await resolver.resolveReport(context, {});
     assert.equal(ambiguousReport.kind, "needs_clarification");
     assert.equal(ambiguousReport.reason, "ambiguous");
+    assert.deepEqual(
+      ambiguousReport.candidates.map((candidate) => candidate.label),
+      ["Backend meeting", "Backend meeting"]
+    );
     meetingService.reports.splice(1);
 
     meetingService.activeMeeting = {
@@ -2029,6 +2039,44 @@ function errorCode(error) {
   assert.deepEqual(
     result.resourceRefs.map((ref) => ref.resourceId),
     [REPORT_ID, SECOND_REPORT_ID]
+  );
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  meetingService.reports = [
+    createReport({ title: "Backend meeting" }),
+    createReport({ id: SECOND_REPORT_ID, title: "Infra meeting" })
+  ];
+  const tool = registry.getDefinition("summarize_meeting_report");
+  const input = tool.validateInput({
+    reportTitle: "Backend meeting",
+    from: "2026-07-08T00:00:00.000Z",
+    to: "2026-07-09T00:00:00.000Z"
+  });
+
+  assert.deepEqual(await tool.prepareExecution(context, input), { kind: "execute" });
+  const result = await tool.execute(context, input);
+
+  assert.equal(result.outputSummary.report.reportId, REPORT_ID);
+  assert.deepEqual(
+    meetingService.calls
+      .filter((call) => call.method === "listReportsForAgent")
+      .map((call) => call.query),
+    [
+      {
+        reportTitle: "Backend meeting",
+        from: "2026-07-08T00:00:00.000Z",
+        to: "2026-07-09T00:00:00.000Z",
+        limit: 4
+      },
+      {
+        reportTitle: "Backend meeting",
+        from: "2026-07-08T00:00:00.000Z",
+        to: "2026-07-09T00:00:00.000Z",
+        limit: 4
+      }
+    ]
   );
 }
 

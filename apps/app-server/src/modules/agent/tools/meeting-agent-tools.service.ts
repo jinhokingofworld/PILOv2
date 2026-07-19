@@ -81,6 +81,7 @@ interface MeetingReportSelectorInput {
   from?: string;
   to?: string;
   status?: MeetingReportStatus;
+  reportTitle?: string;
   roomName?: string;
   useSelectedMeetingReportCandidate?: true;
 }
@@ -269,6 +270,7 @@ const REPORT_SELECTOR_INPUT_FIELDS = [
   "from",
   "to",
   "status",
+  "reportTitle",
   "roomName",
   "useSelectedMeetingReportCandidate"
 ];
@@ -2492,6 +2494,7 @@ export class MeetingAgentToolsService {
       ...(input.from ? { from: input.from } : {}),
       ...(input.to ? { to: input.to } : {}),
       ...(input.status ? { status: input.status } : {}),
+      ...(input.reportTitle ? { reportTitle: input.reportTitle } : {}),
       ...(input.roomName ? { roomName: input.roomName } : {})
     };
     return Object.keys(selector).length === 0
@@ -2790,7 +2793,13 @@ export class MeetingAgentToolsService {
       [
         object.contextRef !== undefined,
         useSelectedMeetingReportCandidate === true,
-        Boolean(from || to || object.status !== undefined || object.roomName !== undefined)
+        Boolean(
+          from ||
+          to ||
+          object.status !== undefined ||
+          object.reportTitle !== undefined ||
+          object.roomName !== undefined
+        )
       ].filter(Boolean).length > 1
     ) {
       throw badRequest(
@@ -2811,6 +2820,15 @@ export class MeetingAgentToolsService {
       ...(object.status === undefined
         ? {}
         : { status: this.readOptionalStatus(object.status) }),
+      ...(object.reportTitle === undefined
+        ? {}
+        : {
+            reportTitle: this.requireBoundedString(
+              object.reportTitle,
+              "reportTitle",
+              500
+            )
+          }),
       ...(object.roomName === undefined
         ? {}
         : { roomName: this.requireBoundedString(object.roomName, "roomName", 100) }),
@@ -3122,7 +3140,19 @@ export class MeetingAgentToolsService {
       from: { type: "string", format: "date-time" },
       to: { type: "string", format: "date-time" },
       status: { type: "string", enum: [...MEETING_REPORT_STATUSES] },
-      roomName: { type: "string", minLength: 1, maxLength: 100 },
+      reportTitle: {
+        type: "string",
+        minLength: 1,
+        maxLength: 500,
+        description:
+          "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+      },
+      roomName: {
+        type: "string",
+        minLength: 1,
+        maxLength: 100,
+        description: "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+      },
       useSelectedMeetingReportCandidate: { type: "boolean", const: true }
     };
   }
@@ -3167,6 +3197,7 @@ export class MeetingAgentToolsService {
         from: object.from,
         to: object.to,
         status: object.status,
+        reportTitle: object.reportTitle,
         roomName: object.roomName,
         useSelectedMeetingReportCandidate:
           object.useSelectedMeetingReportCandidate
@@ -3180,6 +3211,7 @@ export class MeetingAgentToolsService {
       input.from !== undefined ||
       input.to !== undefined ||
       input.status !== undefined ||
+      input.reportTitle !== undefined ||
       input.roomName !== undefined ||
       input.useSelectedMeetingReportCandidate === true
     );
