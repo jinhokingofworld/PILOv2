@@ -220,6 +220,13 @@ assert.match(boardKanban, /hidden md:grid/);
 assert.match(boardKanban, /overflow-x-auto/);
 assert.match(boardKanban, /import \{ useIsMobile \} from "@\/hooks\/use-mobile"/);
 assert.match(boardKanban, /const isMobile = useIsMobile\(\)/);
+assert.match(boardKanban, /const \[hasMounted, setHasMounted\] = useState\(false\)/);
+assert.match(boardKanban, /useEffect\(\(\) => \{\s*setHasMounted\(true\);\s*\}, \[\]\)/);
+assert.match(
+  boardKanban,
+  /if \(!hasMounted\) \{[\s\S]*?aria-busy="true"[\s\S]*?\}/,
+  "Hydration must render a neutral placeholder before choosing a viewport variant"
+);
 assert.match(
   boardKanban,
   /function renderColumn\(\s*column: BoardColumnPayload,\s*index: number,\s*enableDrop: boolean,\s*enableCursorTarget: boolean/,

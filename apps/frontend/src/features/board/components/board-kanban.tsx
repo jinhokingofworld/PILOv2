@@ -1,7 +1,7 @@
 "use client";
 
 import { GitPullRequestArrow } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { BoardIssueCard } from "@/features/board/components/board-issue-card";
 import type {
@@ -106,6 +106,7 @@ export function BoardKanban({
   selectedIssueId = null
 }: BoardKanbanProps) {
   const isMobile = useIsMobile();
+  const [hasMounted, setHasMounted] = useState(false);
   const [draggedIssue, setDraggedIssue] = useState<DraggedIssue | null>(null);
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
   const [mobileColumnId, setMobileColumnId] = useState("");
@@ -132,6 +133,10 @@ export function BoardKanban({
   const mobileColumn = orderedColumns.find(
     ({ id }) => id === resolvedMobileColumnId
   );
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
 
   function handleMobileTabKeyDown(
     event: React.KeyboardEvent<HTMLButtonElement>
@@ -348,6 +353,17 @@ export function BoardKanban({
           </p>
         </div>
       </section>
+    );
+  }
+
+  if (!hasMounted) {
+    return (
+      <section
+        id="kanban"
+        className="kanban-scroll p-4 sm:p-6"
+        aria-busy="true"
+        aria-label="Board kanban"
+      />
     );
   }
 
