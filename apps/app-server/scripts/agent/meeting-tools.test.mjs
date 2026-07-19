@@ -573,7 +573,10 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   assert.equal(result.outputSummary.groundingOutcome, "sources_found");
   assert.equal(result.outputSummary.sourceCount, 1);
   assert.deepEqual(result.outputSummary.sourceTypes, ["transcript"]);
-  assert.deepEqual(result.outputSummary.sourceIds, ["99999999-9999-4999-8999-999999999999"]);
+  assert.equal(result.outputSummary.sourceIds, undefined);
+  assert.equal(result.groundingSources.length, 1);
+  assert.equal(result.groundingSources[0].sourceType, "meeting_transcript");
+  assert.equal(result.groundingSources[0].sourceRef, "99999999-9999-4999-8999-999999999999");
   assert.doesNotMatch(JSON.stringify(result.outputSummary), /원문/);
   assert.deepEqual(ragService.calls[0].input, { query: "일정 결론" });
 
@@ -635,9 +638,9 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
     status: "grounding_queued",
     groundingOutcome: "no_relevant_sources",
     sourceCount: 0,
-    sourceTypes: [],
-    sourceIds: []
+    sourceTypes: []
   });
+  assert.deepEqual(result.groundingSources, []);
   assert.deepEqual(result.resourceRefs, []);
 }
 

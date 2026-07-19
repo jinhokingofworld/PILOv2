@@ -892,9 +892,24 @@ export class MeetingAgentToolsService {
             groundingOutcome:
               sources.length === 0 ? "no_relevant_sources" : "sources_found",
             sourceCount: sources.length,
-            sourceTypes,
-            sourceIds: sources.map((source) => source.sourceId)
+            sourceTypes
           },
+          groundingSources: sources.map((source) => {
+            const resourceRef: AgentResourceRef = {
+              domain: "meeting",
+              resourceType: "meeting_report",
+              resourceId: source.reportId
+            };
+            return {
+              sourceType: source.sourceType === "transcript"
+                ? "meeting_transcript" as const
+                : "meeting_activity" as const,
+              sourceRef: source.sourceId,
+              excerpt: source.content,
+              score: source.score ?? 0,
+              resourceRef
+            };
+          }),
           resourceRefs: reportId
             ? [
                 {

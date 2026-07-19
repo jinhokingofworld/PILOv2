@@ -26,6 +26,8 @@ export interface MeetingEvidenceSource {
   action?: string;
   summary?: string;
   directlyReferenced: boolean;
+  /** Internal retrieval diagnostic. Never expose this value in a public tool summary. */
+  score?: number;
 }
 export type MeetingTranscriptSource = MeetingEvidenceSource;
 
@@ -252,7 +254,10 @@ export class MeetingTranscriptRagService {
         selectedIds.add(candidate.sourceId);
       }
     }
-    return selected.map(({ distance: _distance, ...source }) => source);
+    return selected.map(({ distance, ...source }) => ({
+      ...source,
+      score: 1 - distance
+    }));
   }
 
   private relevanceScore(candidate: CandidateSource): number {

@@ -241,7 +241,7 @@ try {
       if (text.includes("SELECT COALESCE(MAX(step_order)")) {
         return { next_order: 2 };
       }
-      if (text.includes("UPDATE agent_steps SET status = 'completed'")) {
+      if (text.includes("UPDATE agent_steps") && text.includes("SET status = 'completed'")) {
         executed.push({ text, values });
         return { id: values[0] };
       }
@@ -300,19 +300,70 @@ try {
   });
 
   const completedStep = executed.find((call) =>
-    call.text.includes("UPDATE agent_steps SET status = 'completed'")
+    call.text.includes("UPDATE agent_steps") && call.text.includes("SET status = 'completed'")
   );
   assert.deepEqual(JSON.parse(completedStep.values[2]), {
     status: "grounding_queued",
     groundingOutcome: "sources_found",
     sourceCount: 1,
-    sourceTypes: ["transcript"],
-    sourceIds: [allowedSourceId]
+    sourceTypes: ["meeting_transcript"]
   });
   const outboxInsert = executed.find((call) =>
     call.text.includes("INSERT INTO agent_grounded_answer_outbox")
   );
-  assert.deepEqual(JSON.parse(outboxInsert.values[2]), [allowedSourceId]);
+  const registry = JSON.parse(outboxInsert.values[2]);
+  assert.equal(registry.length, 1);
+  assert.match(registry[0].citationId, /^citation_[0-9a-f-]{36}$/);
+  assert.equal(registry[0].sourceType, "meeting_transcript");
+  assert.equal(registry[0].sourceRef, allowedSourceId);
+  assert.deepEqual(registry[0].resourceRef, {
+    domain: "meeting",
+    resourceType: "meeting_report",
+    resourceId: REPORT_ID
+  });
+}
+
+{
+  const executed = [];
+  const database = {
+    async transaction(callback) { return callback(this); },
+    async queryOne(text, values) {
+      if (text.includes("FROM agent_runs") && text.includes("FOR UPDATE")) {
+        return {
+          id: values[0],
+          execution_lease_token: "99999999-9999-4999-8999-999999999999",
+          execution_lease_generation: 1
+        };
+      }
+      if (text.includes("UPDATE agent_steps") && text.includes("SET status = 'completed'")) {
+        executed.push({ text, values });
+        return { id: values[0] };
+      }
+      return null;
+    },
+    async execute(text, values) { executed.push({ text, values }); }
+  };
+  const service = new AgentGroundedAnswerService(database, {
+    normalizeSourceIds() { return []; },
+    async loadAuthorizedSources() { return []; }
+  });
+  await service.completeToolAndQueue({
+    runId: "77777777-7777-4777-8777-777777777777",
+    workspaceId: WORKSPACE_ID,
+    currentUserId: USER_ID,
+    stepId: "88888888-8888-4888-8888-888888888888",
+    outputSummary: { status: "grounding_queued" },
+    resourceRefs: [],
+    groundingSources: [],
+    executionLease: {
+      token: "99999999-9999-4999-8999-999999999999",
+      generation: 1
+    }
+  });
+  assert.equal(executed.some((call) => call.text.includes("agent_grounded_answer_outbox")), false);
+  assert.equal(executed.some((call) => call.text.includes("'answer', 'pending'")), false);
+  const completedRun = executed.find((call) => call.text.includes("SET status = 'completed', final_answer"));
+  assert.match(completedRun.values[1], /관련된 근거를 찾지 못했습니다/);
 }
 
 {
@@ -322,6 +373,7 @@ try {
       return {
         workspace_id: WORKSPACE_ID,
         requested_by_user_id: USER_ID,
+        prompt: "질문",
         source_ids: [sourceId]
       };
     },
@@ -333,8 +385,15 @@ try {
     normalizeSourceIds(sourceIds) {
       return sourceIds;
     },
-    async loadAuthorizedSources() {
-      throw new Error("unknown citation must not load source content");
+    async loadAuthorizedSources(_userId, _workspaceId, sourceIds) {
+      assert.deepEqual(sourceIds, [sourceId]);
+      return [{
+        sourceId,
+        sourceType: "activity",
+        reportId: REPORT_ID,
+        content: "허용된 근거",
+        directlyReferenced: false
+      }];
     }
   };
   const service = new AgentGroundedAnswerService(database, ragService);
@@ -344,5 +403,9 @@ try {
       `transcript:${TRANSCRIPT_ID}`
     ]),
     /unknown citation/
+  );
+  await assert.rejects(
+    () => service.complete("77777777-7777-4777-8777-777777777777", "근거 답변", []),
+    /citation is required/
   );
 }
