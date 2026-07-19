@@ -525,6 +525,9 @@ export interface MeetingAgentActionItemSearchQuery {
   assigneeUserId?: string;
   status?: "PENDING" | "DELIVERING" | "DELIVERY_FAILED" | "APPROVED" | "DISMISSED";
   title?: string;
+  from?: string;
+  to?: string;
+  sort?: "newest" | "oldest";
   limit?: number;
 }
 
@@ -1820,7 +1823,16 @@ export class MeetingService {
     const titleCondition =
       title === null
         ? ""
-        : `AND lower(regexp_replace(BTRIM(action_items.title), '\\s+', ' ', 'g')) = $${values.push(title)}`;
+        : `AND lower(regexp_replace(BTRIM(action_items.title), '\\s+', ' ', 'g')) LIKE '%' || $${values.push(title)} || '%'`;
+    const fromCondition =
+      query.from === undefined
+        ? ""
+        : `AND meeting_reports.created_at >= $${values.push(query.from)}::timestamptz`;
+    const toCondition =
+      query.to === undefined
+        ? ""
+        : `AND meeting_reports.created_at < $${values.push(query.to)}::timestamptz`;
+    const reportOrder = query.sort === "oldest" ? "ASC" : "DESC";
     const rows = await this.database.query<
       QueryResultRow & {
         id: string;
@@ -1857,7 +1869,9 @@ export class MeetingService {
           ${assigneeCondition}
           ${statusCondition}
           ${titleCondition}
-        ORDER BY meeting_reports.created_at DESC, action_items.source_index ASC, action_items.id ASC
+          ${fromCondition}
+          ${toCondition}
+        ORDER BY meeting_reports.created_at ${reportOrder}, action_items.source_index ASC, action_items.id ASC
         LIMIT $${values.push(limit)}
       `,
       values

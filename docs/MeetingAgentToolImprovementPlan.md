@@ -848,11 +848,11 @@ Phase 3 작업으로 남긴다.
 > provider prompt, 사용자 응답에 저장·노출하지 않는다. 후보 선택 뒤 token을 어떤 server-owned
 > 경로로 전달할지는 구현 전 제품·API/DB 계약으로 확정한다.
 
-- [ ] 회의 제어 tool이 `current`, `roomName`, 검증된 `selectionToken`을 planner-facing 입력으로 받게 한다.
-- [ ] `list_meeting_reports`에 `from`, `to`, `roomName` 또는 service가 지원하는 검색 조건을 추가한다.
-- [ ] `find_action_items`가 `reportId` 없이도 Workspace 범위에서 담당자·상태·기간으로 검색되게 한다.
-- [ ] 후속작업 mutation이 action item selector와 member selector를 받아 실행 직전에 내부 ID로 바꾸게 한다.
-- [ ] 기존 UUID 입력은 내부 호환 경로로만 유지하고 planner schema의 기본 경로에서는 제거한다.
+- [x] 회의 제어 tool이 `current`, `roomName`, 검증된 server-owned reference를 planner-facing 입력으로 받게 한다.
+- [x] `list_meeting_reports`에 `from`, `to`, `roomName` 또는 service가 지원하는 검색 조건을 추가한다.
+- [x] `find_action_items`가 `reportId` 없이도 Workspace 범위에서 담당자·상태·기간으로 검색되게 한다.
+- [x] 후속작업 mutation이 action item selector와 member selector를 받아 실행 직전에 내부 ID로 바꾸게 한다.
+- [x] 기존 UUID 입력은 내부 호환 경로로만 유지하고 planner schema의 기본 경로에서는 제거한다.
 
 공개 Meeting API endpoint를 추가하기 전에 `MeetingService`의 기존 query를 tool adapter에서 재사용할 수
 있는지 먼저 확인한다. API endpoint, request, response가 바뀌면 `docs/api/meeting-api.md`와
@@ -862,28 +862,28 @@ Phase 3 작업으로 남긴다.
 
 #### Phase 3 세부 구현 계획 — #1382
 
-- [ ] **1. 현재 UUID 경로와 migration 순서를 고정한다.** Meeting tool별 planner schema, `validateInput`,
+- [x] **1. 현재 UUID 경로와 migration 순서를 고정한다.** Meeting tool별 planner schema, `validateInput`,
   `prepareExecution`/`execute`, domain service 호출의 UUID 필드를 표로 만들고 read/control → report/action
   item search → write mutation 순으로 분리한다. 새 public endpoint·DB schema가 필요한지 이 단계에서 확정한다.
-- [ ] **2. selector schema를 명시한다.** room/current meeting/meeting/report/member/action item selector의
+- [x] **2. selector schema를 명시한다.** room/current meeting/meeting/report/member/action item selector의
   허용 필드, ISO datetime 범위, 상태 enum, 정렬, 1-based ordinal을 runtime validator와 Agent tool schema에
   같은 계약으로 추가한다. UUID를 planner 기본 schema에서 제거한다.
-- [ ] **3. token 소비 경계를 만든다.** selection token은 App Server에서만 검증·복호화하고
+- [x] **3. token 소비 경계를 만든다.** selection token은 App Server에서만 검증·복호화하고
   user/workspace/run/resource type/15분 만료와 stale resource를 다시 확인한다. token plaintext·raw UUID는
   Agent 저장소, SQS, provider prompt, 사용자 응답으로 보내지 않는다.
-- [ ] **4. ambiguity 선택 전달 방식을 확정·구현한다.** 후보 선택을 browser가 단순 token echo로 처리하지
+- [x] **4. ambiguity 선택 전달 방식을 확정·구현한다.** 후보 선택을 browser가 단순 token echo로 처리하지
   않으며, 0/N 후보·동명이인·만료 후보·다른 Workspace/run 선택은 기존 tool을 실행하지 않고 clarification으로
   끝낸다. 필요한 API/DB/Frontend 계약은 이 항목과 같은 PR에서 문서화한다.
 - [x] **5. read/control tool adapter를 연결한다.** Meeting room/현재 Meeting/Meeting control과
   report 조회 tool이 selector → resolver → revalidated internal reference → 기존 domain service 경로를
   사용하도록 만든다.
-- [ ] **6. report/action item 조회를 확장한다.** `list_meeting_reports`, `find_action_items`가
+- [x] **6. report/action item 조회를 확장한다.** `list_meeting_reports`, `find_action_items`가
   Workspace-scoped selector를 받고, 직전 목록 순번은 같은 필터·정렬의 1-based 위치에서만 해소한다.
-- [ ] **7. action item write를 연결한다.** action item/member selector를 confirmation 전과 승인 직전에
+- [x] **7. action item write를 연결한다.** action item/member selector를 confirmation 전과 승인 직전에
   모두 재검증하며, 실패·모호·만료 상황은 write 후보/confirmation을 만들지 않는다.
 - [x] **8. planner·formatter·UI 경계를 맞춘다.** AI Worker structured planner contract와 App Server tool
   snapshot을 동기화하고, formatter/Frontend는 사람이 읽을 수 있는 후보와 질문만 표시한다.
-- [ ] **9. 보안·회귀·E2E를 고정한다.** 0/1/N·동명이인·cross-workspace, token binding/만료/변조/stale,
+- [x] **9. 보안·회귀·E2E를 고정한다.** 0/1/N·동명이인·cross-workspace, token binding/만료/변조/stale,
   UUID/token 비노출, confirmation write 재검증을 App Server·AI Worker·Frontend에서 검증한다.
 - [ ] **10. 배포 전 검증을 수행한다.** build/lint/format/Agent script/AI Worker pytest와 dev에서
   자연어 요청 → clarification 선택 → tool 실행 또는 confirmation 흐름을 같은 runId로 대조한다.
@@ -910,7 +910,7 @@ Phase 3 작업으로 남긴다.
 ##### PR 1 — #1386 read/control·report selector
 
 > 상태 (2026-07-18): 구현과 P1 보완을 완료했고 [PR #1438](https://github.com/Developer-EJ/PILO/pull/1438)에서
-> CI 재검증 중이다. #1387 action item selector·mutation과 Phase 3 통합 E2E gate는 아직 시작하지 않았다.
+> 병합됐다. #1387 action item selector·mutation은 2026-07-19 구현·자동 회귀를 완료했다.
 
 - [x] `list_meeting_rooms`, `get_active_meeting`, `get_meeting_participants`, Meeting control tool,
   `list_meeting_reports`, `get_meeting_report`, `summarize_meeting_report`의 UUID·selector 입력을 tool별로
@@ -942,20 +942,20 @@ Phase 3 작업으로 남긴다.
 
 ##### PR 2 — #1387 action item selector·mutation
 
-- [ ] `find_action_items`에 Workspace-scoped report/member/status/title/기간/정렬 selector와 bounded
+- [x] `find_action_items`에 Workspace-scoped report/member/status/title/기간/정렬 selector와 bounded
   1-based ordinal을 추가한다. ordinal은 같은 filter·sort의 결과에서만 해소한다.
-- [ ] update/dismiss/approve tool이 action item/member selector 또는 server-owned reference를 내부 ID로
+- [x] update/dismiss/approve tool이 action item/member selector 또는 server-owned reference를 내부 ID로
   변환하고, ambiguity·만료·cross-workspace는 confirmation plan을 만들지 않게 한다.
-- [ ] confirmation 생성 전과 승인 직전에 resource 존재·Workspace·권한·상태를 모두 재검증한다. confirmation
+- [x] confirmation 생성 전과 승인 직전에 resource 존재·Workspace·권한·상태를 모두 재검증한다. confirmation
   plan과 approval path에는 raw token을 저장하지 않는다.
-- [ ] action item 후보 버튼, 부분 마스킹 member 정보, expired/retry 상태와 write confirmation UI를
+- [x] action item 후보 버튼, 부분 마스킹 member 정보, expired/retry 상태와 write confirmation UI를
   기존 Agent UI 계약 안에서 연결한다. Frontend common area 해당 여부를 PR 전에 재확인한다.
-- [ ] query/mutation/confirmation E2E에서 0/1/N, 동명이인, ordinal 변경, expired/stale/cross-workspace,
+- [x] query/mutation/confirmation 자동 회귀에서 0/1/N, 동명이인, ordinal 변경, expired/stale/cross-workspace,
   double-submit, UUID/token 비노출을 검증한다.
 
 ##### Phase 3 통합 완료 gate
 
-- [ ] #1386/#1387의 API 문서·tool snapshot·AI Worker schema가 같은 selector 계약을 가리키는지 비교한다.
+- [x] #1386/#1387의 API 문서·tool snapshot·AI Worker schema가 같은 selector 계약을 가리키는지 비교한다.
 - [ ] App Server format/lint/test/build, AI Worker pytest, Frontend format/lint/test/build을 통과시킨다.
 - [ ] dev에서 자연어 요청 → clarification 후보 버튼 → 같은 run 재개 → read 실행 또는 write confirmation
   → 승인/거절/만료를 대조하고, run/step/log/provider-visible context에 UUID·token이 없는지 확인한다.

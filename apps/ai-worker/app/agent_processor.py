@@ -1599,18 +1599,11 @@ def _normalize_meeting_thread_context_reference(
             references,
             "meeting_report_action_item",
         )
-        report_refs = _latest_thread_context_references(references, "meeting_report")
-        if ordinal is not None and len(report_refs) == 1:
-            tool_input.pop("reportId", None)
-            tool_input.pop("actionItemId", None)
-            tool_input.pop("actionItemContextRef", None)
-            tool_input.update(
-                {
-                    "reportContextRef": report_refs[0]["contextRef"],
-                    "ordinal": ordinal,
-                }
-            )
-        elif ordinal is None and len(action_refs) == 1:
+        if ordinal is not None:
+            action_refs = [
+                reference for reference in action_refs if reference.get("ordinal") == ordinal
+            ]
+        if len(action_refs) == 1:
             tool_input.pop("reportId", None)
             tool_input.pop("actionItemId", None)
             tool_input.pop("reportContextRef", None)
@@ -1726,7 +1719,7 @@ MEETING_SELECTION_SELECTOR_FIELDS = {
         "status",
         "roomName",
     ),
-    "workspace_member": ("assigneeUserId", "assigneeDisplayName"),
+    "workspace_member": ("assigneeSelf", "assigneeDisplayName", "clearAssignee"),
     "meeting_report_action_item": (
         "actionItemContextRef",
         "reportContextRef",
@@ -1813,8 +1806,9 @@ def _normalize_meeting_candidate_goal_resume(
             "title",
             "description",
             "priority",
-            "assigneeUserId",
+            "assigneeSelf",
             "assigneeDisplayName",
+            "clearAssignee",
             "useSelectedWorkspaceMemberCandidate",
         )
     ):
@@ -2322,7 +2316,13 @@ def _agent_planner_system_prompt() -> str:
         "or invent a raw resource ID. Use contextRef only when exactly one matching prior resource "
         "exists; otherwise ask for a human-readable name or ordinal. For a prior meeting_report, "
         "use contextRef in get_meeting_report or summarize_meeting_report. For an action-item "
-        "write, use actionItemContextRef, or reportContextRef with a 1-based ordinal. For a "
+        "write from a prior list, use its exact actionItemContextRef. For a "
+        "find_action_items request, omit the report selector to search the whole Workspace, and "
+        "use contextRef, assigneeSelf, assigneeDisplayName, status, title, from, to, sort, "
+        "or limit only when the user specifies them. Never provide assigneeUserId. Use "
+        "assigneeSelf=true, assigneeDisplayName, clearAssignee=true, or the selected Workspace "
+        "member candidate for an action-item assignee change. For an ordinal write, select only "
+        "the matching 1-based actionItemContextRef from the latest identical result list. For a "
         "selected meeting_room, use "
         "useSelectedMeetingRoomCandidate=true in start_meeting_in_room. For a selected "
         "meeting, use useSelectedMeetingCandidate=true. For a selected meeting_report, use "

@@ -170,6 +170,16 @@ assert.match(
   /async listActionItemsForAgent[\s\S]*?WHERE meetings\.workspace_id = \$1/,
   "Action item resolver reads must scope every query to the current Workspace"
 );
+assert.match(
+  meetingServiceSource,
+  /async listActionItemsForAgent[\s\S]*?meeting_reports\.created_at >=[\s\S]*?meeting_reports\.created_at <[\s\S]*?ORDER BY meeting_reports\.created_at \$\{reportOrder\}/,
+  "Workspace action item search must keep bounded date and deterministic sort selectors"
+);
+assert.match(
+  meetingServiceSource,
+  /action_items\.title\)[\s\S]*?LIKE '%' \|\|/,
+  "Action item title search must support a bounded normalized partial match"
+);
 
 function createMeeting(overrides = {}) {
   return {
@@ -776,7 +786,11 @@ class FakeCandidateSelectionDatabase {
     meetingService,
     {},
     {},
-    undefined,
+    {
+      async revalidateReference(_context, reference) {
+        return reference;
+      }
+    },
     candidateSelectionService
   );
   const definition = tools
@@ -827,6 +841,13 @@ class FakeCandidateSelectionDatabase {
           }
           if (contextRef === "ctx_89abcdef0123456789abcdef") {
             return { resourceType: "meeting", resourceId: MEETING_ID };
+          }
+          if (contextRef === "ctx_aaaaaaaaaaaaaaaaaaaaaaaa") {
+            return {
+              resourceType: "meeting_report_action_item",
+              resourceId: ACTION_ITEM_ID,
+              reportId: REPORT_ID
+            };
           }
           return null;
         }
@@ -1152,11 +1173,167 @@ class FakeCandidateSelectionDatabase {
       await resolver.revalidateSelectionToken(context, actionItem.selectionToken),
       actionItem.reference
     );
+
+    const actionUpdateTool = contextTools
+      .listDefinitions()
+      .find((tool) => tool.name === "update_meeting_report_action_item");
+    const confirmation = await actionUpdateTool.buildConfirmation(
+      context,
+      actionUpdateTool.validateInput({
+        actionItemContextRef: "ctx_aaaaaaaaaaaaaaaaaaaaaaaa",
+        priority: "HIGH"
+      })
+    );
+    assert.equal(confirmation.toolName, "update_meeting_report_action_item");
+    assert.equal(confirmation.call.input.actionItemId, ACTION_ITEM_ID);
+
+    const stalePreparation = await actionUpdateTool.buildConfirmation(
+      context,
+      actionUpdateTool.validateInput({
+        actionItemContextRef: "ctx_bbbbbbbbbbbbbbbbbbbbbbbb",
+        priority: "HIGH"
+      })
+    );
+    assert.equal(stalePreparation.kind, "needs_clarification");
+    assert.equal("candidateResources" in stalePreparation, false);
+
     meetingService.reports[0].actionItems = [];
     assert.equal(
       await resolver.revalidateSelectionToken(context, actionItem.selectionToken),
       null
     );
+    await assert.rejects(
+      () =>
+        actionUpdateTool.execute(
+          context,
+          actionUpdateTool.validateConfirmationInput(
+            actionUpdateTool.buildConfirmationInput(confirmation)
+          )
+        ),
+      (error) =>
+        error.getStatus?.() === 400 &&
+        error.response?.error?.message?.includes("no longer available"),
+      "Approval execution must revalidate an action item that became stale after confirmation"
+    );
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.SESSION_SECRET;
+    } else {
+      process.env.SESSION_SECRET = previousSecret;
+    }
+  }
+}
+
+{
+  const previousSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "meeting-action-item-selector-test-secret";
+  const meetingService = new FakeMeetingService();
+  const resolver = new MeetingAgentResourceResolver(
+    meetingService,
+    new FakeWorkspaceService()
+  );
+  const meetingTools = new MeetingAgentToolsService(
+    meetingService,
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    resolver
+  );
+  const findTool = meetingTools
+    .listDefinitions()
+    .find((definition) => definition.name === "find_action_items");
+  const updateTool = meetingTools
+    .listDefinitions()
+    .find(
+      (definition) => definition.name === "update_meeting_report_action_item"
+    );
+  try {
+    assert.equal("assigneeUserId" in updateTool.inputSchema.properties, false);
+    assert.throws(
+      () =>
+        updateTool.validateInput({
+          actionItemContextRef: "ctx_0123456789abcdef01234567",
+          assigneeUserId: USER_ID
+        }),
+      (error) =>
+        error.getStatus?.() === 400 &&
+        error.response?.error?.message?.includes("assigneeUserId is not supported")
+    );
+
+    const searchInput = findTool.validateInput({
+      assigneeSelf: true,
+      status: "PENDING",
+      title: "문서",
+      from: "2026-07-01T00:00:00.000Z",
+      to: "2026-07-31T00:00:00.000Z",
+      sort: "oldest",
+      limit: 10
+    });
+    assert.deepEqual(await findTool.prepareExecution(context, searchInput), {
+      kind: "execute"
+    });
+    const searchResult = await findTool.execute(context, searchInput);
+    assert.equal(searchResult.outputSummary.count, 1);
+    assert.deepEqual(searchResult.outputSummary.actionItems[0], {
+      ordinal: 1,
+      title: "문서 정리",
+      status: "PENDING",
+      assigneeName: "진호",
+      reportCreatedAt: "2026-07-08T00:00:00.000Z"
+    });
+    assert.doesNotMatch(
+      JSON.stringify(searchResult.outputSummary),
+      new RegExp(`${REPORT_ID}|${ACTION_ITEM_ID}|${USER_ID}`)
+    );
+    assert.deepEqual(
+      meetingService.calls.find((call) => call.method === "listActionItemsForAgent")
+        .query,
+      {
+        assigneeUserId: USER_ID,
+        status: "PENDING",
+        title: "문서",
+        from: "2026-07-01T00:00:00.000Z",
+        to: "2026-07-31T00:00:00.000Z",
+        sort: "oldest",
+        limit: 10
+      }
+    );
+    assert.equal(
+      searchResult.resourceRefs[0].resourceType,
+      "meeting_report_action_item"
+    );
+
+    const ambiguous = await findTool.prepareExecution(
+      context,
+      findTool.validateInput({ assigneeDisplayName: "김진호" })
+    );
+    assert.equal(ambiguous.kind, "needs_clarification");
+    assert.equal(ambiguous.candidateResources.length, 2);
+    assert.match(
+      ambiguous.candidateResources[0].candidate.description,
+      /member · ji\*+@example\.com/
+    );
+
+    for (const invalidInput of [
+      { status: "UNKNOWN" },
+      { limit: 21 },
+      {
+        from: "2026-07-02T00:00:00.000Z",
+        to: "2026-07-01T00:00:00.000Z"
+      }
+    ]) {
+      assert.throws(() => findTool.validateInput(invalidInput));
+    }
+
+    const selfUpdate = updateTool.validateInput({
+      actionItemContextRef: "ctx_0123456789abcdef01234567",
+      assigneeSelf: true
+    });
+    assert.equal(selfUpdate.assigneeSelf, true);
+    const clearUpdate = updateTool.validateInput({
+      actionItemContextRef: "ctx_0123456789abcdef01234567",
+      clearAssignee: true
+    });
+    assert.equal(clearUpdate.clearAssignee, true);
   } finally {
     if (previousSecret === undefined) {
       delete process.env.SESSION_SECRET;

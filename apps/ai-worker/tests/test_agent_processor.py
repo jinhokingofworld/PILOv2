@@ -334,6 +334,8 @@ def test_planner_prompt_limits_prior_thread_resource_reuse() -> None:
     assert "Never copy, ask for, or invent a raw resource ID" in prompt
     assert "useSelectedMeetingRoomCandidate=true" in prompt
     assert "useSelectedWorkspaceMemberCandidate=true" in prompt
+    assert "Never provide assigneeUserId" in prompt
+    assert "latest identical result list" in prompt
     assert "Never call the completed lookup tool again" in prompt
 
 
@@ -2481,7 +2483,7 @@ def test_normalizer_clarifies_missing_or_ambiguous_meeting_report_context(
     assert normalized.output_summary["missingFields"] == ["meeting_report_context"]
 
 
-def test_normalizer_maps_action_item_ordinal_to_report_context() -> None:
+def test_normalizer_maps_action_item_ordinal_to_exact_result_context() -> None:
     job = parse_agent_run_job_payload(
         agent_payload(
             tools=[
@@ -2494,8 +2496,7 @@ def test_normalizer_maps_action_item_ordinal_to_report_context() -> None:
                         "type": "object",
                         "additionalProperties": False,
                         "properties": {
-                            "reportContextRef": {"type": "string"},
-                            "ordinal": {"type": "integer"},
+                            "actionItemContextRef": {"type": "string"},
                             "priority": {"type": "string"},
                         },
                     },
@@ -2503,7 +2504,8 @@ def test_normalizer_maps_action_item_ordinal_to_report_context() -> None:
             ]
         )
     )
-    context_ref = "ctx_0123456789abcdef01234567"
+    first_context_ref = "ctx_0123456789abcdef01234567"
+    second_context_ref = "ctx_89abcdef0123456701234567"
     normalized = normalize_agent_planner_decision(
         planner_decision(
             tool_name="update_meeting_report_action_item",
@@ -2514,18 +2516,56 @@ def test_normalizer_maps_action_item_ordinal_to_report_context() -> None:
         prompt="2번 작업 우선순위를 높음으로 바꿔줘",
         planning_context=(
             'previous resource: {"turn":2,"contextRef":"'
-            + context_ref
-            + '","resourceType":"meeting_report","ordinal":1}'
+            + first_context_ref
+            + '","resourceType":"meeting_report_action_item","ordinal":1}\n'
+            + 'previous resource: {"turn":2,"contextRef":"'
+            + second_context_ref
+            + '","resourceType":"meeting_report_action_item","ordinal":2}'
         ),
     )
 
     assert normalized.status == "tool_candidate"
     assert normalized.output_summary["input"] == {
         "priority": "HIGH",
-        "reportContextRef": context_ref,
-        "ordinal": 2,
+        "actionItemContextRef": second_context_ref,
     }
     assert normalized.output_summary["requiresConfirmation"] is True
+
+
+def test_normalizer_rejects_action_item_ordinal_outside_latest_result_set() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="dismiss_meeting_report_action_item",
+                    description="Meeting 후속작업 제외",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={"type": "object", "properties": {}},
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="dismiss_meeting_report_action_item",
+            tool_input={},
+            requires_confirmation=True,
+        ),
+        job,
+        prompt="3번 작업은 제외해줘",
+        planning_context=(
+            'previous resource: {"turn":2,"contextRef":"ctx_0123456789abcdef01234567",'
+            '"resourceType":"meeting_report_action_item","ordinal":1}\n'
+            'previous resource: {"turn":2,"contextRef":"ctx_89abcdef0123456701234567",'
+            '"resourceType":"meeting_report_action_item","ordinal":2}'
+        ),
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["meeting_action_item_context"]
+    assert "requiresConfirmation" not in normalized.output_summary
 
 
 @pytest.mark.parametrize(
