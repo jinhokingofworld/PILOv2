@@ -17,6 +17,7 @@ const nodes = [
     y: 80,
     width: 272,
     height: 116,
+    workflowOrder: 1,
     pinned: true,
     riskLevel: "high",
     reviewStatus: "not_reviewed"
@@ -29,6 +30,7 @@ const nodes = [
     y: 280,
     width: 272,
     height: 116,
+    workflowOrder: 2,
     pinned: false,
     riskLevel: "medium",
     reviewStatus: "not_reviewed"
@@ -41,6 +43,7 @@ const nodes = [
     y: 480,
     width: 272,
     height: 116,
+    workflowOrder: 1,
     pinned: false,
     riskLevel: "low",
     reviewStatus: "approved"
@@ -80,6 +83,60 @@ assert.equal(relatedPresentation.edgeOpacityById.get("edge-bc"), 0);
 const layout = createPrReviewFlowLayout(nodes, relations, "flow-1");
 assert.equal(layout.has("node-a"), false);
 assert.ok(layout.get("node-b").x > nodes[0].x + nodes[0].width);
+
+const workflowNode = (id, workflowOrder, pinned) => ({
+  id,
+  flowId: "flow-ordered",
+  roomFileId: `file-${id}`,
+  x: 120,
+  y: 80,
+  width: 272,
+  height: 116,
+  workflowOrder,
+  pinned,
+  riskLevel: "low",
+  reviewStatus: "not_reviewed"
+});
+
+const orderedNodes = [
+  workflowNode("one", 1, false),
+  workflowNode("two", 2, false),
+  workflowNode("three", 3, false)
+];
+const reversedAndCyclicRelations = [
+  {
+    id: "edge-three-one",
+    fromRoomFileId: "file-three",
+    toRoomFileId: "file-one",
+    relationTypes: ["depends_on"]
+  },
+  {
+    id: "edge-two-one",
+    fromRoomFileId: "file-two",
+    toRoomFileId: "file-one",
+    relationTypes: ["supports"]
+  },
+  {
+    id: "edge-one-three",
+    fromRoomFileId: "file-one",
+    toRoomFileId: "file-three",
+    relationTypes: ["blocks"]
+  }
+];
+const orderedLayout = createPrReviewFlowLayout(
+  orderedNodes,
+  reversedAndCyclicRelations,
+  "flow-ordered"
+);
+assert.ok(orderedLayout.get("one").x < orderedLayout.get("two").x);
+assert.ok(orderedLayout.get("two").x < orderedLayout.get("three").x);
+
+const allPinnedLayout = createPrReviewFlowLayout(
+  [workflowNode("pinned-one", 1, true), workflowNode("pinned-two", 2, true)],
+  [],
+  "flow-ordered"
+);
+assert.equal(allPinnedLayout.size, 0);
 
 assert.deepEqual(
   findMissingPrReviewOrderEdges(
