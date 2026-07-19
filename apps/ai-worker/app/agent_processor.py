@@ -90,6 +90,20 @@ FORBIDDEN_JSON_KEY_PARTS = (
     "transcript",
     "transcripttext",
 )
+CONTEXT_SURFACE_DOMAIN = {
+    "canvas": "canvas",
+    "sql_erd": "sql_erd",
+    "pr_review": "pr_review",
+}
+AGENT_ROUTER_OUTPUT_CLARIFICATION_MESSAGE = (
+    "요청을 처리할 작업 영역을 확실히 판단하지 못했습니다. "
+    "원하는 작업을 조금 더 구체적으로 알려주세요."
+)
+AGENT_PLANNER_OUTPUT_CLARIFICATION_MESSAGE = (
+    "요청을 안전하게 처리하기 위한 정보가 부족합니다. "
+    "원하는 결과를 조금 더 구체적으로 알려주세요."
+)
+UNTRUSTED_COMPLETION_EVIDENCE_TOOL_NAME = "__trusted_capability_terminal_unavailable__"
 
 
 @dataclass(frozen=True)
@@ -141,6 +155,7 @@ class AgentPlanningRequest:
     planning_context: str = ""
     context_surface: str | None = None
     routing: AgentRoutingDecision | None = None
+    completion_tool_names: tuple[str, ...] = ()
     workflow_incomplete: bool = False
 
 
@@ -278,7 +293,6 @@ def select_agent_planner_tools_for_routing(
     selected_domains = set(routing.domains)
     selected_names: set[str] = set()
     covered_domains: set[str] = set()
-    pending_names: list[str] = []
     for capability_id in routing.capability_ids:
         capability = capability_by_id.get(capability_id)
         if (
@@ -288,21 +302,14 @@ def select_agent_planner_tools_for_routing(
         ):
             raise AgentRouterOutputError("Agent router selected an invalid capability")
         covered_domains.add(capability.domain)
-        pending_names.extend(capability.tool_names)
+        for tool_name in capability.tool_names:
+            descriptor = descriptor_by_name.get(tool_name)
+            if descriptor is None or descriptor.domain != capability.domain:
+                raise AgentRouterOutputError("Agent router selected an invalid tool chain")
+            selected_names.add(tool_name)
 
     if covered_domains != selected_domains:
         raise AgentRouterOutputError("Agent router domains do not match selected capabilities")
-
-    while pending_names:
-        tool_name = pending_names.pop(0)
-        if tool_name in selected_names:
-            continue
-        descriptor = descriptor_by_name.get(tool_name)
-        if descriptor is None:
-            raise AgentRouterOutputError("Agent router selected an invalid tool chain")
-        selected_names.add(tool_name)
-        pending_names.extend(descriptor.prerequisite_tool_names)
-        pending_names.extend(descriptor.follow_up_tool_names)
 
     if not selected_names or len(selected_names) > top_k:
         raise AgentRouterOutputError("Agent router tool chain exceeds the configured limit")
@@ -363,12 +370,12 @@ def select_pending_agent_planner_tools_for_routing(
 def _completed_planning_tool_names(planning_context: str) -> set[str]:
     return {
         match.group(1)
-        for line in planning_context.splitlines()
+        for line in _current_prompt_cycle_planning_lines(planning_context)
         if (match := re.match(r"^tool ([A-Za-z0-9_]+):", line)) is not None
     }
 
 
-def _has_started_routed_workflow(
+def _has_incomplete_routed_workflow(
     job: AgentRunJob,
     routing: AgentRoutingDecision,
     planning_context: str,
@@ -383,7 +390,10 @@ def _has_started_routed_workflow(
         for tool_name in capability_by_id[capability_id].tool_names
         if capability_id in capability_by_id
     }
-    return bool(routed_tool_names & _completed_planning_tool_names(planning_context))
+    completed_tool_names = _planning_tool_result_names(planning_context)
+    return bool(routed_tool_names & completed_tool_names) and not routed_tool_names.issubset(
+        completed_tool_names
+    )
 
 
 @dataclass(frozen=True)
@@ -802,9 +812,11 @@ class AgentRunProcessor:
             context_surface = (
                 job.request_context["surface"] if job.request_context is not None else None
             )
+            selection_job = _restrict_agent_job_to_context_surface(job, context_surface)
             routing: AgentRoutingDecision | None = None
+            completion_tool_names: tuple[str, ...] = ()
             if self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER:
-                if self.router_client is None or job.tool_capability_catalog is None:
+                if self.router_client is None or selection_job.tool_capability_catalog is None:
                     raise AgentRouterOutputError(
                         "Agent router configuration or capability catalog is missing"
                     )
@@ -814,12 +826,13 @@ class AgentRunProcessor:
                             prompt=context.prompt,
                             timezone=context.timezone,
                             current_date=current_date,
-                            catalog=job.tool_capability_catalog,
+                            catalog=selection_job.tool_capability_catalog,
                             planning_context=context.planning_context,
                             context_surface=context_surface,
                         )
                     ),
-                    job.tool_capability_catalog,
+                    selection_job.tool_capability_catalog,
+                    context_surface=context_surface,
                 )
                 if routing.status == "needs_clarification":
                     return self._complete_routing_clarification(
@@ -836,13 +849,17 @@ class AgentRunProcessor:
                         prompt_security,
                     )
                 planner_tools = select_agent_planner_tools_for_routing(
-                    job,
+                    selection_job,
                     routing,
                     top_k=self.tool_retrieval_top_k,
                     schema_token_budget=self.tool_retrieval_schema_token_budget,
                 )
+                completion_tool_names = _routing_terminal_tool_names(
+                    selection_job.tool_capability_catalog,
+                    routing,
+                )
                 planner_tools = select_pending_agent_planner_tools_for_routing(
-                    job,
+                    selection_job,
                     routing,
                     planner_tools,
                     context.planning_context,
@@ -854,14 +871,25 @@ class AgentRunProcessor:
                 )
             else:
                 planner_selection = select_agent_planner_tool_selection(
-                    job,
+                    selection_job,
                     context.prompt,
                     mode=self.tool_retrieval_mode,
                     top_k=self.tool_retrieval_top_k,
                     schema_token_budget=self.tool_retrieval_schema_token_budget,
                 )
                 planner_tools = planner_selection.tools
-            if not planner_tools:
+                completion_tool_names = _retrieval_terminal_tool_names(
+                    selection_job.tool_capability_catalog,
+                    planner_selection.retrieval,
+                )
+            routed_workflow_completed = (
+                routing is not None
+                and bool(completion_tool_names)
+                and set(completion_tool_names).issubset(
+                    _planning_tool_result_names(context.planning_context)
+                )
+            )
+            if not planner_tools and not routed_workflow_completed:
                 output_summary = _retrieval_clarification_summary(
                     job,
                     self.tool_retrieval_mode,
@@ -892,9 +920,9 @@ class AgentRunProcessor:
                         else "agent_run_no_longer_planning"
                     ),
                 )
-            planner_job = replace(job, tools=planner_tools)
-            workflow_incomplete = routing is not None and _has_started_routed_workflow(
-                job,
+            planner_job = replace(selection_job, tools=planner_tools)
+            workflow_incomplete = routing is not None and _has_incomplete_routed_workflow(
+                selection_job,
                 routing,
                 context.planning_context,
             )
@@ -909,6 +937,7 @@ class AgentRunProcessor:
                     planning_context=context.planning_context,
                     context_surface=context_surface,
                     routing=routing,
+                    completion_tool_names=completion_tool_names,
                     workflow_incomplete=workflow_incomplete,
                 )
             )
@@ -920,6 +949,7 @@ class AgentRunProcessor:
                 timezone=context.timezone,
                 planning_context=context.planning_context,
                 strict_tool_selection=len(planner_tools) < len(job.tools),
+                completion_tool_names=completion_tool_names,
             )
             if workflow_incomplete and normalized.status in {"completed", "unsupported"}:
                 raise AgentPlannerOutputError(
@@ -984,19 +1014,19 @@ class AgentRunProcessor:
             )
         except InfrastructureError:
             raise
-        except AgentRouterOutputError as error:
-            self._fail_routing(job, step_id, str(error))
-            return self._result(
+        except AgentRouterOutputError:
+            return self._clarify_invalid_output(
                 job,
-                delete_message=True,
-                reason="agent_routing_failed",
+                step_id,
+                AGENT_ROUTER_OUTPUT_CLARIFICATION_MESSAGE,
+                reason="agent_router_output_needs_clarification",
             )
-        except AgentPlannerOutputError as error:
-            self._fail_planning(job, step_id, str(error))
-            return self._result(
+        except AgentPlannerOutputError:
+            return self._clarify_invalid_output(
                 job,
-                delete_message=True,
-                reason="agent_planning_failed",
+                step_id,
+                AGENT_PLANNER_OUTPUT_CLARIFICATION_MESSAGE,
+                reason="agent_planner_output_needs_clarification",
             )
 
     def _complete_routing_clarification(
@@ -1137,44 +1167,35 @@ class AgentRunProcessor:
             ),
         )
 
-    def _fail_planning(
+    def _clarify_invalid_output(
         self,
         job: AgentRunJob,
         step_id: str | None,
-        safe_message: str,
-    ) -> None:
-        if step_id:
-            self.repository.fail_planner_step(
-                job.run_id,
-                step_id,
-                "AGENT_PLANNER_FAILED",
-                safe_message,
-            )
-        self.repository.mark_failed(
+        message: str,
+        *,
+        reason: str,
+    ) -> AgentProcessResult:
+        if step_id and not self.repository.complete_planner_step(
             job.run_id,
-            "AGENT_PLANNER_FAILED",
-            safe_message,
-            "요청을 분석하지 못했습니다. 다시 시도해주세요.",
-        )
-
-    def _fail_routing(
-        self,
-        job: AgentRunJob,
-        step_id: str | None,
-        safe_message: str,
-    ) -> None:
-        if step_id:
-            self.repository.fail_planner_step(
-                job.run_id,
-                step_id,
-                "AGENT_ROUTER_FAILED",
-                safe_message,
+            step_id,
+            {
+                "status": "needs_clarification",
+                "message": message,
+                "finalAnswerDraft": message,
+                "toolSchemaVersion": job.tool_schema_version,
+                "missingFields": ["intent"],
+            },
+        ):
+            return self._result(
+                job,
+                delete_message=True,
+                reason="agent_planner_step_no_longer_running",
             )
-        self.repository.mark_failed(
-            job.run_id,
-            "AGENT_ROUTER_FAILED",
-            safe_message,
-            "요청의 작업 영역을 분석하지 못했습니다. 다시 시도해주세요.",
+        waiting = self.repository.wait_for_user_input(job.run_id, message)
+        return self._result(
+            job,
+            delete_message=True,
+            reason=reason if waiting else "agent_run_no_longer_planning",
         )
 
     def _result(
@@ -1308,6 +1329,7 @@ def normalize_agent_planner_decision(
     timezone: str = "UTC",
     planning_context: str = "",
     strict_tool_selection: bool = False,
+    completion_tool_names: tuple[str, ...] = (),
 ) -> NormalizedPlannerDecision:
     decision = _normalize_calendar_relative_date_query(
         decision,
@@ -1413,6 +1435,15 @@ def normalize_agent_planner_decision(
         else:
             final_answer = "새 SQLtoERD 세션을 생성했습니다."
         message = final_answer
+
+    if status == "completed":
+        completed_tool_names = _planning_tool_result_names(planning_context)
+        if not completed_tool_names or not set(completion_tool_names).issubset(
+            completed_tool_names
+        ):
+            raise AgentPlannerOutputError(
+                "Agent planner completed without terminal tool execution evidence"
+            )
 
     output_summary: dict[str, object] = {
         "status": status,
@@ -2517,7 +2548,7 @@ def _clarification_answer(
 def _completed_sql_erd_action(planning_context: str) -> str | None:
     prefix = "tool generate_sql_erd: "
 
-    for line in reversed(planning_context.splitlines()):
+    for line in reversed(_current_prompt_cycle_planning_lines(planning_context)):
         if not line.startswith(prefix):
             continue
 
@@ -2540,31 +2571,55 @@ class OpenAiAgentRouterClient:
         self.model = model
 
     def route(self, request: AgentRoutingRequest) -> AgentRoutingDecision:
+        response_schema = {
+            "format": {
+                "type": "json_schema",
+                "name": "agent_router_result",
+                "strict": True,
+                "schema": _agent_router_schema(
+                    request.catalog,
+                    context_surface=request.context_surface,
+                ),
+            }
+        }
+        original_input = [
+            {"role": "system", "content": _agent_router_system_prompt()},
+            {"role": "user", "content": _agent_router_user_prompt(request)},
+        ]
         try:
             response = self.client.responses.create(
                 model=self.model,
-                input=[
-                    {"role": "system", "content": _agent_router_system_prompt()},
-                    {"role": "user", "content": _agent_router_user_prompt(request)},
-                ],
-                text={
-                    "format": {
-                        "type": "json_schema",
-                        "name": "agent_router_result",
-                        "strict": True,
-                        "schema": _agent_router_schema(request.catalog),
-                    }
-                },
+                input=original_input,
+                text=response_schema,
             )
         except _openai_retryable_errors() as error:
             raise InfrastructureError("OpenAI Agent router retryable failure") from error
         except Exception as error:
             raise AgentRouterOutputError("Agent router provider failure") from error
 
-        output_text = getattr(response, "output_text", None)
-        if not isinstance(output_text, str) or not output_text.strip():
-            output_text = _extract_response_text(response)
-        decision = parse_agent_router_output(output_text)
+        output_text = _response_output_text(response)
+        try:
+            decision = normalize_agent_routing_decision(
+                parse_agent_router_output(output_text),
+                request.catalog,
+                context_surface=request.context_surface,
+            )
+        except AgentRouterOutputError:
+            try:
+                response = self.client.responses.create(
+                    model=self.model,
+                    input=_agent_output_repair_input(original_input, output_text),
+                    text=response_schema,
+                )
+            except _openai_retryable_errors() as error:
+                raise InfrastructureError("OpenAI Agent router retryable failure") from error
+            except Exception as error:
+                raise AgentRouterOutputError("Agent router repair provider failure") from error
+            decision = normalize_agent_routing_decision(
+                parse_agent_router_output(_response_output_text(response)),
+                request.catalog,
+                context_surface=request.context_surface,
+            )
         usage = getattr(response, "usage", None)
         return replace(
             decision,
@@ -2578,11 +2633,22 @@ def parse_agent_router_output(output_text: str) -> AgentRoutingDecision:
     if not isinstance(output_text, str) or not output_text.strip():
         raise AgentRouterOutputError("Agent router returned no output")
     try:
-        payload = json.loads(output_text)
+        payload = json.loads(_normalize_json_output_text(output_text))
     except json.JSONDecodeError as error:
         raise AgentRouterOutputError("Agent router returned invalid JSON") from error
     if not isinstance(payload, dict):
         raise AgentRouterOutputError("Agent router output must be an object")
+    required_fields = {
+        "status",
+        "domains",
+        "capabilityIds",
+        "intentSummary",
+        "confidence",
+        "clarificationQuestion",
+        "unsupportedReason",
+    }
+    if set(payload) != required_fields:
+        raise AgentRouterOutputError("Agent router output fields are invalid")
 
     status = payload.get("status")
     confidence = payload.get("confidence")
@@ -2624,6 +2690,8 @@ def parse_agent_router_output(output_text: str) -> AgentRoutingDecision:
 def normalize_agent_routing_decision(
     decision: AgentRoutingDecision,
     catalog: ToolCapabilityCatalog,
+    *,
+    context_surface: str | None = None,
 ) -> AgentRoutingDecision:
     domains = tuple(dict.fromkeys(decision.domains))
     capability_ids = tuple(dict.fromkeys(decision.capability_ids))
@@ -2633,10 +2701,15 @@ def normalize_agent_routing_decision(
         raise AgentRouterOutputError("Agent router output exceeds routing limits")
 
     capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
+    required_domain = CONTEXT_SURFACE_DOMAIN.get(context_surface or "")
     selected_capabilities: list[CapabilityDefinition] = []
     for capability_id in capability_ids:
         capability = capability_by_id.get(capability_id)
-        if capability is None or capability.availability != "supported":
+        if (
+            capability is None
+            or capability.availability != "supported"
+            or (required_domain is not None and capability.domain != required_domain)
+        ):
             raise AgentRouterOutputError("Agent router selected an invalid capability")
         selected_capabilities.append(capability)
 
@@ -2713,7 +2786,10 @@ def _agent_router_user_prompt(request: AgentRoutingRequest) -> str:
             "selectorKinds": list(capability.selector_kinds),
             "availability": capability.availability,
         }
-        for capability in request.catalog.capabilities
+        for capability in _router_capabilities_for_surface(
+            request.catalog,
+            request.context_surface,
+        )
     ]
     return json.dumps(
         {
@@ -2729,9 +2805,14 @@ def _agent_router_user_prompt(request: AgentRoutingRequest) -> str:
     )
 
 
-def _agent_router_schema(catalog: ToolCapabilityCatalog) -> dict[str, object]:
-    domain_values = sorted({capability.domain for capability in catalog.capabilities})
-    capability_values = sorted(capability.capability_id for capability in catalog.capabilities)
+def _agent_router_schema(
+    catalog: ToolCapabilityCatalog,
+    *,
+    context_surface: str | None = None,
+) -> dict[str, object]:
+    capabilities = _router_capabilities_for_surface(catalog, context_surface)
+    domain_values = sorted({capability.domain for capability in capabilities})
+    capability_values = sorted(capability.capability_id for capability in capabilities)
     return {
         "type": "object",
         "additionalProperties": False,
@@ -2767,6 +2848,72 @@ def _agent_router_schema(catalog: ToolCapabilityCatalog) -> dict[str, object]:
     }
 
 
+def _router_capabilities_for_surface(
+    catalog: ToolCapabilityCatalog,
+    context_surface: str | None,
+) -> tuple[CapabilityDefinition, ...]:
+    required_domain = CONTEXT_SURFACE_DOMAIN.get(context_surface or "")
+    if required_domain is None:
+        return catalog.capabilities
+    return tuple(
+        capability for capability in catalog.capabilities if capability.domain == required_domain
+    )
+
+
+def _restrict_agent_job_to_context_surface(
+    job: AgentRunJob,
+    context_surface: str | None,
+) -> AgentRunJob:
+    required_domain = CONTEXT_SURFACE_DOMAIN.get(context_surface or "")
+    if required_domain is None:
+        return job
+    catalog = job.tool_capability_catalog
+    if catalog is None:
+        return replace(job, tools=())
+
+    capabilities = tuple(
+        capability for capability in catalog.capabilities if capability.domain == required_domain
+    )
+    capability_ids = {capability.capability_id for capability in capabilities}
+    tool_names = {
+        tool_name
+        for capability in capabilities
+        if capability.availability == "supported"
+        for tool_name in capability.tool_names
+    }
+    descriptors = tuple(
+        replace(
+            descriptor,
+            capability_ids=tuple(
+                capability_id
+                for capability_id in descriptor.capability_ids
+                if capability_id in capability_ids
+            ),
+            prerequisite_tool_names=tuple(
+                tool_name
+                for tool_name in descriptor.prerequisite_tool_names
+                if tool_name in tool_names
+            ),
+            follow_up_tool_names=tuple(
+                tool_name
+                for tool_name in descriptor.follow_up_tool_names
+                if tool_name in tool_names
+            ),
+        )
+        for descriptor in catalog.descriptors
+        if descriptor.domain == required_domain and descriptor.tool_name in tool_names
+    )
+    return replace(
+        job,
+        tools=tuple(tool for tool in job.tools if tool.name in tool_names),
+        tool_capability_catalog=replace(
+            catalog,
+            capabilities=capabilities,
+            descriptors=descriptors,
+        ),
+    )
+
+
 def _agent_routing_observation(
     routing: AgentRoutingDecision,
     job: AgentRunJob,
@@ -2797,41 +2944,65 @@ class OpenAiAgentPlannerClient:
 
     def plan(self, request: AgentPlanningRequest) -> AgentPlannerDecision:
         workflow_constraint = _agent_planner_workflow_constraint(request)
+        completion_allowed = _agent_planner_completion_allowed(request)
+        response_schema = {
+            "format": {
+                "type": "json_schema",
+                "name": "agent_planner_result",
+                "strict": True,
+                "schema": _agent_planner_schema(
+                    workflow_constraint,
+                    completion_allowed=completion_allowed,
+                    workflow_incomplete=request.workflow_incomplete,
+                ),
+            }
+        }
+        original_input = [
+            {
+                "role": "system",
+                "content": _agent_planner_system_prompt(),
+            },
+            {
+                "role": "user",
+                "content": _agent_planner_user_prompt(request, workflow_constraint),
+            },
+        ]
         try:
             response = self.client.responses.create(
                 model=self.model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": _agent_planner_system_prompt(),
-                    },
-                    {
-                        "role": "user",
-                        "content": _agent_planner_user_prompt(request, workflow_constraint),
-                    },
-                ],
-                text={
-                    "format": {
-                        "type": "json_schema",
-                        "name": "agent_planner_result",
-                        "strict": True,
-                        "schema": _agent_planner_schema(
-                            workflow_constraint,
-                            workflow_incomplete=request.workflow_incomplete,
-                        ),
-                    }
-                },
+                input=original_input,
+                text=response_schema,
             )
         except _openai_retryable_errors() as error:
             raise InfrastructureError("OpenAI Agent planner retryable failure") from error
         except Exception as error:
             raise AgentPlannerOutputError("Agent planner provider failure") from error
 
-        output_text = getattr(response, "output_text", None)
-        if not isinstance(output_text, str) or not output_text.strip():
-            output_text = _extract_response_text(response)
-
-        decision = parse_agent_planner_output(output_text)
+        output_text = _response_output_text(response)
+        try:
+            decision = _validate_agent_planner_provider_decision(
+                parse_agent_planner_output(output_text),
+                request,
+                workflow_constraint,
+                completion_allowed=completion_allowed,
+            )
+        except AgentPlannerOutputError:
+            try:
+                response = self.client.responses.create(
+                    model=self.model,
+                    input=_agent_output_repair_input(original_input, output_text),
+                    text=response_schema,
+                )
+            except _openai_retryable_errors() as error:
+                raise InfrastructureError("OpenAI Agent planner retryable failure") from error
+            except Exception as error:
+                raise AgentPlannerOutputError("Agent planner repair provider failure") from error
+            decision = _validate_agent_planner_provider_decision(
+                parse_agent_planner_output(_response_output_text(response)),
+                request,
+                workflow_constraint,
+                completion_allowed=completion_allowed,
+            )
         usage = getattr(response, "usage", None)
         return replace(
             decision,
@@ -2846,17 +3017,65 @@ def _optional_nonnegative_int_attribute(value: object, key: str) -> int | None:
     return item if isinstance(item, int) and item >= 0 else None
 
 
+def _validate_agent_planner_provider_decision(
+    decision: AgentPlannerDecision,
+    request: AgentPlanningRequest,
+    workflow_constraint: AgentPlannerWorkflowConstraint | None,
+    *,
+    completion_allowed: bool,
+) -> AgentPlannerDecision:
+    allowed_statuses = set(
+        _agent_planner_schema(
+            workflow_constraint,
+            completion_allowed=completion_allowed,
+        )[
+            "properties"
+        ]["status"]["enum"]
+    )
+    if decision.status not in allowed_statuses:
+        raise AgentPlannerOutputError("Agent planner returned a disallowed status")
+    eligible_tool_names = {tool.name for tool in request.tools}
+    if decision.status == "tool_candidate" and decision.tool_name not in eligible_tool_names:
+        raise AgentPlannerOutputError("Agent planner selected a tool outside the shortlist")
+    if (
+        workflow_constraint is not None
+        and decision.status == "tool_candidate"
+        and decision.tool_name != workflow_constraint.required_tool_name
+    ):
+        raise AgentPlannerOutputError("Agent planner violated the workflow constraint")
+    return decision
+
+
 def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
     if not isinstance(output_text, str) or not output_text.strip():
         raise AgentPlannerOutputError("Agent planner returned no output")
 
     try:
-        payload = json.loads(output_text)
+        payload = json.loads(_normalize_json_output_text(output_text))
     except json.JSONDecodeError as error:
         raise AgentPlannerOutputError("Agent planner returned invalid JSON") from error
 
     if not isinstance(payload, dict):
         raise AgentPlannerOutputError("Agent planner output must be an object")
+    required_fields = {
+        "status",
+        "message",
+        "finalAnswerDraft",
+        "toolName",
+        "inputJson",
+        "requiresConfirmation",
+        "missingFields",
+        "unsupportedReason",
+    }
+    if set(payload) != required_fields:
+        raise AgentPlannerOutputError("Agent planner output fields are invalid")
+    if not isinstance(payload.get("requiresConfirmation"), bool):
+        raise AgentPlannerOutputError("Agent planner output fields are invalid")
+    missing_fields_value = payload.get("missingFields")
+    if not isinstance(missing_fields_value, list) or not all(
+        isinstance(item, str) for item in missing_fields_value
+    ):
+        raise AgentPlannerOutputError("Agent planner output fields are invalid")
 
     status = _planner_string(payload, "status")
     message = _planner_string(payload, "message")
@@ -2866,8 +3085,8 @@ def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
         _planner_optional_string(payload, "inputJson"),
         tool_name=tool_name,
     )
-    requires_confirmation = payload.get("requiresConfirmation") is True
-    missing_fields = _planner_string_list(payload.get("missingFields"))
+    requires_confirmation = payload["requiresConfirmation"]
+    missing_fields = _planner_string_list(missing_fields_value)
     unsupported_reason = _planner_optional_string(payload, "unsupportedReason")
 
     return AgentPlannerDecision(
@@ -3061,6 +3280,7 @@ def _agent_planner_user_prompt(
             ),
             "prompt": request.prompt,
             "planningContext": request.planning_context,
+            "completionAllowed": _agent_planner_completion_allowed(request),
             "workflowConstraint": (
                 {
                     "requiredToolName": constraint.required_tool_name,
@@ -3078,12 +3298,18 @@ def _agent_planner_user_prompt(
 def _agent_planner_schema(
     workflow_constraint: AgentPlannerWorkflowConstraint | None = None,
     *,
+    completion_allowed: bool = False,
     workflow_incomplete: bool = False,
 ) -> dict[str, object]:
     statuses = (
         ["tool_candidate", "needs_clarification"]
         if workflow_constraint is not None or workflow_incomplete
-        else ["tool_candidate", "needs_clarification", "completed", "unsupported"]
+        else [
+            "tool_candidate",
+            "needs_clarification",
+            *(["completed"] if completion_allowed else []),
+            "unsupported",
+        ]
     )
     tool_name_schema: dict[str, object] = {"type": ["string", "null"]}
     if workflow_constraint is not None:
@@ -3146,7 +3372,7 @@ def _latest_planning_tool_result(
 ) -> tuple[str, dict[str, object]] | None:
     prefix = "tool "
     separator = ": "
-    for line in reversed(planning_context.splitlines()):
+    for line in reversed(_current_prompt_cycle_planning_lines(planning_context)):
         if not line.startswith(prefix):
             continue
         tool_result = line[len(prefix) :]
@@ -3160,6 +3386,76 @@ def _latest_planning_tool_result(
         if isinstance(output, dict):
             return tool_name, output
     return None
+
+
+def _planning_tool_result_names(planning_context: str) -> set[str]:
+    names: set[str] = set()
+    prefix = "tool "
+    separator = ": "
+    for line in _current_prompt_cycle_planning_lines(planning_context):
+        if not line.startswith(prefix):
+            continue
+        tool_name, found, output_json = line[len(prefix) :].partition(separator)
+        if not found or not tool_name:
+            continue
+        try:
+            output = json.loads(output_json)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(output, dict):
+            names.add(tool_name)
+    return names
+
+
+def _current_prompt_cycle_planning_lines(planning_context: str) -> list[str]:
+    lines = planning_context.splitlines()
+    for index in range(len(lines) - 1, -1, -1):
+        if lines[index].startswith("user: "):
+            return lines[index + 1 :]
+    return lines
+
+
+def _agent_planner_completion_allowed(request: AgentPlanningRequest) -> bool:
+    completed_tool_names = _planning_tool_result_names(request.planning_context)
+    if request.completion_tool_names:
+        return set(request.completion_tool_names).issubset(completed_tool_names)
+    eligible_tool_names = {tool.name for tool in request.tools}
+    return bool(completed_tool_names & eligible_tool_names)
+
+
+def _routing_terminal_tool_names(
+    catalog: ToolCapabilityCatalog,
+    routing: AgentRoutingDecision,
+) -> tuple[str, ...]:
+    return _capability_terminal_tool_names(catalog, routing.capability_ids)
+
+
+def _capability_terminal_tool_names(
+    catalog: ToolCapabilityCatalog,
+    capability_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
+    terminal_names: list[str] = []
+    for capability_id in capability_ids:
+        capability = capability_by_id.get(capability_id)
+        if capability is None or not capability.tool_names:
+            raise AgentRouterOutputError("Agent router selected an invalid capability")
+        terminal_names.append(capability.tool_names[-1])
+    return tuple(dict.fromkeys(terminal_names))
+
+
+def _retrieval_terminal_tool_names(
+    catalog: ToolCapabilityCatalog | None,
+    retrieval: ToolRetrievalResult | None,
+) -> tuple[str, ...]:
+    if catalog is None or retrieval is None:
+        return (UNTRUSTED_COMPLETION_EVIDENCE_TOOL_NAME,)
+    capability_ids = retrieval.selected_capability_ids
+    if not capability_ids and retrieval.primary_capability_id:
+        capability_ids = (retrieval.primary_capability_id,)
+    if not capability_ids:
+        return (UNTRUSTED_COMPLETION_EVIDENCE_TOOL_NAME,)
+    return _capability_terminal_tool_names(catalog, capability_ids)
 
 
 def _safe_text(value: str | None, fallback: str) -> str:
@@ -3347,3 +3643,40 @@ def _extract_response_text(response: object) -> str:
                 texts.append(text)
 
     return "".join(texts)
+
+
+def _response_output_text(response: object) -> str:
+    output_text = getattr(response, "output_text", None)
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text
+    return _extract_response_text(response)
+
+
+def _normalize_json_output_text(output_text: str) -> str:
+    normalized = output_text.strip()
+    if not normalized.startswith("```") or not normalized.endswith("```"):
+        return normalized
+    first_newline = normalized.find("\n")
+    if first_newline < 0:
+        return normalized
+    opening = normalized[:first_newline].strip().lower()
+    if opening not in {"```", "```json"}:
+        return normalized
+    return normalized[first_newline + 1 : -3].strip()
+
+
+def _agent_output_repair_input(
+    original_input: list[dict[str, str]],
+    malformed_output: str,
+) -> list[dict[str, str]]:
+    return [
+        *original_input,
+        {"role": "assistant", "content": malformed_output[:4000]},
+        {
+            "role": "user",
+            "content": (
+                "Repair the previous output so it matches the exact JSON schema. "
+                "Preserve the original intent and return only the repaired JSON object."
+            ),
+        },
+    ]

@@ -444,6 +444,48 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
   const service = new CanvasAgentActionService(repository);
 
   const result = await service.execute(
+    run("REST API가 뭐야?"),
+    step({
+      intent: "chat",
+      arguments: {
+        answer: "REST API는 HTTP를 통해 자원을 다루는 인터페이스입니다.",
+        contextScope: "none",
+        reasonCode: "general_question",
+      },
+    }, "route_intent"),
+  );
+
+  assert.equal(result.summary, "REST API는 HTTP를 통해 자원을 다루는 인터페이스입니다.");
+  assert.equal(result.artifact, null);
+  assert.deepEqual(result.resourceRefs, []);
+  assert.equal(result.shouldContinue, false);
+}
+
+{
+  const repository = new FakeRepository();
+  const service = new CanvasAgentActionService(repository);
+
+  await assert.rejects(
+    service.execute(
+      run("이 프레임 구성이 어때?"),
+      step({
+        intent: "chat",
+        arguments: {
+          answer: "선택한 프레임을 분석했습니다.",
+          contextScope: "whole_canvas",
+          reasonCode: "selection_question",
+        },
+      }, "route_intent"),
+    ),
+    (error) => error.response?.error?.message === "Canvas Agent chat contextScope is invalid",
+  );
+}
+
+{
+  const repository = new FakeRepository();
+  const service = new CanvasAgentActionService(repository);
+
+  const result = await service.execute(
     run("자동 정렬 기능 설명해줘"),
     step({ summary: "자동 정렬 설명", suppressProgress: true }, "finish")
   );

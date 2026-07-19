@@ -76,6 +76,27 @@ export class CanvasAgentActionService {
     if (!intentArguments) throw badRequest("Canvas Agent intent arguments are required");
 
     switch (intent) {
+      case "chat": {
+        const answer = this.readText(intentArguments.answer);
+        const contextScope = this.readText(intentArguments.contextScope);
+        const reasonCode = this.readText(intentArguments.reasonCode);
+        if (!answer || Buffer.byteLength(answer, "utf8") > 12_000) {
+          throw badRequest("Canvas Agent chat answer is invalid");
+        }
+        if (contextScope !== "none" && contextScope !== "selected_scene") {
+          throw badRequest("Canvas Agent chat contextScope is invalid");
+        }
+        if (!["general_question", "selection_question", "follow_up_question"].includes(reasonCode)) {
+          throw badRequest("Canvas Agent chat reasonCode is invalid");
+        }
+        return {
+          artifact: null,
+          summary: answer,
+          resourceRefs: [],
+          shouldContinue: false,
+          progress: this.progress(answer, [], null)
+        };
+      }
       case "find_shapes": {
         const query = this.readText(intentArguments.query);
         if (!query) throw badRequest("Canvas Agent find_shapes intent query is required");

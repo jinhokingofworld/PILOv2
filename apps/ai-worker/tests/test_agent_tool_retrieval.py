@@ -156,6 +156,17 @@ def test_catalog_rejects_a_sha_that_does_not_match_the_canonical_content() -> No
         parse_tool_capability_catalog(invalid, TOOL_SCHEMAS)
 
 
+def test_catalog_rejects_capability_and_descriptor_domain_mismatch() -> None:
+    invalid = catalog_payload()
+    invalid["capabilities"][0]["domain"] = "meeting"
+    invalid["sha256"] = compute_tool_capability_catalog_sha(
+        invalid["version"], invalid["capabilities"], invalid["descriptors"]
+    )
+
+    with pytest.raises(ValueError, match="Invalid toolCapabilityCatalog"):
+        parse_tool_capability_catalog(invalid, TOOL_SCHEMAS)
+
+
 def test_metadata_retrieval_prefers_matching_domain_and_returns_low_confidence_fallback() -> None:
     catalog = parse_tool_capability_catalog(catalog_payload(), TOOL_SCHEMAS)
     assert catalog is not None
@@ -338,6 +349,8 @@ def test_catalog_rejects_descriptor_digest_that_does_not_match_the_tool_schema()
 
 def test_retrieval_expands_required_chain_within_the_schema_budget() -> None:
     payload = catalog_payload()
+    payload["capabilities"][1]["domain"] = "calendar"
+    payload["descriptors"][1]["domain"] = "calendar"
     payload["capabilities"][0]["toolNames"] = [
         "list_calendar_events",
         "list_meeting_reports",

@@ -74,7 +74,10 @@ export class PiloFrameShapeUtil extends PiloBaseFrameShapeUtil {
     const showHeading = useValue(
       `pilo-frame-heading:${shape.id}`,
       () => {
-        const parentShape = this.editor.getShape(shape.parentId);
+        const currentShape = this.editor.getShape(shape.id);
+        const parentShape = currentShape
+          ? this.editor.getShape(currentShape.parentId)
+          : undefined;
         const isNestedFrame = isPiloFrameShape(parentShape);
 
         return (
@@ -83,7 +86,7 @@ export class PiloFrameShapeUtil extends PiloBaseFrameShapeUtil {
           this.editor.getEditingShapeId() === shape.id
         );
       },
-      [this.editor, shape.id, shape.parentId],
+      [this.editor, shape.id],
     );
 
     return createElement(

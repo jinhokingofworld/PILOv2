@@ -210,7 +210,11 @@ assert.match(agentChatWidget, /completed/);
 assert.match(agentChatWidget, /failed/);
 assert.match(agentChatWidget, /cancelled/);
 assert.match(agentChatWidget, /finalAnswer/);
-assert.match(agentChatWidget, /errorMessage/);
+assert.doesNotMatch(agentChatWidget, /run\.errorMessage/);
+assert.match(
+  agentChatWidget,
+  /요청 처리 중 문제가 발생했습니다\. 잠시 후 다시 시도해주세요\./
+);
 assert.match(agentChatWidget, /Agent를 사용하려면 로그인과 워크스페이스 선택이 필요합니다/);
 assert.match(agentChatWidget, /activeRunAbortControllerRef\.current/);
 assert.match(agentChatWidget, /fixed inset-y-0 right-0/);

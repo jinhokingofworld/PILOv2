@@ -228,6 +228,25 @@ const fullRegistry = new AgentToolRegistryService(
   new DriveAgentToolsService({})
 );
 {
+  const sqlErdContext = {
+    surface: "sql_erd",
+    sessionId: "77777777-7777-4777-8777-777777777777"
+  };
+  assert.deepEqual(
+    fullRegistry
+      .listDefinitionsForContext(sqlErdContext)
+      .map((definition) => definition.name)
+      .sort(),
+    ["focus_sql_erd_tables", "generate_sql_erd", "inspect_sql_erd_schema"],
+    "a surface context must expose only tools owned by its domain"
+  );
+  assert.equal(
+    fullRegistry.getDefinitionForContext("list_calendar_events", sqlErdContext),
+    null,
+    "execution lookup must enforce the same surface domain"
+  );
+}
+{
   const previousRead = process.env.AGENT_DOMAIN_MEETING_READ_ENABLED;
   const previousWrite = process.env.AGENT_DOMAIN_MEETING_WRITE_ENABLED;
   try {
@@ -394,6 +413,36 @@ const inventory = fullRegistry.listToolInventory();
       ),
     /invalid capability/,
     "duplicate tool names in a capability chain must fail closed"
+  );
+  assert.throws(
+    () =>
+      validateAgentToolCapabilityCatalog(
+        [
+          {
+            ...oneToolCatalog.capabilities[0],
+            domain: "meeting"
+          }
+        ],
+        oneToolCatalog.descriptors,
+        [calendarDefinition]
+      ),
+    /domain mismatch/,
+    "a capability domain must match every tool in its explicit chain"
+  );
+  assert.throws(
+    () =>
+      validateAgentToolCapabilityCatalog(
+        oneToolCatalog.capabilities,
+        [
+          {
+            ...oneToolCatalog.descriptors[0],
+            domain: "meeting"
+          }
+        ],
+        [calendarDefinition]
+      ),
+    /domain mismatch/,
+    "a descriptor domain must match the registered tool domain"
   );
 }
 

@@ -1,11 +1,14 @@
 # Canvas Agent
 
-Canvas Agent의 기존 Canvas shape 검색/화면 안내, Drive 이미지 client action,
-선택 영역의 정적 HTML/CSS artifact 반환 흐름을 관리한다.
+Canvas Agent의 일반 대화, 기존 Canvas shape 검색/화면 안내, Drive 이미지 client
+action, 선택 영역의 정적 HTML/CSS artifact 반환 흐름을 관리한다.
 
 - 기능 설명 모드는 App Server가 명시적으로 라우팅한다.
-- 일반 모드는 AI Worker가 분류한 `find_shapes`, `generate_html`, `import_drive_file`, `unsupported`
+- 일반 모드는 AI Worker가 분류한 `chat`, `find_shapes`, `generate_html`,
+  `import_drive_file`, `unsupported`
   intent와 typed arguments를 `route_intent`에서 검증한다.
+- `chat`은 bounded answer만 run summary로 반환하며 artifact, resource reference,
+  confirmation, Canvas mutation을 만들지 않는다.
 - HTML artifact는 active content와 크기를 재검증해 run `result_json`에 저장하며
   Canvas shape나 draft를 생성하지 않는다.
 - 향후 intent를 추가하더라도 App Server에 등록된 handler만 실행한다.

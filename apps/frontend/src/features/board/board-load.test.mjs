@@ -38,8 +38,8 @@ assert.match(
 );
 assert.match(
   boardDataHook,
-  /limit:\s*parsedIssueQuery\.limit\s*\?\?\s*BOARD_ISSUES_PAGE_LIMIT/,
-  "Board issue list should use the server-supported max page limit by default"
+  /limit:\s*BOARD_ISSUES_PAGE_LIMIT/,
+  "Every Board issue page should use the loader's server-supported max page limit"
 );
 assert.doesNotMatch(
   boardDataHook,

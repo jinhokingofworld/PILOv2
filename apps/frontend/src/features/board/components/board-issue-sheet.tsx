@@ -1,7 +1,7 @@
 "use client";
 
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { ExternalLink, GitPullRequest, Loader2, Pencil, Save, X } from "lucide-react";
+import { ExternalLink, Loader2, Pencil, Save, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,6 @@ import type {
   BoardIssueAssigneeOptionPayload,
   BoardIssueDetailPayload,
   BoardIssueState,
-  BoardRelatedPullRequestPayload,
   UpdateBoardIssueInput
 } from "@/features/board/types";
 import {
@@ -27,7 +26,6 @@ import {
   readBoardLabelColor,
   readBoardLabelName
 } from "@/features/board/utils/board-format";
-import { cn } from "@/lib/utils";
 
 type BoardIssueSheetProps = {
   accessToken: string;
@@ -75,9 +73,6 @@ export function BoardIssueSheet({
   workspaceId
 }: BoardIssueSheetProps) {
   const [issue, setIssue] = useState<BoardIssueDetailPayload | null>(null);
-  const [pullRequests, setPullRequests] = useState<
-    BoardRelatedPullRequestPayload[]
-  >([]);
   const [assigneeOptions, setAssigneeOptions] = useState<
     BoardIssueAssigneeOptionPayload[]
   >([]);
@@ -118,7 +113,6 @@ export function BoardIssueSheet({
     async function loadIssue() {
       if (!open || !issueId || !workspaceId || !boardId || !accessToken) {
         setIssue(null);
-        setPullRequests([]);
         setAssigneeOptions([]);
         setAssigneeOptionsStatus("idle");
         setAssigneeOptionsError(null);
@@ -138,23 +132,22 @@ export function BoardIssueSheet({
       setSaveError(null);
 
       try {
-        const [detail, relatedPullRequests] = await Promise.all([
-          boardClient.getBoardIssue(workspaceId, boardId, issueId),
-          boardClient.listBoardIssuePullRequests(workspaceId, boardId, issueId)
-        ]);
+        const detail = await boardClient.getBoardIssue(
+          workspaceId,
+          boardId,
+          issueId
+        );
 
         if (!active) return;
 
         setIssue(detail);
         resetDraft(detail);
-        setPullRequests(relatedPullRequests);
         setIsEditing(false);
         setStatus("success");
       } catch (loadError) {
         if (!active) return;
 
         setIssue(null);
-        setPullRequests([]);
         setStatus("error");
         setIsEditing(false);
         setError(
@@ -307,7 +300,7 @@ export function BoardIssueSheet({
               이슈 상세
             </DialogPrimitive.Title>
             <DialogPrimitive.Description className="mt-1 text-[21px] leading-7 text-muted-foreground">
-              Board 카드와 연결 가능한 관련 PR 정보를 확인합니다.
+              Board 이슈의 상세 정보를 확인합니다.
             </DialogPrimitive.Description>
           </div>
 
@@ -541,49 +534,6 @@ export function BoardIssueSheet({
                 </section>
               ) : null}
 
-              <section className="grid gap-2">
-                <h3 className="font-heading text-[24px] font-semibold leading-8">관련 PR</h3>
-                {pullRequests.length ? (
-                  <ul className="grid gap-2">
-                    {pullRequests.map((pullRequest) => (
-                      <li key={pullRequest.id}>
-                        <a
-                          className="grid gap-1 rounded-lg border bg-background p-3 transition hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          href={pullRequest.githubUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          <span className="flex items-start justify-between gap-2">
-                            <span className="line-clamp-2 text-[21px] font-medium">
-                              #{pullRequest.githubNumber} {pullRequest.title}
-                            </span>
-                            <span
-                              className={cn(
-                                "rounded-full border px-2 py-0.5 text-[16.5px] font-semibold",
-                                pullRequest.state === "closed"
-                                  ? "border-violet-200 bg-violet-50 text-violet-700"
-                                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
-                              )}
-                            >
-                              {pullRequest.state}
-                            </span>
-                          </span>
-                          <span className="flex flex-wrap items-center gap-2 text-[18px] text-muted-foreground">
-                            <GitPullRequest className="size-3.5" />
-                            {pullRequest.headBranch ?? "-"} {" -> "}
-                            {pullRequest.baseBranch ?? "-"} -{" "}
-                            {pullRequest.changedFilesCount} files
-                          </span>
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="rounded-lg border border-dashed px-3 py-4 text-[21px] text-muted-foreground">
-                    연결된 PR이 없습니다.
-                  </p>
-                )}
-              </section>
             </div>
           ) : null}
           </div>

@@ -155,14 +155,30 @@ AVAILABLE_CANVAS_COLORS: list[dict[str, str]] = [
 
 ALLOWED_INTENTS: list[dict[str, object]] = [
     {
+        "name": "chat",
+        "arguments": {
+            "query": "empty string",
+            "shapeIds": "empty array",
+            "contextScope": "none or selected_scene",
+            "reasonCode": "general_question, selection_question, or follow_up_question",
+        },
+    },
+    {
         "name": "find_shapes",
-        "arguments": {"query": "concise existing Canvas content to search for"},
+        "arguments": {
+            "query": "concise existing Canvas content to search for",
+            "shapeIds": "matching loaded shape ids or an empty array",
+            "contextScope": "none",
+            "reasonCode": "shape_search",
+        },
     },
     {
         "name": "generate_html",
         "arguments": {
             "query": "empty string",
             "shapeIds": "empty array",
+            "contextScope": "selected_scene",
+            "reasonCode": "html_generation",
         },
     },
     {
@@ -170,6 +186,8 @@ ALLOWED_INTENTS: list[dict[str, object]] = [
         "arguments": {
             "query": "concise name or description of an existing Workspace Drive image",
             "shapeIds": "empty array",
+            "contextScope": "none",
+            "reasonCode": "drive_file_import",
         },
     },
     {
@@ -177,6 +195,8 @@ ALLOWED_INTENTS: list[dict[str, object]] = [
         "arguments": {
             "query": "concise unsupported request",
             "shapeIds": "empty array",
+            "contextScope": "none",
+            "reasonCode": "unsupported_mutation or external_domain_action",
         },
     },
 ]

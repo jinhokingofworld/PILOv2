@@ -554,9 +554,7 @@ export class BoardReadQueries {
 
     if (input.search) {
       values.push(`%${input.search}%`);
-      filters.push(
-        `(pi.title ILIKE $${values.length} OR COALESCE(pi.body, '') ILIKE $${values.length})`
-      );
+      filters.push(`pi.title ILIKE $${values.length}`);
     }
 
     if (input.label) {

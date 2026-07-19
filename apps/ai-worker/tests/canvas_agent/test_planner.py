@@ -61,7 +61,7 @@ def test_user_prompt_exposes_only_current_canvas_intents() -> None:
     normal_intents = {intent["name"] for intent in normal_payload["allowedIntents"]}
     tool_help_intents = {intent["name"] for intent in tool_help_payload["allowedIntents"]}
 
-    expected = {"find_shapes", "generate_html", "import_drive_file", "unsupported"}
+    expected = {"chat", "find_shapes", "generate_html", "import_drive_file", "unsupported"}
     assert normal_intents == expected
     assert tool_help_intents == expected
     assert "allowedActions" not in normal_payload
@@ -69,6 +69,50 @@ def test_user_prompt_exposes_only_current_canvas_intents() -> None:
     assert "intent classifier" in system_prompt()
     assert "same language as the user's prompt" in system_prompt()
     assert "never translate them" in system_prompt()
+    assert "Ordinary questions must not be classified as unsupported" in system_prompt()
+
+
+def test_parse_intent_classification_accepts_selection_chat() -> None:
+    result = parse_canvas_agent_intent_classification(
+        json.dumps(
+            {
+                "intent": "chat",
+                "message": "선택한 프레임을 살펴볼게요.",
+                "arguments": {
+                    "query": "",
+                    "shapeIds": [],
+                    "contextScope": "selected_scene",
+                    "reasonCode": "selection_question",
+                },
+            },
+            ensure_ascii=False,
+        )
+    )
+
+    assert result.intent == "chat"
+    assert result.arguments == {
+        "contextScope": "selected_scene",
+        "reasonCode": "selection_question",
+    }
+
+
+def test_parse_intent_classification_rejects_invalid_chat_scope() -> None:
+    with pytest.raises(CanvasAgentIntentClassifierError):
+        parse_canvas_agent_intent_classification(
+            json.dumps(
+                {
+                    "intent": "chat",
+                    "message": "답변할게요.",
+                    "arguments": {
+                        "query": "",
+                        "shapeIds": [],
+                        "contextScope": "whole_canvas",
+                        "reasonCode": "general_question",
+                    },
+                },
+                ensure_ascii=False,
+            )
+        )
 
 
 def test_parse_intent_classification_accepts_html_generation() -> None:

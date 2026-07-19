@@ -40,6 +40,9 @@ import type {
   AgentRunRequestContext
 } from "./types/agent-tool.types";
 
+const PUBLIC_AGENT_FAILURE_MESSAGE =
+  "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.";
+
 export interface AgentRunListQuery {
   status?: unknown;
   page?: unknown;
@@ -1260,7 +1263,7 @@ export class AgentService {
       timezone: run.timezone,
       message: run.message,
       finalAnswer: run.finalAnswer,
-      errorMessage: run.errorMessage,
+      errorMessage: run.errorMessage ? PUBLIC_AGENT_FAILURE_MESSAGE : null,
       expiresAt: run.expiresAt,
       completedAt: run.completedAt,
       createdAt: run.createdAt,
@@ -1281,7 +1284,7 @@ export class AgentService {
       timezone: row.timezone,
       message: row.message,
       finalAnswer: row.final_answer,
-      errorMessage: row.error_message,
+      errorMessage: row.error_message ? PUBLIC_AGENT_FAILURE_MESSAGE : null,
       expiresAt: this.toIso(row.expires_at),
       completedAt: this.toIsoOrNull(row.completed_at),
       createdAt: this.toIso(row.created_at),
@@ -1301,7 +1304,7 @@ export class AgentService {
       inputSummary: this.sanitizeJsonObject(row.input_json),
       outputSummary: this.sanitizeJsonObject(row.output_json),
       resourceRefs: this.sanitizeResourceRefs(row.resource_refs),
-      errorMessage: row.error_message,
+      errorMessage: row.error_message ? PUBLIC_AGENT_FAILURE_MESSAGE : null,
       startedAt: this.toIsoOrNull(row.started_at),
       completedAt: this.toIsoOrNull(row.completed_at)
     };

@@ -21,6 +21,7 @@ class FakeDatabase {
     this.queryOneRows = [...queryOneRows];
     this.queryRows = [...queryRows];
     this.queries = [];
+    this.issueListSql = "";
   }
 
   async queryOne(text, values = []) {
@@ -35,6 +36,9 @@ class FakeDatabase {
 
   async query(text, values = []) {
     this.queries.push({ method: "query", text, values });
+    if (/FROM pilo_issues pi/i.test(text)) {
+      this.issueListSql = text;
+    }
     const next = this.queryRows.shift();
     if (typeof next === "function") {
       return next(text, values);
@@ -203,6 +207,8 @@ function assertNoRemoteGithubCall(database) {
     }
   });
   assertNoRemoteGithubCall(db);
+  assert.match(db.issueListSql, /pi\.title ILIKE/);
+  assert.doesNotMatch(db.issueListSql, /COALESCE\(pi\.body/);
 }
 
 {

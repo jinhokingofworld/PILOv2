@@ -5,6 +5,7 @@ from dataclasses import dataclass
 CANVAS_AGENT_JOB_TYPE = "canvas_agent_step_requested"
 CANVAS_AGENT_SCHEMA_VERSION = "canvas-agent:v1"
 CANVAS_AGENT_INTENTS = {
+    "chat",
     "find_shapes",
     "generate_html",
     "import_drive_file",

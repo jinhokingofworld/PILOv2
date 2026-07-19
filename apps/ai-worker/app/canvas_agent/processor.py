@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
+from app.canvas_agent.planning.chat_responder import CanvasAgentChatResponderError
 from app.canvas_agent.planning.html_generator import CanvasAgentHtmlGeneratorError
 from app.canvas_agent.planning.planner import CanvasAgentIntentClassifierError
 from app.canvas_agent.types import (
@@ -55,6 +56,12 @@ class CanvasHtmlGenerator(Protocol):
     def generate(self, context: CanvasAgentRunContext) -> dict[str, object]: ...
 
 
+class CanvasChatResponder(Protocol):
+    model: str
+
+    def respond(self, context: CanvasAgentRunContext, context_scope: str) -> str: ...
+
+
 def parse_canvas_agent_job_payload(payload: dict[str, object]) -> CanvasAgentJob:
     if payload.get("jobType") != CANVAS_AGENT_JOB_TYPE:
         raise ValueError("Unsupported Canvas Agent job type")
@@ -77,11 +84,13 @@ class CanvasAgentProcessor:
         intent_classifier: CanvasAgentIntentClassifier,
         semantic_router: CanvasSemanticIntentRouter | None = None,
         html_generator: CanvasHtmlGenerator | None = None,
+        chat_responder: CanvasChatResponder | None = None,
     ) -> None:
         self.repository = repository
         self.intent_classifier = intent_classifier
         self.semantic_router = semantic_router
         self.html_generator = html_generator
+        self.chat_responder = chat_responder
 
     def process_payload(self, payload: dict[str, object]) -> CanvasAgentProcessResult:
         try:
@@ -180,6 +189,41 @@ class CanvasAgentProcessor:
                 elif classification.intent == "import_drive_file":
                     query = arguments.get("query")
                     arguments = {"query": query.strip()[:120] if isinstance(query, str) else ""}
+                elif classification.intent == "chat":
+                    context_scope = arguments.get("contextScope")
+                    if context_scope not in {"none", "selected_scene"}:
+                        raise CanvasAgentChatResponderError(
+                            "Canvas Agent chat context scope is invalid"
+                        )
+                    reason_code = arguments.get("reasonCode")
+                    used_chat_responder = False
+                    if context_scope == "selected_scene":
+                        selection_error = context.request_context.get("selectedSceneError")
+                        selected_scene = context.request_context.get("selectedScene")
+                        if isinstance(selection_error, str) and selection_error.strip():
+                            answer = (
+                                "선택 영역 정보를 모두 불러오지 못했습니다. "
+                                "잠시 후 다시 선택해 질문해 주세요."
+                            )
+                        elif not isinstance(selected_scene, dict):
+                            answer = "답변할 캔버스 프레임이나 도형을 먼저 선택해 주세요."
+                        else:
+                            answer = self._chat_response(context, context_scope)
+                            used_chat_responder = True
+                    else:
+                        answer = self._chat_response(context, context_scope)
+                        used_chat_responder = True
+                    arguments = {
+                        "answer": answer,
+                        "contextScope": context_scope,
+                        "reasonCode": (
+                            reason_code[:80] if isinstance(reason_code, str) else "general_question"
+                        ),
+                    }
+                    if used_chat_responder and self.chat_responder is not None:
+                        model_name = self.chat_responder.model
+                    message = answer
+                    result_reason = "canvas_agent_chat_responded"
                 else:
                     arguments = {}
 
@@ -200,6 +244,16 @@ class CanvasAgentProcessor:
                     "canvas_agent_html_generation_failed",
                     job.run_id,
                 )
+            except CanvasAgentChatResponderError:
+                self.repository.mark_failed(
+                    job.run_id,
+                    "대화 답변을 만드는 중 오류가 났어요. 다시 시도해 주세요.",
+                )
+                return CanvasAgentProcessResult(
+                    True,
+                    "canvas_agent_chat_response_failed",
+                    job.run_id,
+                )
             except CanvasAgentIntentClassifierError as error:
                 self.repository.mark_failed(job.run_id, str(error))
                 return CanvasAgentProcessResult(
@@ -211,6 +265,15 @@ class CanvasAgentProcessor:
             return CanvasAgentProcessResult(True, result_reason, job.run_id)
         finally:
             self.repository.release_run_lock(job.run_id)
+
+    def _chat_response(
+        self,
+        context: CanvasAgentRunContext,
+        context_scope: str,
+    ) -> str:
+        if self.chat_responder is None:
+            raise CanvasAgentChatResponderError("Canvas Agent chat responder is not configured")
+        return self.chat_responder.respond(context, context_scope)
 
     def _semantic_classification(
         self,

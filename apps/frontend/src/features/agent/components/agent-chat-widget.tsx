@@ -245,11 +245,7 @@ function getAgentRunDisplayMessage(run: AgentRun) {
         "요청 처리가 완료됐습니다."
       );
     case "failed":
-      return (
-        run.errorMessage?.trim() ||
-        run.message?.trim() ||
-        "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
-      );
+      return "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.";
     case "cancelled":
       return run.message?.trim() || "요청이 취소됐습니다.";
     case "waiting_user_input": {

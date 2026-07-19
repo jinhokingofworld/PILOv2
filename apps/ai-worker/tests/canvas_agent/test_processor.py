@@ -294,3 +294,132 @@ def test_canvas_agent_processor_preserves_drive_import_query() -> None:
         "팀에서 올린 로고 이미지를 찾습니다.",
         "classifier-model",
     )
+
+
+class FakeChatIntentClassifier:
+    model = "classifier-model"
+
+    def __init__(self, context_scope: str = "none") -> None:
+        self.context_scope = context_scope
+
+    def classify(self, _context) -> CanvasAgentIntentClassification:
+        return CanvasAgentIntentClassification(
+            intent="chat",
+            arguments={
+                "contextScope": self.context_scope,
+                "reasonCode": (
+                    "selection_question"
+                    if self.context_scope == "selected_scene"
+                    else "general_question"
+                ),
+            },
+            message="질문에 답변할게요.",
+        )
+
+
+class FakeChatResponder:
+    model = "chat-model"
+
+    def __init__(self) -> None:
+        self.scopes: list[str] = []
+
+    def respond(self, _context, context_scope: str) -> str:
+        self.scopes.append(context_scope)
+        return "REST API는 자원을 HTTP 인터페이스로 다루는 방식입니다."
+
+
+def test_canvas_agent_processor_generates_general_chat_answer() -> None:
+    repository = FakeRepository()
+    responder = FakeChatResponder()
+    processor = CanvasAgentProcessor(
+        repository,
+        FakeChatIntentClassifier(),
+        chat_responder=responder,
+    )
+
+    result = processor.process_payload(
+        {
+            "jobType": "canvas_agent_step_requested",
+            "runId": "11111111-1111-1111-1111-111111111111",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "canvasId": "33333333-3333-3333-3333-333333333333",
+            "requestedByUserId": "44444444-4444-4444-4444-444444444444",
+            "schemaVersion": "canvas-agent:v1",
+        }
+    )
+
+    assert result.reason == "canvas_agent_chat_responded"
+    assert responder.scopes == ["none"]
+    assert repository.classified == (
+        "chat",
+        {
+            "answer": "REST API는 자원을 HTTP 인터페이스로 다루는 방식입니다.",
+            "contextScope": "none",
+            "reasonCode": "general_question",
+        },
+        "REST API는 자원을 HTTP 인터페이스로 다루는 방식입니다.",
+        "chat-model",
+    )
+
+
+def test_canvas_agent_processor_generates_selection_chat_answer() -> None:
+    repository = FakeRepository()
+    original_get_run_context = repository.get_run_context
+
+    def get_run_context(job):
+        context = original_get_run_context(job)
+        context.request_context["selectedScene"] = {"shapes": [{"id": "shape:dashboard"}]}
+        return context
+
+    repository.get_run_context = get_run_context
+    responder = FakeChatResponder()
+    processor = CanvasAgentProcessor(
+        repository,
+        FakeChatIntentClassifier("selected_scene"),
+        chat_responder=responder,
+    )
+
+    result = processor.process_payload(
+        {
+            "jobType": "canvas_agent_step_requested",
+            "runId": "11111111-1111-1111-1111-111111111111",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "canvasId": "33333333-3333-3333-3333-333333333333",
+            "requestedByUserId": "44444444-4444-4444-4444-444444444444",
+            "schemaVersion": "canvas-agent:v1",
+        }
+    )
+
+    assert result.reason == "canvas_agent_chat_responded"
+    assert responder.scopes == ["selected_scene"]
+    assert repository.classified is not None
+    assert repository.classified[1]["contextScope"] == "selected_scene"
+    assert repository.classified[3] == "chat-model"
+
+
+def test_canvas_agent_processor_requests_selection_without_chat_call() -> None:
+    repository = FakeRepository()
+    responder = FakeChatResponder()
+    processor = CanvasAgentProcessor(
+        repository,
+        FakeChatIntentClassifier("selected_scene"),
+        chat_responder=responder,
+    )
+
+    result = processor.process_payload(
+        {
+            "jobType": "canvas_agent_step_requested",
+            "runId": "11111111-1111-1111-1111-111111111111",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "canvasId": "33333333-3333-3333-3333-333333333333",
+            "requestedByUserId": "44444444-4444-4444-4444-444444444444",
+            "schemaVersion": "canvas-agent:v1",
+        }
+    )
+
+    assert result.reason == "canvas_agent_chat_responded"
+    assert responder.scopes == []
+    assert repository.classified is not None
+    assert repository.classified[1]["answer"] == (
+        "답변할 캔버스 프레임이나 도형을 먼저 선택해 주세요."
+    )

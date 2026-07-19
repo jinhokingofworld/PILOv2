@@ -13,6 +13,7 @@ export const CANVAS_AGENT_ACTION_NAMES = [
 ] as const;
 
 export const CANVAS_AGENT_INTENT_NAMES = [
+  "chat",
   "find_shapes",
   "generate_html",
   "import_drive_file",

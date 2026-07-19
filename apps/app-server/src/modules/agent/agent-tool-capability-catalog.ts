@@ -414,6 +414,37 @@ export function validateAgentToolCapabilityCatalog(
   if (capabilityIds.size !== capabilities.length) {
     throw new Error("Agent capability catalog contains duplicate capability IDs");
   }
+  for (const capability of capabilities) {
+    for (const toolName of capability.toolNames) {
+      if (TOOL_DOMAIN_BY_NAME[toolName] !== capability.domain) {
+        throw new Error(
+          `Agent capability domain mismatch: ${capability.id} includes ${toolName}`
+        );
+      }
+    }
+  }
+  const capabilityById = new Map(
+    capabilities.map((capability) => [capability.id, capability])
+  );
+  for (const descriptor of descriptors) {
+    if (TOOL_DOMAIN_BY_NAME[descriptor.toolName] !== descriptor.domain) {
+      throw new Error(
+        `Agent tool descriptor domain mismatch: ${descriptor.toolName}`
+      );
+    }
+    for (const capabilityId of descriptor.capabilityIds) {
+      const capability = capabilityById.get(capabilityId);
+      if (
+        !capability ||
+        capability.domain !== descriptor.domain ||
+        !capability.toolNames.includes(descriptor.toolName)
+      ) {
+        throw new Error(
+          `Agent capability descriptor domain mismatch: ${capabilityId} and ${descriptor.toolName}`
+        );
+      }
+    }
+  }
   if (
     capabilities.some(
       (capability) =>

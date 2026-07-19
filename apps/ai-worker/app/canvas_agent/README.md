@@ -2,8 +2,9 @@
 
 `canvas_agent`는 PILO Canvas 안에서만 동작하는 Canvas AI worker 영역이다.
 이 패키지는 Calendar, Issue, PR, Meeting 같은 외부 도메인 데이터를 직접 조회하거나 수정하지 않는다.
-Canvas 기능 설명, 기존 shape 검색·viewport 이동, 선택 영역의 정적 HTML/CSS
-artifact 생성을 담당한다. Worker는 새 Canvas shape 생성, 연결, 수정, 삭제와
+Canvas 기능 설명, 기존 shape 검색·viewport 이동, 일반 대화와 선택 영역에 대한
+읽기 전용 분석, 선택 영역의 정적 HTML/CSS artifact 생성을 담당한다. Worker는
+새 Canvas shape 생성, 연결, 수정, 삭제와
 Canvas diagram/code draft 생성을 직접 하지 않는다. `generate_html` artifact를 받은
 Canvas Frontend가 기존 tldraw 편집 경로로 코드블럭과 연결선을 생성한다.
 
@@ -16,6 +17,7 @@ canvas_agent/
   embedding_processor.py
   planning/
     planner.py
+    chat_responder.py
     html_generator.py
     prompts.py
     tool_catalog.py
@@ -52,6 +54,7 @@ Canvas Agent run job의 실행 흐름을 담당한다.
 - LLM intent classifier로 검색어와 현재 로드된 shape 후보를 분류
 - 현재 shape 후보가 없으면 정리된 검색어로 semantic router 실행
 - `generate_html`이면 검증된 `selectedScene`을 정적 HTML/CSS로 변환
+- `chat`이면 일반 질문 또는 명시적으로 선택한 장면에 대한 읽기 전용 답변 생성
 - 분류 결과를 `route_intent` step으로 DB에 저장
 
 HTML 생성은 Canvas의 부모 관계, 섹션 순서, 상대 비율과 사용자 텍스트를 구조적
@@ -127,8 +130,22 @@ LLM intent classifier 호출과 응답 검증을 담당한다.
 주의:
 
 - classifier는 raw tldraw shape나 Canvas draft를 만들지 않는다.
-- 일반 모드 intent는 `find_shapes`, `generate_html`, `import_drive_file`, `unsupported`다.
+- 일반 모드 intent는 `chat`, `find_shapes`, `generate_html`, `import_drive_file`,
+  `unsupported`다.
 - 등록되지 않은 mutation 표현을 검색으로 바꾸지 않고 `unsupported`로 분류한다.
+- 말로 충족할 수 있는 일반 질문·설명·의견·분석·조언은 `chat`으로 분류하며
+  평범한 질문을 `unsupported`로 분류하지 않는다.
+
+### `planning/chat_responder.py`
+
+`chat` intent의 실제 자연어 답변을 별도 Responses API 호출로 생성한다.
+
+- `contextScope=none`이면 선택 정보를 전달하지 않고 일반 질문에 답한다.
+- `contextScope=selected_scene`이면 내부 shape id를 일회성 참조로 바꾸고
+  asset reference를 제거한 선택 문맥만 전달한다.
+- 최근 `conversationContext`는 후속 질문 해석에만 제한적으로 사용한다.
+- Canvas 텍스트는 명령이 아닌 신뢰하지 않는 분석 데이터로 취급한다.
+- Canvas를 변경하거나 실행했다고 주장하는 답변을 금지한다.
 
 ### `planning/prompts.py`
 
@@ -147,6 +164,7 @@ LLM에게 허용할 bounded Canvas intent 목록을 관리한다.
 
 포함 내용:
 
+- `chat`
 - `find_shapes`
 - `generate_html`
 - `import_drive_file`

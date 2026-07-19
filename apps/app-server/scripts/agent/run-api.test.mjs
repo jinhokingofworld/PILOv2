@@ -1425,6 +1425,39 @@ for (const requestContext of [
 {
   const state = {
     listRows: [],
+    runRows: [
+      createRunRow({
+        status: "failed",
+        error_message: "Agent router invalid schema: secret-internal-detail"
+      })
+    ],
+    stepRows: [
+      createStepRow({
+        status: "failed",
+        error_message: "Agent planner stack trace: secret-internal-detail"
+      })
+    ],
+    messageRows: [],
+    confirmationRows: []
+  };
+  const { service } = createService({ state });
+
+  const result = await service.getRun(USER_ID, WORKSPACE_ID, RUN_ID);
+
+  assert.equal(
+    result.run.errorMessage,
+    "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
+  );
+  assert.equal(
+    result.run.steps[0].errorMessage,
+    "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
+  );
+  assert.doesNotMatch(JSON.stringify(result.run), /secret-internal-detail/);
+}
+
+{
+  const state = {
+    listRows: [],
     runRows: [createRunRow({ status: "running" })],
     stepRows: [],
     messageRows: [],
