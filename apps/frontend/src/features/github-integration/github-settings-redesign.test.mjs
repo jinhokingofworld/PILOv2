@@ -82,6 +82,15 @@ assert.equal(
   "sync target and recent runs stay in one domain panel"
 );
 assert.match(
+  syncSource,
+  /job-list overflow-hidden rounded-\[8px\] border border-\[#e5e9f2\] divide-y divide-\[#e5e9f2\]/
+);
+assert.match(syncSource, /syncRuns\.map\([\s\S]*?className="p-3"/);
+assert.doesNotMatch(
+  syncSource,
+  /syncRuns\.map\([\s\S]*?rounded-\[8px\] border border-\[#e5e9f2\] bg-\[#fbfcfe\]/
+);
+assert.match(
   primitivesSource,
   /relative overflow-hidden[^\"]*rounded-\[10px\][^\"]*shadow-\[0_10px_28px_rgba\(15,20,34,0\.08\)\]/
 );

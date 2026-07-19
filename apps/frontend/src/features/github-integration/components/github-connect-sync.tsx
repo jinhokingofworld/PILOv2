@@ -167,7 +167,7 @@ export function GithubConnectSync({
             아직 수동 동기화 기록이 없습니다. 대상을 선택한 뒤 첫 동기화를 시작할 수 있습니다.
           </GithubConnectEmptyState>
         ) : (
-          <div className="job-list space-y-3">
+          <div className="job-list overflow-hidden rounded-[8px] border border-[#e5e9f2] divide-y divide-[#e5e9f2]">
             {syncRuns.map((syncRun) => {
               const installation = syncRun.installationId
                 ? installations.find((item) => item.id === syncRun.installationId)
@@ -176,7 +176,7 @@ export function GithubConnectSync({
 
               return (
                 <div
-                  className="rounded-[8px] border border-[#e5e9f2] bg-[#fbfcfe] p-3"
+                  className="p-3"
                   key={syncRun.id}
                 >
                   <div className="flex items-start justify-between gap-3">
