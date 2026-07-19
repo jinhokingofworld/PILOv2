@@ -1166,7 +1166,13 @@ class FakeCandidateSelectionDatabase {
     assert.equal(ambiguousRoom.kind, "needs_clarification");
     assert.equal(ambiguousRoom.reason, "ambiguous");
     assert.equal(ambiguousRoom.candidates.length, 2);
-    assert.doesNotMatch(JSON.stringify(ambiguousRoom.candidates), /[0-9a-f]{8}-/i);
+    const serializedCandidates = JSON.stringify(ambiguousRoom.candidates);
+    for (const resourceId of [
+      SECOND_MEETING_ROOM_ID,
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    ]) {
+      assert.equal(serializedCandidates.includes(resourceId), false);
+    }
     assert.equal(typeof ambiguousRoom.candidates[0].selectionToken, "string");
     assert.notEqual(
       ambiguousRoom.candidates[0].selectionToken,

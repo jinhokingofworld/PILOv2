@@ -993,10 +993,11 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
 
 - PILO AI는 요청이 Canvas 작업인지까지만 판단하며, Canvas 내부의 기능 설명·도형 검색·HTML 생성 분류는
   `CanvasAgentService`가 시작한 Canvas Agent run이 담당한다.
-- `delegate_canvas_agent` input은 선택적인 `canvasId`, `canvasTitle`만 허용한다. `prompt`, 사용자 ID,
-  Workspace ID, 선택 도형 또는 viewport를 planner가 다시 작성해 넣을 수 없다.
-- 대상 우선순위는 명시 `canvasId`, exact `canvasTitle`, 현재 Canvas request context 순서다. 대상이 없거나
-  같은 제목이 여러 개면 child run을 만들지 않고 Canvas 후보를 제시해 사용자 선택을 요청한다.
+- `delegate_canvas_agent` input은 빈 object만 허용한다. `prompt`, 사용자 ID, Workspace ID, Canvas ID,
+  Canvas 이름, 선택 도형 또는 viewport를 planner가 다시 작성해 넣을 수 없다.
+- App Server는 Workspace의 유일한 `freeform` Canvas를 서버에서 조회해 대상으로 사용한다. 현재 Canvas
+  request context가 있으면 그 `canvasId`가 조회한 Workspace Canvas와 같은지도 재검증한다. 0개 또는
+  복수 Canvas는 사용자에게 이름을 묻지 않고 Workspace Canvas 불변식 위반으로 실패 처리한다.
 - App Server는 일반 Agent run의 최신 user message를 그대로 child run의 prompt로 사용한다. Canvas 화면에서
   받은 `selectedShapeIds`, `selectedScene`, loaded shape summary, viewport, `toolHelpMode`는 검증된
   `canvasContext`에서만 복원한다.
