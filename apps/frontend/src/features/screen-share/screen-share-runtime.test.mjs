@@ -83,6 +83,36 @@ test("current-session coordinator ignores a snapshot after its scope is disposed
   assert.deepEqual(snapshots, []);
 });
 
+test("publisher publish completion invalidates current state only for the current scope", async () => {
+  const { finalizePublishedScreenShare } = await loadPurePolicy(
+    provider,
+    "screen-share-runtime-pure",
+  );
+  let completed = 0;
+
+  assert.equal(
+    finalizePublishedScreenShare({
+      attempt: 2,
+      currentAttempt: 2,
+      currentWorkspaceId: "workspace-1",
+      onCurrentPublish: () => { completed += 1; },
+      requestWorkspaceId: "workspace-1",
+    }),
+    true,
+  );
+  assert.equal(
+    finalizePublishedScreenShare({
+      attempt: 1,
+      currentAttempt: 2,
+      currentWorkspaceId: "workspace-1",
+      onCurrentPublish: () => { completed += 1; },
+      requestWorkspaceId: "workspace-1",
+    }),
+    false,
+  );
+  assert.equal(completed, 1);
+});
+
 test("event adapter invalidates for matching presence joins and screen-share events", async () => {
   const { bindScreenShareCurrentSessionInvalidations } = await import(
     "./runtime/screen-share-current-session-events.ts"

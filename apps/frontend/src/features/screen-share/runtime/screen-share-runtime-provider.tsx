@@ -145,6 +145,33 @@ export function isCurrentScreenShareRequest({
     attempt === currentAttempt && requestWorkspaceId === currentWorkspaceId
   );
 }
+
+export function finalizePublishedScreenShare({
+  attempt,
+  currentAttempt,
+  currentWorkspaceId,
+  onCurrentPublish,
+  requestWorkspaceId
+}: {
+  attempt: number;
+  currentAttempt: number;
+  currentWorkspaceId: string;
+  onCurrentPublish: () => void;
+  requestWorkspaceId: string;
+}) {
+  if (
+    !isCurrentScreenShareRequest({
+      attempt,
+      currentAttempt,
+      currentWorkspaceId,
+      requestWorkspaceId
+    })
+  ) {
+    return false;
+  }
+  onCurrentPublish();
+  return true;
+}
 // </screen-share-runtime-pure>
 
 type ScreenShareRuntimeContextValue = {
@@ -398,20 +425,20 @@ export function ScreenShareRuntimeProvider({
         }
       },
       onSharing: (publisherSession) => {
-        if (
-          isCurrentScreenShareRequest({
-            attempt,
-            currentAttempt: publisherAttemptRef.current,
-            currentWorkspaceId: workspaceIdRef.current,
-            requestWorkspaceId
-          })
-        ) {
+        finalizePublishedScreenShare({
+          attempt,
+          currentAttempt: publisherAttemptRef.current,
+          currentWorkspaceId: workspaceIdRef.current,
+          onCurrentPublish: () => {
           publisherSessionRef.current = publisherSession;
           dispatch({
             type: "publisher/sharing",
             sessionId: publisherSession.sessionId
           });
-        }
+            requestCurrentRef.current();
+          },
+          requestWorkspaceId
+        });
       },
       onNativeStop: () => {
         const publisherSession = publisherSessionRef.current;
