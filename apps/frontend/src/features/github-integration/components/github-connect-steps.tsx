@@ -2,7 +2,6 @@ import {
   ExternalLink,
   GitBranch,
   Loader2,
-  Play,
   RefreshCcw,
   Trash2,
   Unplug
@@ -30,14 +29,12 @@ type StepsProps = {
   isDisconnectingProjectOAuth: boolean;
   isDeletingInstallation: boolean;
   isInstallationDeleteRequested: boolean;
-  isSyncing: boolean;
   redirectAction: "oauth" | "installation" | "project_oauth" | null;
   onStartOAuth: () => void;
   onDisconnectOAuth: () => void;
   onStartGithubProjectOAuth: () => void;
   onDisconnectGithubProjectOAuth: () => void;
   onRefresh: () => void;
-  onStartSync: () => void;
   onStartInstallation: () => void;
   onRequestDeleteInstallation: () => void;
   onCancelDeleteInstallation: () => void;
@@ -58,14 +55,12 @@ export function GithubConnectSteps({
   isDisconnectingProjectOAuth,
   isDeletingInstallation,
   isInstallationDeleteRequested,
-  isSyncing,
   redirectAction,
   onStartOAuth,
   onDisconnectOAuth,
   onStartGithubProjectOAuth,
   onDisconnectGithubProjectOAuth,
   onRefresh,
-  onStartSync,
   onStartInstallation,
   onRequestDeleteInstallation,
   onCancelDeleteInstallation,
@@ -88,33 +83,17 @@ export function GithubConnectSteps({
     <div className="space-y-[15px]">
       <GithubConnectPanel
         action={
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button
-              className="h-9 rounded-[8px] bg-[#3157d5] px-3 text-white hover:bg-[#2447bd]"
-              disabled={!access.canChooseRepository || isSyncing || isLoading}
-              onClick={onStartSync}
-              size="sm"
-              type="button"
-            >
-              {isSyncing ? (
-                <Loader2 className="animate-spin" data-icon="inline-start" />
-              ) : (
-                <Play data-icon="inline-start" />
-              )}
-              동기화 시작
-            </Button>
-            <Button
-              className="h-9 rounded-[8px]"
-              disabled={isLoading}
-              onClick={onRefresh}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <RefreshCcw data-icon="inline-start" />
-              새로고침
-            </Button>
-          </div>
+          <Button
+            className="h-9 rounded-[8px]"
+            disabled={isLoading}
+            onClick={onRefresh}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <RefreshCcw data-icon="inline-start" />
+            새로고침
+          </Button>
         }
         icon={<GitBranch className="size-4" />}
         title="GitHub 연결"

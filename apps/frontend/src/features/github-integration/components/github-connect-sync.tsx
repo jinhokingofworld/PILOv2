@@ -44,10 +44,17 @@ const syncTargetOptions: Array<{ value: GithubSyncTarget; label: string }> = [
   { value: "project_v2_items", label: "ProjectV2 아이템" }
 ];
 
+const projectScopedSyncTargets = new Set<GithubSyncTarget>([
+  "project_v2",
+  "project_v2_fields",
+  "project_v2_items"
+]);
+
 type GithubConnectSyncProps = {
   isLoading: boolean;
   installations: GithubAppInstallation[];
   selectedInstallationId: string;
+  selectedProjectV2Id: string;
   selectedRepositoryId: string;
   syncRuns: GithubSyncRun[];
   syncRunsTotal: number;
@@ -61,6 +68,7 @@ export function GithubConnectSync({
   isLoading,
   installations,
   selectedInstallationId,
+  selectedProjectV2Id,
   selectedRepositoryId,
   syncRuns,
   syncRunsTotal,
@@ -69,6 +77,9 @@ export function GithubConnectSync({
   onSyncTargetChange,
   onStartSync
 }: GithubConnectSyncProps) {
+  const isProjectTargetMissingSelection =
+    projectScopedSyncTargets.has(syncTarget) && !selectedProjectV2Id;
+
   return (
     <>
       <GithubConnectPanel
@@ -102,7 +113,10 @@ export function GithubConnectSync({
               <SelectContent>
                 {syncTargetOptions.map((option) => (
                   <SelectItem
-                    disabled={!selectedRepositoryId && option.value !== "source"}
+                    disabled={
+                      (!selectedRepositoryId && option.value !== "source") ||
+                      (projectScopedSyncTargets.has(option.value) && !selectedProjectV2Id)
+                    }
                     key={option.value}
                     value={option.value}
                   >
@@ -119,7 +133,8 @@ export function GithubConnectSync({
               !selectedInstallationId ||
               isSyncing ||
               isLoading ||
-              (!selectedRepositoryId && syncTarget !== "source")
+              (!selectedRepositoryId && syncTarget !== "source") ||
+              isProjectTargetMissingSelection
             }
             onClick={onStartSync}
             type="button"
@@ -132,6 +147,11 @@ export function GithubConnectSync({
             동기화 시작
           </Button>
         </div>
+        {isProjectTargetMissingSelection ? (
+          <p className="mt-2 text-[12px] text-amber-700">
+            Project v2를 먼저 선택해 주세요.
+          </p>
+        ) : null}
       </GithubConnectPanel>
 
       <GithubConnectPanel

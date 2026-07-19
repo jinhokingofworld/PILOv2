@@ -164,12 +164,12 @@ assert.match(githubConnectSteps, /GithubConnectSteps/);
 assert.match(githubConnectSteps, /1\. GitHub 계정 연결/);
 assert.match(githubConnectSteps, /2\. GitHub App 설치/);
 assert.match(githubConnectSteps, /3\. Project 작업 권한/);
-assert.match(githubConnectSteps, /동기화 시작/);
+assert.doesNotMatch(githubConnectSteps, /동기화 시작/);
 assert.match(githubConnectSteps, /새로고침/);
 assert.match(githubConnectSteps, /ProjectV2 OAuth/);
 assert.match(githubConnectSteps, /onStartGithubProjectOAuth/);
 assert.match(githubConnectSteps, /onDisconnectGithubProjectOAuth/);
-assert.match(githubConnectSteps, /onStartSync/);
+assert.doesNotMatch(githubConnectSteps, /onStartSync/);
 assert.doesNotMatch(githubConnectSteps, /disabled=\{connected \|\|/);
 assert.doesNotMatch(
   githubConnectSteps,

@@ -45,9 +45,6 @@ assert.match(primitives, /@\/components\/ui\/badge/);
 assert.doesNotMatch(steps, /md:grid-cols-3/);
 assert.match(steps, /divide-y divide-\[#e4e7ec\]/);
 assert.doesNotMatch(steps, /@\[48rem\]:grid-cols-3/);
-assert.match(
-  steps,
-  /disabled=\{!access\.canChooseRepository \|\| isSyncing \|\| isLoading\}/
-);
+assert.doesNotMatch(steps, /onStartSync|isSyncing|동기화 시작/);
 assert.doesNotMatch(repositories, /max-\[760px\]/);
 assert.equal((repositories.match(/@\[48rem\]:grid-cols-/g) ?? []).length, 2);

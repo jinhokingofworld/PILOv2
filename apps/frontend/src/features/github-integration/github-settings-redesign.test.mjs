@@ -14,10 +14,6 @@ assert.match(stepsSource, /보드 편집 권한 필요/);
 assert.match(stepsSource, /getGithubSettingsAccessState/);
 assert.match(
   stepsSource,
-  /disabled=\{!access\.canChooseRepository \|\| isSyncing \|\| isLoading\}/
-);
-assert.match(
-  stepsSource,
   /flex flex-col flex-wrap gap-4 p-4 @\[48rem\]:flex-row/
 );
 assert.equal(
@@ -30,6 +26,9 @@ assert.equal(
 );
 assert.doesNotMatch(stepsSource, /grid-cols-3/);
 assert.doesNotMatch(stepsSource, /title="현재 작업"/);
+assert.doesNotMatch(stepsSource, /onStartSync/);
+assert.doesNotMatch(stepsSource, /isSyncing/);
+assert.doesNotMatch(stepsSource, /동기화 시작/);
 
 assert.deepEqual(
   getGithubSettingsAccessState({
@@ -76,6 +75,24 @@ assert.match(syncSource, /동기화 대상/);
 assert.match(syncSource, /동기화 시작/);
 assert.match(syncSource, /최근 수동 실행/);
 assert.match(syncSource, /아직 수동 동기화 기록이 없습니다/);
+assert.match(syncSource, /selectedProjectV2Id/);
+assert.match(
+  syncSource,
+  /new Set<GithubSyncTarget>\(\[\s*"project_v2",\s*"project_v2_fields",\s*"project_v2_items"\s*\]\)/
+);
+assert.match(
+  syncSource,
+  /projectScopedSyncTargets\.has\(option\.value\) && !selectedProjectV2Id/
+);
+assert.match(
+  syncSource,
+  /projectScopedSyncTargets\.has\(syncTarget\) && !selectedProjectV2Id/
+);
+assert.match(syncSource, /Project v2를 먼저 선택해 주세요/);
+assert.doesNotMatch(
+  syncSource,
+  /projectScopedSyncTargets[^;]*"full"/
+);
 assert.doesNotMatch(panelSource, /loadGithubPullRequests/);
 assert.doesNotMatch(panelSource, /pullRequestsRequestGateRef/);
 assert.doesNotMatch(panelSource, /setPullRequests/);

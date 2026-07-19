@@ -158,7 +158,6 @@ export function GithubConnectLayout({
           isDeletingInstallation={isDeletingInstallation}
           isInstallationDeleteRequested={isInstallationDeleteRequested}
           isLoading={isLoading}
-          isSyncing={isSyncing}
           projectOAuth={projectOAuth}
           onCancelDeleteInstallation={onCancelDeleteInstallation}
           onConfirmDeleteInstallation={onConfirmDeleteInstallation}
@@ -169,7 +168,6 @@ export function GithubConnectLayout({
           onStartInstallation={onStartInstallation}
           onStartGithubProjectOAuth={onStartGithubProjectOAuth}
           onStartOAuth={onStartOAuth}
-          onStartSync={onStartSync}
           redirectAction={redirectAction}
           selectedInstallation={selectedInstallation}
         />
@@ -202,6 +200,7 @@ export function GithubConnectLayout({
           onStartSync={onStartSync}
           onSyncTargetChange={onSyncTargetChange}
           selectedInstallationId={selectedInstallationId}
+          selectedProjectV2Id={selectedProjectV2Id}
           selectedRepositoryId={selectedRepositoryId}
           syncRuns={syncRuns}
           syncRunsTotal={syncRunsTotal}
