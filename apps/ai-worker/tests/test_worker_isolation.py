@@ -150,6 +150,11 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
     )
     monkeypatch.setattr(
         shared_ai_worker_runtime,
+        "OpenAiCanvasAgentChatResponder",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
         "LocalSentenceTransformerCanvasEmbedder",
         lambda: object(),
     )

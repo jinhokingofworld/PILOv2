@@ -113,6 +113,21 @@ def parse_canvas_agent_intent_classification(
         sanitized_arguments = {"query": query.strip()[:120]}
     elif intent == "generate_html":
         sanitized_arguments = {}
+    elif intent == "chat":
+        context_scope = sanitized_arguments.get("contextScope")
+        if context_scope not in {"none", "selected_scene"}:
+            raise CanvasAgentIntentClassifierError("Canvas Agent chat contextScope is invalid")
+        reason_code = sanitized_arguments.get("reasonCode")
+        if reason_code not in {
+            "general_question",
+            "selection_question",
+            "follow_up_question",
+        }:
+            raise CanvasAgentIntentClassifierError("Canvas Agent chat reasonCode is invalid")
+        sanitized_arguments = {
+            "contextScope": context_scope,
+            "reasonCode": reason_code,
+        }
     elif intent == "unsupported":
         query = sanitized_arguments.get("query")
         sanitized_arguments = {"query": query.strip()[:120] if isinstance(query, str) else ""}
@@ -136,7 +151,7 @@ def _schema(allowed_intents: set[str] | None = None) -> dict[str, object]:
             "arguments": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["query", "shapeIds"],
+                "required": ["query", "shapeIds", "contextScope", "reasonCode"],
                 "properties": {
                     "query": {"type": "string"},
                     "shapeIds": {
@@ -144,6 +159,11 @@ def _schema(allowed_intents: set[str] | None = None) -> dict[str, object]:
                         "items": {"type": "string"},
                         "maxItems": 40,
                     },
+                    "contextScope": {
+                        "type": "string",
+                        "enum": ["none", "selected_scene"],
+                    },
+                    "reasonCode": {"type": "string"},
                 },
             },
         },

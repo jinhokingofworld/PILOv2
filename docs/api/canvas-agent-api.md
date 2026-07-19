@@ -5,8 +5,10 @@
 Canvas Agent API creates and tracks asynchronous server-side AI work that is
 limited to one Workspace Canvas. It explains Canvas functionality, finds
 existing Canvas shapes, moves the current user's viewport, and can generate a
-copyable static HTML/CSS artifact from an explicit Canvas selection. New runs
-do not create, connect, update, delete, or duplicate Canvas shapes.
+copyable static HTML/CSS artifact from an explicit Canvas selection. It also
+answers general questions and provides read-only analysis or advice about an
+explicit Canvas selection. New runs do not create, connect, update, delete, or
+duplicate Canvas shapes.
 
 Canvas Agent is restricted to Canvas actions. Calendar, Issue, PR, Meeting,
 and every other external-domain resource are excluded from this API: it does
@@ -48,10 +50,11 @@ not read, create, update, delete, or represent them as Canvas shapes.
 Frontend -> App Server Canvas Agent API -> Canvas Agent run + SQS job
   -> AI Worker: intent classification with typed arguments
      + one HTML generation call only for generate_html
+     + one read-only conversational response call only for chat
   -> route_intent step
   -> App Server: validate the intent and execute its registered Canvas handler
   -> result saved to run/step
-  -> completed explanation/search/navigation result or static HTML artifact
+  -> completed conversation/explanation/search/navigation result or static HTML artifact
 ```
 
 The same runtime also accepts internal delegation from PILO Agent:
@@ -100,10 +103,28 @@ Structured GPT intent classification over a bounded client shape summary
 - The default pgvector shape-result thresholds are shape similarity `0.78` and
   winner margin `0.08`. A missing or ambiguous embedding match produces an
   empty `find_shapes` result after the structured intent classification.
-- Normal mode exposes `find_shapes`, `generate_html`, `import_drive_file`, and `unsupported`. The classifier
+- Normal mode exposes `chat`, `find_shapes`, `generate_html`,
+  `import_drive_file`, and `unsupported`. The classifier
   returns `{ intent, arguments }`; App Server stores it in a `route_intent`
   step and maps it to the registered handler. Adding a future
   intent also requires an App Server handler and validation.
+
+For `chat`, the classifier returns `contextScope=none` for a self-contained
+general question and `contextScope=selected_scene` only when the user refers to
+the explicit current selection. A selection that happens to exist does not
+affect an unrelated general answer. The Worker makes one additional response
+call for `chat`; App Server accepts only a bounded answer and completes the run
+with `artifact=null`, no resource references, no confirmation, and no Canvas
+mutation. If a selection-scoped question has no complete selected scene, the
+run returns a bounded selection clarification without calling the responder.
+
+The chat responder receives bounded recent `conversationContext` and, only for
+`selected_scene`, an anonymized scene. Raw shape ids are replaced with
+request-local references and asset references are omitted. Canvas text is
+untrusted data rather than instructions. The responder must not claim that it
+changed or executed anything and must not expose UUIDs, tokens, credentials,
+provider payloads, or hidden prompts. PILO AI delegation displays the same
+validated summary verbatim.
 
 For `import_drive_file`, the classifier extracts only a bounded natural-language
 query. App Server searches active `ready` image files under the run's own
@@ -160,8 +181,8 @@ must not add JavaScript behavior or contradict user-authored content.
   produced by the previous Worker remain executable during rollout.
 - Deterministic toolbar-help actions skip AI Worker classification only when the
   request explicitly uses tool-help mode.
-- In normal mode the bounded classifier can select `find_shapes`, `generate_html`,
-  `import_drive_file`, or `unsupported`. Only `generate_html` with a complete
+- In normal mode the bounded classifier can select `chat`, `find_shapes`,
+  `generate_html`, `import_drive_file`, or `unsupported`. Only `generate_html` with a complete
   explicit selection can produce a static artifact. Only a validated
   `import_drive_file` result can request the reversible insertion of an existing
   authorized Drive image.
@@ -381,7 +402,7 @@ requests only when `toolHelpMode` is `true`. In this mode, tool
 location/explanation matching and the Canvas tool overview are handled directly
 without AI Worker classification. When `toolHelpMode` is `false`, App Server
 does not run toolbar/help, mutation, chat, or shape-search keyword routing; the
-request proceeds through the normal `find_shapes` intent path.
+request proceeds through the normal bounded intent classifier.
 
 | Intent | Keywords and examples | Action |
 | --- | --- | --- |
@@ -391,8 +412,9 @@ External-domain words can still appear in an ordinary Canvas shape query.
 For example, `이슈 메모 찾아줘` searches the loaded shape summaries and
 current Canvas embedding index for an existing
 Canvas item; it does not read the Issue domain. App Server does not reject
-external-domain words by keyword before classification, and the only current
-normal-mode intent remains the Canvas-only `find_shapes` intent.
+external-domain words by keyword before classification. The classifier may use
+`find_shapes` for Canvas content, `chat` for a read-only general explanation, or
+`unsupported` when fulfilling the request requires access to an external domain.
 
 Basic Canvas tool discovery uses `progress.toolTarget` so the client can move
 the requester-only Canvas AI pointer to the matching toolbar button and draw a
@@ -553,8 +575,8 @@ Request:
 | `selectedSceneError` | No | Bounded client-side selection/hydration error. A `generate_html` intent returns this message without producing partial HTML. |
 | `viewport` | No | Current visible Canvas bounds used only to create minimal planning context. |
 | `presentationMode` | No | `interactive` shows requester-only progress, pointer, highlight, and viewport focus on the Canvas surface. `background` creates the same read-only run without Canvas-local playback. Defaults to `interactive`. |
-| `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, classify among existing-shape search, Workspace Drive image import, selected-scene HTML generation, and unsupported requests. Defaults to `false`. |
-| `conversationContext` | No | Short-lived same-panel chat memory. `messages` contains up to 10 recent user/assistant messages, and `lastTask` can describe the previous Canvas Agent run for follow-up prompts. Legacy draft id/title fields remain nullable for compatibility. |
+| `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, classify among general or selection-scoped chat, existing-shape search, Workspace Drive image import, selected-scene HTML generation, and unsupported mutation or external-domain requests. Defaults to `false`. |
+| `conversationContext` | No | Short-lived same-panel chat memory. `messages` contains up to 10 recent user/assistant messages, and `lastTask` can describe the previous Canvas Agent run for follow-up prompts such as “why?”, “another way?”, or an explicit retry. The current prompt remains authoritative. Legacy draft id/title fields remain nullable for compatibility. |
 | `clientRequestId` | No | Stable retry idempotency key, up to 128 bytes. |
 
 Server rules:
@@ -788,6 +810,7 @@ does not depend on another Canvas Agent request waking the executor.
 
 ```text
 AI Worker intent:
+  chat
   find_shapes
   generate_html
   import_drive_file

@@ -25,6 +25,7 @@ from app.agent_processor import (
 from app.agent_prompt_security import PromptSecuritySource
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
 from app.canvas_agent.embeddings import LocalSentenceTransformerCanvasEmbedder
+from app.canvas_agent.planning.chat_responder import OpenAiCanvasAgentChatResponder
 from app.canvas_agent.planning.html_generator import OpenAiCanvasAgentHtmlGenerator
 from app.canvas_agent.planning.planner import OpenAiCanvasAgentIntentClassifier
 from app.canvas_agent.processor import CanvasAgentProcessor
@@ -3148,6 +3149,10 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
     )
+    canvas_agent_chat_responder = OpenAiCanvasAgentChatResponder(
+        resolved_settings.openai_api_key,
+        resolved_settings.openai_agent_planner_model,
+    )
     canvas_embedder = LocalSentenceTransformerCanvasEmbedder()
     meeting_report_event_publisher = HttpMeetingReportEventPublisher(
         _require_env("MEETING_REPORT_EVENT_BASE_URL"),
@@ -3180,6 +3185,7 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         canvas_agent_intent_classifier,
         CanvasSemanticRouter(canvas_agent_repository, canvas_embedder),
         canvas_agent_html_generator,
+        canvas_agent_chat_responder,
     )
     canvas_embedding_processor = CanvasEmbeddingProcessor(canvas_agent_repository, canvas_embedder)
     meeting_transcript_embedder = OpenAiTranscriptEmbedder(
