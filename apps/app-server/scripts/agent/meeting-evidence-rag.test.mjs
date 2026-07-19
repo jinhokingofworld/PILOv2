@@ -107,7 +107,7 @@ process.env.OPENAI_API_KEY = "test-key";
 try {
   const database = new FakeDatabase({
     transcripts: [transcript(TRANSCRIPT_ID, 0.1)],
-    activities: [activity(ACTIVITY_ID, 0.9)],
+    activities: [activity(ACTIVITY_ID, 0.4)],
     duplicatePairs: [{ transcript_id: TRANSCRIPT_ID, activity_id: ACTIVITY_ID }]
   });
   const workspaceService = {
@@ -136,8 +136,21 @@ try {
   assert.match(database.queries[1].text, /source_type IN \('decision', 'action_item'\)/);
   assert.match(database.queries[0].text, /chunk\.embedding OPERATOR\(extensions\.<=>\) \$4::extensions\.vector/);
   assert.match(database.queries[1].text, /chunk\.embedding OPERATOR\(extensions\.<=>\) \$4::extensions\.vector/);
+  assert.match(database.queries[0].text, /meeting_report_transcript_embedding_jobs/);
+  assert.match(database.queries[0].text, /job\.status = 'completed'/);
+  assert.match(database.queries[1].text, /meeting_report_activity_evidence_embedding_jobs/);
+  assert.match(database.queries[0].text, />= \$6/);
+  assert.equal(database.queries[0].values[5], 0.55);
   assert.match(database.queries[2].text, /transcript\.embedding OPERATOR\(extensions\.<=>\) activity\.embedding <= \$3/);
   assert.equal(workspaceService.calls.length, 1);
+
+  const thresholdFirstSources = await new MeetingTranscriptRagService(new FakeDatabase({
+    transcripts: [transcript(TRANSCRIPT_ID, 0.46)],
+    activities: [activity(ACTIVITY_ID, 0.9, true)]
+  }), workspaceService).search(USER_ID, WORKSPACE_ID, {
+    query: "관련 없는 직접 참조"
+  });
+  assert.deepEqual(thresholdFirstSources, []);
 
   const crowdedDatabase = new FakeDatabase({
     transcripts: [transcript(TRANSCRIPT_ID, 0.7)],
@@ -153,8 +166,8 @@ try {
     query: "일정이 왜 미뤄졌어?"
   });
   assert.equal(crowdedSources.length, 5);
-  assert.ok(crowdedSources.some((source) => source.sourceId === `transcript:${TRANSCRIPT_ID}`));
-  assert.ok(crowdedSources.some((source) => source.sourceType === "activity"));
+  assert.equal(crowdedSources.length, 5);
+  assert.ok(crowdedSources.every((source) => source.sourceType === "activity"));
 
   const transcriptOnlySources = await new MeetingTranscriptRagService(new FakeDatabase({
     transcripts: [transcript(TRANSCRIPT_ID, 0.1)],
