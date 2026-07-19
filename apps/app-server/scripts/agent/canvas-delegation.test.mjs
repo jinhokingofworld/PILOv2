@@ -65,8 +65,20 @@ const CANVAS_RUN_ID = "55555555-5555-4555-8555-555555555555";
   ]);
 }
 
+const canvasQueries = [];
 const database = {
   async query(sql, parameters) {
+    if (sql.includes("FROM canvas")) {
+      assert.match(sql, /board_type = 'freeform'/);
+      assert.match(sql, /engine_type = 'classic'/);
+      canvasQueries.push({ sql, parameters });
+    }
+    if (sql.includes("FROM canvas") && sql.includes("LIMIT 1")) {
+      assert.equal(parameters[1], WORKSPACE_ID);
+      return parameters[0] === CANVAS_ID
+        ? [{ id: CANVAS_ID, title: "Dashboard" }]
+        : [];
+    }
     if (sql.includes("FROM canvas") && sql.includes("LIMIT 2")) {
       assert.deepEqual(parameters, [WORKSPACE_ID]);
       return [{ id: CANVAS_ID, title: "대시보드" }];
@@ -119,6 +131,7 @@ assert.equal(delegatedCalls[0][2], CANVAS_ID);
 assert.equal(delegatedCalls[0][3], AGENT_RUN_ID);
 assert.equal(delegatedCalls[0][4].prompt, "선택한 화면을 HTML로 만들어줘");
 assert.deepEqual(delegatedCalls[0][4].selectedShapeIds, ["shape:frame"]);
+assert.equal(canvasQueries.filter(({ sql }) => sql.includes("LIMIT 2")).length, 0);
 
 const outsideCanvasContext = {
   currentUserId: USER_ID,
@@ -135,6 +148,7 @@ assert.equal(delegatedCalls.length, 2);
 assert.equal(delegatedCalls[1][2], CANVAS_ID);
 assert.equal(delegatedCalls[1][4].presentationMode, "background");
 assert.equal("selectedShapeIds" in delegatedCalls[1][4], false);
+assert.equal(canvasQueries.filter(({ sql }) => sql.includes("LIMIT 2")).length, 2);
 assert.throws(
   () => definition.prepareExecution(outsideCanvasContext, { canvasTitle: "디자인" }),
   (error) =>
@@ -142,44 +156,60 @@ assert.throws(
     "delegate_canvas_agent input field is invalid: canvasTitle",
 );
 
-for (const canvases of [
-  [],
-  [
-    { id: CANVAS_ID, title: "대시보드" },
-    { id: "77777777-7777-4777-8777-777777777777", title: "중복" },
-  ],
+for (const { canvases, question } of [
+  {
+    canvases: [],
+    question:
+      "현재 Workspace의 Canvas를 찾을 수 없습니다. Canvas 화면을 한 번 연 뒤 다시 요청해주세요.",
+  },
+  {
+    canvases: [
+      { id: CANVAS_ID, title: "대시보드" },
+      { id: "77777777-7777-4777-8777-777777777777", title: "중복" },
+    ],
+    question:
+      "현재 Workspace의 Canvas를 하나로 결정할 수 없습니다. 사용할 Canvas 화면에서 다시 요청해주세요.",
+  },
 ]) {
   const [invalidDefinition] = new CanvasAgentDelegationToolsService(
     canvasAgentService,
     {
-      async query() {
+      async query(sql) {
+        assert.match(sql, /engine_type = 'classic'/);
         return canvases;
       },
     },
   ).listDefinitions();
-  await assert.rejects(
-    () => invalidDefinition.prepareExecution(outsideCanvasContext, {}),
-    (error) =>
-      error?.response?.error?.message ===
-      "Workspace must have exactly one freeform Canvas",
+  assert.deepEqual(
+    await invalidDefinition.prepareExecution(outsideCanvasContext, {}),
+    {
+      kind: "needs_clarification",
+      outputSummary: { status: "needs_clarification", question },
+      resourceRefs: [],
+    },
   );
 }
 
-await assert.rejects(
-  () =>
-    definition.prepareExecution(
-      {
-        ...context,
-        requestContext: {
-          ...context.requestContext,
-          canvasId: "88888888-8888-4888-8888-888888888888",
-        },
+assert.deepEqual(
+  await definition.prepareExecution(
+    {
+      ...context,
+      requestContext: {
+        ...context.requestContext,
+        canvasId: "88888888-8888-4888-8888-888888888888",
       },
-      {},
-    ),
-  (error) =>
-    error?.response?.error?.message ===
-    "Canvas request context does not match the Workspace Canvas",
+    },
+    {},
+  ),
+  {
+    kind: "needs_clarification",
+    outputSummary: {
+      status: "needs_clarification",
+      question:
+        "현재 열린 Canvas를 확인할 수 없습니다. Canvas를 새로고침한 뒤 다시 요청해주세요.",
+    },
+    resourceRefs: [],
+  },
 );
 
 const settleCalls = [];
