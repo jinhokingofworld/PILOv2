@@ -831,7 +831,7 @@ export function GithubPanel() {
       setActionError("ProjectV2를 선택한 뒤 Board를 변경하세요.");
       return;
     }
-    void handleActivateProjectV2(selectedProjectV2Id);
+    void handleActivateProjectV2(selectedProjectV2Id).catch(() => undefined);
   }
 
   async function handleStartGithubSyncRun() {

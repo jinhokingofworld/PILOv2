@@ -70,6 +70,10 @@ assert.match(
   /async function handleActivateProjectV2\(projectV2Id: string\)/
 );
 assert.match(panelSource, /await apiClient\.activateWorkspaceBoardSource/);
+assert.match(
+  panelSource,
+  /void handleActivateProjectV2\(selectedProjectV2Id\)\.catch\(\(\) => undefined\);/
+);
 
 assert.deepEqual(
   getGithubSettingsAccessState({
