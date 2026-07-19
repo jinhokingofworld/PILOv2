@@ -576,8 +576,17 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     useState<SqltoerdSourceMap | null>(null);
   const [sourceNavigationRequest, setSourceNavigationRequest] =
     useState<SqlErdSourceNavigationRequest | null>(null);
-  const [normalizedSqlPreview, setNormalizedSqlPreview] =
+  const [normalizedSqlPreview, setNormalizedSqlPreviewState] =
     useState<SqlErdNormalizedSqlPreview | null>(null);
+  const normalizedSqlPreviewRef = useRef(normalizedSqlPreview);
+  normalizedSqlPreviewRef.current = normalizedSqlPreview;
+  const setNormalizedSqlPreview = useCallback(
+    (nextPreview: SqlErdNormalizedSqlPreview | null) => {
+      normalizedSqlPreviewRef.current = nextPreview;
+      setNormalizedSqlPreviewState(nextPreview);
+    },
+    []
+  );
   const [normalizedSqlApplyError, setNormalizedSqlApplyError] = useState<
     string | null
   >(null);
@@ -595,6 +604,35 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     sqlErdViewSession.id === sessionId &&
     sqlErdViewSession.revision !== null;
   const isSourceMutationSavePending = pendingSourceAutosaveSnapshot !== null;
+  const reconcileNormalizedSqlPreviewAfterSave = useCallback(
+    (savedSession: SqlErdViewSession) => {
+      const currentPreview = normalizedSqlPreviewRef.current;
+      if (!currentPreview) return;
+
+      const rebased = rebaseSqlErdNormalizedSqlPreviewAfterSave(
+        currentPreview,
+        savedSession
+      );
+      if (!rebased) {
+        normalizedSqlPreviewRef.current = null;
+        setNormalizedSqlPreview(null);
+        setNormalizedSqlApplyError(null);
+        setPendingSchemaDeleteLayoutPatch(null);
+        return;
+      }
+
+      const nextPreview = {
+        ...rebased,
+        layoutJson: createSqltoerdLayoutForModel(
+          rebased.modelJson,
+          savedSession.layoutJson
+        )
+      };
+      normalizedSqlPreviewRef.current = nextPreview;
+      setNormalizedSqlPreview(nextPreview);
+    },
+    []
+  );
   const activeAgentTableFocus =
     agentTableFocus &&
     isSqlErdAgentTableFocusCurrent(
@@ -1966,22 +2004,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
             sessionId: requestSessionId
           };
           applySqlErdEditAction({ snapshot, type: "operation_saved" });
-          setNormalizedSqlPreview((currentPreview) => {
-            if (!currentPreview) return null;
-            const rebased = rebaseSqlErdNormalizedSqlPreviewAfterSave(
-              currentPreview,
-              snapshot
-            );
-            return rebased
-              ? {
-                  ...rebased,
-                  layoutJson: createSqltoerdLayoutForModel(
-                    rebased.modelJson,
-                    snapshot.layoutJson
-                  )
-                }
-              : currentPreview;
-          });
+          reconcileNormalizedSqlPreviewAfterSave(snapshot);
           await sourceLock.renew();
           if (pendingSourceAutosaveSnapshotRef.current === requestParsedSnapshot) {
             setPendingSourceAutosaveSnapshot(null);
@@ -2034,22 +2057,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           snapshot: savedViewSession,
           type: "source_autosave_saved"
         });
-        setNormalizedSqlPreview((currentPreview) => {
-          if (!currentPreview) return null;
-          const rebased = rebaseSqlErdNormalizedSqlPreviewAfterSave(
-            currentPreview,
-            savedViewSession
-          );
-          return rebased
-            ? {
-                ...rebased,
-                layoutJson: createSqltoerdLayoutForModel(
-                  rebased.modelJson,
-                  savedViewSession.layoutJson
-                )
-              }
-            : currentPreview;
-        });
+        reconcileNormalizedSqlPreviewAfterSave(savedViewSession);
         if (
           pendingSourceAutosaveSnapshotRef.current === requestParsedSnapshot
         ) {
@@ -2134,6 +2142,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     isCurrentAutosaveRequest,
     layoutAutosaveBlockReason,
     pendingSourceAutosaveSnapshot,
+    reconcileNormalizedSqlPreviewAfterSave,
     setPendingSourceAutosaveSnapshot,
     sourceLock,
     sourceAutosaveRetryAttempt,
@@ -2651,7 +2660,6 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           pinnedTableId={tablePinState.pinnedTableId}
           realtimeConfig={realtimeConfig}
           isReadOnly={isWriteProtocolMismatch}
-          isLegacySnapshotSession={sqlErdViewSession.writeProtocol === "snapshot"}
           isInspectorOpen={isInspectorOpen}
           isSqlSourceOpen={isSourceOpen}
           onInspectorOpenChange={setIsInspectorOpen}
@@ -3547,7 +3555,6 @@ type CanvasShellProps = {
   pinnedTableId: string | null;
   realtimeConfig: SqlErdRealtimeConfig;
   isReadOnly: boolean;
-  isLegacySnapshotSession: boolean;
   isInspectorOpen: boolean;
   isSqlSourceOpen: boolean;
   onInspectorOpenChange: (isOpen: boolean) => void;
@@ -3574,7 +3581,6 @@ function CanvasShell({
   pinnedTableId,
   realtimeConfig,
   isReadOnly,
-  isLegacySnapshotSession,
   isInspectorOpen,
   isSqlSourceOpen,
   onInspectorOpenChange,
@@ -3605,7 +3611,7 @@ function CanvasShell({
         selectedSqlErdObject={selectedSqlErdObject}
         tableFocus={agentTableFocus}
       />
-      {agentTableFocus || autosavePausedBanner || isLegacySnapshotSession ? (
+      {agentTableFocus || autosavePausedBanner ? (
         <div
           className="absolute left-4 top-4 z-30 flex max-w-[calc(100%-2rem)] flex-col items-start gap-2"
           data-sqltoerd-status-banners
@@ -3616,13 +3622,6 @@ function CanvasShell({
               onReloadSession={onReloadSession}
               onRetryLayoutAutosaveOnce={onRetryLayoutAutosaveOnce}
             />
-          ) : null}
-          {isLegacySnapshotSession ? (
-            <div className="max-w-xl rounded-xl border border-amber-200 bg-amber-50/95 px-4 py-3 text-sm leading-6 text-amber-950 shadow-sm">
-              기존 snapshot 세션에서는 다른 사용자의 캔버스 변경을 실시간으로
-              동기화하지 않습니다. 실시간 공동 편집은 operations_v1 세션에서
-              사용하세요.
-            </div>
           ) : null}
           {agentTableFocus ? (
             <AgentTableFocusBanner

@@ -15,6 +15,7 @@ import {
   generateSqlDdlFromErdModel,
   SqltoerdModelToSqlGenerationError
 } from "@/features/sql-erd/utils/model-to-sql";
+import { areSqlErdJsonValuesEqual } from "@/features/sql-erd/utils/model";
 import type { SqlErdViewSession } from "@/features/sql-erd/utils/session-state";
 
 const SQL_ERD_MODEL_SQL_HISTORY_LIMIT = 20;
@@ -463,9 +464,11 @@ export function rebaseSqlErdNormalizedSqlPreviewAfterSave(
   const hasSameSourceState =
     base.id === savedSession.id &&
     base.dialect === savedSession.dialect &&
+    base.sourceFormat === savedSession.sourceFormat &&
     base.sourceText === savedSession.sourceText &&
-    JSON.stringify(base.modelJson) === JSON.stringify(savedSession.modelJson) &&
-    JSON.stringify(base.settingsJson) === JSON.stringify(savedSession.settingsJson);
+    base.writeProtocol === savedSession.writeProtocol &&
+    areSqlErdJsonValuesEqual(base.modelJson, savedSession.modelJson) &&
+    areSqlErdJsonValuesEqual(base.settingsJson, savedSession.settingsJson);
 
   return hasSameSourceState
     ? { ...preview, baseSnapshot: savedSession }
@@ -480,10 +483,12 @@ export function isSqlErdViewSessionCurrent(
     base.id === session.id &&
     base.revision === session.revision &&
     base.dialect === session.dialect &&
+    base.sourceFormat === session.sourceFormat &&
     base.sourceText === session.sourceText &&
-    JSON.stringify(base.modelJson) === JSON.stringify(session.modelJson) &&
-    JSON.stringify(base.layoutJson) === JSON.stringify(session.layoutJson) &&
-    JSON.stringify(base.settingsJson) === JSON.stringify(session.settingsJson)
+    base.writeProtocol === session.writeProtocol &&
+    areSqlErdJsonValuesEqual(base.modelJson, session.modelJson) &&
+    areSqlErdJsonValuesEqual(base.layoutJson, session.layoutJson) &&
+    areSqlErdJsonValuesEqual(base.settingsJson, session.settingsJson)
   );
 }
 

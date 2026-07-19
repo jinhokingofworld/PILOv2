@@ -6,6 +6,7 @@ import type {
 import type { SqltoerdDdlParseError } from "@/features/sql-erd/utils/ddl-parser";
 import {
   applySqltoerdLayoutPatch,
+  areSqlErdJsonValuesEqual,
   areSqltoerdLayoutsEqual
 } from "@/features/sql-erd/utils/model";
 import type { SqlErdViewSession } from "@/features/sql-erd/utils/session-state";
@@ -385,7 +386,7 @@ function isSameSqlErdSnapshot(
     current.revision === candidate.revision &&
     current.dialect === candidate.dialect &&
     current.sourceText === candidate.sourceText &&
-    JSON.stringify(current.modelJson) === JSON.stringify(candidate.modelJson)
+    areSqlErdJsonValuesEqual(current.modelJson, candidate.modelJson)
   );
 }
 

@@ -4023,6 +4023,23 @@ assert.equal(
   normalizedSqlSnapshot.sourceText
 );
 assert.equal(normalizedSqlAppliedState.parse.status, "idle");
+const jsonbReorderedNormalizedSqlAppliedState =
+  sqlEditStateRuntime.reduceSqlErdEditState(successfulSqlEditState, {
+    baseSnapshot: {
+      ...successfulSnapshot,
+      modelJson: {
+        schema: successfulSnapshot.modelJson.schema,
+        version: successfulSnapshot.modelJson.version
+      }
+    },
+    snapshot: normalizedSqlSnapshot,
+    type: "normalized_sql_applied"
+  });
+assert.equal(
+  jsonbReorderedNormalizedSqlAppliedState.lastSuccessfulSnapshot.sourceText,
+  normalizedSqlSnapshot.sourceText,
+  "normalized SQL apply must ignore JSON object key ordering"
+);
 assert.strictEqual(
   sqlEditStateRuntime.reduceSqlErdEditState(successfulSqlEditState, {
     baseSnapshot: { ...successfulSnapshot, revision: 7 },
@@ -6168,6 +6185,81 @@ assert.equal(
     { ...modelSqlPreviewSession, revision: 8, sourceText: "SELECT 1;" }
   ),
   null
+);
+for (const writeProtocol of ["snapshot", "operations_v1"]) {
+  const jsonbRoundTripSession = {
+    ...modelSqlPreviewSession,
+    latestOpSeq: writeProtocol === "operations_v1" ? 4 : 0,
+    settingsJson: {
+      editor: { showRelationLabels: true, theme: "light" },
+      sqltoerdRelationNotes: {}
+    },
+    writeProtocol
+  };
+  const jsonbRoundTripPreview =
+    sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+      modelJson: jsonbRoundTripSession.modelJson,
+      resolvedDialect: "mysql",
+      session: jsonbRoundTripSession
+    });
+  const savedAfterJsonbRoundTrip = {
+    ...jsonbRoundTripSession,
+    revision: 8,
+    modelJson: {
+      schema: jsonbRoundTripSession.modelJson.schema,
+      version: jsonbRoundTripSession.modelJson.version
+    },
+    settingsJson: {
+      sqltoerdRelationNotes: {},
+      editor: { theme: "light", showRelationLabels: true }
+    }
+  };
+  const rebasedAfterJsonbRoundTrip =
+    sqlDiffApplyRuntime.rebaseSqlErdNormalizedSqlPreviewAfterSave(
+      jsonbRoundTripPreview,
+      savedAfterJsonbRoundTrip
+    );
+
+  assert.notEqual(
+    rebasedAfterJsonbRoundTrip,
+    null,
+    `${writeProtocol} preview must survive JSONB object key reordering`
+  );
+  assert.equal(
+    sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(
+      rebasedAfterJsonbRoundTrip,
+      savedAfterJsonbRoundTrip
+    ),
+    true
+  );
+  assert.equal(
+    sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+      rebasedAfterJsonbRoundTrip
+    ).ok,
+    true
+  );
+}
+const snapshotProtocolPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: modelSqlPreviewSession.modelJson,
+    resolvedDialect: "mysql",
+    session: {
+      ...modelSqlPreviewSession,
+      latestOpSeq: 0,
+      writeProtocol: "snapshot"
+    }
+  });
+assert.equal(
+  sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(
+    snapshotProtocolPreview,
+    {
+      ...modelSqlPreviewSession,
+      latestOpSeq: 0,
+      writeProtocol: "operations_v1"
+    }
+  ),
+  false,
+  "preview must become stale when the write protocol changes"
 );
 assert.equal(
   sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(modelSqlPreview, {
@@ -8477,7 +8569,7 @@ assert.match(panel, /관계 의미/);
 assert.doesNotMatch(panel, /Workspace source operation/);
 assert.doesNotMatch(panel, /Workspace operation/);
 assert.match(panel, /Workspace에 저장되었습니다/);
-assert.match(panel, /기존 snapshot 세션에서는 다른 사용자의 캔버스 변경을 실시간으로\s+동기화하지 않습니다/);
+assert.doesNotMatch(panel, /기존 snapshot 세션에서는 다른 사용자의 캔버스 변경을 실시간으로/);
 assert.match(panel, /변경 전/);
 assert.match(panel, /변경 후/);
 assert.match(panel, /SQL 편집 잠금을 확인하는 중입니다/);
@@ -8485,6 +8577,22 @@ assert.match(panel, /handlePreviewSchemaDeleteBatch/);
 assert.match(panel, /setPendingSchemaDeleteLayoutPatch/);
 assert.match(panel, /onSchemaDeleteBatch=\{handlePreviewSchemaDeleteBatch\}/);
 assert.match(panel, /rebaseSqlErdNormalizedSqlPreviewAfterSave/);
+assert.match(
+  panel,
+  /const setNormalizedSqlPreview = useCallback\([\s\S]*?normalizedSqlPreviewRef\.current = nextPreview;[\s\S]*?setNormalizedSqlPreviewState\(nextPreview\)/
+);
+const reconcileNormalizedSqlPreviewImplementation = panel.slice(
+  panel.indexOf("const reconcileNormalizedSqlPreviewAfterSave"),
+  panel.indexOf("const activeAgentTableFocus")
+);
+assert.match(
+  reconcileNormalizedSqlPreviewImplementation,
+  /if \(!rebased\) \{[\s\S]*?setNormalizedSqlPreview\(null\);[\s\S]*?setPendingSchemaDeleteLayoutPatch\(null\);/
+);
+assert.doesNotMatch(
+  panel,
+  /rebaseSqlErdNormalizedSqlPreviewAfterSave[\s\S]*?: currentPreview;/
+);
 assert.match(panel, /이전 변경 저장 중/);
 assert.match(canvasSurface, /onDeleteForeignKey/);
 assert.match(
