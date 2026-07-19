@@ -52,6 +52,9 @@ type PublisherDependencies = {
   }): Promise<LocalScreenTrack[]>;
   createRoom(): ScreenShareRoom;
   onNativeStop(): void;
+  onReserving?(): void;
+  onConnecting?(sessionId: string): void;
+  onSharing?(session: PublisherSession): void;
 };
 
 type ViewerDependencies<Element> = {
@@ -91,7 +94,10 @@ export async function createPublisherSession({
   api,
   createLocalScreenTracks,
   createRoom,
-  onNativeStop
+  onNativeStop,
+  onReserving,
+  onConnecting,
+  onSharing
 }: PublisherDependencies): Promise<PublisherSession> {
   const tracks = await createLocalScreenTracks({ audio: false });
   let room: ScreenShareRoom | null = null;
@@ -139,21 +145,25 @@ export async function createPublisherSession({
       throw new Error("Screen capture did not provide a video track");
     }
 
+    onReserving?.();
     start = await api.start(workspaceId);
     room = createRoom();
+    onConnecting?.(start.id);
     await room.connect(start.livekitUrl, start.livekitToken);
     await room.localParticipant.publishTrack(screenTrack);
     published = true;
+    const publisherSession = {
+      sessionId: start.id,
+      stop: () => cleanup(true)
+    };
     screenTrack.mediaStreamTrack.addEventListener(
       "ended",
       handleNativeStop,
       { once: true }
     );
+    onSharing?.(publisherSession);
 
-    return {
-      sessionId: start.id,
-      stop: () => cleanup(true)
-    };
+    return publisherSession;
   } catch (error) {
     await cleanup(start !== null);
     throw error;

@@ -77,19 +77,39 @@ test("header policy maps start, starting, stop, and another sharer's view", asyn
   );
 });
 
-test("notification policy is ephemeral and only exists for an active session", async () => {
+test("notification policy hides the current user's active share", async () => {
   const { shouldShowScreenShareNotification } = await loadPurePolicy(
     notificationItem,
     "screen-share-notification-pure",
   );
-  assert.equal(shouldShowScreenShareNotification(null), false);
+  assert.equal(shouldShowScreenShareNotification({
+    activeSession: null,
+    currentUserId: "user-1",
+  }), false);
   assert.equal(
-    shouldShowScreenShareNotification(
-      screenShareSession("session-1", "user-2", "민준"),
-    ),
+    shouldShowScreenShareNotification({
+      activeSession: screenShareSession("session-1", "user-2", "민준"),
+      currentUserId: "user-1",
+    }),
     true,
   );
+  assert.equal(
+    shouldShowScreenShareNotification({
+      activeSession: screenShareSession("session-1", "user-1", "나"),
+      currentUserId: "user-1",
+    }),
+    false,
+  );
   assert.match(dropdown, /<ScreenShareNotificationItem/);
+  assert.match(dropdown, /shouldShowScreenShareNotification/);
+  assert.match(
+    dropdown,
+    /const screenShareNotificationSession =\s*activeSession &&\s*shouldShowScreenShareNotification\([\s\S]{0,200}activeSession[\s\S]{0,200}currentUserId/,
+  );
+  assert.match(
+    dropdown,
+    /workspaceInvitations\.length === 0[\s\S]{0,300}!screenShareNotificationSession/,
+  );
   assert.match(dropdown, /startViewing\(session\.id\)/);
   assert.doesNotMatch(notificationItem, /localStorage|mark.*Read|history/i);
 });

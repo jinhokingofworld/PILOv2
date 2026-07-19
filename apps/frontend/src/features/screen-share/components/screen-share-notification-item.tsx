@@ -6,12 +6,23 @@ import { Button } from "@/components/ui/button";
 import type { PublicScreenShareSession } from "@/features/screen-share/types";
 
 // <screen-share-notification-pure>
-type NotificationPolicySession = { id: string };
+type NotificationPolicySession = {
+  id: string;
+  sharer: { userId: string };
+};
 
 export function shouldShowScreenShareNotification(
-  activeSession: NotificationPolicySession | null
+  {
+    activeSession,
+    currentUserId
+  }: {
+    activeSession: NotificationPolicySession | null;
+    currentUserId: string | null;
+  }
 ) {
-  return activeSession !== null;
+  return (
+    activeSession !== null && activeSession.sharer.userId !== currentUserId
+  );
 }
 // </screen-share-notification-pure>
 

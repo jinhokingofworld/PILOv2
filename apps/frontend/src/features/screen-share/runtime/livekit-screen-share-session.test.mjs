@@ -98,6 +98,7 @@ test("publisher captures video before reserving, connects, and publishes only sc
   const track = createLocalTrack();
   const capture = deferred();
   const order = [];
+  const lifecycle = [];
   const { published, room } = createRoomHarness();
   const api = {
     async start() {
@@ -119,6 +120,15 @@ test("publisher captures video before reserving, connects, and publishes only sc
     },
     createRoom: () => room,
     onNativeStop() {},
+    onReserving() {
+      lifecycle.push("reserving");
+    },
+    onConnecting(sessionId) {
+      lifecycle.push(`connecting:${sessionId}`);
+    },
+    onSharing(session) {
+      lifecycle.push(`sharing:${session.sessionId}`);
+    },
   });
 
   await Promise.resolve();
@@ -128,6 +138,11 @@ test("publisher captures video before reserving, connects, and publishes only sc
   const session = await creating;
 
   assert.deepEqual(order, ["capture", "start"]);
+  assert.deepEqual(lifecycle, [
+    "reserving",
+    "connecting:session-1",
+    "sharing:session-1",
+  ]);
   assert.deepEqual(room.connectCalls, [
     ["wss://livekit.example.com", "publisher-token"],
   ]);
@@ -247,6 +262,40 @@ test("publisher native track end cleans resources and then invokes the callback 
   assert.equal(room.disconnectCalls, 1);
   assert.deepEqual(ended, ["session-1"]);
   assert.equal(nativeStops, 1);
+});
+
+test("publisher exposes the session before an immediate native stop cleans up", async () => {
+  const track = createLocalTrack();
+  const ended = [];
+  const { room } = createRoomHarness();
+  let publishedSession;
+
+  await createPublisherSession({
+    workspaceId: "workspace-1",
+    api: {
+      async start() {
+        return publisherStart();
+      },
+      async end(_workspaceId, sessionId) {
+        ended.push(sessionId);
+        return { sessionId, ended: true };
+      },
+    },
+    async createLocalScreenTracks() {
+      return [track];
+    },
+    createRoom: () => room,
+    onNativeStop() {},
+    onSharing(session) {
+      publishedSession = session;
+      track.emitEnded();
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(publishedSession.sessionId, "session-1");
+  assert.equal(track.stopped, 1);
+  assert.deepEqual(ended, ["session-1"]);
 });
 
 test("viewer subscribes only to screen share, attaches one video, and fully cleans up", async () => {

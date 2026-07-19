@@ -61,13 +61,16 @@ type EndedPayload = {
 };
 
 export function reconcileStartedScreenShare({
+  currentUserId,
   notifiedSessionIds,
   session
 }: {
+  currentUserId: string | null;
   notifiedSessionIds: Set<string>;
   session: RuntimePolicySession;
 }) {
-  const shouldToast = !notifiedSessionIds.has(session.id);
+  const shouldToast =
+    session.sharer.userId !== currentUserId && !notifiedSessionIds.has(session.id);
   const nextNotifiedSessionIds = new Set(notifiedSessionIds);
   nextNotifiedSessionIds.add(session.id);
   return {
@@ -93,16 +96,34 @@ export function reconcileEndedScreenShare({
 }
 
 export function reconcileStartedScreenSharePayload({
+  currentUserId,
   notifiedSessionIds,
   payload
 }: {
+  currentUserId: string | null;
   notifiedSessionIds: Set<string>;
   payload: StartedPayload;
 }) {
   return reconcileStartedScreenShare({
+    currentUserId,
     notifiedSessionIds,
     session: payload.session
   });
+}
+
+export function canStartViewingScreenShare({
+  activeSession,
+  currentUserId,
+  sessionId
+}: {
+  activeSession: RuntimePolicySession | null;
+  currentUserId: string | null;
+  sessionId: string;
+}) {
+  return !(
+    activeSession?.id === sessionId &&
+    activeSession.sharer.userId === currentUserId
+  );
 }
 
 export function reconcileEndedScreenSharePayload({
@@ -308,6 +329,15 @@ export function ScreenShareRuntimeProvider({
 
   const startViewing = useCallback(
     (sessionId: string) => {
+      if (
+        !canStartViewingScreenShare({
+          activeSession: activeSessionRef.current,
+          currentUserId,
+          sessionId
+        })
+      ) {
+        return;
+      }
       const currentSessionId = viewerTargetSessionIdRef.current;
       if (currentSessionId === sessionId) return;
       if (currentSessionId) {
@@ -318,7 +348,7 @@ export function ScreenShareRuntimeProvider({
       }
       beginViewing(sessionId);
     },
-    [beginViewing, stopViewerResource]
+    [beginViewing, currentUserId, stopViewerResource]
   );
   startViewingRef.current = startViewing;
 
@@ -365,12 +395,54 @@ export function ScreenShareRuntimeProvider({
     if (!workspaceId || stateRef.current.publisher.status !== "idle") return;
     const attempt = ++publisherAttemptRef.current;
     const requestWorkspaceId = workspaceId;
+    let publisherSessionId: string | null = null;
     dispatch({ type: "publisher/selecting" });
 
     void createPublisherSession({
       api,
       createLocalScreenTracks,
       createRoom: createScreenShareRoom,
+      onReserving: () => {
+        if (
+          isCurrentScreenShareRequest({
+            attempt,
+            currentAttempt: publisherAttemptRef.current,
+            currentWorkspaceId: workspaceIdRef.current,
+            requestWorkspaceId
+          })
+        ) {
+          dispatch({ type: "publisher/reserving" });
+        }
+      },
+      onConnecting: (sessionId) => {
+        publisherSessionId = sessionId;
+        if (
+          isCurrentScreenShareRequest({
+            attempt,
+            currentAttempt: publisherAttemptRef.current,
+            currentWorkspaceId: workspaceIdRef.current,
+            requestWorkspaceId
+          })
+        ) {
+          dispatch({ type: "publisher/connecting", sessionId });
+        }
+      },
+      onSharing: (publisherSession) => {
+        if (
+          isCurrentScreenShareRequest({
+            attempt,
+            currentAttempt: publisherAttemptRef.current,
+            currentWorkspaceId: workspaceIdRef.current,
+            requestWorkspaceId
+          })
+        ) {
+          publisherSessionRef.current = publisherSession;
+          dispatch({
+            type: "publisher/sharing",
+            sessionId: publisherSession.sessionId
+          });
+        }
+      },
       onNativeStop: () => {
         const publisherSession = publisherSessionRef.current;
         if (!publisherSession) return;
@@ -399,16 +471,6 @@ export function ScreenShareRuntimeProvider({
           await publisherSession.stop();
           return;
         }
-        publisherSessionRef.current = publisherSession;
-        dispatch({ type: "publisher/reserving" });
-        dispatch({
-          type: "publisher/connecting",
-          sessionId: publisherSession.sessionId
-        });
-        dispatch({
-          type: "publisher/sharing",
-          sessionId: publisherSession.sessionId
-        });
       })
       .catch((error: unknown) => {
         if (attempt !== publisherAttemptRef.current) return;
@@ -422,7 +484,7 @@ export function ScreenShareRuntimeProvider({
         dispatch({
           type: "publisher/failed",
           error: "화면 공유를 시작하지 못했어요.",
-          sessionId: null
+          sessionId: publisherSessionId
         });
         toast.error("화면 공유를 시작하지 못했어요.");
       });
@@ -471,6 +533,7 @@ export function ScreenShareRuntimeProvider({
     const handleStarted = (payload: StartedPayload) => {
       reloadAttemptRef.current += 1;
       const result = reconcileStartedScreenSharePayload({
+        currentUserId,
         notifiedSessionIds: notifiedSessionIdsRef.current,
         payload
       });
@@ -506,7 +569,7 @@ export function ScreenShareRuntimeProvider({
       socket.off("workspace-screen-share:started", handleStarted);
       socket.off("workspace-screen-share:ended", handleEnded);
     };
-  }, [reloadCurrent, socket, stopViewerResource, workspaceId]);
+  }, [currentUserId, reloadCurrent, socket, stopViewerResource, workspaceId]);
 
   useEffect(() => {
     const previousWorkspaceId = previousWorkspaceIdRef.current;
@@ -538,8 +601,15 @@ export function ScreenShareRuntimeProvider({
           });
         });
       }
-    } else if (stateRef.current.publisher.status === "selecting") {
-      dispatch({ type: "publisher/picker-cancelled" });
+    } else if (
+      stateRef.current.publisher.status === "selecting" ||
+      stateRef.current.publisher.status === "reserving"
+    ) {
+      dispatch({
+        type: "publisher/failed",
+        error: "",
+        sessionId: null
+      });
     }
     if (cleanup.stopViewer) {
       const viewerSession = viewerSessionRef.current;

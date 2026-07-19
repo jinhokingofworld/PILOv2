@@ -50,18 +50,25 @@ test("current session loads on mount and reloads on socket reconnect", () => {
   );
 });
 
-test("started reconciliation activates once and deduplicates its toast", async () => {
+test("started reconciliation keeps the active session but suppresses the sharer's toast", async () => {
   const { reconcileStartedScreenShare } = await loadPurePolicy(
     provider,
     "screen-share-runtime-pure",
   );
   const session = screenShareSession("session-1");
   const first = reconcileStartedScreenShare({
+    currentUserId: "user-3",
     notifiedSessionIds: new Set(),
     session,
   });
   const duplicate = reconcileStartedScreenShare({
+    currentUserId: "user-3",
     notifiedSessionIds: first.notifiedSessionIds,
+    session,
+  });
+  const mine = reconcileStartedScreenShare({
+    currentUserId: "user-2",
+    notifiedSessionIds: new Set(),
     session,
   });
 
@@ -69,6 +76,34 @@ test("started reconciliation activates once and deduplicates its toast", async (
   assert.equal(first.shouldToast, true);
   assert.equal(duplicate.activeSession, session);
   assert.equal(duplicate.shouldToast, false);
+  assert.equal(mine.activeSession, session);
+  assert.equal(mine.shouldToast, false);
+});
+
+test("viewing guard rejects the current user's active share", async () => {
+  const { canStartViewingScreenShare } = await loadPurePolicy(
+    provider,
+    "screen-share-runtime-pure",
+  );
+  const mine = screenShareSession("session-mine");
+  const theirs = screenShareSession("session-theirs");
+
+  assert.equal(
+    canStartViewingScreenShare({
+      activeSession: mine,
+      currentUserId: "user-2",
+      sessionId: mine.id,
+    }),
+    false,
+  );
+  assert.equal(
+    canStartViewingScreenShare({
+      activeSession: theirs,
+      currentUserId: "user-1",
+      sessionId: theirs.id,
+    }),
+    true,
+  );
 });
 
 test("ended reconciliation removes only matching state and viewer", async () => {
@@ -104,6 +139,7 @@ test("Task 4 browser payloads activate and close the matching screen share", asy
   } = await loadPurePolicy(provider, "screen-share-runtime-pure");
   const session = screenShareSession("session-wire");
   const started = reconcileStartedScreenSharePayload({
+    currentUserId: "user-3",
     notifiedSessionIds: new Set(),
     payload: {
       event: "workspace-screen-share:started",
@@ -185,6 +221,17 @@ test("screen sharing owns no Meeting runtime dependency", () => {
   assert.match(
     provider,
     /api[\s\S]{0,30}\.end\(workspaceId, session\.id\)[\s\S]{0,250}\.catch\(/,
+  );
+});
+
+test("publisher stores its session before the native-stop listener can run", () => {
+  assert.match(
+    provider,
+    /onSharing: \(publisherSession\) => \{[\s\S]{0,500}publisherSessionRef\.current = publisherSession[\s\S]{0,500}publisher\/sharing/,
+  );
+  assert.doesNotMatch(
+    provider,
+    /\.then\(async \(publisherSession\) => \{[\s\S]{0,500}publisherSessionRef\.current = publisherSession/,
   );
 });
 
