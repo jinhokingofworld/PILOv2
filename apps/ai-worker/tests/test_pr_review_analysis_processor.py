@@ -856,6 +856,62 @@ def test_semantic_graph_output_enforces_app_string_limits() -> None:
     assert parsed.semantic_graph is None
 
 
+def test_semantic_graph_flow_title_uses_utf16_code_unit_limit() -> None:
+    input_value = parse_pr_review_analysis_input_payload(
+        input_payload(
+            graphSchemaVersion="pr-review-semantic-graph:v2",
+            semanticGraph=semantic_graph_v2_payload(),
+        ),
+        parse_pr_review_analysis_job_payload(job_payload()),
+    )
+    assert input_value.semantic_graph is not None
+    valid_output = semantic_graph_v2_output()
+    valid_output["semanticGraph"]["flows"][0]["title"] = "🙂" * 127
+    valid = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **valid_output}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+    assert valid.semantic_graph is not None
+
+    invalid_output = semantic_graph_v2_output()
+    invalid_output["semanticGraph"]["flows"][0]["title"] = "🙂" * 128
+    invalid = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **invalid_output}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+    assert invalid.semantic_graph is None
+
+
+def test_semantic_graph_role_reason_uses_utf16_code_unit_limit() -> None:
+    input_value = parse_pr_review_analysis_input_payload(
+        input_payload(
+            graphSchemaVersion="pr-review-semantic-graph:v2",
+            semanticGraph=semantic_graph_v2_payload(),
+        ),
+        parse_pr_review_analysis_job_payload(job_payload()),
+    )
+    assert input_value.semantic_graph is not None
+    valid_output = semantic_graph_v2_output()
+    valid_output["semanticGraph"]["files"][0]["roleReason"] = "🙂" * 250
+    valid = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **valid_output}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+    assert valid.semantic_graph is not None
+
+    invalid_output = semantic_graph_v2_output()
+    invalid_output["semanticGraph"]["files"][0]["roleReason"] = "🙂" * 251
+    invalid = parse_pr_review_analysis_output(
+        json.dumps({**_serialize_analysis_result(analysis_result()), **invalid_output}),
+        input_value.files,
+        input_value.semantic_graph,
+    )
+    assert invalid.semantic_graph is None
+
+
 def test_v1_input_still_serializes_v1() -> None:
     input_value = parse_pr_review_analysis_input_payload(
         input_payload(

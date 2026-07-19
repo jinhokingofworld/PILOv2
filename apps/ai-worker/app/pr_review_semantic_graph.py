@@ -692,11 +692,15 @@ def _require_bounded_string(
     max_utf8_bytes: int | None = None,
 ) -> str:
     result = _require_string(value, key)
-    if len(result) > max_chars:
+    if _utf16_code_unit_length(result) > max_chars:
         raise ValueError(f"Invalid {key}")
     if max_utf8_bytes is not None and len(result.encode("utf-8")) > max_utf8_bytes:
         raise ValueError(f"Invalid {key}")
     return result
+
+
+def _utf16_code_unit_length(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
 
 
 def _read_optional_string(value: dict[str, object], key: str) -> str | None:
