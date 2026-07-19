@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  useLayoutEffect,
-  useRef,
-  useSyncExternalStore,
-} from "react";
-import { useValue } from "@tldraw/state-react";
+import { useSyncExternalStore } from "react";
 import { b64Vecs, useEditor } from "tldraw";
 
 import type { CanvasRemoteShapePreviewStore } from "@/features/canvas/collaboration/canvas-remote-shape-preview-store";
@@ -14,9 +9,6 @@ import {
   CANVAS_PREVIEW_STROKE_WIDTHS,
   getCanvasPreviewStrokeDash,
   getCanvasRemotePreviewShapePageTransform,
-  prepareCanvasPreviewContext,
-  useCanvasOverlayRect,
-  type CanvasOverlayRect,
 } from "./canvas-remote-preview-canvas";
 
 type CanvasRemoteFreehandPreviewOverlayProps = {
@@ -43,6 +35,16 @@ type CanvasRemoteFreehandShape = {
     }>;
     size: string;
   };
+};
+
+type CanvasRemoteFreehandPath = {
+  color: string;
+  dashArray?: string;
+  id: string;
+  opacity: number;
+  path: string | null;
+  point: { x: number; y: number } | null;
+  strokeWidth: number;
 };
 
 const CANVAS_HIGHLIGHT_STROKE_WIDTHS: Record<string, number> = {
@@ -107,24 +109,27 @@ function readRemoteFreehandShape(
   };
 }
 
-function drawRemoteFreehandShape({
-  context,
+function toSvgNumber(value: number) {
+  return Math.round(value * 1_000) / 1_000;
+}
+
+function createRemoteFreehandPath({
+  actorUserId,
   editor,
-  overlayRect,
   shape,
 }: {
-  context: CanvasRenderingContext2D;
+  actorUserId: string;
   editor: ReturnType<typeof useEditor>;
-  overlayRect: CanvasOverlayRect;
   shape: CanvasRemoteFreehandShape;
-}) {
+}): CanvasRemoteFreehandPath | null {
+  if (shape.props.dash === "none") return null;
+
   const pageTransform = getCanvasRemotePreviewShapePageTransform(editor, shape);
-  const cameraZoom = editor.getCamera().z;
   const baseStrokeWidth =
     shape.type === "highlight"
       ? (CANVAS_HIGHLIGHT_STROKE_WIDTHS[shape.props.size] ?? 24)
       : (CANVAS_PREVIEW_STROKE_WIDTHS[shape.props.size] ?? 2.75);
-  const strokeWidth = baseStrokeWidth * shape.props.scale * cameraZoom;
+  const strokeWidth = baseStrokeWidth * shape.props.scale;
   const points = shape.props.segments.flatMap((segment) => {
     try {
       return b64Vecs.decodePoints(segment.path).map((point) =>
@@ -138,102 +143,85 @@ function drawRemoteFreehandShape({
     }
   });
 
-  if (!points.length || shape.props.dash === "none") return;
+  if (!points.length) return null;
 
-  context.save();
-  context.globalAlpha =
-    shape.opacity * (shape.type === "highlight" ? 0.42 : 0.92);
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.lineWidth = Math.max(1, strokeWidth);
-  context.strokeStyle =
-    CANVAS_PREVIEW_SHAPE_COLORS[shape.props.color] ??
-    CANVAS_PREVIEW_SHAPE_COLORS.black;
-  context.setLineDash(
-    getCanvasPreviewStrokeDash(shape.props.dash, strokeWidth),
-  );
-  context.beginPath();
+  const dashArray = getCanvasPreviewStrokeDash(shape.props.dash, strokeWidth);
+  const path =
+    points.length > 1
+      ? points
+          .map(
+            (point, index) =>
+              `${index === 0 ? "M" : "L"} ${toSvgNumber(point.x)} ${toSvgNumber(point.y)}`,
+          )
+          .join(" ")
+      : null;
 
-  points.forEach((point, index) => {
-    const screenPoint = editor.pageToScreen(point);
-    const x = screenPoint.x - overlayRect.left;
-    const y = screenPoint.y - overlayRect.top;
-
-    if (index === 0) {
-      context.moveTo(x, y);
-    } else {
-      context.lineTo(x, y);
-    }
-  });
-
-  if (points.length === 1) {
-    const screenPoint = editor.pageToScreen(points[0]);
-    context.arc(
-      screenPoint.x - overlayRect.left,
-      screenPoint.y - overlayRect.top,
-      Math.max(1, strokeWidth / 2),
-      0,
-      Math.PI * 2,
-    );
-    context.fillStyle = context.strokeStyle;
-    context.fill();
-  } else {
-    context.stroke();
-  }
-
-  context.restore();
+  return {
+    color:
+      CANVAS_PREVIEW_SHAPE_COLORS[shape.props.color] ??
+      CANVAS_PREVIEW_SHAPE_COLORS.black,
+    ...(dashArray.length ? { dashArray: dashArray.join(" ") } : {}),
+    id: `${actorUserId}:${shape.id}`,
+    opacity: shape.opacity * (shape.type === "highlight" ? 0.42 : 0.92),
+    path,
+    point:
+      points.length === 1
+        ? { x: toSvgNumber(points[0].x), y: toSvgNumber(points[0].y) }
+        : null,
+    strokeWidth,
+  };
 }
 
 export function CanvasRemoteFreehandPreviewOverlay({
   previewStore,
 }: CanvasRemoteFreehandPreviewOverlayProps) {
   const editor = useEditor();
-  const overlayRef = useRef<HTMLCanvasElement | null>(null);
-  const overlayRect = useCanvasOverlayRect(overlayRef);
   const previews = useSyncExternalStore(
     previewStore.subscribe,
     previewStore.getSnapshot,
     previewStore.getSnapshot,
   );
-  const camera = useValue(
-    "pilo-remote-freehand-preview-camera",
-    () => editor.getCamera(),
-    [editor],
+  const paths = previews.flatMap((preview) =>
+    preview.shapes.flatMap((value) => {
+      const shape = readRemoteFreehandShape(value);
+      if (!shape) return [];
+
+      const path = createRemoteFreehandPath({
+        actorUserId: preview.actorUserId,
+        editor,
+        shape,
+      });
+
+      return path ? [path] : [];
+    }),
   );
 
-  useLayoutEffect(() => {
-    const overlay = overlayRef.current;
-    if (!overlay || !overlayRect) return undefined;
-
-    const animationFrame = window.requestAnimationFrame(() => {
-      const context = overlay.getContext("2d");
-      if (!context) return;
-
-      prepareCanvasPreviewContext({ context, overlay, overlayRect });
-
-      previews.forEach((preview) => {
-        preview.shapes.forEach((value) => {
-          const shape = readRemoteFreehandShape(value);
-          if (!shape) return;
-
-          drawRemoteFreehandShape({
-            context,
-            editor,
-            overlayRect,
-            shape,
-          });
-        });
-      });
-    });
-
-    return () => window.cancelAnimationFrame(animationFrame);
-  }, [camera.x, camera.y, camera.z, editor, overlayRect, previews]);
-
   return (
-    <canvas
-      ref={overlayRef}
-      aria-hidden="true"
-      className="canvas-remote-freehand-preview-layer"
-    />
+    <svg className="canvas-remote-freehand-preview-layer" overflow="visible">
+      {paths.map((path) =>
+        path.path ? (
+          <path
+            key={path.id}
+            d={path.path}
+            fill="none"
+            opacity={path.opacity}
+            stroke={path.color}
+            strokeDasharray={path.dashArray}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={path.strokeWidth}
+          />
+        ) : path.point ? (
+          <circle
+            key={path.id}
+            cx={path.point.x}
+            cy={path.point.y}
+            fill={path.color}
+            opacity={path.opacity}
+            r={Math.max(0.5, path.strokeWidth / 2)}
+          />
+        ) : null,
+      )}
+    </svg>
   );
 }

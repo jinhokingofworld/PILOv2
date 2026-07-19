@@ -150,9 +150,16 @@ Canvas의 아래 흐름은 Canvas 도메인 전용이다.
 - cursor 좌표, selection, `editingShapeId`, `editingMode` presence는 DB에 저장하지 않는다.
 - remote shape preview는 `collaboration/canvas-remote-shape-preview-store`의 외부 store에서
   관리해 preview packet마다 `ClassicCanvasRuntime` 전체를 다시 렌더링하지 않는다.
-- 로컬 draw/highlight pointer가 활성화된 동안에는 원격 preview와 committed shape patch를
-  tldraw document store에 적용하지 않는다. room event는 shape별 대기열에 유지하고 로컬
-  freehand가 끝난 직후 최신 상태를 적용해 서로 다른 사용자의 펜 segment가 끊기지 않게 한다.
+- draw/highlight/line/arrow의 미확정 preview는 tldraw document store에 넣지 않고
+  `OnTheCanvas` world-space overlay에서 Canvas 좌표로 렌더링한다. pan/zoom은 tldraw의
+  camera transform을 그대로 상속하며, pointer가 끝난 뒤 확정된 shape patch만 document
+  store에 적용한다.
+- 기존 shape의 이동·크기 변경 preview는 remote change로 document store에 반영하되,
+  로컬 사용자가 실제 조작 중인 동일 shape만 shape별 대기열에서 보호한다.
+- Canvas 우측 상단 좌표 HUD는 현재 tldraw viewport 정중앙의 Canvas 좌표를 표시한다.
+  포인터 이동에는 반응하지 않고 카메라 이동, zoom, 편집 영역 크기 변경에만 갱신된다.
+  HUD를 누르면 작은 shadcn Popover에서 X/Y 좌표를 입력할 수 있다. Enter 또는
+  Popover 바깥 클릭 시 현재 zoom을 유지한 채 해당 좌표를 화면 정중앙으로 이동한다.
 - local UI Preview의 fake session은 realtime-server DB session 검증을 통과하지 않으므로 presence를 켜지 않는다.
 - `src/shared/tldraw/TldrawSurface`는 presence를 소유하지 않는다. PR Review는 공통 Socket
   transport와 cursor overlay를 사용하되 room 입장과 Presence 보고는 PR Review feature에서

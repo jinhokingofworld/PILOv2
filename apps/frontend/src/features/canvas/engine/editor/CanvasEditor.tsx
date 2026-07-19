@@ -31,6 +31,7 @@ import { CanvasWorkspaceLocationAdapter } from "@/features/canvas/canvas-workspa
 import { TldrawSurface } from "@/shared/tldraw";
 import type { CanvasPresenceController } from "@/features/canvas/collaboration/useCanvasRoom";
 import type { CanvasRemoteShapePreviewStore } from "@/features/canvas/collaboration/canvas-remote-shape-preview-store";
+import { CanvasRemoteShapePreviewProvider } from "@/features/canvas/collaboration/CanvasRemoteShapePreviewContext";
 import { RemoteCursorOverlay } from "@/shared/canvas-realtime/RemoteCursorOverlay";
 import { CanvasRemotePresenceProvider } from "@/features/canvas/collaboration/CanvasRemotePresenceContext";
 import type {
@@ -45,9 +46,9 @@ import {
   CanvasAiChatOverlay,
 } from "./overlays/CanvasAiChatOverlay";
 import { CanvasAgentVisualOverlay } from "./overlays/CanvasAgentVisualOverlay";
-import { CanvasRemoteConnectionPreviewOverlay } from "./overlays/CanvasRemoteConnectionPreviewOverlay";
-import { CanvasRemoteFreehandPreviewOverlay } from "./overlays/CanvasRemoteFreehandPreviewOverlay";
+import { CanvasCameraCoordinateHud } from "./overlays/CanvasCameraCoordinateHud";
 import { CanvasFrameLazyLoadingOverlay } from "./overlays/CanvasFrameLazyLoadingOverlay";
+import { CanvasRemoteWorldPreviewLayer } from "./overlays/CanvasRemoteWorldPreviewLayer";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
 import { SelectedGroupToolbar } from "../interactions/PiloCanvasGroupToolbar";
 import {
@@ -220,6 +221,7 @@ type CanvasEditorProps = {
 
 const tldrawComponents = {
   Background: PiloCanvasBackground,
+  OnTheCanvas: CanvasRemoteWorldPreviewLayer,
 };
 
 const CANVAS_AI_CHAT_HOLD_MS = 500;
@@ -1050,6 +1052,7 @@ export function CanvasEditor({
     },
     [],
   );
+
   const canvasAgent = useCanvasAgent({
     canvasId: board.id,
     editor: canvasEditor,
@@ -2185,7 +2188,7 @@ export function CanvasEditor({
   function handleCanvasPointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     if (
       event.target instanceof Element &&
-      event.target.closest(".canvas-ai-chat")
+      event.target.closest(".canvas-ai-chat, .canvas-coordinate-hud")
     ) {
       return;
     }
@@ -2354,93 +2357,90 @@ export function CanvasEditor({
 
   return (
     <CanvasDriveFileProvider workspaceId={board.workspaceId}>
-    <div
-      className={`h-full${isPiloEraserActive ? " is-pilo-eraser-active" : ""}`}
-      onPointerDownCapture={handleCanvasPointerDownCapture}
-      onPointerMoveCapture={handleCanvasPointerMoveCapture}
-      onPointerUpCapture={handleCanvasPointerUpCapture}
-      onPointerCancelCapture={handleCanvasPointerCancelCapture}
-    >
-      <CanvasRemotePresenceProvider presence={presence?.remotePresence ?? []}>
-        <TldrawSurface
-          className="pilo-tldraw-canvas"
-          hideUi
-          licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
-          shapeUtils={piloCanvasShapeUtils}
-          components={tldrawComponents}
-          onMount={mountEditor}
-        >
-          <CanvasWorkspaceLocationAdapter canvasId={board.id} />
-          <CanvasLocalInteractionReporter
-            onChange={handleLocalInteractionChange}
-          />
-          <CanvasStateReporter
-            onFreeformShapesDraftChange={handleFreeformShapesDraftChange}
-            onFreeformShapesChange={onFreeformShapesChange}
-            onResolveFreeformShapeSnapshot={resolveRealtimePreviewSnapshot}
-            onViewChange={onViewChange}
-            onViewportBoundsChange={onViewportBoundsChange}
-          />
-          <CanvasRealtimePreviewApplier
-            committedShapes={freeformShapes}
-            isShapePatchProtected={isShapePatchProtected}
-            originalShapesRef={remotePreviewOriginalShapesRef}
-            protectionVersion={localInteractionVersion}
-            previewShapeIdsRef={remotePreviewShapeIdsRef}
-            previewStore={presence?.remoteShapePreviewStore}
-          />
-          {presence ? (
-            <>
-              <CanvasRemoteConnectionPreviewOverlay
-                previewStore={presence.remoteShapePreviewStore}
+      <div
+        className={`relative h-full${isPiloEraserActive ? " is-pilo-eraser-active" : ""}`}
+        onPointerCancelCapture={handleCanvasPointerCancelCapture}
+        onPointerDownCapture={handleCanvasPointerDownCapture}
+        onPointerMoveCapture={handleCanvasPointerMoveCapture}
+        onPointerUpCapture={handleCanvasPointerUpCapture}
+      >
+        <CanvasRemotePresenceProvider presence={presence?.remotePresence ?? []}>
+          <CanvasRemoteShapePreviewProvider
+            previewStore={presence?.remoteShapePreviewStore ?? null}
+          >
+            <TldrawSurface
+              className="pilo-tldraw-canvas"
+              components={tldrawComponents}
+              hideUi
+              licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
+              onMount={mountEditor}
+              shapeUtils={piloCanvasShapeUtils}
+            >
+              <CanvasWorkspaceLocationAdapter canvasId={board.id} />
+              <CanvasLocalInteractionReporter
+                onChange={handleLocalInteractionChange}
               />
-              <CanvasRemoteFreehandPreviewOverlay
-                previewStore={presence.remoteShapePreviewStore}
+              <CanvasStateReporter
+                onFreeformShapesChange={onFreeformShapesChange}
+                onFreeformShapesDraftChange={handleFreeformShapesDraftChange}
+                onResolveFreeformShapeSnapshot={resolveRealtimePreviewSnapshot}
+                onViewChange={onViewChange}
+                onViewportBoundsChange={onViewportBoundsChange}
               />
-            </>
-          ) : null}
-          <CanvasHistoryStateReporter
-            onHistoryStateChange={onHistoryStateChange}
-          />
-          <CanvasFileDropImporter />
-          {presence?.enabled ? <CanvasPresenceReporter presence={presence} /> : null}
-          {presence ? (
-            <RemoteCursorOverlay
-              currentUserId={presence.currentUserId}
-              cursorStore={presence.remoteCursorStore}
-              presence={presence.remotePresence}
-            />
-          ) : null}
-          <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
-          <SelectedShapeStackingManager />
-          <SelectedGroupToolbar />
-          {loadingFrameIds.size ? (
-            <CanvasFrameLazyLoadingOverlay loadingFrameIds={loadingFrameIds} />
-          ) : null}
-          <FrameSelectionToolbar />
-        </TldrawSurface>
-      </CanvasRemotePresenceProvider>
-      <CanvasAiChatOverlay
-        anchor={canvasAiChatAnchor}
-        artifact={canvasAgent.artifact}
-        draft={canvasAgent.draft}
-        error={canvasAgent.error}
-        holdProgress={canvasAiChatHoldProgress}
-        isRunning={canvasAgent.isRunning}
-        layoutStorageKey={`pilo:canvas-ai-chat-layout:${board.id}`}
-        onApplyDraft={canvasAgent.applyDraft}
-        onClose={() => setCanvasAiChatAnchor(null)}
-        onDiscardDraft={canvasAgent.discardDraft}
-        onSubmit={canvasAgent.submit}
-        statusMessage={canvasAgent.message}
-      />
-      <CanvasAgentVisualOverlay
-        draft={canvasAgent.draft}
-        editor={canvasEditor}
-        playbackEnabled={canvasAgent.presentationMode !== "background"}
-        progress={canvasAgent.progress}
-      />
-    </div>
+              <CanvasRealtimePreviewApplier
+                committedShapes={freeformShapes}
+                isShapePatchProtected={isShapePatchProtected}
+                originalShapesRef={remotePreviewOriginalShapesRef}
+                previewShapeIdsRef={remotePreviewShapeIdsRef}
+                previewStore={presence?.remoteShapePreviewStore}
+                protectionVersion={localInteractionVersion}
+              />
+              <CanvasHistoryStateReporter
+                onHistoryStateChange={onHistoryStateChange}
+              />
+              <CanvasCameraCoordinateHud />
+              <CanvasFileDropImporter />
+              {presence?.enabled ? (
+                <CanvasPresenceReporter presence={presence} />
+              ) : null}
+              {presence ? (
+                <RemoteCursorOverlay
+                  currentUserId={presence.currentUserId}
+                  cursorStore={presence.remoteCursorStore}
+                  presence={presence.remotePresence}
+                />
+              ) : null}
+              <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
+              <SelectedShapeStackingManager />
+              <SelectedGroupToolbar />
+              {loadingFrameIds.size ? (
+                <CanvasFrameLazyLoadingOverlay loadingFrameIds={loadingFrameIds} />
+              ) : null}
+              <FrameSelectionToolbar />
+            </TldrawSurface>
+          </CanvasRemoteShapePreviewProvider>
+        </CanvasRemotePresenceProvider>
+        <CanvasAiChatOverlay
+          anchor={canvasAiChatAnchor}
+          artifact={canvasAgent.artifact}
+          draft={canvasAgent.draft}
+          error={canvasAgent.error}
+          holdProgress={canvasAiChatHoldProgress}
+          isRunning={canvasAgent.isRunning}
+          layoutStorageKey={`pilo:canvas-ai-chat-layout:${board.id}`}
+          onApplyDraft={canvasAgent.applyDraft}
+          onClose={() => setCanvasAiChatAnchor(null)}
+          onDiscardDraft={canvasAgent.discardDraft}
+          onSubmit={canvasAgent.submit}
+          statusMessage={canvasAgent.message}
+        />
+        <CanvasAgentVisualOverlay
+          draft={canvasAgent.draft}
+          editor={canvasEditor}
+          playbackEnabled={canvasAgent.presentationMode !== "background"}
+          progress={canvasAgent.progress}
+        />
+      </div>
     </CanvasDriveFileProvider>
   );
 }

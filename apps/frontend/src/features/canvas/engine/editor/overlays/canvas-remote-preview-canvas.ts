@@ -1,18 +1,4 @@
-"use client";
-
-import {
-  useLayoutEffect,
-  useState,
-  type RefObject,
-} from "react";
 import { Mat, type Editor, type TLShapeId } from "tldraw";
-
-export type CanvasOverlayRect = {
-  height: number;
-  left: number;
-  top: number;
-  width: number;
-};
 
 export type CanvasRemotePreviewShapeTransform = {
   parentId: string;
@@ -44,63 +30,6 @@ export const CANVAS_PREVIEW_SHAPE_COLORS: Record<string, string> = {
   yellow: "#f59f00",
 };
 
-function hasSameOverlayRect(
-  previousRect: CanvasOverlayRect | null,
-  nextRect: CanvasOverlayRect,
-) {
-  return (
-    previousRect?.height === nextRect.height &&
-    previousRect.left === nextRect.left &&
-    previousRect.top === nextRect.top &&
-    previousRect.width === nextRect.width
-  );
-}
-
-export function useCanvasOverlayRect(
-  overlayRef: RefObject<HTMLCanvasElement | null>,
-) {
-  const [overlayRect, setOverlayRect] = useState<CanvasOverlayRect | null>(null);
-
-  useLayoutEffect(() => {
-    const overlayElement = overlayRef.current;
-    if (!overlayElement) return undefined;
-    const measuredOverlay = overlayElement;
-
-    function updateOverlayRect() {
-      const rect = measuredOverlay.getBoundingClientRect();
-      const nextRect = {
-        height: rect.height,
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-      };
-
-      setOverlayRect((currentRect) =>
-        hasSameOverlayRect(currentRect, nextRect) ? currentRect : nextRect,
-      );
-    }
-
-    updateOverlayRect();
-
-    const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(updateOverlayRect);
-
-    resizeObserver?.observe(measuredOverlay);
-    window.addEventListener("resize", updateOverlayRect);
-    window.addEventListener("scroll", updateOverlayRect, true);
-
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateOverlayRect);
-      window.removeEventListener("scroll", updateOverlayRect, true);
-    };
-  }, [overlayRef]);
-
-  return overlayRect;
-}
-
 export function getCanvasRemotePreviewShapePageTransform(
   editor: Editor,
   shape: CanvasRemotePreviewShapeTransform,
@@ -125,32 +54,4 @@ export function getCanvasPreviewStrokeDash(
   if (dash === "dotted") return [0.1, strokeWidth * 2];
 
   return [];
-}
-
-export function prepareCanvasPreviewContext({
-  context,
-  overlay,
-  overlayRect,
-}: {
-  context: CanvasRenderingContext2D;
-  overlay: HTMLCanvasElement;
-  overlayRect: CanvasOverlayRect;
-}) {
-  const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
-  const pixelWidth = Math.max(
-    1,
-    Math.round(overlayRect.width * devicePixelRatio),
-  );
-  const pixelHeight = Math.max(
-    1,
-    Math.round(overlayRect.height * devicePixelRatio),
-  );
-
-  if (overlay.width !== pixelWidth || overlay.height !== pixelHeight) {
-    overlay.width = pixelWidth;
-    overlay.height = pixelHeight;
-  }
-
-  context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-  context.clearRect(0, 0, overlayRect.width, overlayRect.height);
 }

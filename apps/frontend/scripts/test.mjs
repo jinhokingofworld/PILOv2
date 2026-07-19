@@ -292,6 +292,27 @@ const canvasRemoteConnectionPreview = await readFile(
   ),
   "utf8"
 );
+const canvasRemoteWorldPreviewLayer = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/overlays/CanvasRemoteWorldPreviewLayer.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasCoordinateHud = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/overlays/canvas-coordinate-hud.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasCameraCoordinateHud = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/overlays/CanvasCameraCoordinateHud.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const canvasRemoteCursorOverlay = await readFile(
   new URL("../src/shared/canvas-realtime/RemoteCursorOverlay.tsx", import.meta.url),
   "utf8"
@@ -1024,23 +1045,52 @@ assert.match(canvasRemoteShapePreviewStore, /removeShapeIds/);
 assert.match(canvasRemoteShapePreviewStore, /markCommittedShapeIds/);
 assert.match(canvasRemoteShapePreviewStore, /acknowledgeAppliedShapeIds/);
 assert.match(canvasRemoteShapePreviewStore, /sweepStale/);
-assert.match(piloTldrawCanvas, /CanvasRemoteFreehandPreviewOverlay/);
-assert.match(piloTldrawCanvas, /CanvasRemoteConnectionPreviewOverlay/);
+assert.match(piloTldrawCanvas, /CanvasRemoteWorldPreviewLayer/);
 assert.match(
   piloTldrawCanvas,
   /previewShape\.type === "draw"[\s\S]*previewShape\.type === "highlight"[\s\S]*previewShape\.type === "line"[\s\S]*previewShape\.type === "arrow"/,
 );
 assert.match(canvasRemoteFreehandPreviewOverlay, /useSyncExternalStore/);
-assert.match(canvasRemoteFreehandPreviewOverlay, /requestAnimationFrame/);
 assert.match(canvasRemoteFreehandPreviewOverlay, /b64Vecs\.decodePoints/);
+assert.match(canvasRemoteFreehandPreviewOverlay, /<svg/);
+assert.match(canvasRemoteFreehandPreviewOverlay, /strokeWidth=\{path\.strokeWidth\}/);
+assert.doesNotMatch(canvasRemoteFreehandPreviewOverlay, /pageToScreen/);
+assert.doesNotMatch(canvasRemoteFreehandPreviewOverlay, /requestAnimationFrame/);
 assert.doesNotMatch(canvasRemoteFreehandPreviewOverlay, /editor\.createShapes/);
 assert.doesNotMatch(canvasRemoteFreehandPreviewOverlay, /editor\.updateShapes/);
 assert.match(canvasRemoteConnectionPreviewOverlay, /useSyncExternalStore/);
-assert.match(canvasRemoteConnectionPreviewOverlay, /requestAnimationFrame/);
+assert.match(canvasRemoteConnectionPreviewOverlay, /<svg/);
+assert.match(canvasRemoteConnectionPreviewOverlay, /createArrowheadPath/);
+assert.doesNotMatch(canvasRemoteConnectionPreviewOverlay, /pageToScreen/);
+assert.doesNotMatch(canvasRemoteConnectionPreviewOverlay, /requestAnimationFrame/);
 assert.doesNotMatch(canvasRemoteConnectionPreviewOverlay, /editor\.createShapes/);
 assert.doesNotMatch(canvasRemoteConnectionPreviewOverlay, /editor\.updateShapes/);
 assert.match(canvasRemoteConnectionPreview, /getRemoteConnectionPreviewPath/);
 assert.match(canvasRemoteConnectionPreview, /readRemoteConnectionPreviewShape/);
+assert.match(canvasRemoteWorldPreviewLayer, /canvas-remote-world-preview-layer/);
+assert.match(canvasRemoteWorldPreviewLayer, /CanvasRemoteFreehandPreviewOverlay/);
+assert.match(canvasRemoteWorldPreviewLayer, /CanvasRemoteConnectionPreviewOverlay/);
+assert.match(piloTldrawCanvas, /OnTheCanvas: CanvasRemoteWorldPreviewLayer/);
+assert.match(piloTldrawCanvas, /CanvasRemoteShapePreviewProvider/);
+assert.match(piloTldrawCanvas, /<CanvasCameraCoordinateHud \/>/);
+assert.doesNotMatch(piloTldrawCanvas, /scheduleCanvasCoordinateUpdate/);
+assert.match(canvasCameraCoordinateHud, /getViewportPageBounds\(\)/);
+assert.match(canvasCameraCoordinateHud, /viewport\.x \+ viewport\.w \/ 2/);
+assert.match(canvasCameraCoordinateHud, /viewport\.y \+ viewport\.h \/ 2/);
+assert.match(canvasCameraCoordinateHud, /className="canvas-coordinate-hud"/);
+assert.match(canvasCameraCoordinateHud, /<Popover /);
+assert.match(canvasCameraCoordinateHud, /<Input/);
+assert.match(canvasCameraCoordinateHud, /editor\.centerOnPoint/);
+assert.match(canvasCameraCoordinateHud, /animation: \{ duration: 180 \}/);
+assert.match(canvasCameraCoordinateHud, /if \(moveToDraftCoordinate\(\)\)/);
+assert.match(canvasCameraCoordinateHud, /className="w-auto p-1\.5"/);
+assert.match(canvasCameraCoordinateHud, /text-\[10px\].*md:text-\[10px\]/);
+assert.match(canvasCameraCoordinateHud, /inputMode="decimal"/);
+assert.doesNotMatch(canvasCameraCoordinateHud, /type="number"/);
+assert.doesNotMatch(canvasCameraCoordinateHud, />취소</);
+assert.match(canvasCss, /\.canvas-tool-rail:not\(\.canvas-top-left-controls\)/);
+assert.match(piloTldrawCanvas, /\.canvas-ai-chat, \.canvas-coordinate-hud/);
+assert.match(canvasCoordinateHud, /Math\.round\(value \* 10\) \/ 10/);
 assert.match(canvasLocalInteractionPolicy, /isCanvasFreehandInteractionActive/);
 assert.match(canvasLocalInteractionPolicy, /getCanvasActiveMutationShapeIds/);
 assert.match(canvasLocalInteractionPolicy, /getCanvasInteractionToolPath/);

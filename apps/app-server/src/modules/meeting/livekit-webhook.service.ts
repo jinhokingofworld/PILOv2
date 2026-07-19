@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { WebhookEvent, WebhookReceiver } from "livekit-server-sdk";
 import { QueryResultRow } from "pg";
 import { badRequest, unauthorized } from "../../common/api-error";
@@ -7,6 +7,7 @@ import {
   DatabaseTransaction
 } from "../../database/database.service";
 import { MeetingService } from "./meeting.service";
+import { ScreenShareWebhookService } from "../screen-share/screen-share-webhook.service";
 
 export type LiveKitWebhookDeliveryStatus = "received" | "ignored";
 
@@ -41,7 +42,9 @@ const INVALID_LIVEKIT_WEBHOOK_SIGNATURE_MESSAGE =
 export class LiveKitWebhookService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly meetingService: MeetingService
+    private readonly meetingService: MeetingService,
+    @Optional()
+    private readonly screenShareWebhookService?: ScreenShareWebhookService
   ) {}
 
   async receiveWebhook(
@@ -51,6 +54,27 @@ export class LiveKitWebhookService {
     const body = this.validateRawBody(rawBody);
     this.assertJson(body);
     const event = await this.receiveVerifiedEvent(body, authorization);
+    this.validateRequiredString(
+      event.id,
+      "LiveKit webhook delivery id is required"
+    );
+    this.validateRequiredString(
+      event.event,
+      "LiveKit webhook event name is required"
+    );
+    if (
+      this.screenShareWebhookService &&
+      (await this.screenShareWebhookService.canHandle(event))
+    ) {
+      return this.screenShareWebhookService.handleVerifiedEvent(event);
+    }
+
+    return this.receiveMeetingEvent(event);
+  }
+
+  private async receiveMeetingEvent(
+    event: WebhookEvent
+  ): Promise<LiveKitWebhookDeliveryPayload> {
     const deliveryId = this.validateRequiredString(event.id, "LiveKit webhook delivery id is required");
     const eventName = this.validateRequiredString(event.event, "LiveKit webhook event name is required");
 

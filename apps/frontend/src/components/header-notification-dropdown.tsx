@@ -39,6 +39,12 @@ import {
 } from "@/features/meeting/api/client";
 import { useRealtimeSocket } from "@/shared/realtime/realtime-provider";
 import { enqueueMeetingConnectionAction } from "@/features/meeting/stores/meeting-connection-action-store";
+import {
+  ScreenShareNotificationItem,
+  shouldShowScreenShareNotification
+} from "@/features/screen-share/components/screen-share-notification-item";
+import { useScreenShareRuntime } from "@/features/screen-share/runtime/screen-share-runtime-provider";
+import type { PublicScreenShareSession } from "@/features/screen-share/types";
 import { cn } from "@/lib/utils";
 
 const ACTIVE_MEETING_LEAVE_FAILED_MESSAGE =
@@ -52,6 +58,7 @@ export function HeaderNotificationDropdown() {
   const authSession = useAuthSession();
   const { markMentionRead, mentions, summary } = useChatRuntime();
   const meetingRuntime = useMeetingRuntime();
+  const { activeSession, currentUserId, startViewing } = useScreenShareRuntime();
   const socket = useRealtimeSocket();
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [workspaceInvitations, setWorkspaceInvitations] = useState<
@@ -92,6 +99,11 @@ export function HeaderNotificationDropdown() {
   });
   const notificationLabel =
     unreadCount > 0 ? `읽지 않은 알림 ${unreadCount}개` : "알림";
+  const screenShareNotificationSession =
+    activeSession &&
+    shouldShowScreenShareNotification({ activeSession, currentUserId })
+      ? activeSession
+      : null;
 
   useEffect(() => {
     if (!authSession) {
@@ -356,6 +368,11 @@ export function HeaderNotificationDropdown() {
       });
   }
 
+  function watchScreenShare(session: PublicScreenShareSession) {
+    setIsPopoverOpen(false);
+    startViewing(session.id);
+  }
+
   return (
     <>
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
@@ -397,6 +414,13 @@ export function HeaderNotificationDropdown() {
           </div>
 
           <div className="max-h-80 overflow-y-auto py-1">
+            {screenShareNotificationSession ? (
+              <ScreenShareNotificationItem
+                onWatch={() => watchScreenShare(screenShareNotificationSession)}
+                session={screenShareNotificationSession}
+              />
+            ) : null}
+
             {isLoadingInvitations ? (
               <div className="flex items-center justify-center gap-2 border-b px-4 py-4 text-xs text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
@@ -578,6 +602,7 @@ export function HeaderNotificationDropdown() {
             {workspaceInvitations.length === 0 &&
             meetingNotifications.length === 0 &&
             mentions.length === 0 &&
+            !screenShareNotificationSession &&
             !isLoadingInvitations ? (
               <div className="flex flex-col items-center gap-2 px-4 py-10 text-center text-muted-foreground">
                 <Inbox className="size-7" />

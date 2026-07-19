@@ -14,6 +14,7 @@ import {
   SidebarTrigger
 } from "@/components/ui/sidebar";
 import { HeaderMeetingStatus } from "@/features/meeting/components/header-meeting-status";
+import { ScreenShareHeaderControl } from "@/features/screen-share/components/screen-share-header-control";
 import {
   featureNavigationItems,
   getFeatureNavigationItemForPathname
@@ -38,7 +39,10 @@ export function MainShell({ children }: MainShellProps) {
   if (isSqlErdImmersiveRoute) {
     return (
       <main className="h-svh overflow-hidden bg-background">
-        <WorkspaceMemberAvatars mode="floating" />
+        <div className="fixed right-4 top-4 z-50 flex items-center gap-2 [&_[data-mode=floating]]:!static">
+          <ScreenShareHeaderControl mode="floating" />
+          <WorkspaceMemberAvatars mode="floating" />
+        </div>
         {children}
       </main>
     );
@@ -63,6 +67,7 @@ export function MainShell({ children }: MainShellProps) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <ScreenShareHeaderControl mode="header" />
             <WorkspaceMemberAvatars mode="header" />
             <div className="hidden min-[480px]:block">
               <HeaderMeetingStatus />

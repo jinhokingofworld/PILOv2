@@ -13,6 +13,7 @@ import { MeetingModule } from "./modules/meeting/meeting.module";
 import { PrReviewModule } from "./modules/pr-review/pr-review.module";
 import { SqlErdModule } from "./modules/sql-erd/sql-erd.module";
 import { SettingsModule } from "./modules/settings/settings.module";
+import { ScreenShareModule } from "./modules/screen-share/screen-share.module";
 import { DatabaseModule } from "./database/database.module";
 import { UserModule } from "./modules/user/user.module";
 import { WorkspaceModule } from "./modules/workspace/workspace.module";
@@ -24,6 +25,7 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
     UserModule,
     SettingsModule,
     WorkspaceModule,
+    ScreenShareModule,
     AgentModule,
     GithubIntegrationModule,
     PrReviewModule,

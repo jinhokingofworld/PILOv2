@@ -75,6 +75,8 @@ import { createWorkspacePresenceAccessService } from "../workspace-presence/work
 import { createWorkspacePresenceMembershipRevocationHandler } from "../workspace-presence/workspace-presence-membership-revocation";
 import { createWorkspacePresenceService } from "../workspace-presence/workspace-presence.service";
 import { registerWorkspacePresenceSocketHandlers } from "../workspace-presence/workspace-presence-socket-handlers";
+import { createScreenShareFanOut } from "../screen-share/screen-share-fan-out";
+import { createScreenShareSubscription } from "../screen-share/screen-share-subscription";
 import {
   isMeetingNotificationRedisEvent,
   isMeetingReportRedisEvent,
@@ -545,6 +547,11 @@ export async function createRealtimeSocketServer({
       io,
       service: workspacePresenceService,
     });
+  const screenShareFanOut = createScreenShareFanOut({
+    emit(room, event, payload) {
+      io.to(room).emit(event, payload);
+    },
+  });
   const chatSubscriptionWork = createChatSubscriptionWorkQueue({
     onRejected() {
       console.error("Chat Redis subscription work failed");
@@ -670,6 +677,15 @@ export async function createRealtimeSocketServer({
           }
         },
       )
+    : null;
+  const screenShareSubscription = redisAdapter
+    ? await createScreenShareSubscription({
+        fanOut: screenShareFanOut,
+        onInvalid() {
+          console.error("Workspace screen share Redis payload is invalid");
+        },
+        redisAdapter,
+      })
     : null;
   const unsubscribeChatEvents = redisAdapter
     ? await redisAdapter.subscribe(CHAT_REDIS_CHANNEL, (payload) => {
@@ -1380,6 +1396,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardInvalidations?.();
       await unsubscribeBoardSourceEvents?.();
       await unsubscribeGithubSourceInvalidations?.();
+      await screenShareSubscription?.close();
       await unsubscribeChatEvents?.();
       await unsubscribeWorkspaceMembershipRevocations?.();
       await chatSubscriptionWork.drain();

@@ -680,6 +680,7 @@ export class AgentLoggingService {
               error_code = NULL,
               error_message = NULL,
               turn_sequence = turn_sequence + 1,
+              planning_started_at = now(),
               reason = 'tool_result'
           WHERE run_id = $1
           RETURNING id
@@ -1072,6 +1073,7 @@ export class AgentLoggingService {
                   error_code = NULL,
                   error_message = NULL,
                   turn_sequence = turn_sequence + 1,
+                  planning_started_at = now(),
                   reason = 'tool_result'
               WHERE run_id = $1
               RETURNING id

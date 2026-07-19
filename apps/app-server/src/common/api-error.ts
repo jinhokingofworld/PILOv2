@@ -8,27 +8,36 @@ export type ApiErrorCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"
+  | "SCREEN_SHARE_ALREADY_ACTIVE"
+  | "SCREEN_SHARE_NOT_FOUND"
+  | "SERVICE_UNAVAILABLE"
   | "SQL_ERD_WRITE_PROTOCOL_MISMATCH"
   | "PAYLOAD_TOO_LARGE";
 
-export interface ApiErrorResponse {
+export interface ApiErrorResponse<TDetails = never> {
   success: false;
   error: {
     code: ApiErrorCode;
     message: string;
+    details?: TDetails;
   };
 }
 
-export class ApiError extends HttpException {
-  constructor(status: HttpStatus, code: ApiErrorCode, message: string) {
+export class ApiError<TDetails = never> extends HttpException {
+  constructor(
+    status: HttpStatus,
+    code: ApiErrorCode,
+    message: string,
+    details?: TDetails
+  ) {
     super(
       {
         success: false,
-        error: {
-          code,
-          message
-        }
-      } satisfies ApiErrorResponse,
+        error:
+          details === undefined
+            ? { code, message }
+            : { code, message, details }
+      } satisfies ApiErrorResponse<TDetails>,
       status
     );
   }

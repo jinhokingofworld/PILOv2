@@ -3,6 +3,7 @@ import { CommonModule } from "../../common/common.module";
 import { DatabaseModule } from "../../database/database.module";
 import { BoardModule } from "../board/board.module";
 import { CalendarModule } from "../calendar/calendar.module";
+import { ScreenShareModule } from "../screen-share/screen-share.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { LiveKitEgressService } from "./livekit-egress.service";
 import { LiveKitTokenService } from "./livekit-token.service";
@@ -30,7 +31,14 @@ import {
 import { MeetingNotificationService } from "./meeting-notification.service";
 
 @Module({
-  imports: [CommonModule, DatabaseModule, WorkspaceModule, CalendarModule, BoardModule],
+  imports: [
+    CommonModule,
+    DatabaseModule,
+    WorkspaceModule,
+    CalendarModule,
+    BoardModule,
+    ScreenShareModule
+  ],
   controllers: [
     MeetingController,
     CurrentUserMeetingController,

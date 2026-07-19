@@ -437,7 +437,9 @@ export class AgentService {
           SET status = 'pending', attempt_count = 0, next_attempt_at = now(),
               claim_token = NULL, claimed_at = NULL, delivered_at = NULL,
               error_code = NULL, error_message = NULL,
-              turn_sequence = turn_sequence + 1, reason = 'user_input'
+              turn_sequence = turn_sequence + 1,
+              planning_started_at = now(),
+              reason = 'user_input'
           WHERE run_id = $1
           RETURNING id
         `,
