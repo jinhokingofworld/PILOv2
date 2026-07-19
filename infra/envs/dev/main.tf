@@ -251,7 +251,7 @@ module "ecs" {
         AGENT_DOMAIN_BOARD_WRITE_ENABLED      = "false"
         AGENT_DOMAIN_CANVAS_READ_ENABLED      = "false"
         AGENT_DOMAIN_CANVAS_WRITE_ENABLED     = "false"
-        AGENT_DOMAIN_SQL_ERD_READ_ENABLED     = "false"
+        AGENT_DOMAIN_SQL_ERD_READ_ENABLED     = "true"
         AGENT_DOMAIN_SQL_ERD_WRITE_ENABLED    = "false"
         AGENT_DOMAIN_DRIVE_READ_ENABLED       = "false"
         AGENT_DOMAIN_DRIVE_WRITE_ENABLED      = "false"
