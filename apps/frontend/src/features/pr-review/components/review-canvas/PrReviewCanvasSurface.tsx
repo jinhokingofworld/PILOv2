@@ -98,6 +98,7 @@ import {
 import {
   registerPrReviewFileNodeActivationHandler
 } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
+import { getPrReviewFlowFileBounds } from "@/features/pr-review/components/review-canvas/pr-review-flow-group-drag";
 import {
   preservePrReviewFlowLabelTranslation,
   shouldRemoveCreatedPrReviewSystemShape
@@ -1210,6 +1211,75 @@ function updatePrReviewRelationGeometry(
   }
 }
 
+function updatePrReviewFlowLabelGeometry(
+  editor: Editor,
+  internalShapeUpdateRef: MutableRefObject<boolean>
+) {
+  const fileShapes = editor
+    .getCurrentPageShapes()
+    .filter(isPrReviewFileNodeShape)
+    .map((shape) => ({
+      flowId: shape.props.flowId,
+      x: shape.x,
+      y: shape.y,
+      width: shape.props.w,
+      height: shape.props.h
+    }));
+  const updates = editor.getCurrentPageShapes().flatMap((shape) => {
+    if (shape.type !== PR_REVIEW_FLOW_LABEL_SHAPE_TYPE) {
+      return [];
+    }
+
+    const bounds = getPrReviewFlowFileBounds({
+      fileShapes,
+      flowId: shape.props.flowId
+    });
+    if (!bounds) {
+      return [];
+    }
+
+    return [
+      {
+        id: shape.id,
+        type: PR_REVIEW_FLOW_LABEL_SHAPE_TYPE,
+        x: bounds.left,
+        y: Math.max(
+          CANVAS_PADDING_Y,
+          bounds.top - FLOW_LABEL_HEIGHT - FLOW_HEADER_GAP
+        ),
+        props: {
+          ...shape.props,
+          w: Math.max(FLOW_LABEL_MIN_WIDTH, bounds.right - bounds.left)
+        }
+      } satisfies TLShapePartial<PrReviewFlowLabelShape>
+    ];
+  });
+
+  if (!updates.length) {
+    return;
+  }
+
+  internalShapeUpdateRef.current = true;
+  try {
+    editor.updateShapes(updates);
+  } finally {
+    internalShapeUpdateRef.current = false;
+  }
+}
+
+function updatePrReviewDerivedGeometry(
+  editor: Editor,
+  internalShapeUpdateRef: MutableRefObject<boolean>,
+  preserveStoredRoutes = false
+) {
+  updatePrReviewRelationGeometry(
+    editor,
+    internalShapeUpdateRef,
+    preserveStoredRoutes
+  );
+  updatePrReviewFlowLabelGeometry(editor, internalShapeUpdateRef);
+}
+
 function hasPrReviewRelationAnchors(
   shape: PrReviewRelationEdgeShape,
   geometry: ReturnType<typeof buildPrReviewRelationEdgeGeometry>
@@ -1280,7 +1350,7 @@ function resetPrReviewCanvas(
     }
 
     editor.createShapes(shapes);
-    updatePrReviewRelationGeometry(editor, internalShapeUpdateRef, true);
+    updatePrReviewDerivedGeometry(editor, internalShapeUpdateRef, true);
     initializeSyncedFileGeometry(editor, lastSyncedGeometryRef);
   } finally {
     hydratingRef.current = false;
@@ -1845,7 +1915,7 @@ function PrReviewCanvasPersistenceBridge({
           )
         );
       }
-      updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
+      updatePrReviewDerivedGeometry(editor, internalShapeUpdateRef);
     }
 
     async function flushPendingShapes() {
@@ -1995,7 +2065,7 @@ function PrReviewCanvasPersistenceBridge({
           }
         }
 
-        updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
+        updatePrReviewDerivedGeometry(editor, internalShapeUpdateRef);
         scheduleFlush();
       },
       { scope: "document", source: "user" }
@@ -2213,7 +2283,7 @@ export function PrReviewCanvasSurface({
       }
 
       if (geometryChanged) {
-        updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
+        updatePrReviewDerivedGeometry(editor, internalShapeUpdateRef);
       }
     },
     [realtimeIdentity.currentUser?.userId]
@@ -2480,7 +2550,7 @@ export function PrReviewCanvasSurface({
     internalShapeUpdateRef.current = true;
     try {
       currentEditor.updateShapes(updates);
-      updatePrReviewRelationGeometry(currentEditor, internalShapeUpdateRef);
+      updatePrReviewDerivedGeometry(currentEditor, internalShapeUpdateRef);
     } finally {
       internalShapeUpdateRef.current = false;
     }
@@ -2511,7 +2581,7 @@ export function PrReviewCanvasSurface({
             }) satisfies TLShapePartial<PrReviewFileNodeShape>
         )
       );
-      updatePrReviewRelationGeometry(currentEditor, internalShapeUpdateRef);
+      updatePrReviewDerivedGeometry(currentEditor, internalShapeUpdateRef);
     } finally {
       internalShapeUpdateRef.current = false;
     }
