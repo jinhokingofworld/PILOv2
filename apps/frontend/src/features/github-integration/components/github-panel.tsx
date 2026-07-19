@@ -184,6 +184,8 @@ export function GithubPanel() {
   const [hasRunningSyncRun, setHasRunningSyncRun] = useState(false);
   const [snapshot, setSnapshot] =
     useState<GithubIntegrationSnapshot>(emptySnapshot);
+  const [restoredRepository, setRestoredRepository] =
+    useState<GithubRepository | null>(null);
   const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
   const [selectedInstallationId, setSelectedInstallationId] = useState("");
   const [selectedProjectV2Id, setSelectedProjectV2Id] = useState("");
@@ -199,9 +201,13 @@ export function GithubPanel() {
   const isLoading = panelStatus === "loading" || panelStatus === "idle";
   const connected = snapshot.oauth?.connected === true;
   const isSyncActive = isSyncing || hasRunningSyncRun;
-  const selectedRepository = snapshot.repositories.find(
-    (repository) => repository.id === selectedRepositoryId
-  );
+  const selectedRepository =
+    snapshot.repositories.find(
+      (repository) => repository.id === selectedRepositoryId
+    ) ??
+    (restoredRepository?.id === selectedRepositoryId
+      ? restoredRepository
+      : undefined);
   const selectedInstallation = snapshot.installations.find(
     (installation) => installation.id === selectedInstallationId
   );
@@ -291,6 +297,7 @@ export function GithubPanel() {
       syncRunsRequestGateRef.current.invalidate();
       setPanelStatus("ready");
       setSnapshot(emptySnapshot);
+      setRestoredRepository(null);
       setHasRunningSyncRun(false);
       setSyncPollingError(null);
       setSelectedRepositoryId("");
@@ -350,18 +357,50 @@ export function GithubPanel() {
         return;
       }
 
+      let repositoryDataError: string | null = null;
+      let activeBoardRepository: GithubRepository | null = null;
+
+      if (
+        activeBoardSource?.repository.id &&
+        !repositories.data.some(
+          (repository) => repository.id === activeBoardSource.repository.id
+        )
+      ) {
+        try {
+          activeBoardRepository = await apiClient.getGithubRepository(
+            workspaceId,
+            activeBoardSource.repository.id
+          );
+          if (
+            !snapshotRequestGateRef.current.isCurrent(snapshotRequestGeneration)
+          ) {
+            return;
+          }
+        } catch (error) {
+          if (
+            !snapshotRequestGateRef.current.isCurrent(snapshotRequestGeneration)
+          ) {
+            return;
+          }
+          repositoryDataError = getErrorMessage(error);
+        }
+      }
+
+      const selectionRepositories = activeBoardRepository
+        ? [...repositories.data, activeBoardRepository]
+        : repositories.data;
+
       const initialBoardSelection = resolveGithubActiveBoardSelection({
-        repositories: repositories.data,
+        repositories: selectionRepositories,
         projects: [],
         activeBoardSource,
         preferredRepositoryId,
         preferredProjectV2Id
       });
-      const nextRepository = repositories.data.find(
+      const nextRepository = selectionRepositories.find(
         (repository) => repository.id === initialBoardSelection.repositoryId
       );
       let nextProjects: GithubProjectV2[] = [];
-      let repositoryDataError: string | null = null;
 
       if (nextRepository) {
         try {
@@ -378,7 +417,7 @@ export function GithubPanel() {
       }
 
       const nextBoardSelection = resolveGithubActiveBoardSelection({
-        repositories: repositories.data,
+        repositories: selectionRepositories,
         projects: nextProjects,
         activeBoardSource,
         preferredRepositoryId,
@@ -397,6 +436,12 @@ export function GithubPanel() {
         installations[0]?.id ??
         "";
 
+      if (
+        !snapshotRequestGateRef.current.isCurrent(snapshotRequestGeneration)
+      ) {
+        return;
+      }
+
       setSnapshot((current) => ({
         oauth,
         projectOAuth,
@@ -410,6 +455,7 @@ export function GithubPanel() {
           ? syncRuns.meta.total
           : current.syncRunsTotal
       }));
+      setRestoredRepository(activeBoardRepository);
       if (canApplySyncRuns) {
         setHasRunningSyncRun(
           queuedSyncRuns.meta.total > 0 || runningSyncRuns.meta.total > 0
@@ -433,6 +479,7 @@ export function GithubPanel() {
       setPanelStatus("error");
       setErrorMessage(getErrorMessage(error));
       setSnapshot(emptySnapshot);
+      setRestoredRepository(null);
       setSelectedRepositoryId("");
       selectedRepositoryIdRef.current = "";
       setSelectedInstallationId("");
@@ -867,6 +914,7 @@ export function GithubPanel() {
       repositoriesTotal={snapshot.repositoriesTotal}
       repositoryPage={repositoryPage}
       repositoryQuery={repositoryQuery}
+      restoredRepository={restoredRepository}
       selectedInstallation={selectedInstallation}
       installations={snapshot.installations}
       selectedInstallationId={selectedInstallationId}

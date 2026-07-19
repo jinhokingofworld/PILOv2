@@ -92,13 +92,43 @@ const snapshotLoader =
 assert.match(snapshotLoader, /apiClient\.getWorkspaceActiveBoardSource\(workspaceId\)/);
 assert.match(
   snapshotLoader,
+  /activeBoardSource\?\.repository\.id[\s\S]*?apiClient\.getGithubRepository\([\s\S]*?workspaceId,[\s\S]*?activeBoardSource\.repository\.id[\s\S]*?\)/,
+  "an active Board repository outside the current page must be restored through the existing repository endpoint"
+);
+assert.match(
+  snapshotLoader,
+  /setRestoredRepository\(activeBoardRepository\)/,
+  "an off-page active repository must be retained outside the paginated snapshot"
+);
+assert.match(
+  panel,
+  /const \[restoredRepository, setRestoredRepository\] =\s*useState<GithubRepository \| null>\(null\)/,
+  "restored repository context must not mutate paginated result state"
+);
+assert.match(
+  snapshotLoader,
+  /repositories: repositories\.data,[\s\S]*?repositoriesTotal: repositories\.meta\.total/,
+  "snapshot repository rows and total must stay exactly as returned by the server"
+);
+assert.match(
+  panel,
+  /selectedRepository =\s*snapshot\.repositories\.find\([\s\S]*?restoredRepository\?\.id === selectedRepositoryId/,
+  "active Board selection may use the restored repository without appending it to search results"
+);
+assert.match(
+  snapshotLoader,
+  /!snapshotRequestGateRef\.current\.isCurrent\(snapshotRequestGeneration\)[\s\S]*?return;[\s\S]*?setRestoredRepository\(activeBoardRepository\)/,
+  "stale restored-repository requests must be rejected before state is updated"
+);
+assert.match(
+  snapshotLoader,
   /resolveGithubActiveBoardSelection\(\{[\s\S]*?activeBoardSource,[\s\S]*?preferredRepositoryId,[\s\S]*?preferredProjectV2Id/,
   "snapshot loading must delegate restoration decisions to the tested utility"
 );
 assert.match(
   snapshotLoader,
-  /repositories\.data\.find\([\s\S]*?initialBoardSelection\.repositoryId[\s\S]*?\)[\s\S]*?if \(nextRepository\)[\s\S]*?listAllGithubProjectsV2\(nextRepository\.id\)/,
-  "ProjectV2s may load only after the preferred repository resolves in the current result page"
+  /selectionRepositories\.find\([\s\S]*?initialBoardSelection\.repositoryId[\s\S]*?\)[\s\S]*?if \(nextRepository\)[\s\S]*?listAllGithubProjectsV2\(nextRepository\.id\)/,
+  "ProjectV2s may load only after the preferred repository resolves, including outside the current result page"
 );
 const restoredProjectsRequest = snapshotLoader.indexOf(
   "nextProjects = await listAllGithubProjectsV2(nextRepository.id)"
@@ -116,22 +146,10 @@ assert.match(
   /if \(!allowFallbackSelection\) \{\s*return "";/,
   "an unavailable persisted ProjectV2 must not select a different project"
 );
-const pullRequestsLoader =
-  panel.match(/async function loadGithubPullRequests\([\s\S]*?\n  \}/)?.[0] ?? "";
-assert.match(pullRequestsLoader, /pullRequestsRequestGateRef\.current\.begin\(\)/);
-assert.match(
-  pullRequestsLoader,
-  /selectedRepositoryIdRef\.current === repositoryId[\s\S]*?pullRequestsRequestGateRef\.current\.isCurrent\(requestGeneration\)/
-);
-assert.equal(
-  pullRequestsLoader.match(/if \(!isCurrentRequest\(\)\)/g)?.length,
-  3,
-  "success, catch, and finally must all reject stale PR requests"
-);
-assert.match(
-  snapshotLoader,
-  /selectedRepositoryIdRef\.current = nextRepositoryId;[\s\S]*?if \(nextRepositoryId\)[\s\S]*?loadGithubPullRequests\(nextRepositoryId, false\)/,
-  "PR loading must use the restored repository and retain the existing race guard"
+assert.doesNotMatch(
+  panel,
+  /loadGithubPullRequests|pullRequestsRequestGateRef|setPullRequests/,
+  "GitHub settings restores only repository and ProjectV2 Board context"
 );
 
 console.log("active Board selection persistence tests passed");

@@ -15,10 +15,59 @@ assert.match(stepsSource, /getGithubSettingsAccessState/);
 assert.equal(
   (
     stepsSource.match(
-      /grid-cols-\[26px_minmax\(0,1fr\)_auto\]/g
+      /grid-cols-\[26px_minmax\(0,1fr\)_auto_minmax\(0,1fr\)_26px\]/g
     ) ?? []
   ).length,
   3
+);
+assert.equal(
+  (
+    stepsSource.match(
+      /col-start-3 row-start-1 justify-self-center/g
+    ) ?? []
+  ).length,
+  3,
+  "each connection status pill must occupy the centered grid column"
+);
+assert.equal(
+  (
+    stepsSource.match(
+      /max-\[45rem\]:col-start-2 max-\[45rem\]:row-start-2/g
+    ) ?? []
+  ).length,
+  3,
+  "narrow layouts must move each status pill into an explicit follow-up row"
+);
+assert.equal(
+  (stepsSource.match(/max-\[45rem\]:row-start-4/g) ?? []).length,
+  3,
+  "narrow layouts must move actions below the status and description rows"
+);
+assert.equal(
+  (stepsSource.match(/max-\[45rem\]:row-start-3/g) ?? []).length,
+  3,
+  "narrow layouts must keep descriptions in their own row"
+);
+assert.equal(
+  (stepsSource.match(/col-start-4 row-span-2 row-start-1 justify-self-end/g) ?? []).length,
+  3,
+  "desktop actions must occupy the trailing symmetric column"
+);
+assert.doesNotMatch(stepsSource, /absolute left-1\/2/);
+assert.equal(
+  (stepsSource.match(/max-\[45rem\]:grid-cols-\[26px_minmax\(0,1fr\)_auto\]/g) ?? [])
+    .length,
+  3,
+  "narrow layouts must drop the symmetric desktop grid before long actions overflow"
+);
+assert.match(
+  stepsSource,
+  /const completedDestructiveButtonClassName =\s*"h-10 rounded-\[8px\] border-\[#ffc9c9\] bg-white px-4 text-\[#b42318\] hover:bg-\[#fff1f1\]"/
+);
+assert.doesNotMatch(
+  stepsSource,
+  /completedDisconnectButtonClassName/,
+  "OAuth disconnect controls must use the same destructive treatment as app uninstall"
 );
 assert.match(stepsSource, /before:h-\[calc\(100%-16px\)\]/);
 assert.doesNotMatch(stepsSource, /@\[48rem\]/);
@@ -134,6 +183,16 @@ assert.doesNotMatch(panelSource, /setPullRequests/);
 
 assert.match(repositorySource, /Project를 조회하고 동기화할 repository/);
 assert.doesNotMatch(repositorySource, /Pull Request 조회 기준/);
+assert.match(
+  repositorySource,
+  /restoredRepository: GithubRepository \| null/,
+  "an off-page active repository must be rendered as separate selection context"
+);
+assert.match(
+  repositorySource,
+  /restoredRepository \?[\s\S]*?restoredRepository\.fullName/,
+  "the repository panel must identify the restored current selection without mixing it into result rows"
+);
 assert.match(
   repositorySource,
   /repo-row grid grid-cols-\[minmax\(0,1fr\)_auto\][\s\S]*?@\[48rem\]:grid-cols-\[minmax\(180px,1\.7fr\)_90px_90px_108px_86px\]/
