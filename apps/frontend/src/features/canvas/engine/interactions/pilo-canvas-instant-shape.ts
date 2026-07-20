@@ -24,29 +24,37 @@ export type PiloCanvasInstantShapeRequest =
   | { type: "text" };
 
 const piloInstantShapeSizeByType = {
-  frame: { height: 180, width: 320 },
-  note: { height: 200, width: 200 },
-  text: { height: 48, width: 180 },
+  frame: { height: 360, width: 640 },
+  note: { height: 400, width: 400 },
+  text: { height: 96, width: 360 },
 } as const;
 
 export function getPiloCanvasInstantGeoSize(
   preset: Exclude<PiloDrawingPreset, "pen" | "highlight" | "eraser">,
 ) {
-  if (preset === "circle") return { height: 120, width: 120 };
+  if (preset === "circle") return { height: 240, width: 240 };
   if (preset === "ellipse" || preset === "oval") {
-    return { height: 110, width: 180 };
+    return { height: 220, width: 360 };
   }
   if (preset.startsWith("arrow-")) {
-    return { height: 90, width: 180 };
+    return { height: 180, width: 360 };
   }
   if (preset === "rectangle" || preset.startsWith("rhombus")) {
-    return { height: 110, width: 160 };
+    return { height: 220, width: 320 };
   }
   if (preset === "cloud" || preset === "heart") {
-    return { height: 120, width: 140 };
+    return { height: 240, width: 280 };
   }
 
-  return { height: 120, width: 120 };
+  return { height: 240, width: 240 };
+}
+
+function getPiloCanvasInstantShapeSize(
+  request: PiloCanvasInstantShapeRequest,
+) {
+  return request.type === "geo"
+    ? getPiloCanvasInstantGeoSize(request.preset)
+    : piloInstantShapeSizeByType[request.type];
 }
 
 export function createPiloCanvasShapeInEmptyViewport({
@@ -56,10 +64,7 @@ export function createPiloCanvasShapeInEmptyViewport({
   editor: Editor;
   request: PiloCanvasInstantShapeRequest;
 }) {
-  const size =
-    request.type === "geo"
-      ? getPiloCanvasInstantGeoSize(request.preset)
-      : piloInstantShapeSizeByType[request.type];
+  const size = getPiloCanvasInstantShapeSize(request);
   const point = findPiloCanvasEmptyPlacementForEditor(editor, size);
   const id = createShapeId();
   let shape: TLCreateShapePartial<TLShape> & { id: TLShapeId };

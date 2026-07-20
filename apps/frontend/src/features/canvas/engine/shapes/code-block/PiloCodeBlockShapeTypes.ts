@@ -31,9 +31,14 @@ export type PiloCodeBlockShape = TLBaseShape<
   PiloCodeBlockShapeProps
 >;
 
+export const PILO_COLLAPSED_CODE_BLOCK_SIZE = {
+  h: 144,
+  w: 360,
+} as const;
+
 export const DEFAULT_PILO_CODE_BLOCK_PROPS: PiloCodeBlockShape["props"] = {
-  w: 420,
-  h: 260,
+  w: 840,
+  h: 520,
   fileName: "canvas-node.tsx",
   language: "tsx",
   code: "export function CanvasNode() {\n  return <div>PILO</div>;\n}",

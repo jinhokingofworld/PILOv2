@@ -11,8 +11,8 @@ export type PiloFileNodeShapeProps = {
 export type PiloFileNodeShape = TLBaseShape<"file_node", PiloFileNodeShapeProps>;
 
 export const DEFAULT_PILO_FILE_NODE_PROPS: PiloFileNodeShapeProps = {
-  w: 420,
-  h: 280,
+  w: 840,
+  h: 560,
   fileId: "",
   fileName: "Drive file",
   mimeType: "application/octet-stream",

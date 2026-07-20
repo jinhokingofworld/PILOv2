@@ -12,6 +12,7 @@ const { SqlErdAgentToolsService } = require(
 const {
   buildSqlErdAgentSchemaProjection,
   createSqlErdModelFingerprint,
+  partitionSqlErdAgentContextTableRefs,
   resolveSqlErdAgentTableFocus
 } = require("../../dist/modules/agent/tools/sql-erd-table-focus.js");
 
@@ -284,6 +285,59 @@ assert.deepEqual(
   ).enumValues,
   ["Meeting  Started", "O'Brien"]
 );
+
+const boundedEvidenceModel = structuredClone(focusModelJson());
+const boundedEvidenceTable = boundedEvidenceModel.schema.tables[4];
+boundedEvidenceTable.name = `activity_${"logs_".repeat(20)}`;
+boundedEvidenceTable.comment = `  meeting   activity ${"history ".repeat(20)}`;
+boundedEvidenceTable.columns[1].name = `action_${"kind_".repeat(20)}`;
+boundedEvidenceTable.columns[1].comment = `  meeting   action ${"comment ".repeat(20)}`;
+boundedEvidenceTable.columns[2].dataType = `  ${"custom_type_".repeat(20)}  `;
+const longEnumValue = `meeting_${"started_".repeat(20)}`;
+const boundedEvidenceSource = `CREATE TYPE activity_log_action AS ENUM ('${longEnumValue}');`;
+const boundedEvidenceProjection = buildSqlErdAgentSchemaProjection(
+  boundedEvidenceModel,
+  "meeting activity",
+  boundedEvidenceSource
+);
+const projectedEvidenceTable = boundedEvidenceProjection.tables[4];
+const projectedActionColumn = projectedEvidenceTable.columns.find((column) =>
+  column.name.startsWith("action_")
+);
+const projectedTargetColumn = projectedEvidenceTable.columns.find(
+  (column) => column.name === "target_id"
+);
+const boundedEvidenceCases = [
+  { kind: "table_name", value: projectedEvidenceTable.name },
+  { kind: "table_comment", value: projectedEvidenceTable.comment },
+  { kind: "column_name", value: projectedActionColumn.name },
+  {
+    kind: "column_comment",
+    columnName: projectedActionColumn.name,
+    value: projectedActionColumn.comment
+  },
+  {
+    kind: "data_type",
+    columnName: projectedTargetColumn.name,
+    value: projectedTargetColumn.dataType
+  },
+  {
+    kind: "enum_value",
+    columnName: projectedActionColumn.name,
+    value: projectedActionColumn.enumValues[0]
+  }
+];
+for (const evidence of boundedEvidenceCases) {
+  assert.deepEqual(
+    partitionSqlErdAgentContextTableRefs(
+      boundedEvidenceModel,
+      boundedEvidenceSource,
+      new Map([["t5", [evidence]]]),
+      ["t5"]
+    ),
+    { acceptedRefs: ["t5"], ignoredTables: [] }
+  );
+}
 
 const largeProjection = buildSqlErdAgentSchemaProjection(
   {
@@ -714,6 +768,24 @@ assert.deepEqual(focusDefinition.inputSchema.required, [
   "confidence",
   "reasons"
 ]);
+const focusEvidenceSchema =
+  focusDefinition.inputSchema.properties.reasons.items.properties.evidence.items;
+assert.deepEqual(
+  focusEvidenceSchema.oneOf.map((candidate) => ({
+    kinds: candidate.properties.kind.enum,
+    required: candidate.required
+  })),
+  [
+    {
+      kinds: ["table_name", "table_comment", "column_name"],
+      required: ["kind", "value"]
+    },
+    {
+      kinds: ["column_comment", "data_type", "enum_value"],
+      required: ["kind", "columnName", "value"]
+    }
+  ]
+);
 
 const inspectInput = inspectDefinition.validateInput({
   featureQuery: "결제 기능"

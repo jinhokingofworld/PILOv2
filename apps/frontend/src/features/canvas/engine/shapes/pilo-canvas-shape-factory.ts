@@ -33,13 +33,13 @@ type PiloFileNodePartial = TLCreateShapePartial<PiloFileNodeShape> & {
   id: TLShapeId;
 };
 
-export const PILO_IMPORTED_CODE_BLOCK_WIDTH = 460;
-export const PILO_IMPORTED_CODE_BLOCK_HEIGHT = 300;
+export const PILO_IMPORTED_CODE_BLOCK_WIDTH = 920;
+export const PILO_IMPORTED_CODE_BLOCK_HEIGHT = 600;
 export const PILO_IMPORTED_CODE_FOLDER_MAX_COLUMNS = 3;
-export const PILO_IMPORTED_CODE_FOLDER_GAP_X = 56;
-export const PILO_IMPORTED_CODE_FOLDER_GAP_Y = 64;
-export const PILO_IMPORTED_CODE_FOLDER_PADDING = 40;
-export const PILO_IMPORTED_CODE_FOLDER_HEADER_HEIGHT = 52;
+export const PILO_IMPORTED_CODE_FOLDER_GAP_X = 112;
+export const PILO_IMPORTED_CODE_FOLDER_GAP_Y = 128;
+export const PILO_IMPORTED_CODE_FOLDER_PADDING = 80;
+export const PILO_IMPORTED_CODE_FOLDER_HEADER_HEIGHT = 104;
 
 type ImportedCodeFileInput = {
   code: string;
@@ -81,8 +81,8 @@ export function createCodeBlockShape(
   index: number,
   position: { x: number; y: number },
 ): PiloCodeBlockPartial {
-  const width = 420;
-  const height = 260;
+  const width = 840;
+  const height = 520;
 
   return {
     id: createShapeId(`pilo-code-${Date.now()}-${index}`),
@@ -320,8 +320,8 @@ export function createInsertableShape(
   const offset = 0;
 
   if (request.type === "image") {
-    const width = 320;
-    const height = 200;
+    const width = 640;
+    const height = 400;
     const assetId = createPiloAssetId("image", index);
     const asset: PiloMediaAsset = {
       id: assetId,
@@ -364,8 +364,8 @@ export function createInsertableShape(
   }
 
   if (request.type === "video") {
-    const width = 360;
-    const height = 220;
+    const width = 720;
+    const height = 440;
     const assetId = createPiloAssetId("video", index);
     const asset: PiloMediaAsset = {
       id: assetId,
@@ -407,8 +407,8 @@ export function createInsertableShape(
   }
 
   if (request.type === "bookmark") {
-    const width = 320;
-    const height = 160;
+    const width = 640;
+    const height = 320;
 
     return {
       shape: {
@@ -426,8 +426,8 @@ export function createInsertableShape(
     };
   }
 
-  const width = 420;
-  const height = 260;
+  const width = 840;
+  const height = 520;
 
   return {
     shape: {
@@ -450,8 +450,8 @@ export function createDriveFileNodeShape(
   file: CanvasDriveFileReference,
   shapeId?: TLShapeId,
 ): PiloFileNodePartial {
-  const width = 420;
-  const height = 280;
+  const width = 840;
+  const height = 560;
 
   return {
     id: shapeId ?? createShapeId(`pilo-drive-file-${Date.now()}-${index}`),

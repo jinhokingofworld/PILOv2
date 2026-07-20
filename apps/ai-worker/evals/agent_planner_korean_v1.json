@@ -1686,35 +1686,60 @@
                   "minItems": 1,
                   "maxItems": 5,
                   "items": {
-                    "type": "object",
-                    "required": [
-                      "kind",
-                      "value"
-                    ],
-                    "additionalProperties": false,
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "table_name",
-                          "table_comment",
-                          "column_name",
-                          "column_comment",
-                          "data_type",
-                          "enum_value"
-                        ]
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "value"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "table_name",
+                              "table_comment",
+                              "column_name"
+                            ]
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        }
                       },
-                      "columnName": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 80
-                      },
-                      "value": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 240
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "columnName",
+                          "value"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "column_comment",
+                              "data_type",
+                              "enum_value"
+                            ]
+                          },
+                          "columnName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 80
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        }
                       }
-                    }
+                    ]
                   }
                 }
               }
