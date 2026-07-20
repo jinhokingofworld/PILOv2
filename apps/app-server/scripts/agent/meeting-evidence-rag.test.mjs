@@ -506,3 +506,43 @@ try {
     /citation is required/
   );
 }
+
+{
+  const sourceId = `activity:${ACTIVITY_ID}`;
+  let contextQuery = "";
+  const database = {
+    async queryOne(text) {
+      contextQuery = text;
+      return {
+        workspace_id: WORKSPACE_ID,
+        requested_by_user_id: USER_ID,
+        prompt: "'온보딩 주간회의'에서 배포 일정 찾아줘",
+        source_ids: [sourceId],
+        requested_report_title: "온보딩 주간회의"
+      };
+    }
+  };
+  const service = new AgentGroundedAnswerService(database, {
+    normalizeSourceIds(sourceIds) { return sourceIds; },
+    async loadAuthorizedSources() {
+      return [{
+        sourceId,
+        sourceType: "activity",
+        reportId: REPORT_ID,
+        content: "배포 일정을 다음 주로 정했다.",
+        directlyReferenced: false
+      }];
+    }
+  });
+
+  const context = await service.getContext(
+    "77777777-7777-4777-8777-777777777777"
+  );
+
+  assert.deepEqual(context.retrievalContext, {
+    requestedReportTitle: "온보딩 주간회의",
+    exactTitleMatchFound: false
+  });
+  assert.match(contextQuery, /tool_name = 'list_meeting_reports'/);
+  assert.match(contextQuery, /output_json->>'count' = '0'/);
+}

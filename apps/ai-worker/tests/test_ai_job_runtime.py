@@ -10,7 +10,65 @@ from app.meeting_report_runtime import (
     PgAgentRunRepository,
     RuntimeSettings,
     SqsAiJobWorker,
+    _agent_step_resource_context_lines,
+    _planning_safe_agent_tool_output,
 )
+
+
+def test_agent_tool_resource_refs_become_same_run_opaque_context_refs() -> None:
+    lines = _agent_step_resource_context_lines(
+        thread_id="44444444-4444-4444-8444-444444444444",
+        run_id="33333333-3333-4333-8333-333333333333",
+        step_id="66666666-6666-4666-8666-666666666666",
+        step_order=2,
+        resource_refs=[
+            {
+                "domain": "meeting",
+                "resourceType": "meeting_report",
+                "resourceId": "77777777-7777-4777-8777-777777777777",
+                "label": "온보딩 주간회의",
+                "status": "COMPLETED",
+            }
+        ],
+    )
+
+    assert len(lines) == 1
+    assert "77777777-7777-4777-8777-777777777777" not in lines[0]
+    assert lines[0].startswith("previous resource: ")
+    value = json.loads(lines[0].removeprefix("previous resource: "))
+    assert value == {
+        "contextRef": "ctx_060eb912f95414f3c2e7ac25",
+        "label": "온보딩 주간회의",
+        "ordinal": 1,
+        "resourceType": "meeting_report",
+        "status": "COMPLETED",
+        "turn": 2,
+    }
+
+
+def test_meeting_report_list_planning_output_omits_raw_resource_ids() -> None:
+    report_id = "77777777-7777-4777-8777-777777777777"
+    meeting_id = "33333333-3333-4333-8333-333333333333"
+    output = _planning_safe_agent_tool_output(
+        "list_meeting_reports",
+        {
+            "reportTitle": "온보딩 주간회의",
+            "count": 1,
+            "reports": [
+                {
+                    "reportId": report_id,
+                    "meetingId": meeting_id,
+                    "title": "온보딩 주간회의",
+                    "status": "COMPLETED",
+                }
+            ],
+        },
+    )
+
+    serialized = json.dumps(output, ensure_ascii=False)
+    assert report_id not in serialized
+    assert meeting_id not in serialized
+    assert output["reports"] == [{"title": "온보딩 주간회의", "status": "COMPLETED"}]
 
 
 class FakeDispatcher:

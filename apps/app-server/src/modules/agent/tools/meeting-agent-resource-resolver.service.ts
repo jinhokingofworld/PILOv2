@@ -433,10 +433,11 @@ export class MeetingAgentResourceResolver {
   private reportCandidate(
     report: MeetingReportSummaryPayload
   ): MeetingAgentResourceCandidate {
+    const summary = report.summary?.trim().replace(/\s+/g, " ").slice(0, 180);
     return {
       resourceType: "meeting_report",
       label: report.title?.slice(0, 120) || "회의록",
-      description: report.createdAt,
+      description: summary ? `${report.createdAt} · ${summary}` : report.createdAt,
       status: report.status
     };
   }

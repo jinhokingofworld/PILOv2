@@ -43,14 +43,19 @@ export class AgentThreadContextService {
     const rows = await this.database.query<ThreadResourceStepRow>(
       `
         WITH current_run AS (
-          SELECT thread_id
+          SELECT id, thread_id, created_at
           FROM agent_runs
           WHERE id = $1
             AND workspace_id = $2
             AND requested_by_user_id = $3
             AND thread_id IS NOT NULL
-        ), recent_runs AS (
-          SELECT prior_run.id, prior_run.created_at, current_run.thread_id
+        ), candidate_runs AS (
+          SELECT current_run.id, current_run.created_at, current_run.thread_id, 0 AS run_order
+          FROM current_run
+
+          UNION ALL
+
+          SELECT prior_run.id, prior_run.created_at, current_run.thread_id, 1 AS run_order
           FROM agent_runs AS prior_run
           INNER JOIN current_run
             ON current_run.thread_id = prior_run.thread_id
@@ -59,7 +64,10 @@ export class AgentThreadContextService {
             AND prior_run.requested_by_user_id = $3
             AND prior_run.status = 'completed'
             AND prior_run.final_answer IS NOT NULL
-          ORDER BY prior_run.created_at DESC, prior_run.id DESC
+        ), recent_runs AS (
+          SELECT id, created_at, thread_id, run_order
+          FROM candidate_runs
+          ORDER BY run_order ASC, created_at DESC, id DESC
           LIMIT $4
         )
         SELECT
@@ -73,6 +81,7 @@ export class AgentThreadContextService {
          AND step.step_type = 'tool'
          AND step.status = 'completed'
         ORDER BY
+          recent_run.run_order ASC,
           recent_run.created_at DESC,
           recent_run.id DESC,
           step.step_order ASC,

@@ -19,6 +19,7 @@ from app.agent_processor import (
     AgentRoutingDecision,
     AgentRoutingRequest,
     AgentRunContext,
+    AgentRunJob,
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
     OpenAiAgentRouterClient,
@@ -249,6 +250,48 @@ def calendar_list_update_catalog(tools: list[dict[str, object]]) -> dict[str, ob
     return catalog
 
 
+def meeting_hybrid_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
+    catalog = tool_capability_catalog(tools)
+    examples = [
+        {"kind": "canonical", "utterance": "'온보딩 주간회의'에서 배포 일정 찾아줘"},
+        {"kind": "paraphrase", "utterance": "제목이 API 설계 회의인 회의록에서 인증 논의 찾아줘"},
+        {"kind": "typo", "utterance": "온보딩주간회의에서 배포일정 찿아줘"},
+        {"kind": "honorific", "utterance": "온보딩 주간회의에서 배포 일정을 찾아주세요"},
+        {"kind": "abbreviation", "utterance": "회의록 제목+근거 검색"},
+    ]
+    catalog["capabilities"] = [
+        {
+            "id": "meeting.report.hybrid_search",
+            "domain": "meeting",
+            "toolNames": ["list_meeting_reports", "search_meeting_transcript"],
+            "whenToUse": "명시된 제목 exact 조회 뒤 실제 발언 근거를 검색할 때",
+            "mustNotUseFor": ["제목 없는 내용 검색", "단순 상세 조회"],
+            "positiveExamples": [example["utterance"] for example in examples],
+            "examples": examples,
+            "selectorKinds": ["meeting_report", "query"],
+            "requiresConfirmation": False,
+            "availability": "supported",
+        }
+    ]
+    for descriptor in catalog["descriptors"]:
+        descriptor["domain"] = "meeting"
+        descriptor["operation"] = "read"
+        descriptor["capabilityIds"] = ["meeting.report.hybrid_search"]
+        descriptor["selectorKinds"] = ["meeting_report", "query"]
+        descriptor["whenToUse"] = "명시된 제목 exact 조회 뒤 실제 발언 근거를 검색할 때"
+        descriptor["mustNotUseFor"] = ["제목 없는 내용 검색", "단순 상세 조회"]
+        if descriptor["toolName"] == "list_meeting_reports":
+            descriptor["prerequisiteToolNames"] = []
+            descriptor["followUpToolNames"] = ["search_meeting_transcript"]
+        else:
+            descriptor["prerequisiteToolNames"] = ["list_meeting_reports"]
+            descriptor["followUpToolNames"] = []
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
 def calendar_and_meeting_read_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
     catalog = tool_capability_catalog(tools)
     meeting_capability = catalog["capabilities"][1]
@@ -456,6 +499,30 @@ def test_meeting_candidate_selection_prefers_terminal_clarification_over_retriev
     assert normalized.status == "tool_candidate"
     assert normalized.output_summary["toolName"] == "find_action_items"
     assert normalized.output_summary["input"] == {"useSelectedMeetingReportCandidate": True}
+
+
+def test_meeting_report_candidate_selection_resumes_transcript_search() -> None:
+    job = _meeting_transcript_search_job()
+    planning_context = (
+        'selected meeting candidate resume: {"clarificationToolName":"search_meeting_transcript",'
+        '"goalToolName":"","resourceType":"meeting_report",'
+        '"toolInput":{"query":"인증 방식 논의","reportTitle":"API 설계 회의"}}'
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_transcript",
+            tool_input={"query": "인증 방식 논의", "reportTitle": "API 설계 회의"},
+        ),
+        job,
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "query": "인증 방식 논의",
+        "useSelectedMeetingReportCandidate": True,
+    }
 
 
 def test_meeting_candidate_selection_recovers_compatible_goal_when_catalog_was_missing() -> None:
@@ -791,6 +858,7 @@ class FakeGroundedAnswerProcessor(AgentGroundedAnswerProcessor):
         _prompt: str,
         _sources: list[object],
         *,
+        retrieval_context: dict[str, object] | None = None,
         citation_retry: bool = False,
     ) -> tuple[str, list[str]]:
         self.answer_calls += 1
@@ -925,6 +993,42 @@ def test_grounded_answer_terminalizes_after_second_invalid_citation() -> None:
     assert processor.answer_calls == 2
     assert handoff.completed == []
     assert handoff.citation_failures == [RUN_ID]
+
+
+def test_grounded_answer_discloses_exact_title_miss_before_fallback_evidence() -> None:
+    handoff = FakeGroundedAnswerHandoffClient(
+        {
+            "prompt": "'온보딩 주간회의'에서 배포 일정 찾아줘",
+            "retrievalContext": {
+                "requestedReportTitle": "온보딩 주간회의",
+                "exactTitleMatchFound": False,
+            },
+            "sources": [
+                {
+                    "citationId": "citation_valid",
+                    "sourceType": "meeting_transcript",
+                    "excerpt": "배포는 다음 주 수요일에 진행합니다.",
+                }
+            ],
+        }
+    )
+    processor = FakeGroundedAnswerProcessor(
+        handoff,
+        api_key="unused",
+        model="unused",
+        timeout_seconds=1,
+        answers=[("배포는 다음 주 수요일입니다.", ["citation_valid"])],
+    )
+
+    result = processor.process_payload(
+        {"jobType": "agent_grounded_answer_requested", "runId": RUN_ID}
+    )
+
+    assert result.reason == "grounded_answer_completed"
+    answer = handoff.completed[0][1]
+    assert answer.startswith("제목이 정확히 ‘온보딩 주간회의’인 회의록은 없었습니다.")
+    assert "Workspace 전체 회의 내용" in answer
+    assert handoff.completed[0][2] == ["citation_valid"]
 
 
 def create_processor(
@@ -1178,6 +1282,116 @@ def test_routed_multistep_chain_exposes_only_next_unfinished_tool() -> None:
     )
 
     assert [tool.name for tool in pending] == ["update_calendar_event"]
+
+
+def test_routed_meeting_hybrid_chain_exposes_title_lookup_then_transcript_search() -> None:
+    tools = [
+        tool_snapshot(
+            name="list_meeting_reports",
+            inputSchema={
+                "type": "object",
+                "properties": {"reportTitle": {"type": "string"}},
+            },
+        ),
+        tool_snapshot(
+            name="search_meeting_transcript",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {"query": {"type": "string"}},
+            },
+        ),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_hybrid_catalog(tools))
+    )
+    routing = routing_decision(
+        domains=("meeting",),
+        capability_ids=("meeting.report.hybrid_search",),
+    )
+    selected = select_agent_planner_tools_for_routing(job, routing)
+
+    first = select_pending_agent_planner_tools_for_routing(job, routing, selected, "")
+    second = select_pending_agent_planner_tools_for_routing(
+        job,
+        routing,
+        selected,
+        'tool list_meeting_reports: {"reportTitle":"온보딩 주간회의","count":1}',
+    )
+    exhausted = select_pending_agent_planner_tools_for_routing(
+        job,
+        routing,
+        selected,
+        (
+            'tool list_meeting_reports: {"reportTitle":"온보딩 주간회의","count":1}\n'
+            'tool search_meeting_transcript: {"groundingOutcome":"sources_found"}'
+        ),
+    )
+
+    assert [tool.name for tool in first] == [
+        "list_meeting_reports",
+        "search_meeting_transcript",
+    ]
+    assert [tool.name for tool in second] == ["search_meeting_transcript"]
+    assert exhausted == ()
+
+
+def test_routed_meeting_hybrid_chain_rejects_completion_after_title_lookup() -> None:
+    tools = [
+        tool_snapshot(
+            name="list_meeting_reports",
+            inputSchema={"type": "object", "properties": {"reportTitle": {"type": "string"}}},
+        ),
+        tool_snapshot(
+            name="search_meeting_transcript",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {"query": {"type": "string"}},
+            },
+        ),
+    ]
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            prompt="'온보딩 주간회의'에서 배포 일정 찾아줘",
+            planning_context=(
+                "user: '온보딩 주간회의'에서 배포 일정 찾아줘\n"
+                'tool list_meeting_reports: {"reportTitle":"온보딩 주간회의",'
+                '"count":1,"reports":[{"title":"온보딩 주간회의"}]}'
+            ),
+        )
+    )
+    planner = FakePlannerClient(
+        decision=planner_decision(
+            status="completed",
+            tool_name=None,
+            tool_input={},
+            final_answer_draft="제목 조회 결과로 답했습니다.",
+        )
+    )
+    router = FakeRouterClient(
+        decision=routing_decision(
+            domains=("meeting",),
+            capability_ids=("meeting.report.hybrid_search",),
+        )
+    )
+    processor = create_processor(
+        repository,
+        planner,
+        router_client=router,
+        tool_retrieval_mode=TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_hybrid_catalog(tools))
+    )
+
+    assert result.reason == "agent_planner_output_needs_clarification"
+    assert [tool.name for tool in planner.requests[0].tools] == ["search_meeting_transcript"]
+    assert planner.requests[0].workflow_incomplete is True
+    assert repository.completed_runs == []
 
 
 def test_routed_multistep_chain_ignores_previous_user_cycle_results() -> None:
@@ -3190,6 +3404,146 @@ def test_normalizer_uses_single_opaque_meeting_report_context_reference() -> Non
 
     assert normalized.status == "tool_candidate"
     assert normalized.output_summary["input"] == {"contextRef": context_ref}
+
+
+def _meeting_transcript_search_job() -> AgentRunJob:
+    return parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="search_meeting_transcript",
+                    description="Meeting transcript 및 Activity 근거 검색",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["query"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "query": {"type": "string"},
+                            "contextRef": {"type": "string"},
+                            "reportTitle": {"type": "string"},
+                            "useSelectedMeetingReportCandidate": {
+                                "type": "boolean",
+                                "const": True,
+                            },
+                        },
+                    },
+                )
+            ]
+        )
+    )
+
+
+def test_hybrid_search_exact_one_uses_current_run_opaque_context_ref() -> None:
+    context_ref = "ctx_0123456789abcdef01234567"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_transcript",
+            tool_input={
+                "query": "온보딩 주간회의 API 배포 일정 결정",
+                "reportId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "reportTitle": "온보딩 주간회의",
+            },
+        ),
+        _meeting_transcript_search_job(),
+        prompt="‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
+        planning_context=(
+            "user: ‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?\n"
+            'tool list_meeting_reports: {"reportTitle":"온보딩 주간회의",'
+            '"count":1,"reports":[{"title":"온보딩 주간회의"}]}\n'
+            'previous resource: {"turn":2,"contextRef":"'
+            + context_ref
+            + '","resourceType":"meeting_report","ordinal":1}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "search_meeting_transcript"
+    assert normalized.output_summary["input"] == {
+        "query": "API 배포 일정 결정",
+        "contextRef": context_ref,
+    }
+    assert "reportId" not in normalized.output_summary["input"]
+
+
+def test_hybrid_search_exact_zero_falls_back_to_workspace_content_query() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_transcript",
+            tool_input={
+                "query": "온보딩 주간회의 API 배포 일정 결정",
+                "reportTitle": "온보딩 주간회의",
+            },
+        ),
+        _meeting_transcript_search_job(),
+        prompt="‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
+        planning_context=(
+            "user: ‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?\n"
+            'tool list_meeting_reports: {"reportTitle":"온보딩 주간회의",'
+            '"count":0,"reports":[]}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {"query": "API 배포 일정 결정"}
+
+
+def test_hybrid_workspace_fallback_removes_title_date_and_command_wording() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_transcript",
+            tool_input={
+                "query": "7월 18일 온보딩 주간회의 API 배포 일정 찾아줘",
+                "reportTitle": "온보딩 주간회의",
+            },
+        ),
+        _meeting_transcript_search_job(),
+        prompt="7월 18일 ‘온보딩 주간회의’에서 API 배포 일정 찾아줘",
+        planning_context=(
+            "user: 7월 18일 ‘온보딩 주간회의’에서 API 배포 일정 찾아줘\n"
+            'tool list_meeting_reports: {"reportTitle":"온보딩 주간회의",'
+            '"count":0,"reports":[]}'
+        ),
+    )
+
+    assert normalized.output_summary["input"] == {"query": "API 배포 일정"}
+
+
+def test_hybrid_search_exact_multiple_preserves_title_for_candidate_selection() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_transcript",
+            tool_input={"query": "인증 방식 논의"},
+        ),
+        _meeting_transcript_search_job(),
+        prompt="제목이 'API 설계 회의'인 회의록에서 인증 방식 논의를 찾아줘.",
+        planning_context=(
+            "user: 제목이 'API 설계 회의'인 회의록에서 인증 방식 논의를 찾아줘.\n"
+            'tool list_meeting_reports: {"reportTitle":"API 설계 회의",'
+            '"count":2,"reports":[{"title":"API 설계 회의"},{"title":"API 설계 회의"}]}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "query": "인증 방식 논의",
+        "reportTitle": "API 설계 회의",
+    }
+
+
+def test_content_only_search_does_not_invent_a_report_title_lookup() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_transcript",
+            tool_input={"query": "배포 일정이 미뤄진 이유"},
+        ),
+        _meeting_transcript_search_job(),
+        prompt="배포 일정이 미뤄진 이유가 나온 회의를 찾아줘.",
+        planning_context="",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {"query": "배포 일정이 미뤄진 이유"}
 
 
 @pytest.mark.parametrize(

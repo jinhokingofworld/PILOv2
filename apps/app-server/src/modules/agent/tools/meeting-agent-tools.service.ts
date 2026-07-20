@@ -56,6 +56,8 @@ interface ListMeetingReportsInput {
   status?: MeetingReportStatus;
   from?: string;
   to?: string;
+  /** Agent-only exact selector. The Meeting REST API deliberately does not expose it. */
+  reportTitle?: string;
   /** Agent-only filter. The Meeting REST API deliberately does not expose it. */
   roomName?: string;
   limit: number;
@@ -256,7 +258,14 @@ const MEETING_ACTION_ITEM_STATUSES: readonly MeetingActionItemStatus[] = [
 ];
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const LIST_INPUT_FIELDS = ["status", "from", "to", "roomName", "limit"];
+const LIST_INPUT_FIELDS = [
+  "status",
+  "from",
+  "to",
+  "reportTitle",
+  "roomName",
+  "limit"
+];
 const REPORT_ID_INPUT_FIELDS = ["reportId"];
 const MEETING_ID_INPUT_FIELDS = ["meetingId"];
 const MEETING_SELECTOR_INPUT_FIELDS = [
@@ -998,7 +1007,7 @@ export class MeetingAgentToolsService {
     return {
       name: "list_meeting_reports",
       description:
-        "Workspace MeetingReport 목록을 createdAt 내림차순으로 조회합니다. 기간과 개수를 생략하면 최신 회의록 1개를 반환합니다.",
+        "Workspace MeetingReport 목록을 createdAt 내림차순으로 조회합니다. reportTitle은 표시 제목 COALESCE(user_title, title)을 기존 정규화 규칙으로 exact 조회합니다. 기간과 개수를 생략하면 최신 회의록 1개를 반환합니다.",
       riskLevel: "low",
       executionMode: "auto",
       inputSchema: {
@@ -1011,6 +1020,13 @@ export class MeetingAgentToolsService {
           },
           from: { type: "string", format: "date-time" },
           to: { type: "string", format: "date-time" },
+          reportTitle: {
+            type: "string",
+            minLength: 1,
+            maxLength: 500,
+            description:
+              "Agent 전용 MeetingReport 표시 제목 exact selector. 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
+          },
           roomName: { type: "string", minLength: 1, maxLength: 100 },
           limit: {
             type: "integer",
@@ -1126,6 +1142,7 @@ export class MeetingAgentToolsService {
 
     return {
       outputSummary: {
+        ...(input.reportTitle ? { reportTitle: input.reportTitle } : {}),
         count: reports.length,
         reports
       },
@@ -2070,6 +2087,7 @@ export class MeetingAgentToolsService {
     const projection: AgentJsonObject = {
       reportId: report.id,
       meetingId: report.meetingId,
+      title: this.boundText(report.title, 500),
       status: report.status,
       createdAt: report.createdAt,
       retryCount: report.retryCount,
@@ -2172,8 +2190,10 @@ export class MeetingAgentToolsService {
   }
 
   private toResourceRef(report: MeetingReportSummaryPayload): AgentResourceRef {
+    const label = this.boundText(report.title, 500);
     return {
       ...this.toMeetingReportResourceRef(report.id),
+      ...(label ? { label } : {}),
       status: report.status,
       metadata: {
         meetingId: report.meetingId
@@ -2702,10 +2722,21 @@ export class MeetingAgentToolsService {
         : { status: this.readOptionalStatus(object.status) }),
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
+      ...(object.reportTitle === undefined
+        ? {}
+        : {
+            reportTitle: this.requireBoundedString(
+              object.reportTitle,
+              "reportTitle",
+              500
+            )
+          }),
       ...(object.roomName === undefined
         ? {}
         : { roomName: this.requireBoundedString(object.roomName, "roomName", 100) }),
-      limit: this.readOptionalLimit(object.limit) ?? 1
+      limit:
+        this.readOptionalLimit(object.limit) ??
+        (object.reportTitle === undefined ? 1 : 4)
     };
   }
 

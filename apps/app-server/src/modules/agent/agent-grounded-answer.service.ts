@@ -35,6 +35,11 @@ export interface GroundingContextSource {
   resourceRef: AgentResourceRef;
 }
 
+export interface GroundingRetrievalContext {
+  requestedReportTitle: string;
+  exactTitleMatchFound: false;
+}
+
 @Injectable()
 export class AgentGroundedAnswerService {
   constructor(
@@ -151,16 +156,31 @@ export class AgentGroundedAnswerService {
   async getContext(runId: string): Promise<{
     prompt: string;
     sources: GroundingContextSource[];
+    retrievalContext?: GroundingRetrievalContext;
   } | null> {
     const row = await this.database.queryOne<{
       workspace_id: string;
       requested_by_user_id: string;
       prompt: string;
       source_ids: unknown;
+      requested_report_title: string | null;
     }>(
-      `SELECT run.workspace_id, run.requested_by_user_id, run.prompt, outbox.source_ids
+      `SELECT run.workspace_id, run.requested_by_user_id, run.prompt, outbox.source_ids,
+              exact_title_lookup.requested_report_title
        FROM agent_runs run
        JOIN agent_grounded_answer_outbox outbox ON outbox.run_id = run.id
+       LEFT JOIN LATERAL (
+         SELECT step.output_json->>'reportTitle' AS requested_report_title
+         FROM agent_steps step
+         WHERE step.run_id = run.id
+           AND step.step_type = 'tool'
+           AND step.tool_name = 'list_meeting_reports'
+           AND step.status = 'completed'
+           AND step.output_json->>'count' = '0'
+           AND NULLIF(BTRIM(step.output_json->>'reportTitle'), '') IS NOT NULL
+         ORDER BY step.step_order DESC, step.id DESC
+         LIMIT 1
+       ) exact_title_lookup ON TRUE
        WHERE run.id = $1 AND run.status = 'running'`,
       [runId]
     );
@@ -172,7 +192,16 @@ export class AgentGroundedAnswerService {
         row.requested_by_user_id,
         row.workspace_id,
         registry
-      )
+      ),
+      ...(typeof row.requested_report_title === "string" &&
+      row.requested_report_title.trim()
+        ? {
+            retrievalContext: {
+              requestedReportTitle: row.requested_report_title.trim().slice(0, 500),
+              exactTitleMatchFound: false as const
+            }
+          }
+        : {})
     };
   }
 

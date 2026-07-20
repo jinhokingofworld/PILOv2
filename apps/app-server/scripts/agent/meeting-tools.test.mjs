@@ -626,6 +626,25 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
     reportId: REPORT_ID
   });
 
+  meetingService.reports.push(
+    createReport({ id: SECOND_REPORT_ID, title: "Backend meeting" })
+  );
+  const ambiguousTitlePreparation = await tool.prepareExecution(
+    context,
+    tool.validateInput({
+      query: "인증 방식 논의",
+      reportTitle: "Backend meeting"
+    })
+  );
+  assert.equal(ambiguousTitlePreparation.kind, "needs_clarification");
+  assert.match(ambiguousTitlePreparation.outputSummary.question, /후보/);
+  assert.equal(ambiguousTitlePreparation.candidateResources.length, 2);
+  assert.match(
+    ambiguousTitlePreparation.candidateResources[0].candidate.description,
+    /2026-07-08.*회의 요약/
+  );
+  meetingService.reports.splice(1);
+
   ragService.sources = [
     {
       sourceId: "cross-report-source",
@@ -1941,6 +1960,7 @@ function errorCode(error) {
 
   assert.equal(result.outputSummary.count, 1);
   assert.equal(report.reportId, REPORT_ID);
+  assert.equal(report.title, "Backend meeting");
   assert.equal(report.status, "COMPLETED");
   assert.equal(report.createdAt, "2026-07-08T00:00:00.000Z");
   assert.deepEqual(
@@ -1951,6 +1971,7 @@ function errorCode(error) {
   assert.equal(report.transcript.stored, false);
   assert.equal(result.resourceRefs[0].domain, "meeting");
   assert.equal(result.resourceRefs[0].resourceType, "meeting_report");
+  assert.equal(result.resourceRefs[0].label, "Backend meeting");
   assert.deepEqual(meetingService.calls[0], {
     method: "listReportsForAgent",
     currentUserId: USER_ID,
@@ -1960,6 +1981,64 @@ function errorCode(error) {
       limit: 20
     }
   });
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  const tool = registry.getDefinition("list_meeting_reports");
+  assert.deepEqual(tool.inputSchema.properties.reportTitle, {
+    type: "string",
+    minLength: 1,
+    maxLength: 500,
+    description:
+      "Agent 전용 MeetingReport 표시 제목 exact selector. 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
+  });
+  const input = tool.validateInput({ reportTitle: "  Backend meeting  " });
+  const result = await tool.execute(context, input);
+
+  assert.deepEqual(input, {
+    reportTitle: "Backend meeting",
+    limit: 4
+  });
+  assert.equal(result.outputSummary.reportTitle, "Backend meeting");
+  assert.equal(result.outputSummary.count, 1);
+  assert.deepEqual(meetingService.calls[0].query, input);
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  meetingService.reports = [];
+  const tool = registry.getDefinition("list_meeting_reports");
+  const result = await tool.execute(
+    context,
+    tool.validateInput({ reportTitle: "없는 회의록" })
+  );
+
+  assert.deepEqual(result.outputSummary, {
+    reportTitle: "없는 회의록",
+    count: 0,
+    reports: []
+  });
+  assert.deepEqual(result.resourceRefs, []);
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  meetingService.reports = [
+    createReport({ title: "동일 제목" }),
+    createReport({ id: SECOND_REPORT_ID, title: "동일 제목" })
+  ];
+  const tool = registry.getDefinition("list_meeting_reports");
+  const result = await tool.execute(
+    context,
+    tool.validateInput({ reportTitle: "동일 제목" })
+  );
+
+  assert.equal(result.outputSummary.count, 2);
+  assert.deepEqual(
+    result.resourceRefs.map((reference) => reference.label),
+    ["동일 제목", "동일 제목"]
+  );
 }
 
 {
