@@ -17,6 +17,10 @@ import {
   AgentConfirmationService
 } from "./agent-confirmation.service";
 import {
+  AgentMessagePayload,
+  AgentMessageService
+} from "./agent-message.service";
+import {
   AgentRunCreatePayload,
   AgentRunDetailPayload,
   AgentRunListPayload,
@@ -29,8 +33,24 @@ import {
 export class AgentController {
   constructor(
     private readonly agentService: AgentService,
-    private readonly agentConfirmationService: AgentConfirmationService
+    private readonly agentConfirmationService: AgentConfirmationService,
+    private readonly agentMessageService: AgentMessageService
   ) {}
+
+  @Post("messages")
+  async routeMessage(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<AgentMessagePayload>> {
+    return apiResponse(
+      await this.agentMessageService.routeMessage(
+        currentUserId,
+        workspaceId,
+        body
+      )
+    );
+  }
 
   @Post("runs")
   async createRun(

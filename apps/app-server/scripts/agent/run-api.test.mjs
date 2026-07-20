@@ -497,7 +497,7 @@ function errorMessage(error) {
       created: false
     }
   ]);
-  const controller = new AgentController(runService, {});
+  const controller = new AgentController(runService, {}, {});
   const createdReply = {
     statusCode: null,
     status(code) {
@@ -530,6 +530,44 @@ function errorMessage(error) {
   assert.equal(reusedReply.statusCode, 200);
   assert.equal(created.success, true);
   assert.equal(reused.success, true);
+}
+
+{
+  const routedPayload = {
+    outcome: "needs_choice",
+    relationship: "ambiguous",
+    run: null,
+    previousRun: null,
+    clarification: {
+      question: "기존 작업을 이어갈까요, 아니면 새 요청을 시작할까요?",
+      choices: [
+        { disposition: "continue_previous", label: "기존 작업 계속" },
+        { disposition: "start_new", label: "새 요청 시작" }
+      ]
+    }
+  };
+  const calls = [];
+  const controller = new AgentController({}, {}, {
+    async routeMessage(currentUserId, workspaceId, body) {
+      calls.push({ currentUserId, workspaceId, body });
+      return routedPayload;
+    }
+  });
+  const body = {
+    activeRunId: RUN_ID,
+    clientRequestId: "message-request-1",
+    disposition: "auto",
+    message: "그거",
+    requestContext: null,
+    timezone: "Asia/Seoul"
+  };
+
+  const result = await controller.routeMessage(USER_ID, WORKSPACE_ID, body);
+
+  assert.deepEqual(result, { success: true, data: routedPayload });
+  assert.deepEqual(calls, [
+    { currentUserId: USER_ID, workspaceId: WORKSPACE_ID, body }
+  ]);
 }
 
 {

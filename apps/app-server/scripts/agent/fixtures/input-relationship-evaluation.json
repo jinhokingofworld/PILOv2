@@ -1,0 +1,51 @@
+[
+  {
+    "name": "meeting_candidate_ordinal",
+    "question": "어느 회의록을 선택할까요?",
+    "message": "두 번째",
+    "relationship": "continuation"
+  },
+  {
+    "name": "meeting_to_calendar",
+    "question": "어느 회의록을 선택할까요?",
+    "message": "이번 주 일정 보여줘",
+    "relationship": "new_intent"
+  },
+  {
+    "name": "missing_date",
+    "question": "날짜를 알려주세요.",
+    "message": "다음 주 화요일",
+    "relationship": "continuation"
+  },
+  {
+    "name": "date_to_board",
+    "question": "날짜를 알려주세요.",
+    "message": "그건 됐고 Board 이슈를 찾아줘",
+    "relationship": "new_intent"
+  },
+  {
+    "name": "ambiguous_pronoun",
+    "question": "어느 회의록을 선택할까요?",
+    "message": "그거",
+    "relationship": "ambiguous"
+  },
+  {
+    "name": "explicit_cancel",
+    "question": "날짜를 알려주세요.",
+    "message": "그 작업 취소해줘",
+    "relationship": "cancel"
+  },
+  {
+    "name": "cancel_and_new_request",
+    "question": "어느 회의록을 선택할까요?",
+    "message": "그건 됐고 이번 주 일정 보여줘",
+    "relationship": "new_intent"
+  },
+  {
+    "name": "confirmation_chat_is_not_approval",
+    "question": "일정을 생성할까요?",
+    "message": "승인할게",
+    "relationship": "ambiguous",
+    "runStatus": "waiting_confirmation"
+  }
+]

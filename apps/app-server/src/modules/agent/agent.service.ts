@@ -342,36 +342,95 @@ export class AgentService {
     const input = this.normalizeRunInput(body);
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const outcome = await this.database.transaction(async (transaction) => {
-      const run = await transaction.queryOne<AgentRunRow>(
-        `
+    const outcome = await this.database.transaction((transaction) =>
+      this.resumeRunInputInTransaction(
+        transaction,
+        currentUserId,
+        workspaceId,
+        runId,
+        input
+      )
+    );
+    if (outcome === "expired") {
+      throw badRequest("Agent run input wait has expired");
+    }
+    await this.agentOutboxPublisherService.publishCreatedRun(runId);
+    return this.getRun(currentUserId, workspaceId, runId);
+  }
+
+  normalizeRunInputBody(body: unknown): AgentRunInput {
+    return this.normalizeRunInput(body);
+  }
+
+  async isDeterministicCandidateContinuationInTransaction(
+    transaction: DatabaseTransaction,
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    requestContext: AgentRunRequestContext,
+    input: AgentRunInput
+  ): Promise<boolean> {
+    if (input.selection) return true;
+    return Boolean(
+      await this.resolveOrdinalCandidateSelection(
+        transaction,
+        { currentUserId, workspaceId, runId, requestContext },
+        runId,
+        input.message
+      )
+    );
+  }
+
+  async resumeRunInputInTransaction(
+    transaction: DatabaseTransaction,
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    input: AgentRunInput
+  ): Promise<"accepted" | "expired"> {
+    const run = await transaction.queryOne<AgentRunRow>(
+      `
           SELECT *
           FROM agent_runs
           WHERE id = $1
             AND workspace_id = $2
             AND requested_by_user_id = $3
           FOR UPDATE
-        `,
-        [runId, workspaceId, currentUserId]
-      );
-      if (!run) throw notFound("Agent run not found");
-      if (run.status !== "waiting_user_input") {
-        throw badRequest("Agent run is not waiting for user input");
-      }
-      const stillWaiting = await transaction.queryOne<{ id: string }>(
-        `SELECT id FROM agent_runs WHERE id = $1 AND updated_at > now() - INTERVAL '24 hours'`,
+      `,
+      [runId, workspaceId, currentUserId]
+    );
+    if (!run) throw notFound("Agent run not found");
+    if (run.status !== "waiting_user_input") {
+      throw badRequest("Agent run is not waiting for user input");
+    }
+    const stillWaiting = await transaction.queryOne<{ id: string }>(
+      `SELECT id FROM agent_runs WHERE id = $1 AND updated_at > now() - INTERVAL '24 hours'`,
+      [runId]
+    );
+    if (!stillWaiting) {
+      await transaction.execute(
+        `UPDATE agent_runs SET status = 'cancelled', message = '추가 정보 입력 대기 시간이 만료되었습니다.', completed_at = now(), updated_at = now() WHERE id = $1`,
         [runId]
       );
-      if (!stillWaiting) {
-        await transaction.execute(
-          `UPDATE agent_runs SET status = 'cancelled', message = '추가 정보 입력 대기 시간이 만료되었습니다.', completed_at = now(), updated_at = now() WHERE id = $1`,
-          [runId]
-        );
-        return "expired" as const;
-      }
-      const selection =
-        input.selection ??
-        (await this.resolveOrdinalCandidateSelection(
+      return "expired";
+    }
+    const selection =
+      input.selection ??
+      (await this.resolveOrdinalCandidateSelection(
+        transaction,
+        {
+          currentUserId,
+          workspaceId,
+          runId,
+          requestContext: run.request_context_json
+        },
+        runId,
+        input.message
+      ));
+    let storedMessage = input.message;
+    if (selection?.kind === AGENT_CANDIDATE_SELECTION_KIND) {
+      const selected =
+        await this.agentCandidateSelectionService.consumeCandidateInTransaction(
           transaction,
           {
             currentUserId,
@@ -379,127 +438,107 @@ export class AgentService {
             runId,
             requestContext: run.request_context_json
           },
-          runId,
-          input.message
-        ));
-      let storedMessage = input.message;
-      if (selection?.kind === AGENT_CANDIDATE_SELECTION_KIND) {
-        const selected =
-          await this.agentCandidateSelectionService.consumeCandidateInTransaction(
-            transaction,
-            {
-              currentUserId,
-              workspaceId,
-              runId,
-              requestContext: run.request_context_json
-            },
-            selection.candidateSelectionId
-          );
-        if (selected.reference.domain === "meeting") {
-          storedMessage = buildStoredMeetingCandidateSelectionMessage(selected.label);
-        } else if (
-          selected.reference.domain === "sqltoerd" &&
-          selected.reference.resourceType === "session"
-        ) {
-          storedMessage = buildStoredSqlErdSelectionMessage(
-            selected.reference.resourceId,
-            selected.label
-          );
-        } else {
-          throw badRequest("Agent candidate domain cannot resume this run");
-        }
-      }
-      if (selection?.kind === SQL_ERD_SESSION_SELECTION_KIND) {
-        const selectionToken = selection.token;
-        const latestToolStep = await this.getLatestCompletedToolStep(
-          transaction,
-          runId
+          selection.candidateSelectionId
         );
-        const candidates =
-          latestToolStep?.tool_name === "inspect_sql_erd_schema" &&
-          isSqlErdClarificationOutput(latestToolStep.output_json)
-            ? parseSqlErdSessionCandidates(latestToolStep.output_json.candidates)
-            : [];
-        const selected = candidates.find(
-          (candidate) => candidate.selectionToken === selectionToken
-        );
-        if (!selected) {
-          throw badRequest(
-            "selection token must belong to the latest SQLtoERD session candidates"
-          );
-        }
-        storedMessage = buildStoredSqlErdSelectionMessage(
-          selected.selectionToken,
-          selected.title
-        );
-      }
-      if (selection?.kind === MEETING_CANDIDATE_SELECTION_KIND) {
-        const selected =
-          await this.agentCandidateSelectionService.consumeMeetingCandidateInTransaction(
-            transaction,
-            {
-              currentUserId,
-              workspaceId,
-              runId,
-              requestContext: run.request_context_json
-            },
-            selection.candidateSelectionId
-          );
+      if (selected.reference.domain === "meeting") {
         storedMessage = buildStoredMeetingCandidateSelectionMessage(selected.label);
+      } else if (
+        selected.reference.domain === "sqltoerd" &&
+        selected.reference.resourceType === "session"
+      ) {
+        storedMessage = buildStoredSqlErdSelectionMessage(
+          selected.reference.resourceId,
+          selected.label
+        );
+      } else {
+        throw badRequest("Agent candidate domain cannot resume this run");
       }
-      const next = await transaction.queryOne<{ sequence: number | string }>(
-        `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
-        [runId]
-      );
-      await transaction.execute(
-        `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'user', $3)`,
-        [runId, Number(next?.sequence ?? 1), storedMessage]
-      );
-      const resumed = await transaction.queryOne<{ id: string }>(
-        `
-          UPDATE agent_runs
-          SET status = 'planning',
-              message = '추가 정보를 반영하고 있습니다.',
-              final_answer = NULL,
-              error_code = NULL,
-              error_message = NULL,
-              completed_at = NULL,
-              planner_turn_count = 0,
-              tool_call_count = 0,
-              updated_at = now()
-          WHERE id = $1
-            AND status = 'waiting_user_input'
-          RETURNING id
-        `,
-        [runId]
-      );
-      if (!resumed) {
-        throw new Error("Agent run could not resume from user input");
-      }
-      const outbox = await transaction.queryOne<{ id: string }>(
-        `
-          UPDATE agent_run_outbox
-          SET status = 'pending', attempt_count = 0, next_attempt_at = now(),
-              claim_token = NULL, claimed_at = NULL, delivered_at = NULL,
-              error_code = NULL, error_message = NULL,
-              turn_sequence = turn_sequence + 1,
-              planning_started_at = now(),
-              reason = 'user_input'
-          WHERE run_id = $1
-          RETURNING id
-        `,
-        [runId]
-      );
-      if (!outbox) {
-        throw new Error("Agent run outbox could not be re-armed");
-      }
-      return "accepted" as const;
-    });
-    if (outcome === "expired") {
-      throw badRequest("Agent run input wait has expired");
     }
-    await this.agentOutboxPublisherService.publishCreatedRun(runId);
-    return this.getRun(currentUserId, workspaceId, runId);
+    if (selection?.kind === SQL_ERD_SESSION_SELECTION_KIND) {
+      const selectionToken = selection.token;
+      const latestToolStep = await this.getLatestCompletedToolStep(
+        transaction,
+        runId
+      );
+      const candidates =
+        latestToolStep?.tool_name === "inspect_sql_erd_schema" &&
+        isSqlErdClarificationOutput(latestToolStep.output_json)
+          ? parseSqlErdSessionCandidates(latestToolStep.output_json.candidates)
+          : [];
+      const selected = candidates.find(
+        (candidate) => candidate.selectionToken === selectionToken
+      );
+      if (!selected) {
+        throw badRequest(
+          "selection token must belong to the latest SQLtoERD session candidates"
+        );
+      }
+      storedMessage = buildStoredSqlErdSelectionMessage(
+        selected.selectionToken,
+        selected.title
+      );
+    }
+    if (selection?.kind === MEETING_CANDIDATE_SELECTION_KIND) {
+      const selected =
+        await this.agentCandidateSelectionService.consumeMeetingCandidateInTransaction(
+          transaction,
+          {
+            currentUserId,
+            workspaceId,
+            runId,
+            requestContext: run.request_context_json
+          },
+          selection.candidateSelectionId
+        );
+      storedMessage = buildStoredMeetingCandidateSelectionMessage(selected.label);
+    }
+    const next = await transaction.queryOne<{ sequence: number | string }>(
+      `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+      [runId]
+    );
+    await transaction.execute(
+      `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'user', $3)`,
+      [runId, Number(next?.sequence ?? 1), storedMessage]
+    );
+    const resumed = await transaction.queryOne<{ id: string }>(
+      `
+        UPDATE agent_runs
+        SET status = 'planning',
+            message = '추가 정보를 반영하고 있습니다.',
+            final_answer = NULL,
+            error_code = NULL,
+            error_message = NULL,
+            completed_at = NULL,
+            planner_turn_count = 0,
+            tool_call_count = 0,
+            updated_at = now()
+        WHERE id = $1
+          AND status = 'waiting_user_input'
+        RETURNING id
+      `,
+      [runId]
+    );
+    if (!resumed) {
+      throw new Error("Agent run could not resume from user input");
+    }
+    const outbox = await transaction.queryOne<{ id: string }>(
+      `
+        UPDATE agent_run_outbox
+        SET status = 'pending', attempt_count = 0, next_attempt_at = now(),
+            claim_token = NULL, claimed_at = NULL, delivered_at = NULL,
+            error_code = NULL, error_message = NULL,
+            turn_sequence = turn_sequence + 1,
+            planning_started_at = now(),
+            reason = 'user_input'
+        WHERE run_id = $1
+        RETURNING id
+      `,
+      [runId]
+    );
+    if (!outbox) {
+      throw new Error("Agent run outbox could not be re-armed");
+    }
+    return "accepted";
   }
 
   private async createStoredRun(
@@ -809,6 +848,10 @@ export class AgentService {
     });
   }
 
+  normalizeCreateRunBody(body: unknown): AgentRunCreateInput {
+    return this.normalizeCreateRunInput(body);
+  }
+
   private normalizeCreateRunInput(body: unknown): AgentRunCreateInput {
     if (!this.isPlainObject(body)) {
       throw badRequest("Request body must be an object");
@@ -877,7 +920,7 @@ export class AgentService {
     };
   }
 
-  private async assertRequestContextAccess(
+  async assertRequestContextAccess(
     workspaceId: string,
     requestContext: AgentRunRequestContext
   ): Promise<void> {
