@@ -128,6 +128,7 @@ export class AgentExecutionService {
   ) {}
 
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
+    const toolTurnStartedAt = this.agentLatencyObserver?.start();
     const run = await this.database.queryOne<AgentExecutionRunRow>(
       `
         SELECT
@@ -155,7 +156,8 @@ export class AgentExecutionService {
       {
         prompt: run.prompt,
         timezone: run.timezone,
-        requestContext: run.request_context_json
+        requestContext: run.request_context_json,
+        toolTurnStartedAt
       }
     );
   }
@@ -168,8 +170,11 @@ export class AgentExecutionService {
       prompt?: string;
       timezone?: string;
       requestContext?: AgentRunRequestContext;
+      toolTurnStartedAt?: number;
     } = {}
   ): Promise<AgentExecutionResult> {
+    const toolTurnStartedAt =
+      context.toolTurnStartedAt ?? this.agentLatencyObserver?.start();
     const plannerStep = await this.findReadyPlannerStep(
       currentUserId,
       workspaceId,
@@ -198,7 +203,6 @@ export class AgentExecutionService {
       context.requestContext === undefined
         ? await this.findRunRequestContext(currentUserId, workspaceId, runId)
         : context.requestContext;
-    const toolTurnStartedAt = this.agentLatencyObserver?.start();
     try {
       const result = await this.executePlannerOutput(
         currentUserId,
@@ -257,6 +261,15 @@ export class AgentExecutionService {
     );
 
     if (!definition) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: candidate.toolName,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "validation_error"
+      });
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_CONTEXT_UNAVAILABLE",
         errorMessage: "Agent tool is unavailable for this context",
@@ -283,6 +296,15 @@ export class AgentExecutionService {
       definition
     );
     if (!this.matchesRegistry(candidate, definition) && !isLegacyMeetingReportPlan) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: candidate.toolName,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "validation_error"
+      });
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_PLAN_MISMATCH",
         errorMessage: "Agent tool plan does not match registry metadata",
@@ -291,6 +313,15 @@ export class AgentExecutionService {
     }
 
     if (definition.riskLevel === "high") {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "validation_error"
+      });
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_HIGH_RISK",
         errorMessage: "High-risk Agent tool execution is not supported",
@@ -307,6 +338,15 @@ export class AgentExecutionService {
       isLegacyMeetingReportPlan
     );
     if (!validatedInput.ok) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "validation_error"
+      });
       return validatedInput.result;
     }
 
@@ -637,6 +677,15 @@ export class AgentExecutionService {
     preparationStartedAt?: number
   ): Promise<AgentExecutionResult> {
     if (!definition.prepareExecution) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "validation_error"
+      });
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_PREPARATION_UNAVAILABLE",
         errorMessage: "Contextual Agent tool preparation is not available",
@@ -656,18 +705,15 @@ export class AgentExecutionService {
           input
         );
 
-      this.observeLatency({
-        runId,
-        requestContext,
-        toolName: definition.name,
-        stage: "tool_preparation",
-        outcome: this.isClarificationResult(preparation)
-          ? "clarification"
-          : "success",
-        startedAt: preparationStartedAt
-      });
-
       if (this.isClarificationResult(preparation)) {
+        this.observeLatency({
+          runId,
+          requestContext,
+          toolName: definition.name,
+          stage: "tool_preparation",
+          outcome: "clarification",
+          startedAt: preparationStartedAt
+        });
         return this.completeClarification(
           currentUserId,
           workspaceId,
@@ -681,6 +727,14 @@ export class AgentExecutionService {
       }
 
       if (preparation.kind === "confirmation") {
+        this.observeLatency({
+          runId,
+          requestContext,
+          toolName: definition.name,
+          stage: "tool_preparation",
+          outcome: "success",
+          startedAt: preparationStartedAt
+        });
         return this.createConfirmationFromPlan(
           currentUserId,
           workspaceId,
@@ -694,6 +748,14 @@ export class AgentExecutionService {
         throw badRequest("Agent tool preparation result is invalid");
       }
 
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "success",
+        startedAt: preparationStartedAt
+      });
       return this.executeAutoTool(
         currentUserId,
         workspaceId,
@@ -714,7 +776,7 @@ export class AgentExecutionService {
         stage: "tool_preparation",
         outcome: "failure",
         startedAt: preparationStartedAt,
-        failureType: "domain_error"
+        failureType: "validation_error"
       });
       if (this.isAgentErrorCode(error, "CONFIRMATION_NOT_PENDING")) {
         return {

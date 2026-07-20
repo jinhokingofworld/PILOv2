@@ -1119,6 +1119,110 @@ def test_non_sql_erd_planning_does_not_emit_latency_events() -> None:
     assert observer.calls == []
 
 
+def test_sql_erd_generate_planning_does_not_emit_focus_latency_events() -> None:
+    observer = FakeAgentLatencyObserver()
+    repository = FakeAgentRunRepository(
+        context=run_context(prompt="주문 관리 ERD를 생성해줘")
+    )
+    processor = create_processor(repository, latency_observer=observer)
+
+    processor.process_payload(
+        agent_payload(
+            requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+            tools=[
+                tool_snapshot(
+                    name="generate_sql_erd",
+                    riskLevel="medium",
+                    executionMode="contextual",
+                    inputSchema={"type": "object"},
+                )
+            ],
+        )
+    )
+
+    assert observer.calls == []
+
+
+def test_sql_erd_unexpected_processor_failure_emits_failed_planning_turn() -> None:
+    observer = FakeAgentLatencyObserver()
+    repository = FakeAgentRunRepository(context_error=RuntimeError("unexpected"))
+    processor = create_processor(repository, latency_observer=observer)
+
+    with pytest.raises(RuntimeError, match="unexpected"):
+        processor.process_payload(
+            agent_payload(
+                requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID}
+            )
+        )
+
+    assert [call["stage"] for call in observer.calls] == ["planning_turn"]
+    assert observer.calls[0]["outcome"] == "failure"
+    assert observer.calls[0]["failure_type"] == "unknown"
+
+
+def test_sql_erd_incomplete_workflow_records_planner_validation_failure_once() -> None:
+    tools = [
+        tool_snapshot(
+            name="inspect_sql_erd_schema",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"featureQuery": {"type": "string"}},
+            },
+        ),
+        tool_snapshot(
+            name="focus_sql_erd_tables",
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"primaryTableRefs": {"type": "array"}},
+            },
+        ),
+    ]
+    observer = FakeAgentLatencyObserver()
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            prompt="회의 관련 테이블만 집중적으로 보여줘",
+            planning_context='tool inspect_sql_erd_schema: {"action":"inspected"}',
+        )
+    )
+    processor = create_processor(
+        repository,
+        FakePlannerClient(
+            decision=planner_decision(
+                status="unsupported",
+                tool_name=None,
+                tool_input={},
+                unsupported_reason="완료할 수 없음",
+            )
+        ),
+        FakeExecutionHandoffClient(),
+        FakeRouterClient(
+            decision=routing_decision(
+                domains=("sql_erd",),
+                capability_ids=("sql_erd.tables.focus",),
+            )
+        ),
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+        observer,
+    )
+
+    result = processor.process_payload(
+        agent_payload(
+            requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+            tools=tools,
+            toolCapabilityCatalog=sql_erd_focus_catalog(tools),
+        )
+    )
+
+    assert result.reason == "agent_planner_output_needs_clarification"
+    planner_events = [call for call in observer.calls if call["stage"] == "planner"]
+    assert len(planner_events) == 1
+    assert planner_events[0]["outcome"] == "failure"
+    assert planner_events[0]["failure_type"] == "validation_error"
+
+
 def test_llm_router_then_planner_selects_calendar_tool() -> None:
     tools = [tool_snapshot()]
     repository = FakeAgentRunRepository(

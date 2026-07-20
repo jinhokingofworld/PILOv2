@@ -431,6 +431,13 @@ class AgentProcessResult:
     run_id: str | None = None
 
 
+@dataclass
+class _AgentLatencyScope:
+    targeted: bool = False
+    queue_wait_ms: int | None = None
+    queue_emitted: bool = False
+
+
 class AgentGroundedAnswerProcessor:
     """Keeps bounded Meeting evidence in-memory: only App Server internal HTTPS carries it."""
 
@@ -745,9 +752,10 @@ class AgentRunProcessor:
         except ValueError:
             return AgentProcessResult(delete_message=True, reason="invalid_agent_job")
 
+        latency_scope = _AgentLatencyScope()
         planning_started_at = self.latency_observer.start()
         try:
-            result = self.process_job(job)
+            result = self.process_job(job, latency_scope)
         except AgentExecutionHandoffError:
             result = AgentProcessResult(
                 delete_message=False,
@@ -760,6 +768,16 @@ class AgentRunProcessor:
                 reason="infrastructure_failure",
                 run_id=job.run_id,
             )
+        except Exception:
+            self._observe_latency(
+                job,
+                stage="planning_turn",
+                outcome="failure",
+                started_at=planning_started_at,
+                failure_type="unknown",
+                targeted=True,
+            )
+            raise
         self._observe_latency(
             job,
             stage="planning_turn",
@@ -768,10 +786,16 @@ class AgentRunProcessor:
             failure_type=(
                 "repository_error" if result.reason == "infrastructure_failure" else None
             ),
+            targeted=latency_scope.targeted,
         )
         return result
 
-    def process_job(self, job: AgentRunJob) -> AgentProcessResult:
+    def process_job(
+        self,
+        job: AgentRunJob,
+        latency_scope: _AgentLatencyScope | None = None,
+    ) -> AgentProcessResult:
+        latency_scope = latency_scope or _AgentLatencyScope()
         lock_acquired = self.repository.try_acquire_run_lock(job.run_id)
         if not lock_acquired:
             return self._result(
@@ -784,13 +808,7 @@ class AgentRunProcessor:
             context = self.repository.get_run_context(job)
             if context is None:
                 return self._result(job, delete_message=True, reason="agent_run_not_found")
-            if context.queue_wait_ms is not None:
-                self._observe_latency(
-                    job,
-                    stage="queue_wait",
-                    outcome="success",
-                    elapsed_ms=context.queue_wait_ms,
-                )
+            latency_scope.queue_wait_ms = context.queue_wait_ms
 
             status = context.status
             if status in TERMINAL_AGENT_RUN_STATUSES:
@@ -811,7 +829,11 @@ class AgentRunProcessor:
                 )
 
             if status == "running":
-                return self._handoff_execution(job, retried=True)
+                return self._handoff_execution(
+                    job,
+                    retried=True,
+                    latency_scope=latency_scope,
+                )
 
             if status != "planning":
                 return self._result(
@@ -835,11 +857,16 @@ class AgentRunProcessor:
                     ),
                 )
 
-            return self._plan_run(job, context)
+            return self._plan_run(job, context, latency_scope)
         finally:
             self.repository.release_run_lock(job.run_id)
 
-    def _plan_run(self, job: AgentRunJob, context: AgentRunContext) -> AgentProcessResult:
+    def _plan_run(
+        self,
+        job: AgentRunJob,
+        context: AgentRunContext,
+        latency_scope: _AgentLatencyScope,
+    ) -> AgentProcessResult:
         step_id: str | None = None
         try:
             step_id = self.repository.start_planner_step(job, context)
@@ -893,8 +920,20 @@ class AgentRunProcessor:
                         outcome="failure",
                         started_at=router_started_at,
                         failure_type=_latency_failure_type(error),
+                        targeted=latency_scope.targeted,
                     )
                     raise
+                routed_tool_names = {
+                    tool_name
+                    for capability in selection_job.tool_capability_catalog.capabilities
+                    if capability.capability_id in routing.capability_ids
+                    for tool_name in capability.tool_names
+                }
+                latency_scope.targeted = bool(
+                    routed_tool_names
+                    & {SQL_ERD_INSPECTION_TOOL_NAME, SQL_ERD_FOCUS_TOOL_NAME}
+                )
+                self._emit_queue_latency(job, latency_scope)
                 self._observe_latency(
                     job,
                     stage="router",
@@ -909,6 +948,7 @@ class AgentRunProcessor:
                     provider_input_tokens=routing.provider_input_tokens,
                     provider_output_tokens=routing.provider_output_tokens,
                     provider_total_tokens=routing.provider_total_tokens,
+                    targeted=latency_scope.targeted,
                 )
                 if routing.status == "needs_clarification":
                     return self._complete_routing_clarification(
@@ -1019,6 +1059,11 @@ class AgentRunProcessor:
                         workflow_incomplete=workflow_incomplete,
                     )
                 )
+                if decision.tool_name in {
+                    SQL_ERD_INSPECTION_TOOL_NAME,
+                    SQL_ERD_FOCUS_TOOL_NAME,
+                }:
+                    latency_scope.targeted = True
                 normalized = normalize_agent_planner_decision(
                     decision,
                     planner_job,
@@ -1029,15 +1074,25 @@ class AgentRunProcessor:
                     strict_tool_selection=len(planner_tools) < len(job.tools),
                     completion_tool_names=completion_tool_names,
                 )
+                if workflow_incomplete and normalized.status in {
+                    "completed",
+                    "unsupported",
+                }:
+                    raise AgentPlannerOutputError(
+                        "Agent planner ended before the routed workflow was complete"
+                    )
             except Exception as error:
+                self._emit_queue_latency(job, latency_scope)
                 self._observe_latency(
                     job,
                     stage="planner",
                     outcome="failure",
                     started_at=planner_started_at,
                     failure_type=_latency_failure_type(error),
+                    targeted=latency_scope.targeted,
                 )
                 raise
+            self._emit_queue_latency(job, latency_scope)
             self._observe_latency(
                 job,
                 stage="planner",
@@ -1050,11 +1105,8 @@ class AgentRunProcessor:
                 provider_input_tokens=decision.provider_input_tokens,
                 provider_output_tokens=decision.provider_output_tokens,
                 provider_total_tokens=decision.provider_total_tokens,
+                targeted=latency_scope.targeted,
             )
-            if workflow_incomplete and normalized.status in {"completed", "unsupported"}:
-                raise AgentPlannerOutputError(
-                    "Agent planner ended before the routed workflow was complete"
-                )
             output_summary = dict(normalized.output_summary)
             if routing is not None:
                 output_summary["toolRouting"] = _agent_routing_observation(
@@ -1086,7 +1138,11 @@ class AgentRunProcessor:
                     normalized.message,
                     normalized.risk_level,
                 )
-                return self._handoff_execution(job, retried=False)
+                return self._handoff_execution(
+                    job,
+                    retried=False,
+                    latency_scope=latency_scope,
+                )
 
             if normalized.status == "needs_clarification":
                 waiting = self.repository.wait_for_user_input(
@@ -1252,6 +1308,7 @@ class AgentRunProcessor:
         job: AgentRunJob,
         *,
         retried: bool,
+        latency_scope: _AgentLatencyScope,
     ) -> AgentProcessResult:
         handoff_started_at = self.latency_observer.start()
         try:
@@ -1263,6 +1320,7 @@ class AgentRunProcessor:
                 outcome="failure",
                 started_at=handoff_started_at,
                 failure_type="domain_error",
+                targeted=latency_scope.targeted,
             )
             raise AgentExecutionHandoffError() from error
         self._observe_latency(
@@ -1270,6 +1328,7 @@ class AgentRunProcessor:
             stage="execution_handoff",
             outcome="success",
             started_at=handoff_started_at,
+            targeted=latency_scope.targeted,
         )
         return self._result(
             job,
@@ -1337,9 +1396,10 @@ class AgentRunProcessor:
         provider_output_tokens: int | None = None,
         provider_total_tokens: int | None = None,
         failure_type: str | None = None,
+        targeted: bool = False,
     ) -> None:
         surface = job.request_context.get("surface") if job.request_context else None
-        if surface != "sql_erd":
+        if surface != "sql_erd" or not targeted:
             return
         self.latency_observer.observe(
             run_id=job.run_id,
@@ -1356,6 +1416,26 @@ class AgentRunProcessor:
             provider_total_tokens=provider_total_tokens,
             failure_type=failure_type,
         )
+
+    def _emit_queue_latency(
+        self,
+        job: AgentRunJob,
+        latency_scope: _AgentLatencyScope,
+    ) -> None:
+        if (
+            not latency_scope.targeted
+            or latency_scope.queue_emitted
+            or latency_scope.queue_wait_ms is None
+        ):
+            return
+        self._observe_latency(
+            job,
+            stage="queue_wait",
+            outcome="success",
+            elapsed_ms=latency_scope.queue_wait_ms,
+            targeted=True,
+        )
+        latency_scope.queue_emitted = True
 
 
 def _planning_latency_outcome(reason: str) -> str:
