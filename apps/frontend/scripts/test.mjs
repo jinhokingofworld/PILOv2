@@ -550,6 +550,21 @@ assert.match(mainShell, /HeaderMeetingStatus/);
 assert.match(mainShell, /HeaderNotificationDropdown/);
 assert.match(mainShell, /sticky top-0/);
 assert.match(mainShell, /<span className="truncate">\{activeFeature\.title\}<\/span>/);
+assert.match(mainShell, /data-sqltoerd-workspace-header/);
+assert.match(mainShell, /href="\/home"/);
+assert.match(mainShell, /<Home className="size-4"/);
+assert.match(mainShell, /function WorkspaceHeaderActions/);
+const sqlErdWorkspaceHeader = mainShell.slice(
+  mainShell.lastIndexOf(
+    "<header",
+    mainShell.indexOf("data-sqltoerd-workspace-header")
+  ),
+  mainShell.indexOf("{children}", mainShell.indexOf("data-sqltoerd-workspace-header"))
+);
+assert.match(sqlErdWorkspaceHeader, /min-h-14/);
+assert.match(sqlErdWorkspaceHeader, /border-b/);
+assert.match(sqlErdWorkspaceHeader, /<WorkspaceHeaderActions \/>/);
+assert.doesNotMatch(sqlErdWorkspaceHeader, /mode="floating"/);
 assert.match(mainShell, /peer-data-\[variant=inset\]:!m-0/);
 assert.match(mainShell, /peer-data-\[state=collapsed\]:!ml-0/);
 assert.match(headerNotificationDropdown, /PopoverTrigger/);
