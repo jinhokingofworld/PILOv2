@@ -2006,6 +2006,29 @@ function errorCode(error) {
 }
 
 {
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("list_meeting_reports");
+  const input = tool.validateInput({
+    reportTitle: "Backend meeting",
+    from: "2026-07-08T00:00:00.000Z",
+    to: "2026-07-09T00:00:00.000Z",
+    status: "COMPLETED",
+    roomName: "Backend"
+  });
+  const result = await tool.execute(context, input);
+
+  assert.deepEqual(result.outputSummary, {
+    reportTitle: "Backend meeting",
+    from: "2026-07-08T00:00:00.000Z",
+    to: "2026-07-09T00:00:00.000Z",
+    reportStatus: "COMPLETED",
+    roomName: "Backend",
+    count: 1,
+    reports: result.outputSummary.reports
+  });
+}
+
+{
   const { meetingService, registry } = createRegistry();
   meetingService.reports = [];
   const tool = registry.getDefinition("list_meeting_reports");

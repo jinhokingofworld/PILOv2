@@ -448,7 +448,11 @@ def _ensure_title_fallback_disclosure(
     if retrieval_context is None:
         return answer
     title = str(retrieval_context["requestedReportTitle"])
-    if title in answer and re.search(r"정확|일치|없", answer):
+    if title in answer and re.search(
+        r"(?:정확|일치).{0,40}(?:제목|회의록).{0,80}(?:없|못)|"
+        r"(?:제목|회의록).{0,40}(?:정확|일치).{0,80}(?:없|못)",
+        answer,
+    ):
         return answer
     prefix = (
         f"제목이 정확히 ‘{title}’인 회의록은 없었습니다. "
@@ -1400,6 +1404,10 @@ def normalize_agent_planner_decision(
     strict_tool_selection: bool = False,
     completion_tool_names: tuple[str, ...] = (),
 ) -> NormalizedPlannerDecision:
+    decision = _normalize_meeting_report_hybrid_title_lookup(
+        decision,
+        completion_tool_names=completion_tool_names,
+    )
     decision = _normalize_calendar_relative_date_query(
         decision,
         job,
@@ -2271,6 +2279,15 @@ def _normalize_meeting_report_hybrid_search(
         message = "exact 제목으로 확인한 회의록 범위에서 근거를 검색합니다."
     else:
         tool_input["reportTitle"] = report_title.strip()
+        for output_field, input_field in (
+            ("from", "from"),
+            ("to", "to"),
+            ("reportStatus", "status"),
+            ("roomName", "roomName"),
+        ):
+            value = output.get(output_field)
+            if isinstance(value, str) and value.strip():
+                tool_input[input_field] = value.strip()
         message = "같은 제목의 회의록 후보를 사용자 선택으로 해소합니다."
 
     return AgentPlannerDecision(
@@ -2285,6 +2302,24 @@ def _normalize_meeting_report_hybrid_search(
         missing_fields=(),
         unsupported_reason=None,
     )
+
+
+def _normalize_meeting_report_hybrid_title_lookup(
+    decision: AgentPlannerDecision,
+    *,
+    completion_tool_names: tuple[str, ...],
+) -> AgentPlannerDecision:
+    if (
+        decision.status != "tool_candidate"
+        or decision.tool_name != "list_meeting_reports"
+        or set(completion_tool_names) != {"search_meeting_transcript"}
+        or not isinstance(decision.tool_input.get("reportTitle"), str)
+    ):
+        return decision
+
+    tool_input = dict(decision.tool_input)
+    tool_input.pop("limit", None)
+    return replace(decision, tool_input=tool_input)
 
 
 def _meeting_hybrid_content_query(

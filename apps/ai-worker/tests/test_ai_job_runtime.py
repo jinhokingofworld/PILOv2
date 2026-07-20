@@ -49,6 +49,7 @@ def test_agent_tool_resource_refs_become_same_run_opaque_context_refs() -> None:
 def test_meeting_report_list_planning_output_omits_raw_resource_ids() -> None:
     report_id = "77777777-7777-4777-8777-777777777777"
     meeting_id = "33333333-3333-4333-8333-333333333333"
+    assignee_user_id = "99999999-9999-4999-8999-999999999999"
     output = _planning_safe_agent_tool_output(
         "list_meeting_reports",
         {
@@ -60,6 +61,12 @@ def test_meeting_report_list_planning_output_omits_raw_resource_ids() -> None:
                     "meetingId": meeting_id,
                     "title": "온보딩 주간회의",
                     "status": "COMPLETED",
+                    "actionItems": [
+                        {
+                            "title": "배포 체크리스트 정리",
+                            "assigneeUserId": assignee_user_id,
+                        }
+                    ],
                 }
             ],
         },
@@ -68,7 +75,14 @@ def test_meeting_report_list_planning_output_omits_raw_resource_ids() -> None:
     serialized = json.dumps(output, ensure_ascii=False)
     assert report_id not in serialized
     assert meeting_id not in serialized
-    assert output["reports"] == [{"title": "온보딩 주간회의", "status": "COMPLETED"}]
+    assert assignee_user_id not in serialized
+    assert output["reports"] == [
+        {
+            "title": "온보딩 주간회의",
+            "status": "COMPLETED",
+            "actionItems": [{"title": "배포 체크리스트 정리"}],
+        }
+    ]
 
 
 class FakeDispatcher:

@@ -1163,14 +1163,16 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   `meeting.report.hybrid_search`를 선택한다. Planner는 먼저 `list_meeting_reports({ reportTitle })`로
   exact 조회하고, 제목 결과만으로 질문에 답하거나 완료하지 않는다. exact 1건이면 같은 tool step이 만든
   서버 소유 opaque `contextRef`로 `search_meeting_transcript`를 이어 호출한다. planner-facing input은
-  raw `reportId`를 받거나 생성하지 않는다.
+  raw `reportId`를 받거나 생성하지 않는다. Hybrid prerequisite에서는 모델이 `limit`을 제출해도 제거해
+  동일 제목 후보를 임의의 1건으로 축소하지 않는다.
 - exact 제목 결과가 0건이면 오류나 사용자 입력 대기로 전환하지 않고
   `count: 0, reports: []`로 완료한다. Planner는 같은 run에서 report selector 없이 Workspace 범위
   `search_meeting_transcript`를 호출한다. 별도 내용 질문은 제목·날짜·명령 표현을 제거한 content-focused
   query를 사용하고, 제목만 남는 경우에만 제목 문자열로 fallback할 수 있다. 근거가 발견된 최종 답변에는
   정확한 제목이 없어서 Workspace 전체 내용 검색으로 전환했다는 사실을 자연스럽게 밝힌다.
 - exact 제목 결과가 여러 건이면 `search_meeting_transcript`의 기존 MeetingReport candidate selection을
-  사용해 날짜, 상태, 제목과 bounded 설명을 보여주고 사용자가 하나를 고르게 한다. 선택 전에는 서로 다른
+  사용해 날짜, 상태, 제목과 bounded 설명을 보여주고 사용자가 하나를 고르게 한다. 최초 exact 조회에
+  명시한 `from`, `to`, `status`, `roomName`은 후보 조회에도 그대로 유지한다. 선택 전에는 서로 다른
   회의록의 내용을 합치지 않는다. 선택 뒤에는 `useSelectedMeetingReportCandidate=true`로 원래 검색을
   재개한다.
 - 명확한 제목 후보가 없는 주제·발언·결정·이유·담당자 내용 검색은 `meeting.evidence.search`로

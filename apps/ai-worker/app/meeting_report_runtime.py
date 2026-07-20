@@ -200,19 +200,20 @@ def _planning_safe_agent_tool_output(tool_name: str, output_json: object) -> obj
         return output_json
     return {
         **output_json,
-        "reports": [
-            (
-                {
-                    key: value
-                    for key, value in report.items()
-                    if key not in {"reportId", "meetingId"}
-                }
-                if isinstance(report, dict)
-                else report
-            )
-            for report in reports
-        ],
+        "reports": [_strip_planning_resource_ids(report) for report in reports],
     }
+
+
+def _strip_planning_resource_ids(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _strip_planning_resource_ids(item)
+            for key, item in value.items()
+            if key != "id" and not key.endswith(("Id", "_id"))
+        }
+    if isinstance(value, list):
+        return [_strip_planning_resource_ids(item) for item in value]
+    return value
 
 
 UUID_TEXT_PATTERN = re.compile(

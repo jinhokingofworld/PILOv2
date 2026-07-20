@@ -1143,6 +1143,10 @@ export class MeetingAgentToolsService {
     return {
       outputSummary: {
         ...(input.reportTitle ? { reportTitle: input.reportTitle } : {}),
+        ...(input.from ? { from: input.from } : {}),
+        ...(input.to ? { to: input.to } : {}),
+        ...(input.status ? { reportStatus: input.status } : {}),
+        ...(input.roomName ? { roomName: input.roomName } : {}),
         count: reports.length,
         reports
       },

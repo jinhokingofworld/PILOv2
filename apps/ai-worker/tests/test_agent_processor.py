@@ -1031,6 +1031,46 @@ def test_grounded_answer_discloses_exact_title_miss_before_fallback_evidence() -
     assert handoff.completed[0][2] == ["citation_valid"]
 
 
+def test_grounded_answer_does_not_confuse_missing_evidence_with_exact_title_miss() -> None:
+    handoff = FakeGroundedAnswerHandoffClient(
+        {
+            "prompt": "'온보딩 주간회의'에서 배포 일정 찾아줘",
+            "retrievalContext": {
+                "requestedReportTitle": "온보딩 주간회의",
+                "exactTitleMatchFound": False,
+            },
+            "sources": [
+                {
+                    "citationId": "citation_valid",
+                    "sourceType": "meeting_transcript",
+                    "excerpt": "배포는 다음 주 수요일에 진행합니다.",
+                }
+            ],
+        }
+    )
+    processor = FakeGroundedAnswerProcessor(
+        handoff,
+        api_key="unused",
+        model="unused",
+        timeout_seconds=1,
+        answers=[
+            (
+                "온보딩 주간회의에서 배포 지연 근거는 없지만 수요일 일정은 있습니다.",
+                ["citation_valid"],
+            )
+        ],
+    )
+
+    result = processor.process_payload(
+        {"jobType": "agent_grounded_answer_requested", "runId": RUN_ID}
+    )
+
+    assert result.reason == "grounded_answer_completed"
+    assert handoff.completed[0][1].startswith(
+        "제목이 정확히 ‘온보딩 주간회의’인 회의록은 없었습니다."
+    )
+
+
 def create_processor(
     repository: FakeAgentRunRepository,
     planner_client: FakePlannerClient | None = None,
@@ -3434,6 +3474,93 @@ def _meeting_transcript_search_job() -> AgentRunJob:
     )
 
 
+def test_hybrid_title_lookup_ignores_model_limit_to_detect_duplicate_titles() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "reportTitle": {"type": "string"},
+                            "limit": {"type": "integer"},
+                        },
+                    },
+                ),
+                tool_snapshot(
+                    name="search_meeting_transcript",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["query"],
+                        "additionalProperties": False,
+                        "properties": {"query": {"type": "string"}},
+                    },
+                ),
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={"reportTitle": "온보딩 주간회의", "limit": 1},
+        ),
+        job,
+        prompt="‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
+        completion_tool_names=("search_meeting_transcript",),
+    )
+
+    assert normalized.output_summary["input"] == {"reportTitle": "온보딩 주간회의"}
+
+
+def test_direct_report_list_keeps_explicit_limit_when_hybrid_is_not_the_only_goal() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "reportTitle": {"type": "string"},
+                            "limit": {"type": "integer"},
+                        },
+                    },
+                ),
+                tool_snapshot(
+                    name="search_meeting_transcript",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["query"],
+                        "additionalProperties": False,
+                        "properties": {"query": {"type": "string"}},
+                    },
+                ),
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={"reportTitle": "온보딩 주간회의", "limit": 1},
+        ),
+        job,
+        prompt="온보딩 주간회의 회의록 한 건만 보여줘",
+        completion_tool_names=("list_meeting_reports", "search_meeting_transcript"),
+    )
+
+    assert normalized.output_summary["input"] == {
+        "reportTitle": "온보딩 주간회의",
+        "limit": 1,
+    }
+
+
 def test_hybrid_search_exact_one_uses_current_run_opaque_context_ref() -> None:
     context_ref = "ctx_0123456789abcdef01234567"
     normalized = normalize_agent_planner_decision(
@@ -3520,7 +3647,10 @@ def test_hybrid_search_exact_multiple_preserves_title_for_candidate_selection() 
         planning_context=(
             "user: 제목이 'API 설계 회의'인 회의록에서 인증 방식 논의를 찾아줘.\n"
             'tool list_meeting_reports: {"reportTitle":"API 설계 회의",'
-            '"count":2,"reports":[{"title":"API 설계 회의"},{"title":"API 설계 회의"}]}'
+            '"from":"2026-07-18T00:00:00.000Z",'
+            '"to":"2026-07-19T00:00:00.000Z","reportStatus":"COMPLETED",'
+            '"roomName":"Backend","count":2,'
+            '"reports":[{"title":"API 설계 회의"},{"title":"API 설계 회의"}]}'
         ),
     )
 
@@ -3528,6 +3658,10 @@ def test_hybrid_search_exact_multiple_preserves_title_for_candidate_selection() 
     assert normalized.output_summary["input"] == {
         "query": "인증 방식 논의",
         "reportTitle": "API 설계 회의",
+        "from": "2026-07-18T00:00:00.000Z",
+        "to": "2026-07-19T00:00:00.000Z",
+        "status": "COMPLETED",
+        "roomName": "Backend",
     }
 
 
