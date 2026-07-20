@@ -38,6 +38,11 @@ def report(
                     "conditionalRate": domain_count / 10,
                     "overallRate": domain_count / 10,
                 },
+                "capabilityExact": {
+                    "count": domain_count,
+                    "conditionalRate": 1.0,
+                    "overallRate": domain_count / 10,
+                },
                 "toolExact": {
                     "count": tool_count,
                     "conditionalRate": round(tool_count / domain_count, 4),
@@ -97,9 +102,31 @@ def test_two_stage_comparison_pairs_inputs_and_reports_funnel_delta() -> None:
     assert result["candidateBinding"]["sourceRevision"] == "candidate-revision"
     assert result["variants"]["canonical"]["delta"]["exactAttemptRate"] == 0.1
     assert result["variants"]["canonical"]["delta"]["domainExactOverallRate"] == 0.1
+    assert result["variants"]["canonical"]["delta"]["capabilityExactOverallRate"] == 0.1
     assert result["variants"]["canonical"]["delta"]["conditionalToolAccuracy"] == 0.0111
     assert result["aggregate"]["baseline"]["endToEndExactRate"] == 0.8
     assert result["aggregate"]["candidate"]["endToEndExactRate"] == 0.9
+
+
+def test_two_stage_comparison_reports_multi_tool_workflow_delta() -> None:
+    baseline = report("multi_tool", domain_count=10, tool_count=10, exact_count=10)
+    candidate = report("multi_tool", domain_count=10, tool_count=10, exact_count=10)
+    baseline["multiToolWorkflows"] = {
+        "workflowAttempts": 10,
+        "exactWorkflowAttempts": 8,
+        "exactWorkflowRate": 0.8,
+    }
+    candidate["multiToolWorkflows"] = {
+        "workflowAttempts": 10,
+        "exactWorkflowAttempts": 9,
+        "exactWorkflowRate": 0.9,
+    }
+    candidate["metadata"]["sourceRevision"] = "candidate-revision"
+
+    result = build_two_stage_comparison([baseline], [candidate])
+
+    assert result["variants"]["multi_tool"]["delta"]["multiToolExactWorkflowRate"] == 0.1
+    assert result["aggregate"]["candidate"]["multiToolExactWorkflowRate"] == 0.9
 
 
 def test_two_stage_comparison_rejects_different_fixture_inputs() -> None:

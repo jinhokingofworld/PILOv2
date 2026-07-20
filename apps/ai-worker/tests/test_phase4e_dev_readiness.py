@@ -99,7 +99,7 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
     )
     catalog_sha = __import__("hashlib").sha256(CATALOG_PATH.read_bytes()).hexdigest()
     evaluation_reports = []
-    variants = ("canonical", "held_out", "counterexample", "context")
+    variants = ("canonical", "held_out", "counterexample", "context", "multi_tool")
     repetitions = 5
     for variant in variants:
         suite = load_meeting_regression_suite(CATALOG_PATH, TOOL_SNAPSHOT_PATH, variant)
@@ -124,6 +124,11 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
                         "overallRate": 1.0,
                     },
                     "domainExact": {
+                        "count": tool_selection_attempts,
+                        "conditionalRate": 1.0,
+                        "overallRate": 1.0,
+                    },
+                    "capabilityExact": {
                         "count": tool_selection_attempts,
                         "conditionalRate": 1.0,
                         "overallRate": 1.0,
@@ -156,6 +161,17 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
                 "domainRecallAtK": 1.0,
                 "capabilityRecallAtK": 1.0,
             },
+            "multiToolWorkflows": (
+                {
+                    "workflowCount": 6,
+                    "workflowAttempts": 30,
+                    "exactWorkflowAttempts": 30,
+                    "exactWorkflowRate": 1.0,
+                    "stageAttempts": attempts,
+                }
+                if variant == "multi_tool"
+                else None
+            ),
         }
         evaluation_reports.append(
             write_json(
@@ -198,6 +214,8 @@ def test_phase4e_readiness_combines_all_gates_without_raw_values(tmp_path: Path)
         "heldOutCount": 54,
         "counterexampleCount": 72,
         "multiTurnCount": 54,
+        "multiToolWorkflowCount": 6,
+        "multiToolStageCount": 18,
         "selectorCardinalityCount": 4,
     }
     assert report["runtime"] == {"writeContractCount": 4}
@@ -213,6 +231,7 @@ def test_phase4e_readiness_combines_all_gates_without_raw_values(tmp_path: Path)
         "held_out": (55, 275, 275),
         "counterexample": (74, 370, 365),
         "context": (55, 275, 275),
+        "multi_tool": (18, 90, 60),
     }
     serialized = json.dumps(report, ensure_ascii=False)
     assert "회의방 목록 보여줘" not in serialized
@@ -272,6 +291,7 @@ def test_phase4e_readiness_fails_when_router_domain_funnel_is_below_threshold(
     degraded_rate = round(degraded_count / funnel["toolSelectionAttempts"], 4)
     for stage_name in (
         "domainExact",
+        "capabilityExact",
         "toolExact",
         "requiredInputExact",
         "executionPolicyExact",
@@ -307,7 +327,7 @@ def test_phase4e_readiness_requires_complete_repeated_attempts(tmp_path: Path) -
         evaluate_phase4e_dev_readiness(inputs)
 
 
-def test_phase4e_readiness_requires_all_four_actual_meeting_evals(tmp_path: Path) -> None:
+def test_phase4e_readiness_requires_every_actual_meeting_eval(tmp_path: Path) -> None:
     inputs = readiness_inputs(tmp_path)
     inputs = Phase4eReadinessInputs(
         **{
@@ -316,7 +336,7 @@ def test_phase4e_readiness_requires_all_four_actual_meeting_evals(tmp_path: Path
         }
     )
 
-    with pytest.raises(ValueError, match="all four Meeting evaluation reports"):
+    with pytest.raises(ValueError, match="every Meeting evaluation report"):
         evaluate_phase4e_dev_readiness(inputs)
 
 

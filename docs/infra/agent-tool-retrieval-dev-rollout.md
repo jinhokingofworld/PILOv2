@@ -91,8 +91,8 @@ Workspace 권한, 멱등성, 승인 시점 재검증을 통과해야 runtime evi
 | action item 승인 | `approve_meeting_report_action_item` | confirmation required |
 
 AI Worker의 `check_phase4e_dev_readiness.py`는 이 결과를 retrieval/security gate, Meeting canonical·held-out·
-negative·multi-turn의 실제 `LLM Router → Planner` provider evaluation, dev Terraform과 이 runbook에 결합한다.
-fixture 개수만으로는 실행할 수 없으며 네 evaluation report가 registry/catalog SHA와 일치해야 한다. 최종
+negative·multi-turn·multi-tool의 실제 `LLM Router → Planner` provider evaluation, dev Terraform과 이 runbook에 결합한다.
+fixture 개수만으로는 실행할 수 없으며 모든 evaluation report가 registry/catalog SHA와 일치해야 한다. 최종
 `phase4e-dev-readiness` artifact가 `passed=true`여야 dev 공개 후보로 판정한다. artifact에는
 check ID·count·SHA·정확도·recall만 남고 사용자 발화,
 resource ID, UUID, tool input, token은 남지 않는다.
