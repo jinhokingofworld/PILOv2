@@ -482,28 +482,43 @@ function matchesContextEvidence(
   enumValuesByType: ReadonlyMap<string, readonly string[]>
 ): boolean {
   if (evidence.kind === "table_name") {
-    return evidence.value === table.name;
+    return CATALOG_NAME_LIMITS.some(
+      (limit) => evidence.value === boundText(table.name, limit)
+    );
   }
   if (evidence.kind === "table_comment") {
-    return evidence.value === table.comment;
+    return (
+      table.comment !== null &&
+      evidence.value === boundText(table.comment, OPTIONAL_TEXT_LIMIT)
+    );
   }
   if (evidence.kind === "column_name") {
-    return table.columns.some((column) => column.name === evidence.value);
+    return table.columns.some(
+      (column) => evidence.value === boundText(column.name, COLUMN_NAME_LIMIT)
+    );
   }
 
-  const column = table.columns.find(
-    (candidate) => candidate.name === evidence.columnName
+  const matchingColumns = table.columns.filter(
+    (candidate) =>
+      boundText(candidate.name, COLUMN_NAME_LIMIT) === evidence.columnName
   );
-  if (!column) return false;
+  if (matchingColumns.length !== 1) return false;
+  const [column] = matchingColumns;
 
   if (evidence.kind === "column_comment") {
-    return evidence.value === column.comment;
+    return (
+      column.comment !== null &&
+      evidence.value === boundText(column.comment, OPTIONAL_TEXT_LIMIT)
+    );
   }
   if (evidence.kind === "data_type") {
-    return evidence.value === column.dataType;
+    return (
+      evidence.value ===
+      boundExactText(column.dataType.trim(), DATA_TYPE_LIMIT)
+    );
   }
-  return readColumnEnumValues(column.dataType, enumValuesByType).includes(
-    evidence.value
+  return readColumnEnumValues(column.dataType, enumValuesByType).some(
+    (value) => evidence.value === boundExactText(value, ENUM_VALUE_LIMIT)
   );
 }
 

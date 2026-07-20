@@ -99,6 +99,16 @@ const CONTEXT_EVIDENCE_KINDS = [
   "data_type",
   "enum_value"
 ] as const;
+const CONTEXT_EVIDENCE_KINDS_WITHOUT_COLUMN = [
+  "table_name",
+  "table_comment",
+  "column_name"
+] as const;
+const CONTEXT_EVIDENCE_KINDS_WITH_COLUMN = [
+  "column_comment",
+  "data_type",
+  "enum_value"
+] as const;
 
 const INSPECT_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
   type: "object",
@@ -170,14 +180,37 @@ const FOCUS_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
             minItems: 1,
             maxItems: MAX_CONTEXT_EVIDENCE_ITEMS,
             items: {
-              type: "object",
-              required: ["kind", "value"],
-              additionalProperties: false,
-              properties: {
-                kind: { type: "string", enum: [...CONTEXT_EVIDENCE_KINDS] },
-                columnName: { type: "string", minLength: 1, maxLength: 80 },
-                value: { type: "string", minLength: 1, maxLength: 240 }
-              }
+              oneOf: [
+                {
+                  type: "object",
+                  required: ["kind", "value"],
+                  additionalProperties: false,
+                  properties: {
+                    kind: {
+                      type: "string",
+                      enum: [...CONTEXT_EVIDENCE_KINDS_WITHOUT_COLUMN]
+                    },
+                    value: { type: "string", minLength: 1, maxLength: 240 }
+                  }
+                },
+                {
+                  type: "object",
+                  required: ["kind", "columnName", "value"],
+                  additionalProperties: false,
+                  properties: {
+                    kind: {
+                      type: "string",
+                      enum: [...CONTEXT_EVIDENCE_KINDS_WITH_COLUMN]
+                    },
+                    columnName: {
+                      type: "string",
+                      minLength: 1,
+                      maxLength: 80
+                    },
+                    value: { type: "string", minLength: 1, maxLength: 240 }
+                  }
+                }
+              ]
             }
           }
         }

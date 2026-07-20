@@ -1396,6 +1396,9 @@ def normalize_agent_planner_decision(
     message = _safe_text(decision.message, "요청 분석을 완료했습니다.")
     final_answer = _safe_text(decision.final_answer_draft, message)
     tool = tools_by_name.get(decision.tool_name or "")
+    tool_input = decision.tool_input
+    if tool is not None and tool.name == SQL_ERD_FOCUS_TOOL_NAME:
+        tool_input = _normalize_sql_erd_focus_input(tool_input, planning_context)
     missing_fields = tuple(decision.missing_fields)
     unsupported_reason = decision.unsupported_reason
 
@@ -1407,20 +1410,20 @@ def normalize_agent_planner_decision(
         message = "지원하지 않는 Agent 도구 요청입니다."
 
     if status == "tool_candidate" and tool is not None:
-        missing_fields = _missing_required_tool_input_fields(tool, decision.tool_input)
+        missing_fields = _missing_required_tool_input_fields(tool, tool_input)
         if tool.name == "focus_sql_erd_tables":
             missing_fields = _missing_sql_erd_focus_fields(
-                decision.tool_input,
+                tool_input,
                 missing_fields,
                 planning_context,
             )
         if tool.name == "update_calendar_event":
             missing_fields = _missing_calendar_update_fields(
-                decision.tool_input,
+                tool_input,
                 missing_fields,
             )
         if tool.name == "create_calendar_event" and _has_invalid_calendar_create_time_order(
-            decision.tool_input
+            tool_input
         ):
             missing_fields = tuple(sorted({*missing_fields, "calendar_event_end_time"}))
 
@@ -1432,14 +1435,14 @@ def normalize_agent_planner_decision(
             )
             unsupported_reason = "calendar_recurrence_unsupported"
         elif tool.name == "create_calendar_event" and _requires_calendar_time_or_all_day(
-            decision.tool_input
+            tool_input
         ):
             missing_fields = tuple(sorted({*missing_fields, "calendar_event_time_or_all_day"}))
 
         if (
             tool.name in MEETING_REPORT_ID_TOOLS
             and _meeting_report_tool_requires_legacy_id(tool)
-            and not _has_valid_uuid(decision.tool_input.get("reportId"))
+            and not _has_valid_uuid(tool_input.get("reportId"))
         ):
             status = "unsupported"
             message = "특정 회의록을 식별할 수 없습니다."
@@ -1494,7 +1497,7 @@ def normalize_agent_planner_decision(
                 "riskLevel": tool.risk_level,
                 "executionMode": tool.execution_mode,
                 "requiresConfirmation": requires_confirmation,
-                "input": _sanitize_tool_input(tool.name, decision.tool_input),
+                "input": _sanitize_tool_input(tool.name, tool_input),
                 "toolInputValidation": "app_server_required",
             }
         )
@@ -1547,6 +1550,200 @@ def _missing_required_tool_input_fields(
             if isinstance(min_items, int) and len(value) < min_items:
                 missing.append(field)
     return tuple(missing)
+
+
+def _normalize_sql_erd_focus_input(
+    input_value: dict[str, object],
+    planning_context: str,
+) -> dict[str, object]:
+    inspection = _latest_sql_erd_inspection(planning_context)
+    if inspection is None or any(
+        input_value.get(field) != inspection.get(field)
+        for field in ("sessionId", "sessionRevision", "modelFingerprint")
+    ):
+        return input_value
+
+    projection = inspection.get("projection")
+    tables = projection.get("tables") if isinstance(projection, dict) else None
+    edges = projection.get("edges") if isinstance(projection, dict) else None
+    if not isinstance(tables, list) or not isinstance(edges, list):
+        return input_value
+
+    table_by_ref = {
+        table["ref"]: table
+        for table in tables
+        if isinstance(table, dict)
+        and isinstance(table.get("ref"), str)
+        and SQL_ERD_TABLE_REF_PATTERN.fullmatch(str(table["ref"])) is not None
+    }
+    primary_refs = input_value.get("primaryTableRefs")
+    if not isinstance(primary_refs, list) or any(
+        not isinstance(ref, str) or ref not in table_by_ref for ref in primary_refs
+    ):
+        return input_value
+
+    reasons_by_ref: dict[str, dict[str, object]] = {}
+    reasons = input_value.get("reasons")
+    if isinstance(reasons, list):
+        for item in reasons:
+            if not isinstance(item, dict):
+                continue
+            table_ref = item.get("tableRef")
+            reason = item.get("reason")
+            if (
+                not isinstance(table_ref, str)
+                or not isinstance(reason, str)
+                or not reason.strip()
+                or table_ref in reasons_by_ref
+            ):
+                continue
+            reasons_by_ref[table_ref] = {
+                "tableRef": table_ref,
+                "reason": reason.strip()[:240],
+            }
+
+    primary_set = set(primary_refs)
+    direct_neighbors = set()
+    for edge in edges:
+        if (
+            not isinstance(edge, list)
+            or len(edge) != 2
+            or not all(isinstance(ref, str) for ref in edge)
+        ):
+            continue
+        left, right = edge
+        if left in primary_set:
+            direct_neighbors.add(right)
+        if right in primary_set:
+            direct_neighbors.add(left)
+
+    related_refs: list[str] = []
+    related_value = input_value.get("relatedTableRefs")
+    if isinstance(related_value, list):
+        for ref in related_value:
+            if (
+                isinstance(ref, str)
+                and ref in table_by_ref
+                and ref in direct_neighbors
+                and ref not in primary_set
+                and ref in reasons_by_ref
+                and ref not in related_refs
+            ):
+                related_refs.append(ref)
+                if len(related_refs) == SQL_ERD_RELATED_TABLE_REF_LIMIT:
+                    break
+
+    context_refs: list[str] = []
+    context_reasons: dict[str, dict[str, object]] = {}
+    context_value = input_value.get("contextTableRefs")
+    if isinstance(context_value, list):
+        selected_refs = primary_set.union(related_refs)
+        for ref in context_value:
+            if (
+                not isinstance(ref, str)
+                or ref not in table_by_ref
+                or ref in selected_refs
+                or ref in context_refs
+            ):
+                continue
+            reason = reasons_by_ref.get(ref)
+            original_reason = (
+                next(
+                    (
+                        item
+                        for item in reasons
+                        if isinstance(item, dict) and item.get("tableRef") == ref
+                    ),
+                    None,
+                )
+                if isinstance(reasons, list)
+                else None
+            )
+            evidence = (
+                original_reason.get("evidence") if isinstance(original_reason, dict) else None
+            )
+            valid_evidence = (
+                [
+                    normalized
+                    for item in evidence
+                    if (normalized := _normalize_sql_erd_context_evidence(table_by_ref[ref], item))
+                    is not None
+                ]
+                if isinstance(evidence, list)
+                else []
+            )
+            if reason is None or not valid_evidence:
+                continue
+            context_refs.append(ref)
+            context_reasons[ref] = {**reason, "evidence": valid_evidence[:5]}
+            if len(context_refs) == SQL_ERD_CONTEXT_TABLE_REF_LIMIT:
+                break
+
+    normalized_reasons = [
+        reasons_by_ref[ref] for ref in [*primary_refs, *related_refs] if ref in reasons_by_ref
+    ]
+    normalized_reasons.extend(context_reasons[ref] for ref in context_refs)
+    return {
+        **input_value,
+        "relatedTableRefs": related_refs,
+        "contextTableRefs": context_refs,
+        "reasons": normalized_reasons,
+    }
+
+
+def _normalize_sql_erd_context_evidence(
+    table: dict[str, object],
+    value: object,
+) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    kind = value.get("kind")
+    evidence_value = value.get("value")
+    if not isinstance(kind, str) or not isinstance(evidence_value, str):
+        return None
+
+    if kind in {"table_name", "table_comment", "column_name"}:
+        if "columnName" in value:
+            return None
+        if kind == "table_name" and evidence_value == table.get("name"):
+            return {"kind": kind, "value": evidence_value}
+        if kind == "table_comment" and evidence_value == table.get("comment"):
+            return {"kind": kind, "value": evidence_value}
+        columns = table.get("columns")
+        if (
+            kind == "column_name"
+            and isinstance(columns, list)
+            and any(
+                isinstance(column, dict) and evidence_value == column.get("name")
+                for column in columns
+            )
+        ):
+            return {"kind": kind, "value": evidence_value}
+        return None
+
+    if kind not in {"column_comment", "data_type", "enum_value"}:
+        return None
+    column_name = value.get("columnName")
+    columns = table.get("columns")
+    if not isinstance(column_name, str) or not isinstance(columns, list):
+        return None
+    matching_columns = [
+        column
+        for column in columns
+        if isinstance(column, dict) and column.get("name") == column_name
+    ]
+    if len(matching_columns) != 1:
+        return None
+    column = matching_columns[0]
+    if kind == "column_comment" and evidence_value != column.get("comment"):
+        return None
+    if kind == "data_type" and evidence_value != column.get("dataType"):
+        return None
+    if kind == "enum_value":
+        enum_values = column.get("enumValues")
+        if not isinstance(enum_values, list) or evidence_value not in enum_values:
+            return None
+    return {"kind": kind, "columnName": column_name, "value": evidence_value}
 
 
 def _missing_sql_erd_focus_fields(

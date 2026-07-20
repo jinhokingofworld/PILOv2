@@ -4315,6 +4315,156 @@ def test_sql_erd_table_focus_accepts_unique_compact_primary_refs() -> None:
     assert normalized.output_summary["input"]["primaryTableRefs"] == ["t1", "t20"]
 
 
+def test_sql_erd_table_focus_drops_related_ref_without_direct_primary_edge() -> None:
+    focus_tool = tool_snapshot(
+        name="focus_sql_erd_tables",
+        inputSchema={
+            "type": "object",
+            "required": [
+                "primaryTableRefs",
+                "relatedTableRefs",
+                "contextTableRefs",
+                "reasons",
+            ],
+            "properties": {
+                "primaryTableRefs": {"type": "array", "minItems": 1},
+                "relatedTableRefs": {"type": "array"},
+                "contextTableRefs": {"type": "array"},
+                "reasons": {"type": "array", "minItems": 1},
+            },
+        },
+    )
+    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
+    planning_context = "tool inspect_sql_erd_schema: " + json.dumps(
+        {
+            "sessionId": SQL_ERD_SESSION_ID,
+            "sessionRevision": 7,
+            "modelFingerprint": "fnv1a32:1234abcd",
+            "projection": {
+                "tables": [
+                    {"ref": "t16", "name": "pr_review_sessions"},
+                    {"ref": "t22", "name": "meetings"},
+                    {"ref": "t23", "name": "meeting_participants"},
+                ],
+                "edges": [["t22", "t23"]],
+                "truncated": False,
+            },
+        }
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="focus_sql_erd_tables",
+            tool_input={
+                "sessionId": SQL_ERD_SESSION_ID,
+                "sessionRevision": 7,
+                "modelFingerprint": "fnv1a32:1234abcd",
+                "primaryTableRefs": ["t22"],
+                "relatedTableRefs": ["t16"],
+                "contextTableRefs": [],
+                "reasons": [
+                    {"tableRef": "t22", "reason": "회의 핵심 테이블"},
+                    {"tableRef": "t16", "reason": "의미상 관련된 테이블"},
+                ],
+            },
+        ),
+        job,
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"]["relatedTableRefs"] == []
+    assert normalized.output_summary["input"]["reasons"] == [
+        {"tableRef": "t22", "reason": "회의 핵심 테이블"}
+    ]
+
+
+def test_sql_erd_table_focus_drops_invalid_optional_evidence_item() -> None:
+    focus_tool = tool_snapshot(
+        name="focus_sql_erd_tables",
+        inputSchema={
+            "type": "object",
+            "required": [
+                "primaryTableRefs",
+                "relatedTableRefs",
+                "contextTableRefs",
+                "reasons",
+            ],
+            "properties": {
+                "primaryTableRefs": {"type": "array", "minItems": 1},
+                "relatedTableRefs": {"type": "array"},
+                "contextTableRefs": {"type": "array"},
+                "reasons": {"type": "array", "minItems": 1},
+            },
+        },
+    )
+    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
+    planning_context = "tool inspect_sql_erd_schema: " + json.dumps(
+        {
+            "sessionId": SQL_ERD_SESSION_ID,
+            "sessionRevision": 7,
+            "modelFingerprint": "fnv1a32:1234abcd",
+            "projection": {
+                "tables": [
+                    {"ref": "t22", "name": "meetings"},
+                    {
+                        "ref": "t3",
+                        "name": "activity_logs",
+                        "columns": [
+                            {
+                                "name": "action",
+                                "dataType": "activity_log_action",
+                                "enumValues": ["meeting_started", "meeting_ended"],
+                                "primaryKey": False,
+                                "foreignKey": False,
+                            }
+                        ],
+                    },
+                ],
+                "edges": [],
+                "truncated": False,
+            },
+        }
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="focus_sql_erd_tables",
+            tool_input={
+                "sessionId": SQL_ERD_SESSION_ID,
+                "sessionRevision": 7,
+                "modelFingerprint": "fnv1a32:1234abcd",
+                "primaryTableRefs": ["t22"],
+                "relatedTableRefs": [],
+                "contextTableRefs": ["t3"],
+                "reasons": [
+                    {"tableRef": "t22", "reason": "회의 핵심 테이블"},
+                    {
+                        "tableRef": "t3",
+                        "reason": "회의 활동 로그",
+                        "evidence": [
+                            {"kind": "table_name", "value": "activity_logs"},
+                            {
+                                "kind": "column_name",
+                                "columnName": "action",
+                                "value": "meeting_started, meeting_ended",
+                            },
+                        ],
+                    },
+                ],
+            },
+        ),
+        job,
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"]["contextTableRefs"] == ["t3"]
+    assert normalized.output_summary["input"]["reasons"][1]["evidence"] == [
+        {"kind": "table_name", "value": "activity_logs"}
+    ]
+
+
 def test_sql_erd_table_focus_rejects_ref_missing_from_latest_inspection() -> None:
     focus_tool = tool_snapshot(
         name="focus_sql_erd_tables",
@@ -4347,7 +4497,7 @@ def test_sql_erd_table_focus_rejects_ref_missing_from_latest_inspection() -> Non
     assert "toolName" not in normalized.output_summary
 
 
-def test_sql_erd_table_focus_rejects_invalid_or_overlapping_context_refs() -> None:
+def test_sql_erd_table_focus_drops_invalid_or_overlapping_context_refs() -> None:
     focus_tool = tool_snapshot(
         name="focus_sql_erd_tables",
         description="SQLtoERD 테이블 집중 보기를 생성합니다.",
@@ -4379,9 +4529,8 @@ def test_sql_erd_table_focus_rejects_invalid_or_overlapping_context_refs() -> No
             planning_context=sql_erd_inspection_planning_context("t1", "t2"),
         )
 
-        assert normalized.status == "needs_clarification"
-        assert normalized.output_summary["missingFields"] == ["contextTableRefs"]
-        assert "toolName" not in normalized.output_summary
+        assert normalized.status == "tool_candidate"
+        assert normalized.output_summary["input"]["contextTableRefs"] == []
 
 
 def test_sql_erd_table_focus_requires_latest_inspection_context() -> None:
