@@ -19,6 +19,11 @@ from app.agent_planner_evaluation import (
 )
 from app.agent_processor import OpenAiAgentPlannerClient, OpenAiAgentRouterClient
 from app.agent_tool_retrieval import TOOL_RETRIEVER_VERSION
+from app.agent_workflow_evaluation import (
+    build_workflow_evaluation_report,
+    evaluate_workflow_suite,
+    load_workflow_scenarios,
+)
 
 
 def main() -> None:
@@ -160,13 +165,31 @@ def main() -> None:
         suite.job.tool_capability_catalog is None
     ):
         raise SystemExit("--tool-capability-catalog is required for routing evaluation")
+    workflow_mode = bool(
+        args.meeting_catalog and args.meeting_variant == "multi_tool"
+    )
+    if workflow_mode and (args.compare_shadow_retrieval or not args.llm_routing):
+        raise SystemExit("multi_tool workflow evaluation requires --llm-routing")
     planner = OpenAiAgentPlannerClient(api_key, args.model, args.timeout_seconds)
     router = (
         OpenAiAgentRouterClient(api_key, args.router_model, args.timeout_seconds)
         if args.llm_routing
         else None
     )
-    if args.compare_shadow_retrieval:
+    if workflow_mode:
+        assert args.meeting_catalog is not None
+        assert router is not None
+        workflow_results = evaluate_workflow_suite(
+            planner,
+            router,
+            suite.job,
+            load_workflow_scenarios(args.meeting_catalog),
+            current_date=args.current_date,
+            timezone=args.timezone,
+            repetitions=args.repetitions,
+        )
+        report = build_workflow_evaluation_report(workflow_results)
+    elif args.compare_shadow_retrieval:
         legacy_results = evaluate_suite(
             planner,
             suite,
