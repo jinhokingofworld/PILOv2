@@ -1729,6 +1729,46 @@ for (const testCase of [
 }
 
 {
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service, confirmationService } = createService({
+    registryState: {
+      name: "inspect_sql_erd_schema",
+      executionMode: "contextual",
+      prepareExecution: {
+        kind: "confirmation",
+        plan: confirmationPlan()
+      }
+    },
+    planner: plannerOutput({
+      toolName: "inspect_sql_erd_schema",
+      executionMode: "contextual",
+      requiresConfirmation: null
+    }),
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
+  });
+  confirmationService.createConfirmation = async () => {
+    throw new Error("confirmation persistence unavailable");
+  };
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed");
+  const preparationEvents = latencyObserver.calls.filter(
+    (call) => call.stage === "tool_preparation"
+  );
+  assert.deepEqual(
+    preparationEvents.map(({ outcome, failureType }) => ({ outcome, failureType })),
+    [{ outcome: "success", failureType: undefined }]
+  );
+  const toolTurn = latencyObserver.calls.find((call) => call.stage === "tool_turn");
+  assert.equal(toolTurn.outcome, "failure");
+}
+
+{
   const { service, loggingService, outboxPublisherService } = createService({
     planner: plannerOutput({
       toolRouting: {

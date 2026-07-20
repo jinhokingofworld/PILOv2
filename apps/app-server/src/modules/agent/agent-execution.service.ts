@@ -693,6 +693,8 @@ export class AgentExecutionService {
       });
     }
 
+    let preparationReturned = false;
+    let preparationOutcomeEmitted = false;
     try {
       const preparation: AgentToolPreparationResult =
         await definition.prepareExecution(
@@ -704,6 +706,7 @@ export class AgentExecutionService {
           },
           input
         );
+      preparationReturned = true;
 
       if (this.isClarificationResult(preparation)) {
         this.observeLatency({
@@ -714,7 +717,8 @@ export class AgentExecutionService {
           outcome: "clarification",
           startedAt: preparationStartedAt
         });
-        return this.completeClarification(
+        preparationOutcomeEmitted = true;
+        return await this.completeClarification(
           currentUserId,
           workspaceId,
           runId,
@@ -735,7 +739,8 @@ export class AgentExecutionService {
           outcome: "success",
           startedAt: preparationStartedAt
         });
-        return this.createConfirmationFromPlan(
+        preparationOutcomeEmitted = true;
+        return await this.createConfirmationFromPlan(
           currentUserId,
           workspaceId,
           runId,
@@ -756,6 +761,7 @@ export class AgentExecutionService {
         outcome: "success",
         startedAt: preparationStartedAt
       });
+      preparationOutcomeEmitted = true;
       return this.executeAutoTool(
         currentUserId,
         workspaceId,
@@ -769,15 +775,17 @@ export class AgentExecutionService {
         postExecutionDisposition
       );
     } catch (error) {
-      this.observeLatency({
-        runId,
-        requestContext,
-        toolName: definition.name,
-        stage: "tool_preparation",
-        outcome: "failure",
-        startedAt: preparationStartedAt,
-        failureType: "validation_error"
-      });
+      if (!preparationOutcomeEmitted) {
+        this.observeLatency({
+          runId,
+          requestContext,
+          toolName: definition.name,
+          stage: "tool_preparation",
+          outcome: "failure",
+          startedAt: preparationStartedAt,
+          failureType: preparationReturned ? "validation_error" : "domain_error"
+        });
+      }
       if (this.isAgentErrorCode(error, "CONFIRMATION_NOT_PENDING")) {
         return {
           status: "skipped",

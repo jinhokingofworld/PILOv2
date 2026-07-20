@@ -775,7 +775,7 @@ class AgentRunProcessor:
                 outcome="failure",
                 started_at=planning_started_at,
                 failure_type="unknown",
-                targeted=True,
+                targeted=latency_scope.targeted,
             )
             raise
         self._observe_latency(
@@ -890,6 +890,14 @@ class AgentRunProcessor:
                 job.request_context["surface"] if job.request_context is not None else None
             )
             selection_job = _restrict_agent_job_to_context_surface(job, context_surface)
+            latency_scope.targeted = _sql_erd_latency_target_hint(
+                selection_job,
+                context.prompt,
+                context.planning_context,
+                top_k=self.tool_retrieval_top_k,
+                schema_token_budget=self.tool_retrieval_schema_token_budget,
+            )
+            self._emit_queue_latency(job, latency_scope)
             routing: AgentRoutingDecision | None = None
             completion_tool_names: tuple[str, ...] = ()
             if self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER:
@@ -929,9 +937,8 @@ class AgentRunProcessor:
                     if capability.capability_id in routing.capability_ids
                     for tool_name in capability.tool_names
                 }
-                latency_scope.targeted = bool(
-                    routed_tool_names
-                    & {SQL_ERD_INSPECTION_TOOL_NAME, SQL_ERD_FOCUS_TOOL_NAME}
+                latency_scope.targeted = latency_scope.targeted or bool(
+                    routed_tool_names & {SQL_ERD_INSPECTION_TOOL_NAME, SQL_ERD_FOCUS_TOOL_NAME}
                 )
                 self._emit_queue_latency(job, latency_scope)
                 self._observe_latency(
@@ -940,9 +947,7 @@ class AgentRunProcessor:
                     outcome=(
                         "clarification"
                         if routing.status == "needs_clarification"
-                        else "fallback"
-                        if routing.status == "unsupported"
-                        else "success"
+                        else "fallback" if routing.status == "unsupported" else "success"
                     ),
                     started_at=router_started_at,
                     provider_input_tokens=routing.provider_input_tokens,
@@ -1446,10 +1451,42 @@ def _planning_latency_outcome(reason: str) -> str:
     return "success"
 
 
+def _sql_erd_latency_target_hint(
+    job: AgentRunJob,
+    prompt: str,
+    planning_context: str,
+    *,
+    top_k: int,
+    schema_token_budget: int,
+) -> bool:
+    target_tool_names = {
+        SQL_ERD_INSPECTION_TOOL_NAME,
+        SQL_ERD_FOCUS_TOOL_NAME,
+    }
+    if _planning_tool_result_names(planning_context) & target_tool_names:
+        return True
+
+    selection = select_agent_planner_tool_selection(
+        job,
+        prompt,
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
+        top_k=top_k,
+        schema_token_budget=schema_token_budget,
+    )
+    retrieval_tool_names = (
+        set(selection.retrieval.tool_names) if selection.retrieval is not None else set()
+    )
+    if retrieval_tool_names & target_tool_names:
+        return True
+
+    eligible_tool_names = {tool.name for tool in job.tools}
+    return bool(eligible_tool_names) and eligible_tool_names.issubset(target_tool_names)
+
+
 def _latency_failure_type(error: BaseException) -> str:
     if isinstance(error, InfrastructureError):
         return "provider_error"
-    if isinstance(error, (AgentRouterOutputError, AgentPlannerOutputError)):
+    if isinstance(error, AgentRouterOutputError | AgentPlannerOutputError):
         return "validation_error"
     return "unknown"
 
