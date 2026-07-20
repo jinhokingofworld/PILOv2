@@ -6,6 +6,7 @@ COMPARISON_FORMAT = "agent-llm-router-planner-comparison:v1"
 _FUNNEL_STAGES = (
     "routerRouted",
     "domainExact",
+    "capabilityExact",
     "toolExact",
     "requiredInputExact",
     "executionPolicyExact",
@@ -157,6 +158,31 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
         "toolSelectionAccuracy": tool_selection_accuracy,
         "requiredInputAccuracy": required_input_accuracy,
     }
+    multi_tool = report.get("multiToolWorkflows")
+    if multi_tool is not None:
+        multi_tool_summary = _object(multi_tool, "Invalid multi-tool workflow summary")
+        workflow_attempts = _nonnegative_int(
+            multi_tool_summary.get("workflowAttempts"),
+            "Invalid multi-tool workflow attempt count",
+        )
+        exact_workflow_attempts = _nonnegative_int(
+            multi_tool_summary.get("exactWorkflowAttempts"),
+            "Invalid multi-tool exact workflow count",
+        )
+        if exact_workflow_attempts > workflow_attempts:
+            raise ValueError("Invalid multi-tool exact workflow count")
+        exact_workflow_rate = _fraction(exact_workflow_attempts, workflow_attempts)
+        if (
+            _rate(
+                multi_tool_summary.get("exactWorkflowRate"),
+                "Invalid multi-tool workflow rate",
+            )
+            != exact_workflow_rate
+        ):
+            raise ValueError("Invalid multi-tool workflow rate")
+        summary["multiToolWorkflowAttempts"] = workflow_attempts
+        summary["multiToolExactWorkflowAttempts"] = exact_workflow_attempts
+        summary["multiToolExactWorkflowRate"] = exact_workflow_rate
     previous_count = int(summary["toolSelectionAttempts"])
     for stage_name in _FUNNEL_STAGES:
         stage = _object(stages.get(stage_name), f"Missing funnel stage: {stage_name}")
@@ -198,6 +224,18 @@ def _aggregate(reports: Iterable[dict[str, object]]) -> dict[str, float | int | 
         "requiredInputAttempts": input_attempts,
         "requiredInputPassedAttempts": input_passed_attempts,
     }
+    multi_tool_workflow_attempts = sum(
+        int(summary.get("multiToolWorkflowAttempts") or 0) for summary in summaries
+    )
+    multi_tool_exact_attempts = sum(
+        int(summary.get("multiToolExactWorkflowAttempts") or 0) for summary in summaries
+    )
+    if multi_tool_workflow_attempts:
+        result["multiToolWorkflowAttempts"] = multi_tool_workflow_attempts
+        result["multiToolExactWorkflowAttempts"] = multi_tool_exact_attempts
+        result["multiToolExactWorkflowRate"] = _fraction(
+            multi_tool_exact_attempts, multi_tool_workflow_attempts
+        )
     previous_count = tool_attempts
     for stage_name in _FUNNEL_STAGES:
         count = sum(int(summary[f"{stage_name}Count"]) for summary in summaries)
@@ -223,8 +261,10 @@ def _summary_delta(
         "toolSelectionAccuracy",
         "requiredInputAccuracy",
         "domainExactOverallRate",
+        "capabilityExactOverallRate",
         "conditionalToolAccuracy",
         "endToEndExactRate",
+        "multiToolExactWorkflowRate",
     )
     return {
         name: round(float(candidate[name]) - float(baseline[name]), 4)

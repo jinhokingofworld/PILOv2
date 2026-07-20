@@ -27,6 +27,114 @@
       "expectedStatus": "needs_clarification"
     }
   ],
+  "multiToolCases": [
+    {
+      "id": "meeting_reports_then_calendar",
+      "prompt": "먼저 최근 회의록 3건을 보여주고, 그다음 2026년 7월 21일 일정을 알려줘",
+      "expectedDomains": ["meeting", "calendar"],
+      "expectedCapabilityIds": ["meeting.reports.list", "calendar.events.list"],
+      "stages": [
+        {
+          "toolName": "list_meeting_reports",
+          "inputContains": {"limit": 3},
+          "requiresConfirmation": false
+        },
+        {
+          "toolName": "list_calendar_events",
+          "inputContains": {"start": "2026-07-21", "end": "2026-07-21"},
+          "requiresConfirmation": false
+        },
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "calendar_then_meeting_reports",
+      "prompt": "먼저 2026년 7월 22일 일정을 확인하고, 이어서 최근 회의록 2건을 보여줘",
+      "expectedDomains": ["calendar", "meeting"],
+      "expectedCapabilityIds": ["calendar.events.list", "meeting.reports.list"],
+      "stages": [
+        {
+          "toolName": "list_calendar_events",
+          "inputContains": {"start": "2026-07-22", "end": "2026-07-22"},
+          "requiresConfirmation": false
+        },
+        {
+          "toolName": "list_meeting_reports",
+          "inputContains": {"limit": 2},
+          "requiresConfirmation": false
+        },
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "action_items_then_calendar",
+      "prompt": "먼저 내 담당 회의 할 일을 찾아주고, 그다음 2026년 7월 23일 일정을 보여줘",
+      "expectedDomains": ["meeting", "calendar"],
+      "expectedCapabilityIds": ["meeting.action_items.list", "calendar.events.list"],
+      "stages": [
+        {
+          "toolName": "find_action_items",
+          "inputContains": {"assigneeSelf": true},
+          "requiresConfirmation": false
+        },
+        {
+          "toolName": "list_calendar_events",
+          "inputContains": {"start": "2026-07-23", "end": "2026-07-23"},
+          "requiresConfirmation": false
+        },
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "calendar_then_action_items",
+      "prompt": "먼저 2026년 7월 24일 일정을 보여주고, 이어서 내 담당 회의 할 일을 찾아줘",
+      "expectedDomains": ["calendar", "meeting"],
+      "expectedCapabilityIds": ["calendar.events.list", "meeting.action_items.list"],
+      "stages": [
+        {
+          "toolName": "list_calendar_events",
+          "inputContains": {"start": "2026-07-24", "end": "2026-07-24"},
+          "requiresConfirmation": false
+        },
+        {
+          "toolName": "find_action_items",
+          "inputContains": {"assigneeSelf": true},
+          "requiresConfirmation": false
+        },
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "meeting_rooms_then_calendar",
+      "prompt": "먼저 회의실 목록을 보여주고, 그다음 2026년 7월 25일 일정을 확인해줘",
+      "expectedDomains": ["meeting", "calendar"],
+      "expectedCapabilityIds": ["meeting.rooms.list", "calendar.events.list"],
+      "stages": [
+        {"toolName": "list_meeting_rooms", "requiresConfirmation": false},
+        {
+          "toolName": "list_calendar_events",
+          "inputContains": {"start": "2026-07-25", "end": "2026-07-25"},
+          "requiresConfirmation": false
+        },
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "calendar_then_meeting_rooms",
+      "prompt": "먼저 2026년 7월 26일 일정을 확인하고, 그다음 회의실 목록을 보여줘",
+      "expectedDomains": ["calendar", "meeting"],
+      "expectedCapabilityIds": ["calendar.events.list", "meeting.rooms.list"],
+      "stages": [
+        {
+          "toolName": "list_calendar_events",
+          "inputContains": {"start": "2026-07-26", "end": "2026-07-26"},
+          "requiresConfirmation": false
+        },
+        {"toolName": "list_meeting_rooms", "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    }
+  ],
   "qualityCases": [
     {
       "id": "meeting_summary_sections_canonical",

@@ -59,6 +59,12 @@ _MEETING_EVALUATION_VARIANTS = {
         "domainExactOverallRate": 0.95,
         "conditionalToolAccuracy": 0.95,
     },
+    "multi_tool": {
+        "multiToolExactWorkflowRate": 0.95,
+        "domainExactOverallRate": 0.95,
+        "capabilityExactOverallRate": 0.95,
+        "conditionalToolAccuracy": 0.95,
+    },
 }
 
 
@@ -131,7 +137,7 @@ def _validate_meeting_evaluations(
     evaluation_inventory: dict[str, dict[str, int]],
 ) -> dict[str, object]:
     if len(paths) != len(_MEETING_EVALUATION_VARIANTS):
-        raise ValueError("Phase 4-E requires all four Meeting evaluation reports")
+        raise ValueError("Phase 4-E requires every Meeting evaluation report")
     summaries: dict[str, object] = {}
     for path in paths:
         report = _load_json(path)
@@ -179,12 +185,22 @@ def _validate_meeting_evaluations(
             raise ValueError(f"Incomplete Meeting routing funnel: {variant}")
         stages = _validate_routing_funnel(funnel, funnel_attempts)
         domain_stage = stages["domainExact"]
+        capability_stage = stages["capabilityExact"]
         tool_stage = stages["toolExact"]
         end_stage = stages["endToEndExact"]
         derived_metrics = {
             "domainExactOverallRate": domain_stage.get("overallRate"),
+            "capabilityExactOverallRate": capability_stage.get("overallRate"),
             "conditionalToolAccuracy": tool_stage.get("conditionalRate"),
         }
+        multi_tool_summary = report.get("multiToolWorkflows")
+        if variant == "multi_tool":
+            multi_tool_summary = _object(multi_tool_summary, "Missing multi-tool workflow summary")
+            derived_metrics["multiToolExactWorkflowRate"] = multi_tool_summary.get(
+                "exactWorkflowRate"
+            )
+        elif multi_tool_summary is not None:
+            raise ValueError("Unexpected multi-tool workflow summary")
         for metric_name, threshold in expected.items():
             metric = derived_metrics.get(metric_name, report.get(metric_name))
             if not isinstance(metric, int | float) or float(metric) < float(threshold):
@@ -200,7 +216,7 @@ def _validate_meeting_evaluations(
         supported_rate = retrieval.get("supportedToUnsupportedRate")
         if supported_rate not in (0, 0.0, None):
             raise ValueError("LLM Router marked a supported request unsupported")
-        if variant in {"canonical", "held_out", "counterexample"}:
+        if variant in {"canonical", "held_out", "counterexample", "multi_tool"}:
             minimum = 1.0 if variant == "canonical" else 0.95
             for metric_name in ("domainRecallAtK", "capabilityRecallAtK"):
                 metric = retrieval.get(metric_name)
@@ -215,9 +231,11 @@ def _validate_meeting_evaluations(
             "toolSelectionAttempts": funnel_attempts,
             "exactAttemptRate": report.get("exactAttemptRate"),
             "domainExactOverallRate": domain_stage.get("overallRate"),
+            "capabilityExactOverallRate": capability_stage.get("overallRate"),
             "conditionalToolAccuracy": tool_stage.get("conditionalRate"),
             "endToEndExactOverallRate": end_stage.get("overallRate"),
             "toolSelectionAccuracy": report.get("toolSelectionAccuracy"),
+            "multiToolExactWorkflowRate": derived_metrics.get("multiToolExactWorkflowRate"),
         }
     if set(summaries) != set(_MEETING_EVALUATION_VARIANTS):
         raise ValueError("Meeting evaluation variants are incomplete")
@@ -231,6 +249,7 @@ def _validate_routing_funnel(
     names = (
         "routerRouted",
         "domainExact",
+        "capabilityExact",
         "toolExact",
         "requiredInputExact",
         "executionPolicyExact",
@@ -404,6 +423,8 @@ def _validate_meeting_catalog(
     held_out_count = 0
     counterexample_count = 0
     context_count = 0
+    multi_tool_workflow_count = 0
+    multi_tool_stage_count = 0
     evaluation_inventory = {
         variant: {"caseCount": 0, "toolSelectionCaseCount": 0}
         for variant in _MEETING_EVALUATION_VARIANTS
@@ -478,6 +499,43 @@ def _validate_meeting_catalog(
         if tool_name:
             evaluation_inventory[variant]["toolSelectionCaseCount"] += 1
 
+    multi_tool_cases = value.get("multiToolCases")
+    if not isinstance(multi_tool_cases, list) or not multi_tool_cases:
+        raise ValueError("Meeting multi-tool cases are incomplete")
+    multi_tool_ids: set[str] = set()
+    for workflow in multi_tool_cases:
+        if not isinstance(workflow, dict):
+            raise ValueError("Invalid Meeting multi-tool case")
+        workflow_id = _required_string(workflow, "id")
+        if workflow_id in multi_tool_ids:
+            raise ValueError("Meeting multi-tool case IDs must be unique")
+        multi_tool_ids.add(workflow_id)
+        domains = _string_list(workflow, "expectedDomains")
+        capability_ids = _string_list(workflow, "expectedCapabilityIds")
+        stages = workflow.get("stages")
+        if (
+            len(set(domains)) < 2
+            or len(set(capability_ids)) < 2
+            or not isinstance(stages, list)
+            or len(stages) < 3
+        ):
+            raise ValueError("Meeting multi-tool case does not cover distinct tasks")
+        tool_stage_count = 0
+        for stage in stages:
+            if not isinstance(stage, dict):
+                raise ValueError("Invalid Meeting multi-tool stage")
+            tool_name = stage.get("toolName")
+            if tool_name is not None:
+                if not isinstance(tool_name, str) or not tool_name:
+                    raise ValueError("Invalid Meeting multi-tool stage tool")
+                tool_stage_count += 1
+        if tool_stage_count < 2 or stages[-1].get("status") != "completed":
+            raise ValueError("Meeting multi-tool workflow is incomplete")
+        multi_tool_workflow_count += 1
+        multi_tool_stage_count += len(stages)
+        evaluation_inventory["multi_tool"]["caseCount"] += len(stages)
+        evaluation_inventory["multi_tool"]["toolSelectionCaseCount"] += tool_stage_count
+
     for capability_id, expected_chain in _REQUIRED_WRITE_CHAINS.items():
         capability = by_id.get(capability_id)
         if capability is None:
@@ -503,6 +561,8 @@ def _validate_meeting_catalog(
             "heldOutCount": held_out_count,
             "counterexampleCount": counterexample_count,
             "multiTurnCount": context_count,
+            "multiToolWorkflowCount": multi_tool_workflow_count,
+            "multiToolStageCount": multi_tool_stage_count,
             "selectorCardinalityCount": len(cardinalities),
         },
         evaluation_inventory,

@@ -65,6 +65,8 @@ class EvaluationExpectation:
     missing_fields: tuple[str, ...]
     domain: str | None = None
     capability_id: str | None = None
+    domains: tuple[str, ...] = ()
+    capability_ids: tuple[str, ...] = ()
     required_tool_names: tuple[str, ...] = ()
     supported: bool | None = None
 
@@ -76,6 +78,9 @@ class EvaluationCase:
     kind: str
     expectation: EvaluationExpectation
     planning_context: str = ""
+    workflow_id: str | None = None
+    workflow_stage: int | None = None
+    workflow_stage_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +110,8 @@ class CaseEvaluationResult:
     shortlist_violation: bool
     expected_domain: str | None
     expected_capability_id: str | None
+    expected_domains: tuple[str, ...]
+    expected_capability_ids: tuple[str, ...]
     required_tool_names: tuple[str, ...]
     expected_supported: bool
     retrieved_domains: tuple[str, ...]
@@ -120,6 +127,9 @@ class CaseEvaluationResult:
     provider_input_tokens: int | None
     provider_output_tokens: int | None
     provider_total_tokens: int | None
+    workflow_id: str | None
+    workflow_stage: int | None
+    workflow_stage_count: int | None
 
 
 class PlannerEvaluator(Protocol):
@@ -180,9 +190,10 @@ def load_meeting_regression_suite(
     tool_snapshot_path: Path,
     variant: str,
 ) -> EvaluationSuite:
-    if variant not in {"canonical", "held_out", "counterexample", "context"}:
+    if variant not in {"canonical", "held_out", "counterexample", "context", "multi_tool"}:
         raise ValueError(
-            "Meeting regression variant must be canonical, held_out, counterexample, or context"
+            "Meeting regression variant must be canonical, held_out, counterexample, context, "
+            "or multi_tool"
         )
 
     try:
@@ -210,6 +221,13 @@ def load_meeting_regression_suite(
     quality_cases = catalog.get("qualityCases", [])
     if not isinstance(quality_cases, list):
         raise ValueError("Meeting regression qualityCases must be an array")
+    if variant == "multi_tool":
+        cases = _meeting_multi_tool_cases(catalog, base_suite)
+        return EvaluationSuite(
+            version=f"{_require_string(catalog, 'version')}:{variant}",
+            job=base_suite.job,
+            cases=cases,
+        )
     cases: list[EvaluationCase] = []
     for capability in capabilities:
         if not isinstance(capability, dict):
@@ -301,6 +319,88 @@ def load_meeting_regression_suite(
         job=base_suite.job,
         cases=tuple(cases),
     )
+
+
+def _meeting_multi_tool_cases(
+    catalog: dict[str, object],
+    base_suite: EvaluationSuite,
+) -> tuple[EvaluationCase, ...]:
+    workflows = catalog.get("multiToolCases")
+    if not isinstance(workflows, list) or not workflows:
+        raise ValueError("Meeting regression multiToolCases must be a non-empty array")
+    eligible_tool_names = {tool.name for tool in base_suite.job.tools}
+    cases: list[EvaluationCase] = []
+    workflow_ids: set[str] = set()
+    for workflow in workflows:
+        if not isinstance(workflow, dict):
+            raise ValueError("Meeting regression multi-tool workflow must be an object")
+        workflow_id = _require_string(workflow, "id")
+        if workflow_id in workflow_ids:
+            raise ValueError("Meeting regression multi-tool workflow IDs must be unique")
+        workflow_ids.add(workflow_id)
+        prompt = _require_string(workflow, "prompt")
+        domains = _string_tuple(workflow, "expectedDomains")
+        capability_ids = _string_tuple(workflow, "expectedCapabilityIds")
+        if len(domains) < 2 or len(capability_ids) < 2:
+            raise ValueError("Multi-tool workflow must cover at least two capabilities and domains")
+        stages = workflow.get("stages")
+        if not isinstance(stages, list) or len(stages) < 3:
+            raise ValueError("Multi-tool workflow must include tool stages and completion")
+        tool_names = tuple(
+            _require_string(stage, "toolName")
+            for stage in stages
+            if isinstance(stage, dict) and stage.get("toolName") is not None
+        )
+        if len(tool_names) < 2 or len(set(tool_names)) < 2:
+            raise ValueError("Multi-tool workflow must select at least two distinct tools")
+        if any(name not in eligible_tool_names for name in tool_names):
+            raise ValueError("Multi-tool workflow references an unknown tool")
+        completed: list[str] = []
+        for index, stage in enumerate(stages, start=1):
+            if not isinstance(stage, dict):
+                raise ValueError("Multi-tool workflow stage must be an object")
+            tool_name = stage.get("toolName")
+            status = stage.get("status", "tool_candidate")
+            if not isinstance(status, str) or not status:
+                raise ValueError("Multi-tool workflow stage status must be a string")
+            if tool_name is not None and (not isinstance(tool_name, str) or not tool_name):
+                raise ValueError("Multi-tool workflow stage toolName must be a string")
+            if status == "completed" and tool_name is not None:
+                raise ValueError("Multi-tool completion stage must not select a tool")
+            input_contains = stage.get("inputContains", {})
+            if not isinstance(input_contains, dict):
+                raise ValueError("Multi-tool workflow inputContains must be an object")
+            requires_confirmation = stage.get("requiresConfirmation")
+            if requires_confirmation is not None and not isinstance(requires_confirmation, bool):
+                raise ValueError("Multi-tool workflow confirmation must be a boolean")
+            planning_context = "\n".join(f"tool {name}: {{}}" for name in completed)
+            cases.append(
+                EvaluationCase(
+                    case_id=f"multi_tool:{workflow_id}:stage:{index}",
+                    prompt=prompt,
+                    kind="multi_tool",
+                    expectation=EvaluationExpectation(
+                        status=status,
+                        tool_name=tool_name,
+                        input_contains=dict(input_contains),
+                        requires_confirmation=requires_confirmation,
+                        missing_fields=(),
+                        domains=domains,
+                        capability_ids=capability_ids,
+                        required_tool_names=tool_names,
+                        supported=True,
+                    ),
+                    planning_context=planning_context,
+                    workflow_id=workflow_id,
+                    workflow_stage=index,
+                    workflow_stage_count=len(stages),
+                )
+            )
+            if tool_name is not None:
+                completed.append(tool_name)
+        if stages[-1].get("status") != "completed":
+            raise ValueError("Multi-tool workflow must end with completed")
+    return tuple(cases)
 
 
 def _meeting_regression_expectation(capability: dict[str, object]) -> EvaluationExpectation:
@@ -441,6 +541,12 @@ def evaluate_case(
 
     planner_started = perf_counter()
     planner_output_failure: str | None = None
+    completion_tool_names: tuple[str, ...] = ()
+    workflow_incomplete = False
+    if routing is not None and routing.status == "routed":
+        completion_tool_names = _routing_completion_tool_names(job, routing.capability_ids)
+        completed_tool_names = _completed_tool_names(case.planning_context)
+        workflow_incomplete = not set(completion_tool_names).issubset(completed_tool_names)
     if routing is not None and routing.status != "routed":
         decision = AgentPlannerDecision(
             status=(
@@ -475,6 +581,8 @@ def evaluate_case(
                     tools=tools,
                     planning_context=case.planning_context,
                     routing=routing,
+                    completion_tool_names=completion_tool_names,
+                    workflow_incomplete=workflow_incomplete,
                 )
             )
         except AgentPlannerOutputError as error:
@@ -494,6 +602,10 @@ def evaluate_case(
                 replace(job, tools=tools),
                 prompt=case.prompt,
                 current_date=current_date,
+                timezone=timezone,
+                planning_context=case.planning_context,
+                strict_tool_selection=(routing is not None or retrieval is not None),
+                completion_tool_names=completion_tool_names,
             )
         except AgentPlannerOutputError as error:
             planner_output_failure = _planner_output_failure(error)
@@ -525,6 +637,10 @@ def evaluate_case(
     expected_domain = case.expectation.domain or (
         expected_descriptor.domain if expected_descriptor else None
     )
+    expected_domains = case.expectation.domains or ((expected_domain,) if expected_domain else ())
+    expected_capability_ids = case.expectation.capability_ids or (
+        (case.expectation.capability_id,) if case.expectation.capability_id else ()
+    )
     required_tool_names = case.expectation.required_tool_names or (
         (case.expectation.tool_name,) if case.expectation.tool_name else ()
     )
@@ -552,6 +668,8 @@ def evaluate_case(
         shortlist_violation=shortlist_violation,
         expected_domain=expected_domain,
         expected_capability_id=case.expectation.capability_id,
+        expected_domains=expected_domains,
+        expected_capability_ids=expected_capability_ids,
         required_tool_names=required_tool_names,
         expected_supported=(
             case.expectation.supported
@@ -604,7 +722,41 @@ def evaluate_case(
             decision.provider_total_tokens,
             routing.provider_total_tokens if routing else None,
         ),
+        workflow_id=case.workflow_id,
+        workflow_stage=case.workflow_stage,
+        workflow_stage_count=case.workflow_stage_count,
     )
+
+
+def _routing_completion_tool_names(
+    job: AgentRunJob,
+    capability_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    catalog = job.tool_capability_catalog
+    if catalog is None:
+        return ()
+    capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
+    names: list[str] = []
+    for capability_id in capability_ids:
+        capability = capability_by_id.get(capability_id)
+        if capability is not None and capability.tool_names:
+            names.append(capability.tool_names[-1])
+    return tuple(dict.fromkeys(names))
+
+
+def _completed_tool_names(planning_context: str) -> set[str]:
+    names: set[str] = set()
+    for line in planning_context.splitlines():
+        if not line.startswith("tool ") or ": " not in line:
+            continue
+        tool_name, _, output = line[5:].partition(": ")
+        try:
+            parsed = json.loads(output)
+        except (TypeError, ValueError):
+            continue
+        if tool_name and isinstance(parsed, dict):
+            names.add(tool_name)
+    return names
 
 
 def _sum_optional_tokens(*values: int | None) -> int | None:
@@ -671,6 +823,7 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
         "confirmationAccuracy": _accuracy(confirmation_cases, "confirmation"),
         "clarificationAccuracy": _accuracy(clarification_cases, "missing_fields"),
         "routingFunnel": _routing_funnel(results),
+        "multiToolWorkflows": _multi_tool_workflow_summary(results),
         "planner": {
             "latencyMs": _latency_summary([result.planner_latency_ms for result in results]),
             "averageEstimatedToolSchemaTokens": _average(
@@ -728,6 +881,9 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
                 "id": result.case_id,
                 "attempt": result.attempt,
                 "kind": result.kind,
+                "workflowId": result.workflow_id,
+                "workflowStage": result.workflow_stage,
+                "workflowStageCount": result.workflow_stage_count,
                 "expected": _privacy_safe_expected(result.expected),
                 "passed": result.passed,
                 "classification": _classification(result),
@@ -756,8 +912,13 @@ def _routing_funnel(results: tuple[CaseEvaluationResult, ...]) -> dict[str, obje
         ("routerRouted", lambda result: result.routing_status == "routed"),
         (
             "domainExact",
-            lambda result: result.expected_domain is None
-            or set(result.retrieved_domains) == {result.expected_domain},
+            lambda result: not result.expected_domains
+            or set(result.retrieved_domains) == set(result.expected_domains),
+        ),
+        (
+            "capabilityExact",
+            lambda result: not result.expected_capability_ids
+            or set(result.retrieved_capability_ids) == set(result.expected_capability_ids),
         ),
         ("toolExact", lambda result: "tool" not in result.failure_reasons),
         ("requiredInputExact", lambda result: "input" not in result.failure_reasons),
@@ -784,6 +945,43 @@ def _routing_funnel(results: tuple[CaseEvaluationResult, ...]) -> dict[str, obje
     return {
         "toolSelectionAttempts": total,
         "stages": stages,
+    }
+
+
+def _multi_tool_workflow_summary(
+    results: tuple[CaseEvaluationResult, ...],
+) -> dict[str, object] | None:
+    multi_tool_results = [result for result in results if result.workflow_id is not None]
+    if not multi_tool_results:
+        return None
+    grouped: dict[tuple[str, int], list[CaseEvaluationResult]] = {}
+    for result in multi_tool_results:
+        grouped.setdefault((str(result.workflow_id), result.attempt), []).append(result)
+    exact_attempts = 0
+    for workflow_results in grouped.values():
+        expected_stage_count = workflow_results[0].workflow_stage_count
+        stages = {result.workflow_stage for result in workflow_results}
+        if (
+            isinstance(expected_stage_count, int)
+            and stages == set(range(1, expected_stage_count + 1))
+            and all(result.passed for result in workflow_results)
+            and all(result.routing_status == "routed" for result in workflow_results)
+            and all(
+                set(result.retrieved_domains) == set(result.expected_domains)
+                for result in workflow_results
+            )
+            and all(
+                set(result.retrieved_capability_ids) == set(result.expected_capability_ids)
+                for result in workflow_results
+            )
+        ):
+            exact_attempts += 1
+    return {
+        "workflowCount": len({result.workflow_id for result in multi_tool_results}),
+        "workflowAttempts": len(grouped),
+        "exactWorkflowAttempts": exact_attempts,
+        "exactWorkflowRate": _fraction(exact_attempts, len(grouped)),
+        "stageAttempts": len(multi_tool_results),
     }
 
 
@@ -883,6 +1081,8 @@ def _parse_case(value: object) -> EvaluationCase:
         not isinstance(capability_id, str) or not capability_id.strip()
     ):
         raise ValueError("Evaluation expected capabilityId must be a string")
+    domains = _optional_string_tuple(expected, "domains")
+    capability_ids = _optional_string_tuple(expected, "capabilityIds")
     required_tool_names = expected.get("requiredToolNames", [])
     if not isinstance(required_tool_names, list) or not all(
         isinstance(name, str) and name for name in required_tool_names
@@ -904,6 +1104,8 @@ def _parse_case(value: object) -> EvaluationCase:
             missing_fields=tuple(missing_fields),
             domain=domain.strip() if isinstance(domain, str) else None,
             capability_id=(capability_id.strip() if isinstance(capability_id, str) else None),
+            domains=domains,
+            capability_ids=capability_ids,
             required_tool_names=tuple(required_tool_names),
             supported=supported,
         ),
@@ -1001,15 +1203,17 @@ def _retrieval_recall(results: list[CaseEvaluationResult]) -> float | None:
 
 
 def _domain_recall(results: list[CaseEvaluationResult]) -> float | None:
-    eligible = [result for result in results if result.expected_domain]
-    return _rate([bool(result.expected_domain in result.retrieved_domains) for result in eligible])
+    eligible = [result for result in results if result.expected_domains]
+    return _rate(
+        [bool(set(result.expected_domains) <= set(result.retrieved_domains)) for result in eligible]
+    )
 
 
 def _capability_recall(results: list[CaseEvaluationResult]) -> float | None:
-    eligible = [result for result in results if result.expected_capability_id]
+    eligible = [result for result in results if result.expected_capability_ids]
     return _rate(
         [
-            bool(result.expected_capability_id in result.retrieved_capability_ids)
+            bool(set(result.expected_capability_ids) <= set(result.retrieved_capability_ids))
             for result in eligible
         ]
     )
@@ -1142,6 +1346,10 @@ def _privacy_safe_expected(expected: EvaluationExpectation) -> dict[str, object]
         output["domain"] = expected.domain
     if expected.capability_id:
         output["capabilityId"] = expected.capability_id
+    if expected.domains:
+        output["domains"] = list(expected.domains)
+    if expected.capability_ids:
+        output["capabilityIds"] = list(expected.capability_ids)
     if expected.required_tool_names:
         output["requiredToolNames"] = list(expected.required_tool_names)
     if expected.supported is not None:
@@ -1265,7 +1473,11 @@ def _bounded_optional_token_count(value: int | None) -> int | None:
 
 
 def _bounded_case_kind(value: str) -> str:
-    return value if value in {"canonical", "held_out", "counterexample", "positive"} else "other"
+    return (
+        value
+        if value in {"canonical", "held_out", "counterexample", "multi_tool", "positive"}
+        else "other"
+    )
 
 
 def _optional_kind(value: dict[object, object]) -> str:
@@ -1351,3 +1563,23 @@ def _require_string(value: dict[object, object], key: str) -> str:
     if not isinstance(item, str) or not item.strip():
         raise ValueError(f"Evaluation suite field is invalid: {key}")
     return item.strip()
+
+
+def _string_tuple(value: dict[object, object], key: str) -> tuple[str, ...]:
+    items = value.get(key)
+    if (
+        not isinstance(items, list)
+        or not items
+        or not all(isinstance(item, str) and item.strip() for item in items)
+    ):
+        raise ValueError(f"Evaluation suite field is invalid: {key}")
+    normalized = tuple(item.strip() for item in items)
+    if len(set(normalized)) != len(normalized):
+        raise ValueError(f"Evaluation suite field contains duplicates: {key}")
+    return normalized
+
+
+def _optional_string_tuple(value: dict[object, object], key: str) -> tuple[str, ...]:
+    if key not in value:
+        return ()
+    return _string_tuple(value, key)

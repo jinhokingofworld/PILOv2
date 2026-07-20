@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sidebar";
 import { HeaderMeetingStatus } from "@/features/meeting/components/header-meeting-status";
 import { ScreenShareHeaderControl } from "@/features/screen-share/components/screen-share-header-control";
+import { SqlErdSessionHeaderTitle } from "@/features/sql-erd/session-header-title";
 import {
   featureNavigationItems,
   getFeatureNavigationItemForPathname
@@ -68,7 +69,7 @@ export function MainShell({ children }: MainShellProps) {
             <div className="h-5 w-px shrink-0 bg-border" />
             <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
               <LayoutDashboard className="size-4 shrink-0 text-muted-foreground" />
-              <span className="truncate">{activeFeature.title}</span>
+              <SqlErdSessionHeaderTitle fallback={activeFeature.title} />
             </div>
           </div>
           <WorkspaceHeaderActions />

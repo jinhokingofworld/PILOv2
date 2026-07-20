@@ -48,7 +48,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--meeting-variant",
-        choices=("canonical", "held_out", "counterexample", "context"),
+        choices=("canonical", "held_out", "counterexample", "context", "multi_tool"),
         default="canonical",
         help="Meeting regression prompt set to evaluate when --meeting-catalog is provided.",
     )

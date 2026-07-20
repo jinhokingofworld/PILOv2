@@ -22,6 +22,7 @@ from app.agent_processor import (
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
     OpenAiAgentRouterClient,
+    SqlErdInspectContinuation,
 )
 from app.agent_prompt_security import PromptSecuritySource
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
@@ -1673,15 +1674,12 @@ class PgAgentRunRepository:
               run.prompt,
               run.timezone,
               run.planner_turn_count,
-              (
-                SELECT planner.output_json->>'toolName'
-                FROM agent_steps AS planner
-                WHERE planner.run_id = run.id
-                  AND planner.step_type = 'planner'
-                  AND planner.status = 'completed'
-                ORDER BY planner.step_order DESC, planner.id DESC
-                LIMIT 1
-              ) AS latest_planner_tool_name,
+              outbox.reason AS outbox_reason,
+              latest_planner.output_json->>'toolName' AS latest_planner_tool_name,
+              latest_planner.output_json AS latest_planner_output_json,
+              latest_planner.step_order AS latest_planner_step_order,
+              latest_tool.tool_name AS latest_tool_name,
+              latest_tool.step_order AS latest_tool_step_order,
               CASE
                 WHEN outbox.planning_started_at IS NULL THEN NULL
                 ELSE GREATEST(
@@ -1697,6 +1695,24 @@ class PgAgentRunRepository:
             INNER JOIN agent_run_outbox AS outbox
               ON outbox.run_id = run.id
              AND outbox.turn_sequence = %s
+            LEFT JOIN LATERAL (
+              SELECT planner.output_json, planner.step_order
+              FROM agent_steps AS planner
+              WHERE planner.run_id = run.id
+                AND planner.step_type = 'planner'
+                AND planner.status = 'completed'
+              ORDER BY planner.step_order DESC, planner.id DESC
+              LIMIT 1
+            ) AS latest_planner ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT tool.tool_name, tool.step_order
+              FROM agent_steps AS tool
+              WHERE tool.run_id = run.id
+                AND tool.step_type = 'tool'
+                AND tool.status = 'completed'
+              ORDER BY tool.step_order DESC, tool.id DESC
+              LIMIT 1
+            ) AS latest_tool ON TRUE
             WHERE run.id = %s
               AND run.workspace_id = %s
               AND run.requested_by_user_id = %s
@@ -1889,6 +1905,7 @@ class PgAgentRunRepository:
                 if row.get("latest_planner_tool_name") is not None
                 else None
             ),
+            sql_erd_inspect_continuation=_recover_sql_erd_inspect_continuation(row),
             queue_wait_ms=(
                 int(row["queue_wait_ms"]) if row.get("queue_wait_ms") is not None else None
             ),
@@ -2358,6 +2375,61 @@ class S3RecordingStorage:
             raise InfrastructureError("Could not download recording object") from error
 
         return path
+
+
+def _recover_sql_erd_inspect_continuation(
+    row: dict[str, object],
+) -> SqlErdInspectContinuation | None:
+    if row.get("outbox_reason") != "tool_result":
+        return None
+    planner_output = row.get("latest_planner_output_json")
+    if not isinstance(planner_output, dict):
+        return None
+    continuation = planner_output.get("continuation")
+    if not isinstance(continuation, dict) or set(continuation) != {
+        "kind",
+        "prerequisiteToolName",
+        "nextToolName",
+    }:
+        return None
+    planner_step_order = row.get("latest_planner_step_order")
+    tool_step_order = row.get("latest_tool_step_order")
+    if (
+        planner_output.get("toolName") != "inspect_sql_erd_schema"
+        or row.get("latest_tool_name") != "inspect_sql_erd_schema"
+        or not isinstance(planner_step_order, int)
+        or isinstance(planner_step_order, bool)
+        or not isinstance(tool_step_order, int)
+        or isinstance(tool_step_order, bool)
+        or tool_step_order != planner_step_order + 1
+    ):
+        return None
+    kind = continuation.get("kind")
+    prerequisite_tool_name = continuation.get("prerequisiteToolName")
+    next_tool_name = continuation.get("nextToolName")
+    if (
+        not isinstance(kind, str)
+        or not isinstance(prerequisite_tool_name, str)
+        or next_tool_name is not None
+        and not isinstance(next_tool_name, str)
+    ):
+        return None
+    contracts = {
+        "sql_erd_inspect_focus": ("inspect_sql_erd_schema", "focus_sql_erd_tables"),
+        "sql_erd_inspect_complete": ("inspect_sql_erd_schema", None),
+    }
+    expected_contract = contracts.get(kind)
+    if (
+        expected_contract is None
+        or prerequisite_tool_name != expected_contract[0]
+        or next_tool_name != expected_contract[1]
+    ):
+        return None
+    return SqlErdInspectContinuation(
+        kind=kind,
+        prerequisite_tool_name=prerequisite_tool_name,
+        next_tool_name=next_tool_name,
+    )
 
 
 class OpenAiMeetingReportClient:

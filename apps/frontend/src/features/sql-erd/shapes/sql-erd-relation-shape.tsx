@@ -165,7 +165,7 @@ export function getSqlErdRelationVisualStyle({
   isHovered: boolean;
   isSelected: boolean;
 }) {
-  if (isSelected) {
+  if (isSelected || isContextual) {
     return {
       stroke: "rgba(37, 99, 235, 0.98)",
       strokeWidth: 4
@@ -176,13 +176,6 @@ export function getSqlErdRelationVisualStyle({
     return {
       stroke: "rgba(37, 99, 235, 0.82)",
       strokeWidth: 3.25
-    };
-  }
-
-  if (isContextual) {
-    return {
-      stroke: "rgba(37, 99, 235, 0.74)",
-      strokeWidth: 3
     };
   }
 
