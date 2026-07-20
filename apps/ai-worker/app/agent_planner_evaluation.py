@@ -15,6 +15,7 @@ from app.agent_processor import (
     AgentPlannerOutputError,
     AgentPlanningRequest,
     AgentRouterClient,
+    AgentRouterOutputError,
     AgentRoutingRequest,
     AgentRunJob,
     AgentToolSchema,
@@ -24,6 +25,7 @@ from app.agent_processor import (
     parse_agent_run_job_payload,
     select_agent_planner_tools_for_routing,
 )
+from app.meeting_report_processor import InfrastructureError
 from app.agent_tool_retrieval import (
     DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
     TOOL_RETRIEVER_VERSION,
@@ -98,6 +100,7 @@ class CaseEvaluationResult:
     kind: str
     passed: bool
     failure_reasons: tuple[str, ...]
+    runtime_failure: str | None
     expected: EvaluationExpectation
     actual: NormalizedPlannerDecision
     retrieval: ToolRetrievalResult | None
@@ -506,29 +509,36 @@ def evaluate_case(
     retrieval = None
     retrieval_latency_ms = 0.0
     routing = None
+    runtime_failure: str | None = None
     if use_llm_routing:
         if router is None or job.tool_capability_catalog is None:
             raise ValueError("LLM routing evaluation requires a router and capability catalog")
         routing_started = perf_counter()
-        routing = normalize_agent_routing_decision(
-            router.route(
-                AgentRoutingRequest(
-                    prompt=case.prompt,
-                    timezone=timezone,
-                    current_date=current_date,
-                    catalog=job.tool_capability_catalog,
-                    planning_context=case.planning_context,
-                    context_surface=(
-                        job.request_context.get("surface")
-                        if job.request_context is not None
-                        else None
-                    ),
-                )
-            ),
-            job.tool_capability_catalog,
-        )
-        retrieval_latency_ms = (perf_counter() - routing_started) * 1000
-        if routing.status == "routed":
+        try:
+            routing = normalize_agent_routing_decision(
+                router.route(
+                    AgentRoutingRequest(
+                        prompt=case.prompt,
+                        timezone=timezone,
+                        current_date=current_date,
+                        catalog=job.tool_capability_catalog,
+                        planning_context=case.planning_context,
+                        context_surface=(
+                            job.request_context.get("surface")
+                            if job.request_context is not None
+                            else None
+                        ),
+                    )
+                ),
+                job.tool_capability_catalog,
+            )
+        except AgentRouterOutputError:
+            runtime_failure = "router_output"
+        except InfrastructureError:
+            runtime_failure = "router_infrastructure"
+        finally:
+            retrieval_latency_ms = (perf_counter() - routing_started) * 1000
+        if routing is not None and routing.status == "routed":
             tools = select_agent_planner_tools_for_routing(
                 job,
                 routing,
@@ -547,7 +557,9 @@ def evaluate_case(
         completion_tool_names = _routing_completion_tool_names(job, routing.capability_ids)
         completed_tool_names = _completed_tool_names(case.planning_context)
         workflow_incomplete = not set(completion_tool_names).issubset(completed_tool_names)
-    if routing is not None and routing.status != "routed":
+    if runtime_failure is not None:
+        decision = _rejected_planner_decision()
+    elif routing is not None and routing.status != "routed":
         decision = AgentPlannerDecision(
             status=(
                 "needs_clarification" if routing.status == "needs_clarification" else "unsupported"
@@ -588,6 +600,9 @@ def evaluate_case(
         except AgentPlannerOutputError as error:
             planner_output_failure = _planner_output_failure(error)
             decision = _rejected_planner_decision()
+        except InfrastructureError:
+            runtime_failure = "planner_infrastructure"
+            decision = _rejected_planner_decision()
     planner_latency_ms = (perf_counter() - planner_started) * 1000
     shortlist_tool_names = tuple(tool.name for tool in tools)
     shortlist_violation = planner_output_failure == "tool_outside_shortlist" or bool(
@@ -616,7 +631,9 @@ def evaluate_case(
     else:
         actual = _rejected_normalized_decision(planner_output_failure)
     failures = (
-        ["planner_output"]
+        ["runtime_failure"]
+        if runtime_failure is not None
+        else ["planner_output"]
         if planner_output_failure is not None
         else _compare(case.expectation, actual)
     )
@@ -656,10 +673,11 @@ def evaluate_case(
         kind=case.kind,
         passed=not failures,
         failure_reasons=tuple(failures),
+        runtime_failure=runtime_failure,
         expected=case.expectation,
         actual=actual,
         retrieval=retrieval,
-        routing_status=routing.status if routing else None,
+        routing_status=(routing.status if routing else "failed" if use_llm_routing else None),
         routing_confidence=routing.confidence if routing else None,
         shortlist_tool_names=shortlist_tool_names,
         shortlist_schema_bytes=_tool_schema_bytes(tools),
@@ -704,7 +722,7 @@ def evaluate_case(
         ),
         retriever_version=(
             "agent-tool-llm-router:v1"
-            if routing is not None
+            if use_llm_routing
             else TOOL_RETRIEVER_VERSION if retrieval else None
         ),
         current_date=current_date,
@@ -888,6 +906,7 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
                 "passed": result.passed,
                 "classification": _classification(result),
                 "failureReasons": list(result.failure_reasons),
+                "runtimeFailure": result.runtime_failure,
                 "failureCategoryCandidates": _failure_category_candidates(result),
                 "actual": _privacy_safe_actual(result.actual),
                 "retrieval": _retrieval_output(result),
@@ -1490,6 +1509,8 @@ def _optional_kind(value: dict[object, object]) -> str:
 def _failure_category_candidates(result: CaseEvaluationResult) -> list[str]:
     categories: list[str] = []
     expected = result.expected
+    if result.runtime_failure is not None:
+        categories.append("runtime_failure")
     if expected.status == "unsupported" and result.actual.status != "unsupported":
         categories.append("unsafe_candidate")
     if "tool" in result.failure_reasons:
