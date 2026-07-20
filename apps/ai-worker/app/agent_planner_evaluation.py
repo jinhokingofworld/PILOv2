@@ -12,6 +12,7 @@ from app.agent_processor import (
     AGENT_RUN_REQUESTED_JOB_TYPE,
     AgentPlannerClient,
     AgentPlannerDecision,
+    AgentPlannerOutputError,
     AgentPlanningRequest,
     AgentRouterClient,
     AgentRoutingRequest,
@@ -439,6 +440,7 @@ def evaluate_case(
         retrieval_latency_ms = (perf_counter() - retrieval_started) * 1000
 
     planner_started = perf_counter()
+    planner_output_failure: str | None = None
     if routing is not None and routing.status != "routed":
         decision = AgentPlannerDecision(
             status=(
@@ -457,39 +459,59 @@ def evaluate_case(
             unsupported_reason=routing.unsupported_reason,
         )
     else:
-        decision = planner.plan(
-            AgentPlanningRequest(
-                run_id=str(
-                    uuid5(
-                        NAMESPACE_URL,
-                        f"agent-planner-evaluation:{evaluation_seed}:{case.case_id}:{attempt}",
-                    )
-                ),
-                prompt=case.prompt,
-                timezone=timezone,
-                current_date=current_date,
-                tool_schema_version=job.tool_schema_version,
-                tools=tools,
-                planning_context=case.planning_context,
-                routing=routing,
+        try:
+            decision = planner.plan(
+                AgentPlanningRequest(
+                    run_id=str(
+                        uuid5(
+                            NAMESPACE_URL,
+                            f"agent-planner-evaluation:{evaluation_seed}:{case.case_id}:{attempt}",
+                        )
+                    ),
+                    prompt=case.prompt,
+                    timezone=timezone,
+                    current_date=current_date,
+                    tool_schema_version=job.tool_schema_version,
+                    tools=tools,
+                    planning_context=case.planning_context,
+                    routing=routing,
+                )
             )
-        )
+        except AgentPlannerOutputError as error:
+            planner_output_failure = _planner_output_failure(error)
+            decision = _rejected_planner_decision()
     planner_latency_ms = (perf_counter() - planner_started) * 1000
     shortlist_tool_names = tuple(tool.name for tool in tools)
-    shortlist_violation = bool(
+    shortlist_violation = planner_output_failure == "tool_outside_shortlist" or bool(
         (routing is not None or retrieval and not retrieval.low_confidence)
         and decision.tool_name
         and decision.tool_name not in shortlist_tool_names
     )
-    actual = normalize_agent_planner_decision(
-        decision,
-        replace(job, tools=tools),
-        prompt=case.prompt,
-        current_date=current_date,
+    if planner_output_failure is None:
+        try:
+            actual = normalize_agent_planner_decision(
+                decision,
+                replace(job, tools=tools),
+                prompt=case.prompt,
+                current_date=current_date,
+            )
+        except AgentPlannerOutputError as error:
+            planner_output_failure = _planner_output_failure(error)
+            shortlist_violation = (
+                shortlist_violation or planner_output_failure == "tool_outside_shortlist"
+            )
+            actual = _rejected_normalized_decision(planner_output_failure)
+    else:
+        actual = _rejected_normalized_decision(planner_output_failure)
+    failures = (
+        ["planner_output"]
+        if planner_output_failure is not None
+        else _compare(case.expectation, actual)
     )
-    failures = _compare(case.expectation, actual)
     if shortlist_violation:
-        failures.append("shortlist_tool")
+        for failure in ("tool", "shortlist_tool"):
+            if failure not in failures:
+                failures.append(failure)
     descriptor_by_tool_name = (
         {descriptor.tool_name: descriptor for descriptor in job.tool_capability_catalog.descriptors}
         if job.tool_capability_catalog
@@ -1262,6 +1284,8 @@ def _failure_category_candidates(result: CaseEvaluationResult) -> list[str]:
         categories.append("wrong_tool")
     if "shortlist_tool" in result.failure_reasons:
         categories.append("shortlist_violation")
+    if "planner_output" in result.failure_reasons:
+        categories.append("planner_output_error")
     if "status" in result.failure_reasons:
         categories.append("wrong_status")
     if "input" in result.failure_reasons:
@@ -1275,6 +1299,39 @@ def _failure_category_candidates(result: CaseEvaluationResult) -> list[str]:
     if "confirmation" in result.failure_reasons:
         categories.append("confirmation_policy")
     return categories
+
+
+def _planner_output_failure(error: AgentPlannerOutputError) -> str:
+    if "outside the shortlist" in str(error):
+        return "tool_outside_shortlist"
+    return "invalid_planner_output"
+
+
+def _rejected_planner_decision() -> AgentPlannerDecision:
+    return AgentPlannerDecision(
+        status="unsupported",
+        message="Evaluator rejected invalid planner output.",
+        final_answer_draft="Evaluator rejected invalid planner output.",
+        tool_name=None,
+        tool_input={},
+        requires_confirmation=False,
+        missing_fields=(),
+        unsupported_reason="invalid_planner_output",
+    )
+
+
+def _rejected_normalized_decision(reason: str) -> NormalizedPlannerDecision:
+    message = "Evaluator rejected invalid planner output."
+    return NormalizedPlannerDecision(
+        status="unsupported",
+        message=message,
+        final_answer=message,
+        output_summary={
+            "status": "unsupported",
+            "unsupportedReason": reason,
+        },
+        risk_level=None,
+    )
 
 
 def _classification(result: CaseEvaluationResult) -> str:

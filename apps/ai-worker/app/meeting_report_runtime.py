@@ -1672,7 +1672,27 @@ class PgAgentRunRepository:
               run.status,
               run.prompt,
               run.timezone,
-              run.planner_turn_count
+              run.planner_turn_count,
+              (
+                SELECT planner.output_json->>'toolName'
+                FROM agent_steps AS planner
+                WHERE planner.run_id = run.id
+                  AND planner.step_type = 'planner'
+                  AND planner.status = 'completed'
+                ORDER BY planner.step_order DESC, planner.id DESC
+                LIMIT 1
+              ) AS latest_planner_tool_name,
+              CASE
+                WHEN outbox.planning_started_at IS NULL THEN NULL
+                ELSE GREATEST(
+                  0,
+                  FLOOR(
+                    EXTRACT(EPOCH FROM (
+                      clock_timestamp() - outbox.planning_started_at
+                    )) * 1000
+                  )
+                )::bigint
+              END AS queue_wait_ms
             FROM agent_runs AS run
             INNER JOIN agent_run_outbox AS outbox
               ON outbox.run_id = run.id
@@ -1864,6 +1884,14 @@ class PgAgentRunRepository:
             prompt=str(row["prompt"]),
             timezone=str(row["timezone"]),
             planner_turn_count=int(row["planner_turn_count"]),
+            latest_planner_tool_name=(
+                str(row["latest_planner_tool_name"])
+                if row.get("latest_planner_tool_name") is not None
+                else None
+            ),
+            queue_wait_ms=(
+                int(row["queue_wait_ms"]) if row.get("queue_wait_ms") is not None else None
+            ),
             planning_context=planning_context,
             untrusted_context_sources=tuple(
                 source for line, source in untrusted_source_lines if line in included_lines

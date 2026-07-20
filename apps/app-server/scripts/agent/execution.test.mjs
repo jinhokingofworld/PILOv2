@@ -93,12 +93,14 @@ class FakeWorkspaceService {
 }
 
 class FakeDatabaseService {
-  constructor(state) {
+  constructor(state, timeline = []) {
     this.state = state;
     this.calls = [];
+    this.timeline = timeline;
   }
 
   async query(text) {
+    this.timeline.push("db:query");
     this.calls.push({ text, values: [] });
     if (text.includes("SELECT DISTINCT tool_name")) {
       return (this.state.completedToolNames ?? []).map((tool_name) => ({
@@ -109,6 +111,7 @@ class FakeDatabaseService {
   }
 
   async queryOne(text, values = []) {
+    this.timeline.push("db:queryOne");
     this.calls.push({ text, values });
 
     if (text.includes(" AS started")) {
@@ -380,6 +383,24 @@ class FakeAgentLoggingService {
       createdAt: "2026-07-10T00:00:00.000Z",
       updatedAt: "2026-07-10T00:00:00.000Z"
     };
+  }
+}
+
+class FakeAgentLatencyObserver {
+  constructor(timeline = []) {
+    this.calls = [];
+    this.clock = 0;
+    this.timeline = timeline;
+  }
+
+  start() {
+    this.timeline.push("latency:start");
+    this.clock += 10;
+    return this.clock;
+  }
+
+  observe(input) {
+    this.calls.push(input);
   }
 }
 
@@ -1004,7 +1025,9 @@ function createExecutionServiceWithRegistry(
   registry,
   {
     prompt = "이번 주 일정 알려줘",
-    timezone = "Asia/Seoul"
+    timezone = "Asia/Seoul",
+    requestContext = null,
+    latencyObserver = undefined
   } = {}
 ) {
   const state = {
@@ -1013,8 +1036,10 @@ function createExecutionServiceWithRegistry(
       workspace_id: WORKSPACE_ID,
       requested_by_user_id: USER_ID,
       status: "running",
+      turn_sequence: 1,
       prompt,
-      timezone
+      timezone,
+      request_context_json: requestContext
     },
     plannerStep: {
       id: STEP_ID,
@@ -1022,7 +1047,10 @@ function createExecutionServiceWithRegistry(
     }
   };
   const workspaceService = new FakeWorkspaceService();
-  const database = new FakeDatabaseService(state);
+  const database = new FakeDatabaseService(
+    state,
+    latencyObserver?.timeline ?? []
+  );
   const loggingService = new FakeAgentLoggingService(state);
   const confirmationService = new FakeAgentConfirmationService();
   const outboxPublisherService = new FakeAgentOutboxPublisherService();
@@ -1050,7 +1078,8 @@ function createExecutionServiceWithRegistry(
       undefined,
       undefined,
       outboxPublisherService,
-      candidateSelectionService
+      candidateSelectionService,
+      latencyObserver
     ),
     candidateSelectionService,
     confirmationService,
@@ -1068,7 +1097,8 @@ function createService({
   toolCallLimitReached = false,
   completedToolNames = [],
   publisherError = null,
-  candidateSelectionService = undefined
+  candidateSelectionService = undefined,
+  latencyObserver = undefined
 } = {}) {
   const state = {
     run: {
@@ -1076,6 +1106,7 @@ function createService({
       workspace_id: WORKSPACE_ID,
       requested_by_user_id: USER_ID,
       status: runStatus,
+      turn_sequence: 1,
       prompt: "이번 주 일정 알려줘",
       timezone: "Asia/Seoul",
       request_context_json: requestContext
@@ -1089,7 +1120,10 @@ function createService({
     completedToolNames
   };
   const workspaceService = new FakeWorkspaceService();
-  const database = new FakeDatabaseService(state);
+  const database = new FakeDatabaseService(
+    state,
+    latencyObserver?.timeline ?? []
+  );
   const loggingService = new FakeAgentLoggingService(state);
   const confirmationService = new FakeAgentConfirmationService();
   const toolRegistryService = new FakeAgentToolRegistryService(registryState);
@@ -1107,14 +1141,16 @@ function createService({
       undefined,
       undefined,
       outboxPublisherService,
-      candidateSelectionService
+      candidateSelectionService,
+      latencyObserver
     ),
     workspaceService,
     database,
     loggingService,
     confirmationService,
     toolRegistryService,
-    outboxPublisherService
+    outboxPublisherService,
+    latencyObserver
   };
 }
 
@@ -1536,12 +1572,18 @@ function formatterMeetingReport(index, overrides = {}) {
 }
 
 {
-  const { service, loggingService, outboxPublisherService } = createService({
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service, database, loggingService, outboxPublisherService } = createService({
     registryState: {
       postExecutionDisposition: "complete_run",
       name: "focus_sql_erd_tables"
     },
-    planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" }),
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
   });
 
   const result = await service.executeReadyRun(RUN_ID);
@@ -1554,6 +1596,186 @@ function formatterMeetingReport(index, overrides = {}) {
   );
   assert.equal(completion.input.postExecutionDisposition, "complete_run");
   assert.match(completion.input.waitingMessage, /focus_sql_erd_tables 실행을 완료했습니다/);
+  assert.deepEqual(
+    latencyObserver.calls.map((call) => call.stage),
+    ["tool_preparation", "tool_execution", "tool_advance", "tool_turn"]
+  );
+  assert.equal(
+    latencyObserver.calls.every(
+      (call) =>
+        call.surface === "sql_erd" &&
+        call.toolName === "focus_sql_erd_tables" &&
+        call.turnSequence === 1
+    ),
+    true
+  );
+  assert.equal(latencyObserver.timeline[0], "latency:start");
+  assert.match(database.calls[0].text, /planner_turn_count AS turn_sequence/);
+}
+
+{
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({ latencyObserver });
+
+  await service.executeReadyRun(RUN_ID);
+
+  assert.deepEqual(latencyObserver.calls, []);
+}
+
+{
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({
+    registryState: {
+      name: "focus_sql_erd_tables",
+      validationError: badRequest("invalid focus input")
+    },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" }),
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed");
+  const preparationEvents = latencyObserver.calls.filter(
+    (call) => call.stage === "tool_preparation"
+  );
+  assert.equal(preparationEvents.length, 1);
+  assert.equal(preparationEvents[0].outcome, "failure");
+  assert.equal(preparationEvents[0].failureType, "validation_error");
+}
+
+for (const testCase of [
+  {
+    name: "context unavailable",
+    registryState: { contextUnavailable: true },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
+  },
+  {
+    name: "registry mismatch",
+    registryState: { riskLevel: "medium" },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
+  },
+  {
+    name: "high risk",
+    registryState: { riskLevel: "high" },
+    planner: plannerOutput({
+      toolName: "focus_sql_erd_tables",
+      riskLevel: "high"
+    })
+  },
+  {
+    name: "contextual preparation unavailable",
+    registryState: { executionMode: "contextual" },
+    planner: plannerOutput({
+      toolName: "focus_sql_erd_tables",
+      executionMode: "contextual",
+      requiresConfirmation: null
+    })
+  }
+]) {
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({
+    registryState: testCase.registryState,
+    planner: testCase.planner,
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed", testCase.name);
+  const preparationEvents = latencyObserver.calls.filter(
+    (call) => call.stage === "tool_preparation"
+  );
+  assert.deepEqual(
+    preparationEvents.map(({ outcome, failureType }) => ({ outcome, failureType })),
+    [{ outcome: "failure", failureType: "validation_error" }],
+    testCase.name
+  );
+}
+
+{
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({
+    registryState: {
+      name: "inspect_sql_erd_schema",
+      executionMode: "contextual",
+      prepareExecution: { kind: "invalid" }
+    },
+    planner: plannerOutput({
+      toolName: "inspect_sql_erd_schema",
+      executionMode: "contextual",
+      requiresConfirmation: null
+    }),
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed");
+  const preparationEvents = latencyObserver.calls.filter(
+    (call) => call.stage === "tool_preparation"
+  );
+  assert.deepEqual(
+    preparationEvents.map(({ outcome, failureType }) => ({ outcome, failureType })),
+    [{ outcome: "failure", failureType: "validation_error" }]
+  );
+}
+
+{
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service, confirmationService, loggingService } = createService({
+    registryState: {
+      name: "inspect_sql_erd_schema",
+      executionMode: "contextual",
+      prepareExecution: {
+        kind: "confirmation",
+        plan: confirmationPlan()
+      }
+    },
+    planner: plannerOutput({
+      toolName: "inspect_sql_erd_schema",
+      executionMode: "contextual",
+      requiresConfirmation: null
+    }),
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
+  });
+  confirmationService.createConfirmation = async () => {
+    throw new Error("confirmation persistence unavailable");
+  };
+
+  await assert.rejects(
+    service.executeReadyRun(RUN_ID),
+    /confirmation persistence unavailable/
+  );
+  assert.equal(
+    loggingService.calls.some((call) => call.method === "failRun"),
+    false
+  );
+  const preparationEvents = latencyObserver.calls.filter(
+    (call) => call.stage === "tool_preparation"
+  );
+  assert.deepEqual(
+    preparationEvents.map(({ outcome, failureType }) => ({ outcome, failureType })),
+    [{ outcome: "success", failureType: undefined }]
+  );
+  const toolTurn = latencyObserver.calls.find((call) => call.stage === "tool_turn");
+  assert.equal(toolTurn.outcome, "failure");
 }
 
 {
@@ -2103,6 +2325,7 @@ function formatterMeetingReport(index, overrides = {}) {
   );
 
   const selectedToken = SQL_ERD_SECOND_SESSION_ID;
+  const inspectLatencyObserver = new FakeAgentLatencyObserver();
   const resumedExecution = createExecutionServiceWithRegistry(
     plannerOutput({
       toolName: inspectDefinition.name,
@@ -2117,7 +2340,12 @@ function formatterMeetingReport(index, overrides = {}) {
     registry,
     {
       prompt: "Untitled ERD 세션을 선택했습니다.",
-      timezone: "Asia/Seoul"
+      timezone: "Asia/Seoul",
+      requestContext: {
+        surface: "sql_erd",
+        sessionId: SQL_ERD_SECOND_SESSION_ID
+      },
+      latencyObserver: inspectLatencyObserver
     }
   );
   await resumedExecution.service.executeLatestPlannedTool(
@@ -2130,6 +2358,10 @@ function formatterMeetingReport(index, overrides = {}) {
     (call) => call.method === "completeToolStepAndAdvance"
   ).input.outputSummary;
   assert.equal(resumedOutput.sessionId, SQL_ERD_SECOND_SESSION_ID);
+  assert.deepEqual(
+    inspectLatencyObserver.calls.map((call) => call.stage),
+    ["tool_preparation", "tool_execution", "tool_advance", "tool_turn"]
+  );
   assert.deepEqual(
     sqlErdService.calls
       .filter((call) => call.method === "getSession")

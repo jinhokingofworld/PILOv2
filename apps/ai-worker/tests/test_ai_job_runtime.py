@@ -904,6 +904,8 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
             "prompt": "그 회의를 다시 연결해줘",
             "timezone": "Asia/Seoul",
             "planner_turn_count": 2,
+            "queue_wait_ms": 37,
+            "latest_planner_tool_name": "focus_sql_erd_tables",
             "thread_id": None,
         },
         timeline_rows=[
@@ -966,6 +968,11 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
         "user_follow_up",
         "회의 상태 조회가 끝났나요?",
     )
+    assert context.queue_wait_ms == 37
+    assert context.latest_planner_tool_name == "focus_sql_erd_tables"
+    run_query, _run_values = connection.executed[0]
+    assert "clock_timestamp() - outbox.planning_started_at" in run_query
+    assert "latest_planner_tool_name" in run_query
     timeline_query, timeline_values = connection.executed[-1]
     assert "UNION ALL" in timeline_query
     assert "ORDER BY occurred_at DESC" in timeline_query
