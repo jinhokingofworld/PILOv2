@@ -48,7 +48,7 @@ export function HomeDashboard() {
 
   return (
     <PageCursorSurface
-      className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#f6f7f9] p-4 sm:p-5"
+      className="relative flex min-h-0 flex-1 flex-col bg-[#f6f7f9] p-4 sm:p-5"
       enabled={Boolean(authSession?.activeWorkspaceId)}
       page="home"
       workspaceId={authSession?.activeWorkspaceId ?? ""}
@@ -78,7 +78,9 @@ export function HomeDashboard() {
             pullRequestsState={pullRequestsState}
           />
         </section>
-        <GithubWorkspaceCards />
+        <div className="min-h-[128px] [&>div]:min-h-[128px]">
+          <GithubWorkspaceCards />
+        </div>
       </div>
     </PageCursorSurface>
   );

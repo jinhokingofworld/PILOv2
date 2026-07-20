@@ -18,10 +18,12 @@ test("HomeDashboard는 시안형 섹션과 기존 바로가기를 조합한다",
 
   assert.match(source, /워크스페이스 현황/);
   assert.match(source, /GithubWorkspaceCards/);
+  assert.match(source, /min-h-\[128px\]/);
   assert.match(
     source,
     /grid-cols-\[minmax\(260px,0\.66fr\)_minmax\(0,1\.34fr\)\]/
   );
+  assert.doesNotMatch(source, /overflow-y-auto/);
 });
 
 test("MembersCard는 기존 멤버 데이터로 팀 현황을 요약한다", async () => {
