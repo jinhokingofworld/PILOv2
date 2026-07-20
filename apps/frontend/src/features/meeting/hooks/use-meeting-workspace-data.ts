@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { createMeetingApiClient } from "@/features/meeting/api/client";
+import {
+  getLocalMeetingMockReportList,
+  isLocalMeetingMockReport,
+  localMeetingMockReportDetail
+} from "@/features/meeting/mock-data";
 import type {
   JoinMeetingInput,
   CurrentMeetingPayload,
@@ -48,6 +53,9 @@ const emptyReportsState: MeetingWorkspaceReportsState = {
   nextCursor: null,
   reports: []
 };
+const canUseLocalMeetingMockData =
+  process.env.NODE_ENV === "development" &&
+  process.env.NEXT_PUBLIC_ENABLE_MEETING_MOCK === "true";
 
 function errorFromUnknown(error: unknown) {
   return error instanceof Error
@@ -73,6 +81,13 @@ export function useMeetingWorkspaceData({
       normalizedAccessToken &&
       (!usesRoomScopedApi || normalizedMeetingRoomId)
   );
+  const canLoadLocalMockReports = Boolean(
+    canUseLocalMeetingMockData &&
+      enabled &&
+      normalizedWorkspaceId &&
+      normalizedAccessToken
+  );
+  const canLoadReports = canLoad || canLoadLocalMockReports;
   const reportsQueryKey = JSON.stringify(reportsQuery);
   const meetingClient = useMemo(
     () => createMeetingApiClient({ accessToken: normalizedAccessToken }),
@@ -117,14 +132,25 @@ export function useMeetingWorkspaceData({
   ]);
 
   const loadReports = useCallback(async () => {
-    if (!canLoad || !reportsEnabled) {
+    if (!canLoadReports || !reportsEnabled) {
       return emptyReportsState;
     }
 
     const query = JSON.parse(reportsQueryKey) as MeetingReportListQuery;
-    return meetingClient.listMeetingReports(normalizedWorkspaceId, query);
+    if (!canLoad) {
+      return getLocalMeetingMockReportList(query) ?? emptyReportsState;
+    }
+
+    const result = await meetingClient.listMeetingReports(
+      normalizedWorkspaceId,
+      query
+    );
+    if (!canUseLocalMeetingMockData || result.reports.length) return result;
+
+    return getLocalMeetingMockReportList(query) ?? result;
   }, [
     canLoad,
+    canLoadReports,
     meetingClient,
     normalizedWorkspaceId,
     reportsEnabled,
@@ -157,7 +183,7 @@ export function useMeetingWorkspaceData({
   }, [canLoad, loadCurrentMeeting]);
 
   const reloadReports = useCallback(async () => {
-    if (!canLoad || !reportsEnabled) {
+    if (!canLoadReports || !reportsEnabled) {
       setReportsState(emptyReportsState);
       setReportsStatus("idle");
       setReportsError(null);
@@ -179,7 +205,7 @@ export function useMeetingWorkspaceData({
       setReportsStatus("error");
       return emptyReportsState;
     }
-  }, [canLoad, loadReports, reportsEnabled]);
+  }, [canLoadReports, loadReports, reportsEnabled]);
 
   const startMeeting = useCallback(
     async (input: StartMeetingInput = {}) => {
@@ -290,6 +316,10 @@ export function useMeetingWorkspaceData({
 
   const getMeetingReport = useCallback(
     async (reportId: string) => {
+      if (canUseLocalMeetingMockData && isLocalMeetingMockReport(reportId)) {
+        return { report: localMeetingMockReportDetail };
+      }
+
       return meetingClient.getMeetingReport(requireWorkspace(), reportId);
     },
     [meetingClient, requireWorkspace]
@@ -460,7 +490,7 @@ export function useMeetingWorkspaceData({
     let active = true;
 
     async function load() {
-      if (!canLoad || !reportsEnabled) {
+      if (!canLoadReports || !reportsEnabled) {
         setReportsState(emptyReportsState);
         setReportsStatus("idle");
         setReportsError(null);
@@ -490,7 +520,7 @@ export function useMeetingWorkspaceData({
     return () => {
       active = false;
     };
-  }, [canLoad, loadReports, reportsEnabled]);
+  }, [canLoadReports, loadReports, reportsEnabled]);
 
   return {
     accessToken: normalizedAccessToken,

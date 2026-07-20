@@ -9,6 +9,10 @@ const meetingApiClient = await readFile(
   new URL("../../src/features/meeting/api/client.ts", import.meta.url),
   "utf8"
 );
+const meetingMockData = await readFile(
+  new URL("../../src/features/meeting/mock-data.ts", import.meta.url),
+  "utf8"
+);
 const meetingHook = await readFile(
   new URL(
     "../../src/features/meeting/hooks/use-meeting-workspace-data.ts",
@@ -210,11 +214,26 @@ assert.match(meetingHook, /createMeetingApiClient/);
 assert.match(meetingHook, /MeetingWorkspaceDataStatus/);
 assert.match(meetingHook, /updateMeetingReportContent/);
 assert.match(meetingHook, /reportsEnabled/);
+assert.match(meetingHook, /process\.env\.NODE_ENV === "development"/);
+assert.match(meetingHook, /process\.env\.NEXT_PUBLIC_ENABLE_MEETING_MOCK === "true"/);
+assert.match(meetingHook, /canLoadLocalMockReports/);
+assert.match(meetingHook, /const canLoadReports = canLoad \|\| canLoadLocalMockReports/);
+assert.match(meetingHook, /getLocalMeetingMockReportList/);
+assert.match(meetingHook, /isLocalMeetingMockReport/);
+assert.match(meetingHook, /localMeetingMockReportDetail/);
 assert.match(meetingHook, /reloadCurrentMeeting/);
 assert.match(meetingHook, /meetingRoomId\?: string \| null/);
 assert.match(meetingHook, /usesRoomScopedApi/);
 assert.match(meetingHook, /getCurrentMeetingInRoom/);
 assert.match(meetingHook, /startMeetingInRoom/);
+
+assert.match(meetingMockData, /LOCAL_MEETING_MOCK_REPORT_ID/);
+assert.match(meetingMockData, /localMeetingMockReportSummary/);
+assert.match(meetingMockData, /localMeetingMockReportDetail/);
+assert.match(meetingMockData, /activityEvidence/);
+assert.match(meetingMockData, /sourceType: "decision"/);
+assert.match(meetingMockData, /sourceIndex: 0/);
+assert.match(meetingMockData, /decisionItems/);
 assert.match(meetingHook, /reloadReports/);
 assert.match(meetingHook, /startMeeting/);
 assert.match(meetingHook, /joinMeeting/);
@@ -442,6 +461,31 @@ assert.match(meetingReportSection, /useMeetingReportRealtime/);
 assert.match(meetingReportSection, /selectedReportId === event\.reportId/);
 assert.match(meetingReportSection, /활동 근거/);
 assert.match(meetingReportSection, /report\.activityEvidence/);
+assert.match(meetingReportSection, /getActivityEvidence/);
+assert.match(meetingReportSection, /activity\.references\.some/);
+assert.match(meetingReportSection, /reference\.sourceType === sourceType/);
+assert.match(meetingReportSection, /reference\.sourceIndex === sourceIndex/);
+assert.match(meetingReportSection, /activityEvidenceForItem/);
+assert.match(meetingReportSection, /활동 \{activityEvidence\.length\}건/);
+assert.match(meetingReportSection, /selectedActivityEvidence/);
+assert.match(meetingReportSection, /selectedActivityEvidenceSourceLabel/);
+assert.match(meetingReportSection, /selectActivityEvidence/);
+assert.match(meetingReportSection, /getActivityEvidence\(report, "summary"\)/);
+assert.match(meetingReportSection, /getActivityEvidence\(report, "discussion"\)/);
+assert.match(meetingReportSection, /getActivityEvidence\(\s*report,\s*"action_item",\s*item\.sourceIndex\s*\)/);
+assert.match(meetingReportSection, /activityEvidence=\{summaryActivityEvidence\}/);
+assert.match(meetingReportSection, /activityEvidence=\{discussionActivityEvidence\}/);
+assert.match(meetingReportSection, /activityEvidence=\{activityEvidence\}/);
+assert.match(meetingReportSection, /후속 작업 \$\{item\.sourceIndex \+ 1\}/);
+assert.doesNotMatch(meetingReportSection, /selectedActivityDecisionIndex/);
+assert.doesNotMatch(meetingReportSection, /기록된 활동 근거가 없습니다/);
+assert.match(meetingReportSection, /grid gap-5 border-b pb-5/);
+assert.match(meetingReportSection, /md:flex-nowrap/);
+assert.match(meetingReportSection, /CalendarPlus/);
+assert.match(meetingReportSection, /Users/);
+assert.match(meetingReportSection, /생성일/);
+assert.match(meetingReportSection, /수정일/);
+assert.match(meetingReportSection, /참석자/);
 assert.match(meetingReportSection, /getReportIdFromLocation/);
 assert.match(meetingReportSection, /new URLSearchParams\(window\.location\.search\)/);
 assert.match(meetingReportSection, /openedDeepLinkReportIdRef/);
@@ -466,7 +510,7 @@ assert.match(meetingReportSection, /승인/);
 assert.match(meetingReportSection, /editing/);
 assert.match(
   meetingReportSection,
-  /!editing && evidenceSegments\.length[\s\S]*?flex flex-wrap items-center justify-between gap-2[\s\S]*?<EvidenceTimeButtons[\s\S]*?취소[\s\S]*?승인/
+  /!editing && \(evidenceSegments\.length \|\| activityEvidence\.length\)[\s\S]*?flex flex-wrap items-center justify-between gap-2[\s\S]*?<EvidenceTimeButtons[\s\S]*?취소[\s\S]*?승인/
 );
 assert.match(meetingReportSection, /endDate: endDate \|\| startDate/);
 assert.match(meetingReportSection, /종료 날짜 \(비우면 시작 날짜\)/);
@@ -514,7 +558,10 @@ assert.match(
 );
 assert.match(meetingReportSection, /getEvidenceSegments\(report, "summary"\)/);
 assert.match(meetingReportSection, /getEvidenceSegments\(report, "discussion"\)/);
-assert.match(meetingReportSection, /getEvidenceSegments\(report, "decision"\)/);
+assert.match(
+  meetingReportSection,
+  /getEvidenceSegments\(\s*report,\s*"decision",\s*(?:item\.sourceIndex|sourceIndex)\s*\)/
+);
 assert.doesNotMatch(
   meetingReportSection,
   /getEvidenceSegments\(report, "(?:summary|discussion|decision)", 0\)/
