@@ -131,7 +131,7 @@ const runRow = (id = "run-1") => ({
   created_count: 0, updated_count: 0, skipped_count: 0, error_message: null, cursor: {}
 });
 
-async function admitManual({ replay = null, active = [], userTotal = 0, workspaceTotal = 0, userCooldown = null, workspaceCooldown = null, queuedTotal = 0, sharedQueue = null, failPrepare = false } = {}) {
+async function admitManual({ replay = null, active = [], userTotal = 0, workspaceTotal = 0, userCooldown = null, workspaceCooldown = null, queuedTotal = 0, sharedQueue = null, failPrepare = false, assertManualLimitSql = false } = {}) {
   const events = [];
   const database = {
     async queryOne(text) {
@@ -148,6 +148,16 @@ async function admitManual({ replay = null, active = [], userTotal = 0, workspac
           async queryOne(text) {
             if (/github_sync_manual_requests/.test(text)) return replay;
             if (/FROM github_sync_runs AS run/.test(text)) {
+              if (assertManualLimitSql) {
+                assert.match(
+                  text,
+                  /MAX\(GREATEST\(1, CEIL\(EXTRACT\(EPOCH FROM \(run\.created_at \+ \(\$4 \* interval '1 second'\) - now\(\)\)\)/
+                );
+                assert.match(
+                  text,
+                  /FILTER \(WHERE run\.created_at \+ \(\$4 \* interval '1 second'\) > now\(\)\) AS cooldown_retry_after_seconds/
+                );
+              }
               const total = events.includes("user-limit") ? workspaceTotal : userTotal;
               events.push(events.includes("user-limit") ? "workspace-limit" : "user-limit");
               return { total, window_retry_after_seconds: 19, cooldown_retry_after_seconds: events.includes("workspace-limit") ? workspaceCooldown : userCooldown };
@@ -197,6 +207,14 @@ for (const options of [{ userTotal: 5 }, { workspaceTotal: 10 }]) {
 for (const options of [{ userCooldown: 23 }, { workspaceCooldown: 29 }]) {
   const { start } = await admitManual(options);
   await assert.rejects(start, (error) => error.getStatus() === 429 && error.getResponse().error.details.retryAfterSeconds === (options.userCooldown ?? options.workspaceCooldown));
+}
+{
+  const { start } = await admitManual({ userCooldown: null, assertManualLimitSql: true });
+  assert.equal((await start()).id, "new-run");
+}
+{
+  const { start } = await admitManual({ userCooldown: 1, assertManualLimitSql: true });
+  await assert.rejects(start, (error) => error.getStatus() === 429 && error.getResponse().error.details.retryAfterSeconds >= 1);
 }
 {
   const { start } = await admitManual({ queuedTotal: 100 });

@@ -438,7 +438,8 @@ export class GithubSyncRunService {
     const row = await transaction.queryOne<{ total: string | number; window_retry_after_seconds: string | number; cooldown_retry_after_seconds: string | number | null }>(`
       SELECT COUNT(*)::int AS total,
         GREATEST(1, COALESCE(CEIL(EXTRACT(EPOCH FROM (MIN(run.created_at) + ($3 * interval '1 second') - now()))), 1))::int AS window_retry_after_seconds,
-        MAX(GREATEST(1, CEIL(EXTRACT(EPOCH FROM (run.created_at + ($4 * interval '1 second') - now()))))::int) AS cooldown_retry_after_seconds
+        MAX(GREATEST(1, CEIL(EXTRACT(EPOCH FROM (run.created_at + ($4 * interval '1 second') - now()))))::int)
+          FILTER (WHERE run.created_at + ($4 * interval '1 second') > now()) AS cooldown_retry_after_seconds
       FROM github_sync_runs AS run
       INNER JOIN github_sync_jobs AS job ON job.sync_run_id=run.id
       WHERE run.workspace_id=$1 AND run.trigger_source='manual' ${userFilter}
