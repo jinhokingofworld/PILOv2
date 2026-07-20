@@ -110,6 +110,7 @@ latency만 보고 Router를 제거하지 않는다.
 - 저장된 Planner와 inspect tool step이 인접하고 현재 outbox 사유가 `tool_result`다.
 - 직전 inspect 결과에 유효한 table projection이 있다.
 - focus continuation이면 현재 tool snapshot에도 `focus_sql_erd_tables`가 있다.
+- routed workflow의 terminal tool이 focus 하나뿐이고 다른 capability 목표가 없다.
 
 하나라도 맞지 않으면 오류나 별도 clarification을 만들지 않고 기존 Router 경로로
 돌아간다. Router만 생략하며 Planner 출력 검증, App Server 권한·revision·fingerprint

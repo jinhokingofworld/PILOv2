@@ -54,6 +54,7 @@ AI Worker repository는 새 table 없이 기존 `agent_steps`와
 7. planning context의 최신 inspect output이 clarification이 아닌 정상
    `projection.tables` 결과
 8. focus continuation이면 현재 eligible tool에 focus가 존재
+9. routed workflow의 terminal tool이 focus 하나뿐이며 다른 capability 목표가 없음
 
 하나라도 실패하면 기존 Router 흐름으로 돌아간다. continuation은 prompt 문자열이나
 tool 이름 하나만으로 복원하지 않는다.

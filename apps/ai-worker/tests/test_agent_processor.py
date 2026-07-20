@@ -29,6 +29,7 @@ from app.agent_processor import (
     _agent_planner_user_prompt,
     _agent_router_schema,
     _agent_router_user_prompt,
+    _sql_erd_inspect_continuation_contract_enabled,
     normalize_agent_planner_decision,
     normalize_agent_routing_decision,
     parse_agent_planner_output,
@@ -4811,6 +4812,28 @@ def test_sql_erd_inspect_continuation_contract_is_disabled_by_default(
     assert "continuationKind" not in _agent_planner_schema()["required"]
     assert parse_agent_planner_output(json.dumps(legacy_payload)).continuation_kind is None
 
+    compound_tools = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(name="inspect_sql_erd_schema", executionMode="contextual"),
+                tool_snapshot(name="focus_sql_erd_tables", executionMode="contextual"),
+                tool_snapshot(name="generate_sql_erd", executionMode="contextual"),
+            ]
+        )
+    ).tools
+    compound_request = AgentPlanningRequest(
+        run_id=RUN_ID,
+        prompt="Inspect and generate SQLtoERD schemas.",
+        timezone="Asia/Seoul",
+        current_date="2026-07-20",
+        tool_schema_version=AGENT_TOOL_SCHEMA_VERSION,
+        tools=compound_tools,
+        context_surface="sql_erd",
+        completion_tool_names=("focus_sql_erd_tables", "generate_sql_erd"),
+    )
+    monkeypatch.setenv("AGENT_SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED", "true")
+    assert _sql_erd_inspect_continuation_contract_enabled(compound_request) is False
+
 
 @pytest.mark.parametrize(
     ("continuation_kind", "expected_next_tool_name"),
@@ -4930,6 +4953,17 @@ def test_sql_erd_inspect_continuation_contract_parses_and_summarizes_bounded_out
             "inspect_sql_erd_schema",
             ["inspect_sql_erd_schema"],
             (),
+        ),
+        (
+            "sql_erd_inspect_focus",
+            "tool_candidate",
+            "inspect_sql_erd_schema",
+            [
+                "inspect_sql_erd_schema",
+                "focus_sql_erd_tables",
+                "generate_sql_erd",
+            ],
+            ("focus_sql_erd_tables", "generate_sql_erd"),
         ),
     ],
 )

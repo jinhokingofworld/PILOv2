@@ -1839,9 +1839,12 @@ def _validated_sql_erd_inspect_continuation(
         raise AgentPlannerOutputError(
             "Agent planner returned an invalid continuation tool or status"
         )
+    if completion_tool_names != (SQL_ERD_FOCUS_TOOL_NAME,):
+        raise AgentPlannerOutputError(
+            "Agent planner returned a continuation for a compound workflow"
+        )
     if continuation_kind == "sql_erd_inspect_focus" and (
         SQL_ERD_FOCUS_TOOL_NAME not in eligible_tool_names
-        or SQL_ERD_FOCUS_TOOL_NAME not in completion_tool_names
     ):
         raise AgentPlannerOutputError("Agent planner returned an ineligible continuation")
     return {
@@ -4025,6 +4028,7 @@ def _sql_erd_inspect_continuation_contract_enabled(request: AgentPlanningRequest
         os.environ.get(SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED, "false").lower() == "true"
         and request.context_surface == "sql_erd"
         and any(tool.name == SQL_ERD_INSPECTION_TOOL_NAME for tool in request.tools)
+        and request.completion_tool_names == (SQL_ERD_FOCUS_TOOL_NAME,)
     )
 
 
