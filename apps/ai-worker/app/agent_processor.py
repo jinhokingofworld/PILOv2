@@ -138,6 +138,13 @@ class AgentToolSchema:
 
 
 @dataclass(frozen=True)
+class SqlErdInspectContinuation:
+    kind: str
+    prerequisite_tool_name: str
+    next_tool_name: str | None
+
+
+@dataclass(frozen=True)
 class AgentRunContext:
     run_id: str
     workspace_id: str
@@ -148,6 +155,7 @@ class AgentRunContext:
     planner_turn_count: int = 0
     queue_wait_ms: int | None = None
     latest_planner_tool_name: str | None = None
+    sql_erd_inspect_continuation: SqlErdInspectContinuation | None = None
     planning_context: str = ""
     untrusted_context_sources: tuple[PromptSecuritySource, ...] = ()
     current_user_source: PromptSecuritySource | None = None
