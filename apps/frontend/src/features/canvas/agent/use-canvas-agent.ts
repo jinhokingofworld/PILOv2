@@ -22,6 +22,7 @@ import {
   getCanvasAgentReadyShapeIds,
 } from "./canvas-agent-camera";
 import { insertCanvasAgentHtmlArtifact } from "./canvas-agent-html-insertion";
+import { completeCanvasAgentFocusProgress } from "./canvas-agent-progress";
 import { buildCanvasAgentShapeSummaries } from "./canvas-agent-shape-context";
 import {
   buildCanvasAgentSelectedScene,
@@ -75,6 +76,7 @@ export function useCanvasAgent({
   const insertedDriveFileRunIdsRef = useRef(new Set<string>());
   const focusRetryTimerRef = useRef<number | null>(null);
   const progressHideTimerRef = useRef<number | null>(null);
+  const progressPresentationVersionRef = useRef(0);
   const longRunningTimerRef = useRef<number | null>(null);
   const [visibleProgress, setVisibleProgress] = useState<CanvasAgentProgress | null>(null);
 
@@ -127,19 +129,32 @@ export function useCanvasAgent({
         }
       }
       const progress = nextRun.presentationMode === "background" ? null : nextRun.progress;
+      const progressPresentationVersion =
+        progressPresentationVersionRef.current + 1;
+      progressPresentationVersionRef.current = progressPresentationVersion;
       clearProgressHideTimer();
       if (!ACTIVE_STATUSES.has(nextRun.status)) {
         clearLongRunningTimer();
       }
-      setVisibleProgress(progress);
-      if (progress && !ACTIVE_STATUSES.has(nextRun.status)) {
-        progressHideTimerRef.current = window.setTimeout(() => {
-          setVisibleProgress((currentProgress) =>
-            currentProgress === progress ? null : currentProgress,
-          );
-          progressHideTimerRef.current = null;
+      const scheduleCompletedProgressHide = () => {
+        if (!progress || ACTIVE_STATUSES.has(nextRun.status)) return;
+
+        clearProgressHideTimer();
+        const timer = window.setTimeout(() => {
+          if (
+            progressPresentationVersionRef.current ===
+            progressPresentationVersion
+          ) {
+            setVisibleProgress(null);
+          }
+          if (progressHideTimerRef.current === timer) {
+            progressHideTimerRef.current = null;
+          }
         }, COMPLETED_PROGRESS_HIDE_DELAY_MS);
-      }
+        progressHideTimerRef.current = timer;
+      };
+      setVisibleProgress(progress);
+      scheduleCompletedProgressHide();
       clearFocusRetryTimer();
       if (!editor || !progress) return;
 
@@ -161,10 +176,13 @@ export function useCanvasAgent({
           null,
         );
         if (usedLoadedBounds) {
-          setVisibleProgress({
-            ...progress,
-            message: "검색 결과로 이동했습니다.",
-          });
+          setVisibleProgress(
+            completeCanvasAgentFocusProgress(
+              progress,
+              "검색 결과로 이동했습니다.",
+            ),
+          );
+          scheduleCompletedProgressHide();
         } else if (
           progress.highlightedShapeIds.length &&
           attempt < FOCUS_RETRY_DELAYS_MS.length
@@ -174,10 +192,13 @@ export function useCanvasAgent({
             focusProgressResult(attempt + 1);
           }, FOCUS_RETRY_DELAYS_MS[attempt]);
         } else if (progress.highlightedShapeIds.length) {
-          setVisibleProgress({
-            ...progress,
-            message: "검색 결과는 찾았지만 화면에 불러오지 못했습니다.",
-          });
+          setVisibleProgress(
+            completeCanvasAgentFocusProgress(
+              progress,
+              "검색 결과는 찾았지만 화면에 불러오지 못했습니다.",
+            ),
+          );
+          scheduleCompletedProgressHide();
         }
       };
       if (progress.targetViewport) {
