@@ -9,6 +9,7 @@ import {
   PILO_CHILD_SHAPE_COUNT_META_KEY,
   isRecord as isCanvasRecord,
 } from "../engine/shapes/canvas-shape-metadata";
+import { resolveCanvasShapeParentId } from "./canvas-shape-parent";
 
 const defaultCanvasBoardId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 
@@ -65,11 +66,14 @@ export function normalizeCanvasShape(value: unknown) {
     rawShape.type = shapeType;
   }
 
-  if (
-    typeof value.parentShapeId === "string" &&
-    value.parentShapeId.startsWith("shape:")
-  ) {
-    rawShape.parentId = value.parentShapeId;
+  const parentId = resolveCanvasShapeParentId({
+    parentShapeId: value.parentShapeId,
+    rawParentId: rawShape.parentId,
+    shapeId: id,
+  });
+
+  if (parentId) {
+    rawShape.parentId = parentId;
   } else {
     delete rawShape.parentId;
   }

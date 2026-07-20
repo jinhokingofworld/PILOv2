@@ -470,6 +470,10 @@ assert.match(canvasService, /UPDATE canvas_freeform_shapes s/);
 assert.match(canvasService, /parent_shape_id/);
 assert.match(canvasService, /child_counts\.child_shape_count/);
 assert.match(canvasService, /s\.parent_shape_id IS NULL/);
+assert.match(
+  canvasService,
+  /COALESCE\(s\.raw_shape ->> 'parentId', ''\) NOT LIKE 'shape:%'/,
+);
 assert.match(canvasService, /s\.parent_shape_id = \$2/);
 assert.match(canvasService, /parent_shape_id = \$3/);
 assert.match(canvasService, /content_hash/);
