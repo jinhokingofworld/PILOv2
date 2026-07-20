@@ -26,33 +26,48 @@ test("HomeDashboard는 시안형 섹션과 기존 바로가기를 조합한다",
   assert.doesNotMatch(source, /overflow-y-auto/);
 });
 
-test("MembersCard는 기존 멤버 데이터로 팀 현황을 요약한다", async () => {
+test("HomeDashboard는 14일을 조회하고 이번 주 7일만 일정에 전달한다", async () => {
+  const source = await readHomeSource("./components/home-dashboard.tsx");
+
+  assert.match(source, /getCalendarRangeDates\(today,\s*14\)/);
+  assert.match(source, /calendarDates\.slice\(0,\s*7\)/);
+  assert.match(source, /calendarDates=\{visibleCalendarDates\}/);
+});
+
+test("MembersCard는 숫자 요약 없이 고정 높이 안에서 멤버와 초대 목록을 함께 스크롤한다", async () => {
   const source = await readHomeSource("./components/members-card.tsx");
+  const scrollContainers = source.match(/overflow-y-auto/g) ?? [];
 
   assert.match(source, /title="팀 현황"/);
-  assert.match(source, /label: "전체"/);
-  assert.match(source, /label: "접속 중"/);
-  assert.match(source, /label: "오프라인"/);
-  assert.match(source, /members\.length/);
-  assert.match(source, /onlineMembers\.length/);
-  assert.match(source, /offlineMembers\.length/);
+  assert.doesNotMatch(source, /const teamStats/);
+  assert.doesNotMatch(source, /label: "전체"/);
+  assert.doesNotMatch(source, /grid grid-cols-3 gap-2/);
+  assert.match(source, /className="h-\[430px\] min-h-0"/);
+  assert.match(source, /overflow-y-auto/);
+  assert.equal(scrollContainers.length, 1);
   assert.match(
     source,
-    /membersStatus === "success" \? members\.length : "–"/
+    /className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1"[\s\S]*<MemberPresencePanel[\s\S]*\{pendingInvitations/
   );
+  assert.doesNotMatch(
+    source,
+    /<MemberPresenceList[\s\S]*function MemberPresenceList[\s\S]*overflow-y-auto/
+  );
+  assert.doesNotMatch(source, /scrollbar-width:none/);
   assert.doesNotMatch(source, /placeholder:text-\[#9ba0aa\]/i);
   assert.doesNotMatch(source, /text-\[#5865f2\]/i);
 });
 
-test("CalendarCard는 14일 전체와 기존 이동 계약을 유지한다", async () => {
+test("CalendarCard는 이번 주 7일과 기존 이동 계약을 유지한다", async () => {
   const source = await readHomeSource("./components/calendar-card.tsx");
 
-  assert.match(source, /이번 주 · 다음 주 일정/);
+  assert.match(source, /이번 주 일정/);
+  assert.doesNotMatch(source, /이번 주 · 다음 주 일정/);
   assert.doesNotMatch(source, /향후 2주 일정/);
   assert.match(source, /formatCalendarRangeTitle\(calendarDates\)/);
   assert.match(source, /calendarDates\.map/);
   assert.match(source, /grid-cols-7/);
-  assert.match(source, /grid-rows-2/);
+  assert.doesNotMatch(source, /grid-rows-2/);
   assert.match(source, /오늘 일정/);
   assert.match(source, /bg-\[#eef0f4\].*text-\[#656972\]/);
   assert.match(source, /router\.push\(`\/calendar\?date=\$\{dateValue\}`\)/);

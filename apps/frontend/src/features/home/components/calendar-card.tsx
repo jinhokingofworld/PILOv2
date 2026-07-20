@@ -75,7 +75,7 @@ function ReadonlyCalendar({
           </span>
           <div className="min-w-0">
             <p className="truncate text-[16px] font-semibold tracking-[-0.01em] text-[#202124]">
-              이번 주 · 다음 주 일정
+              이번 주 일정
             </p>
             <p className="truncate text-[12px] text-[#6b6f78]">{calendarTitle}</p>
           </div>
@@ -99,7 +99,7 @@ function ReadonlyCalendar({
           </Button>
         </div>
         <div className="-mx-1 min-h-0 flex-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="grid h-full min-w-[720px] grid-cols-7 grid-rows-2 gap-2">
+          <div className="grid h-full min-w-[720px] grid-cols-7 gap-2">
             {calendarDates.map((date) => {
               const isToday = isSameCalendarDate(date, today);
               const dateValue = formatCalendarDate(date);

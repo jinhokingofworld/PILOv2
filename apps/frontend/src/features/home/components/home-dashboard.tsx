@@ -21,6 +21,10 @@ export function HomeDashboard() {
   const authSession = useAuthSession();
   const today = useMemo(() => new Date(), []);
   const calendarDates = useMemo(() => getCalendarRangeDates(today, 14), [today]);
+  const visibleCalendarDates = useMemo(
+    () => calendarDates.slice(0, 7),
+    [calendarDates]
+  );
   const calendarRange = useMemo(
     () => ({
       end: formatCalendarDate(calendarDates[calendarDates.length - 1]),
@@ -58,7 +62,7 @@ export function HomeDashboard() {
         <section className="grid gap-4 xl:grid-cols-[minmax(260px,0.66fr)_minmax(0,1.34fr)]">
           <MembersCard />
           <CalendarCard
-            calendarDates={calendarDates}
+            calendarDates={visibleCalendarDates}
             calendarEventsState={calendarEventsState}
             today={today}
           />
