@@ -834,7 +834,6 @@ class AgentRunProcessor:
                     SQL_ERD_INSPECTION_TOOL_NAME,
                     SQL_ERD_FOCUS_TOOL_NAME,
                 }
-                self._emit_queue_latency(job, latency_scope)
                 return self._handoff_execution(
                     job,
                     retried=True,

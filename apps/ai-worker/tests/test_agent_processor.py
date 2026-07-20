@@ -1312,11 +1312,10 @@ def test_sql_erd_running_handoff_retry_recovers_target_from_latest_planner_tool(
     assert result.reason == "agent_execution_handoff_retried"
     assert handoff.calls == [RUN_ID]
     assert [call["stage"] for call in observer.calls] == [
-        "queue_wait",
         "execution_handoff",
         "planning_turn",
     ]
-    assert observer.calls[1]["outcome"] == "success"
+    assert observer.calls[0]["outcome"] == "success"
 
 
 def test_sql_erd_incomplete_workflow_records_planner_validation_failure_once() -> None:
