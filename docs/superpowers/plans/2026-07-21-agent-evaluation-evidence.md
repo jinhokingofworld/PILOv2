@@ -4,7 +4,7 @@
 
 **Goal:** Canvas를 제외한 고정 Agent 평가에서 실제 순차 Tool 결과 기반 task success와 paired 처리 효율을 비교한다.
 
-**Architecture:** 기존 단일 Router/Planner 평가는 유지하고 `multi_tool` variant만 production `AgentRunProcessor`와 작은 in-memory Tool simulator로 실행한다. 기존 report에 workflow attempt를 추가하고 comparison이 scenario 단위 bootstrap 신뢰구간과 latency/token 차이를 계산한다.
+**Architecture:** 기존 단일 Router/Planner 평가는 유지하고 `multi_tool`과 균형 잡힌 `agent_workflow` variant를 production `AgentRunProcessor`와 작은 in-memory Tool simulator로 실행한다. `agent_workflow`는 Canvas를 제외한 6개 도메인을 각각 최소 5개, 총 31개 scenario로 대표한다. comparison은 이 variant를 scenario 단위 bootstrap 표본으로 사용하고 도메인별 비회귀와 성공률·latency·token 차이의 95% 신뢰구간을 함께 판정한다.
 
 **Tech Stack:** Python 3.12, pytest 8.3, GitHub Actions, 표준 라이브러리 `dataclasses`, `hashlib`, `random`, `statistics`.
 
@@ -15,6 +15,26 @@
 - 새 Python dependency를 추가하지 않는다.
 - 실제 prompt와 Tool payload는 artifact에 저장하지 않는다.
 - 아래에 명시한 필수 테스트 외 조합 테스트를 추가하지 않는다.
+
+### Task 5: Canvas 제외 도메인 균형 평가
+
+**Files:**
+- Create: `apps/ai-worker/evals/agent_workflow_catalog_v1.json`
+- Modify: `apps/ai-worker/app/agent_workflow_evaluation.py`
+- Modify: `apps/ai-worker/app/agent_planner_comparison.py`
+- Modify: `apps/ai-worker/scripts/evaluate_agent_planner.py`
+- Modify: `.github/workflows/evaluate-agent-planner.yml`
+
+- [x] Meeting, Calendar, Board, Drive, SQLtoERD, PR Review를 각 최소 5개 scenario로 구성한다.
+- [x] 단일 Tool, multi-Tool, clarification, unsupported, confirmation, grounded answer를 포함한다.
+- [x] capability의 terminal Tool chain과 catalog fixture가 일치하는지 고정 snapshot으로 검증한다.
+- [x] SQLtoERD와 PR Review의 `contextSurface`를 실제 Router/Planner 요청에 전달한다.
+- [x] catalog hash를 baseline/candidate 고정 입력으로 검증한다.
+- [x] `agent_workflow`만 전체 Agent 개선 근거로 사용해 Meeting 편향을 제거한다.
+- [x] 평가 도메인별 task success 비회귀 gate를 추가한다.
+- [x] 평가 작업 범주별 task success 비회귀 gate를 추가한다.
+- [x] latency 또는 token의 95% 신뢰구간 전체가 개선 방향일 때만 효율 개선으로 판정한다.
+- [x] 기존 Meeting Phase 4-E readiness 입력은 변경하지 않는다.
 
 ---
 
@@ -232,4 +252,4 @@ ci: Agent 평가 revision과 artifact 조건 강화 (#1487)
 
 PR 제목: `test(agent,ci): 사용자 작업 성공률 평가 근거 강화`
 
-PR 본문에는 실제 provider 평가는 미수행이며, 현재 6개 workflow만으로 전체 Agent 개선을 주장할 수 없고 별도 평가 실행과 충분한 scenario가 필요함을 명시한다.
+PR 본문에는 실제 provider 평가는 미수행이며, 현재 31개 대표 workflow는 운영 트래픽 전체나 모든 요청 유형의 개선을 의미하지 않는다고 명시한다.

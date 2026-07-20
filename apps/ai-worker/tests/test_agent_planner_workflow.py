@@ -39,6 +39,20 @@ def test_multi_tool_variant_uses_sequential_workflow_evaluator() -> None:
     assert 'Path("app/agent_planner_comparison.py")' in script
 
 
+def test_agent_workflow_variant_is_compared_without_entering_meeting_readiness() -> None:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    script = EVALUATOR_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert '"agent_workflow"' in script
+    assert "--workflow-catalog" in script
+    assert "- agent_workflow" in workflow
+    assert "agent-workflow-catalog.json" in workflow
+    assert "baseline-meeting-agent_workflow-evaluation.json" in workflow
+    assert "candidate-meeting-agent_workflow-evaluation.json" in workflow
+    readiness_command = workflow.split("check_phase4e_dev_readiness.py", 1)[1]
+    assert "agent_workflow" not in readiness_command
+
+
 def test_comparison_command_fails_without_improvement_evidence() -> None:
     script = COMPARISON_SCRIPT_PATH.read_text(encoding="utf-8")
 

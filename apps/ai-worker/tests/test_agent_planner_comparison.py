@@ -69,6 +69,7 @@ def report(
         "metadata": {
             "suiteVersion": f"meeting-agent-regression:v1:{variant}",
             "meetingCatalogSha256": "a" * 64,
+            "workflowCatalogSha256": "9" * 64,
             "model": "planner-model",
             "routerModel": "router-model",
             "currentDate": "2026-07-20",
@@ -95,8 +96,9 @@ def workflow_report(
     source_revision: str,
     latency_ms: float,
     provider_tokens: int,
+    variant: str = "multi_tool",
 ) -> dict[str, object]:
-    value = report("multi_tool", domain_count=10, tool_count=10, exact_count=exact_count)
+    value = report(variant, domain_count=10, tool_count=10, exact_count=exact_count)
     value["totalCases"] = 10
     value["metadata"]["sourceRevision"] = source_revision
     value["workflowEvaluation"] = {"taskSuccessRate": value["exactAttemptRate"]}
@@ -201,6 +203,157 @@ def test_workflow_comparison_requires_confident_success_and_efficiency_gain() ->
     assert evidence["passed"] is True
 
 
+def test_improvement_evidence_prefers_balanced_agent_workflow_variant() -> None:
+    baseline = [
+        workflow_report(
+            1,
+            source_revision="baseline-revision",
+            latency_ms=200.0,
+            provider_tokens=100,
+        ),
+        workflow_report(
+            1,
+            source_revision="baseline-revision",
+            latency_ms=200.0,
+            provider_tokens=100,
+            variant="agent_workflow",
+        ),
+    ]
+    candidate = [
+        workflow_report(
+            10,
+            source_revision="candidate-revision",
+            latency_ms=100.0,
+            provider_tokens=80,
+        ),
+        workflow_report(
+            10,
+            source_revision="candidate-revision",
+            latency_ms=100.0,
+            provider_tokens=80,
+            variant="agent_workflow",
+        ),
+    ]
+
+    evidence = build_two_stage_comparison(baseline, candidate)["improvementEvidence"]
+
+    assert evidence["scopeVariants"] == ["agent_workflow"]
+    assert evidence["uniqueScenarioCount"] == 10
+
+
+def test_improvement_evidence_rejects_regression_in_evaluated_domain() -> None:
+    baseline = workflow_report(
+        1,
+        source_revision="baseline-revision",
+        latency_ms=200.0,
+        provider_tokens=100,
+        variant="agent_workflow",
+    )
+    candidate = workflow_report(
+        9,
+        source_revision="candidate-revision",
+        latency_ms=100.0,
+        provider_tokens=80,
+        variant="agent_workflow",
+    )
+    for value in (baseline, candidate):
+        value["results"][0]["expected"]["domains"] = ["pr_review"]
+        for result in value["results"][1:]:
+            result["expected"]["domains"] = ["board"]
+    candidate["results"][0]["passed"] = False
+    candidate["results"][0]["workflow"]["taskSuccess"] = False
+    candidate["results"][9]["passed"] = True
+    candidate["results"][9]["workflow"]["taskSuccess"] = True
+
+    evidence = build_two_stage_comparison([baseline], [candidate])["improvementEvidence"]
+
+    assert evidence["domainTaskSuccess"]["pr_review"]["delta"] == -1.0
+    assert evidence["domainNonRegressionPassed"] is False
+    assert evidence["passed"] is False
+
+
+def test_improvement_evidence_rejects_uncertain_efficiency_delta() -> None:
+    baseline = workflow_report(
+        1,
+        source_revision="baseline-revision",
+        latency_ms=100.0,
+        provider_tokens=100,
+        variant="agent_workflow",
+    )
+    candidate = workflow_report(
+        10,
+        source_revision="candidate-revision",
+        latency_ms=50.0,
+        provider_tokens=100,
+        variant="agent_workflow",
+    )
+    for result in candidate["results"][-3:]:
+        result["workflow"]["latencyMs"] = 200.0
+
+    evidence = build_two_stage_comparison([baseline], [candidate])["improvementEvidence"]
+
+    assert evidence["latencyMs"]["delta"] < 0
+    assert evidence["latencyMs"]["confidenceInterval95"][1] > 0
+    assert evidence["efficiencyPassed"] is False
+    assert evidence["passed"] is False
+
+
+def test_domain_gate_uses_evaluation_domain_for_negative_routing_case() -> None:
+    baseline = workflow_report(
+        1,
+        source_revision="baseline-revision",
+        latency_ms=200.0,
+        provider_tokens=100,
+        variant="agent_workflow",
+    )
+    candidate = workflow_report(
+        10,
+        source_revision="candidate-revision",
+        latency_ms=100.0,
+        provider_tokens=80,
+        variant="agent_workflow",
+    )
+    for value in (baseline, candidate):
+        for result in value["results"]:
+            result["expected"]["domains"] = ["meeting"]
+            result["expected"]["evaluationDomains"] = ["drive"]
+
+    evidence = build_two_stage_comparison([baseline], [candidate])["improvementEvidence"]
+
+    assert set(evidence["domainTaskSuccess"]) == {"drive"}
+
+
+def test_improvement_evidence_rejects_regression_in_task_category() -> None:
+    baseline = workflow_report(
+        1,
+        source_revision="baseline-revision",
+        latency_ms=200.0,
+        provider_tokens=100,
+        variant="agent_workflow",
+    )
+    candidate = workflow_report(
+        9,
+        source_revision="candidate-revision",
+        latency_ms=100.0,
+        provider_tokens=80,
+        variant="agent_workflow",
+    )
+    for value in (baseline, candidate):
+        value["results"][0]["kind"] = "confirmation"
+        for result in value["results"][1:]:
+            result["kind"] = "single_tool"
+    candidate["results"][0]["passed"] = False
+    candidate["results"][0]["workflow"]["taskSuccess"] = False
+    candidate["results"][9]["passed"] = True
+    candidate["results"][9]["workflow"]["taskSuccess"] = True
+
+    evidence = build_two_stage_comparison([baseline], [candidate])["improvementEvidence"]
+
+    assert evidence["categoryTaskSuccess"]["confirmation"]["delta"] == -1.0
+    assert evidence["categoryNonRegressionPassed"] is False
+    assert evidence["passed"] is False
+
+
 @pytest.mark.parametrize("mutation", ("duplicate", "missing"))
 def test_workflow_comparison_rejects_incomplete_attempt_pairs(mutation: str) -> None:
     baseline = workflow_report(
@@ -251,6 +404,16 @@ def test_two_stage_comparison_rejects_different_fixture_inputs() -> None:
     baseline = report("canonical", domain_count=10, tool_count=10, exact_count=10)
     candidate = report("canonical", domain_count=10, tool_count=10, exact_count=10)
     candidate["metadata"]["meetingCatalogSha256"] = "b" * 64
+
+    with pytest.raises(ValueError, match="same fixed inputs"):
+        build_two_stage_comparison([baseline], [candidate])
+
+
+def test_two_stage_comparison_rejects_different_workflow_catalogs() -> None:
+    baseline = report("canonical", domain_count=10, tool_count=10, exact_count=10)
+    candidate = report("canonical", domain_count=10, tool_count=10, exact_count=10)
+    candidate["metadata"]["sourceRevision"] = "candidate-revision"
+    candidate["metadata"]["workflowCatalogSha256"] = "8" * 64
 
     with pytest.raises(ValueError, match="same fixed inputs"):
         build_two_stage_comparison([baseline], [candidate])

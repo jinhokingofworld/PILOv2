@@ -15,6 +15,7 @@ _FUNNEL_STAGES = (
 )
 _PAIRED_METADATA_KEYS = (
     "meetingCatalogSha256",
+    "workflowCatalogSha256",
     "model",
     "routerModel",
     "currentDate",
@@ -168,7 +169,8 @@ def _paired_improvement_evidence(
     candidate: dict[str, dict[str, object]],
 ) -> dict[str, object]:
     scenario_pairs: dict[str, list[tuple[dict[str, object], dict[str, object]]]] = {}
-    for variant in sorted(baseline):
+    evidence_variants = ["agent_workflow"] if "agent_workflow" in baseline else sorted(baseline)
+    for variant in evidence_variants:
         baseline_results = _raw_results(baseline[variant])
         candidate_results = _raw_results(candidate[variant])
         for baseline_result, candidate_result in zip(
@@ -190,13 +192,20 @@ def _paired_improvement_evidence(
     token_pairs: list[tuple[float, float]] = []
     baseline_safety = 0
     candidate_safety = 0
+    domain_success_pairs: dict[str, list[tuple[float, float]]] = {}
+    category_success_pairs: dict[str, list[tuple[float, float]]] = {}
     for pairs in scenario_pairs.values():
-        success_pairs.append(
-            (
-                _mean([float(_task_success(item[0])) for item in pairs]),
-                _mean([float(_task_success(item[1])) for item in pairs]),
-            )
+        success_pair = (
+            _mean([float(_task_success(item[0])) for item in pairs]),
+            _mean([float(_task_success(item[1])) for item in pairs]),
         )
+        success_pairs.append(success_pair)
+        for domain in _expected_domains(pairs[0][0]):
+            domain_success_pairs.setdefault(domain, []).append(success_pair)
+        category = pairs[0][0].get("kind")
+        if not isinstance(category, str) or not category:
+            raise ValueError("Invalid workflow task category")
+        category_success_pairs.setdefault(category, []).append(success_pair)
         latency_pair = _scenario_numeric_pair(pairs, "latencyMs")
         if latency_pair is not None:
             latency_pairs.append(latency_pair)
@@ -215,12 +224,21 @@ def _paired_improvement_evidence(
         _paired_numeric_summary(token_pairs) if len(token_pairs) == len(scenario_pairs) else None
     )
     efficiency_passed = bool(
-        (latency is not None and latency["delta"] < 0)
-        or (tokens is not None and tokens["delta"] < 0)
+        (latency is not None and latency["confidenceInterval95"][1] < 0)
+        or (tokens is not None and tokens["confidenceInterval95"][1] < 0)
     )
     safety_passed = baseline_safety == 0 and candidate_safety == 0
     success_passed = confidence_interval[0] > 0
+    domain_task_success = _grouped_task_success(domain_success_pairs)
+    domain_non_regression_passed = bool(domain_task_success) and all(
+        item["passed"] is True for item in domain_task_success.values()
+    )
+    category_task_success = _grouped_task_success(category_success_pairs)
+    category_non_regression_passed = bool(category_task_success) and all(
+        item["passed"] is True for item in category_task_success.values()
+    )
     return {
+        "scopeVariants": evidence_variants,
         "uniqueScenarioCount": len(scenario_pairs),
         "bootstrap": {"cluster": "scenario", "seed": 17, "resamples": 2000},
         "taskSuccess": {
@@ -233,13 +251,23 @@ def _paired_improvement_evidence(
         "latencyMs": latency,
         "providerTotalTokens": tokens,
         "efficiencyPassed": efficiency_passed,
+        "domainTaskSuccess": domain_task_success,
+        "domainNonRegressionPassed": domain_non_regression_passed,
+        "categoryTaskSuccess": category_task_success,
+        "categoryNonRegressionPassed": category_non_regression_passed,
         "safetyViolations": {
             "baseline": baseline_safety,
             "candidate": candidate_safety,
             "delta": candidate_safety - baseline_safety,
             "passed": safety_passed,
         },
-        "passed": success_passed and efficiency_passed and safety_passed,
+        "passed": (
+            success_passed
+            and efficiency_passed
+            and domain_non_regression_passed
+            and category_non_regression_passed
+            and safety_passed
+        ),
     }
 
 
@@ -276,6 +304,31 @@ def _validate_workflow_result(result: dict[str, object]) -> None:
     safety = workflow.get("safetyViolations")
     if not isinstance(safety, list) or not all(isinstance(item, str) for item in safety):
         raise ValueError("Invalid workflow safety result")
+
+
+def _expected_domains(result: dict[str, object]) -> tuple[str, ...]:
+    expected = _object(result.get("expected"), "Invalid workflow expectation")
+    domains = expected.get("evaluationDomains", expected.get("domains"))
+    if not isinstance(domains, list) or not all(
+        isinstance(domain, str) and domain for domain in domains
+    ):
+        raise ValueError("Invalid workflow expected domains")
+    return tuple(domains)
+
+
+def _grouped_task_success(
+    groups: dict[str, list[tuple[float, float]]],
+) -> dict[str, dict[str, float | int | bool]]:
+    return {
+        name: {
+            "scenarioCount": len(pairs),
+            "baseline": round(_mean([item[0] for item in pairs]), 4),
+            "candidate": round(_mean([item[1] for item in pairs]), 4),
+            "delta": round(_mean([item[1] - item[0] for item in pairs]), 4),
+            "passed": _mean([item[1] - item[0] for item in pairs]) >= 0,
+        }
+        for name, pairs in sorted(groups.items())
+    }
 
 
 def _scenario_numeric_pair(
@@ -315,15 +368,17 @@ def _safety_violation_count(result: dict[str, object]) -> int:
 
 def _paired_numeric_summary(
     pairs: list[tuple[float, float]],
-) -> dict[str, float] | None:
+) -> dict[str, float | list[float]] | None:
     if not pairs:
         return None
     baseline = _mean([item[0] for item in pairs])
     candidate = _mean([item[1] for item in pairs])
+    deltas = [item[1] - item[0] for item in pairs]
     return {
         "baseline": round(baseline, 4),
         "candidate": round(candidate, 4),
         "delta": round(candidate - baseline, 4),
+        "confidenceInterval95": list(_bootstrap_mean_confidence_interval(deltas)),
     }
 
 

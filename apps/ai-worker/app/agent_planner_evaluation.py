@@ -43,6 +43,7 @@ def build_evaluation_input_hashes(
     tool_snapshot_path: Path,
     meeting_catalog_path: Path | None = None,
     tool_capability_catalog_path: Path | None = None,
+    workflow_catalog_path: Path | None = None,
 ) -> dict[str, str]:
     hashes = {
         "suiteSha256": hashlib.sha256(tool_snapshot_path.read_bytes()).hexdigest(),
@@ -54,6 +55,10 @@ def build_evaluation_input_hashes(
     if tool_capability_catalog_path:
         hashes["toolCapabilityCatalogFileSha256"] = hashlib.sha256(
             tool_capability_catalog_path.read_bytes()
+        ).hexdigest()
+    if workflow_catalog_path:
+        hashes["workflowCatalogSha256"] = hashlib.sha256(
+            workflow_catalog_path.read_bytes()
         ).hexdigest()
     return hashes
 

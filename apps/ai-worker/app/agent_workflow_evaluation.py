@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from time import perf_counter
@@ -28,9 +28,21 @@ class WorkflowScenario:
     scenario_id: str
     prompt: str
     fixtures: tuple[WorkflowToolFixture, ...]
+    category: str = "workflow"
     expected_answer_contains: tuple[str, ...] = ()
     expected_domains: tuple[str, ...] = ()
     expected_capability_ids: tuple[str, ...] = ()
+    context_surface: str | None = None
+    evaluation_domains: tuple[str, ...] = ()
+    expected_router_status: str = "routed"
+    expected_planner_status: str = "completed"
+    expected_terminal_status: str = "completed"
+
+
+@dataclass(frozen=True)
+class WorkflowCatalog:
+    version: str
+    scenarios: tuple[WorkflowScenario, ...]
 
 
 @dataclass(frozen=True)
@@ -49,16 +61,28 @@ class WorkflowEvaluationResult:
     router_routed: bool
     domain_exact: bool
     capability_exact: bool
+    evaluation_domains: tuple[str, ...]
+    expected_router_status: str
+    expected_tool_count: int
+    category: str
 
 
 def load_workflow_scenarios(catalog_path: Path) -> tuple[WorkflowScenario, ...]:
+    return load_workflow_catalog(catalog_path).scenarios
+
+
+def load_workflow_catalog(catalog_path: Path) -> WorkflowCatalog:
     try:
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         raise ValueError("Workflow catalog must contain valid JSON") from error
-    workflows = catalog.get("multiToolCases") if isinstance(catalog, dict) else None
+    if not isinstance(catalog, dict):
+        raise ValueError("Workflow catalog must be an object")
+    version = _required_string(catalog, "version")
+    is_legacy_multi_tool_catalog = "workflowCases" not in catalog
+    workflows = catalog.get("workflowCases", catalog.get("multiToolCases"))
     if not isinstance(workflows, list) or not workflows:
-        raise ValueError("Workflow catalog must include multiToolCases")
+        raise ValueError("Workflow catalog must include workflowCases or multiToolCases")
 
     scenarios: list[WorkflowScenario] = []
     for workflow in workflows:
@@ -75,7 +99,11 @@ def load_workflow_scenarios(catalog_path: Path) -> tuple[WorkflowScenario, ...]:
             input_contains = stage.get("inputContains", {})
             output = stage.get("output")
             requires_confirmation = stage.get("requiresConfirmation", False)
-            if not isinstance(input_contains, dict) or not isinstance(output, dict) or not output:
+            if (
+                not isinstance(input_contains, dict)
+                or not isinstance(output, dict)
+                or (not output and requires_confirmation is not True)
+            ):
                 raise ValueError("Workflow Tool stages require inputContains and output objects")
             if requires_confirmation is not None and not isinstance(requires_confirmation, bool):
                 raise ValueError("Workflow confirmation policy must be boolean or null")
@@ -87,24 +115,53 @@ def load_workflow_scenarios(catalog_path: Path) -> tuple[WorkflowScenario, ...]:
                     requires_confirmation=requires_confirmation,
                 )
             )
-        if not fixtures:
-            raise ValueError("Workflow must include at least one Tool stage")
+        expected_domains = _optional_string_tuple(workflow, "expectedDomains")
+        evaluation_domains = (
+            _optional_string_tuple(workflow, "evaluationDomains") or expected_domains
+        )
+        if not evaluation_domains:
+            raise ValueError("Workflow must include evaluationDomains or expectedDomains")
+        expected_router_status = _optional_string(workflow, "expectedRouterStatus") or "routed"
+        expected_planner_status = _optional_string(workflow, "expectedPlannerStatus") or "completed"
+        expected_terminal_status = (
+            _optional_string(workflow, "expectedTerminalStatus") or "completed"
+        )
+        if expected_router_status not in {"routed", "needs_clarification", "unsupported"}:
+            raise ValueError("Workflow expectedRouterStatus is invalid")
+        if expected_planner_status not in {
+            "tool_candidate",
+            "completed",
+            "needs_clarification",
+            "unsupported",
+        }:
+            raise ValueError("Workflow expectedPlannerStatus is invalid")
+        if expected_terminal_status not in {"completed", "waiting_user_input"}:
+            raise ValueError("Workflow expectedTerminalStatus is invalid")
         scenarios.append(
             WorkflowScenario(
                 scenario_id=_required_string(workflow, "id"),
                 prompt=_required_string(workflow, "prompt"),
                 fixtures=tuple(fixtures),
-                expected_answer_contains=_string_tuple(workflow, "finalAnswerContains"),
-                expected_domains=_string_tuple(workflow, "expectedDomains"),
-                expected_capability_ids=_string_tuple(
+                category=(
+                    _optional_string(workflow, "category")
+                    or ("multi_tool" if is_legacy_multi_tool_catalog else "workflow")
+                ),
+                expected_answer_contains=_optional_string_tuple(workflow, "finalAnswerContains"),
+                expected_domains=expected_domains,
+                expected_capability_ids=_optional_string_tuple(
                     workflow,
                     "expectedCapabilityIds",
                 ),
+                context_surface=_optional_string(workflow, "contextSurface"),
+                evaluation_domains=evaluation_domains,
+                expected_router_status=expected_router_status,
+                expected_planner_status=expected_planner_status,
+                expected_terminal_status=expected_terminal_status,
             )
         )
     if len({scenario.scenario_id for scenario in scenarios}) != len(scenarios):
         raise ValueError("Workflow scenario IDs must be unique")
-    return tuple(scenarios)
+    return WorkflowCatalog(version=version, scenarios=tuple(scenarios))
 
 
 def evaluate_workflow_suite(
@@ -139,6 +196,8 @@ def build_workflow_evaluation_report(
 ) -> dict[str, object]:
     scenario_ids = {result.scenario_id for result in results}
     task_successes = sum(result.task_success for result in results)
+    multi_tool_results = [result for result in results if result.expected_tool_count > 1]
+    multi_tool_scenario_ids = {result.scenario_id for result in multi_tool_results}
     safety_violation_count = sum(len(result.safety_violations) for result in results)
     funnel_predicates = (
         ("routerRouted", lambda result: result.router_routed),
@@ -174,10 +233,13 @@ def build_workflow_evaluation_report(
             "stages": stages,
         },
         "multiToolWorkflows": {
-            "workflowCount": len(scenario_ids),
-            "workflowAttempts": len(results),
-            "exactWorkflowAttempts": task_successes,
-            "exactWorkflowRate": _fraction(task_successes, len(results)),
+            "workflowCount": len(multi_tool_scenario_ids),
+            "workflowAttempts": len(multi_tool_results),
+            "exactWorkflowAttempts": sum(result.task_success for result in multi_tool_results),
+            "exactWorkflowRate": _fraction(
+                sum(result.task_success for result in multi_tool_results),
+                len(multi_tool_results),
+            ),
         },
         "workflowEvaluation": {
             "taskSuccessRate": _fraction(task_successes, len(results)),
@@ -191,12 +253,14 @@ def build_workflow_evaluation_report(
             {
                 "id": result.scenario_id,
                 "attempt": result.attempt,
-                "kind": "multi_tool",
+                "kind": result.category,
                 "passed": result.task_success,
                 "failureReasons": list(result.failure_reasons),
                 "expected": {
                     "domains": list(result.expected_domains),
                     "capabilityIds": list(result.expected_capability_ids),
+                    "evaluationDomains": list(result.evaluation_domains),
+                    "routerStatus": result.expected_router_status,
                 },
                 "workflow": {
                     "taskSuccess": result.task_success,
@@ -220,7 +284,11 @@ def _evaluate_workflow(
     current_date: str,
     timezone: str,
 ) -> WorkflowEvaluationResult:
-    repository = _ReplayRepository(job, scenario.prompt, timezone)
+    request_context = dict(job.request_context or {})
+    if scenario.context_surface is not None:
+        request_context["surface"] = scenario.context_surface
+    scenario_job = replace(job, request_context=request_context or None)
+    repository = _ReplayRepository(scenario_job, scenario.prompt, timezone)
     planner_recorder = _TokenRecorder(planner)
     router_recorder = _TokenRecorder(router)
     handoff = _ReplayHandoff(repository, scenario)
@@ -236,7 +304,7 @@ def _evaluate_workflow(
     started = perf_counter()
     try:
         for _ in range(len(scenario.fixtures) + 2):
-            result = processor.process_job(job)
+            result = processor.process_job(scenario_job)
             if repository.status in {"completed", "failed", "cancelled", "waiting_user_input"}:
                 break
             if result.reason not in {
@@ -251,17 +319,20 @@ def _evaluate_workflow(
     failures = list(repository.validation_failures)
     if runtime_failure is not None:
         failures.append(runtime_failure)
-    if repository.status != "completed":
+    if repository.status != scenario.expected_terminal_status:
         failures.append("terminal_state")
+    planner_status = (repository.latest_output_summary or {}).get("status")
+    if planner_status != scenario.expected_planner_status:
+        failures.append("planner_status")
     expected_tools = tuple(fixture.tool_name for fixture in scenario.fixtures)
     if tuple(repository.executed_tool_names) != expected_tools:
         failures.append("tool_sequence")
     if any(item not in repository.final_answer for item in scenario.expected_answer_contains):
         failures.append("final_answer_grounding")
-    failure_reasons = tuple(dict.fromkeys(failures))
     routing_decisions = router_recorder.decisions
     router_routed = bool(routing_decisions) and all(
-        getattr(decision, "status", None) == "routed" for decision in routing_decisions
+        getattr(decision, "status", None) == scenario.expected_router_status
+        for decision in routing_decisions
     )
     domain_exact = not scenario.expected_domains or (
         router_routed
@@ -277,6 +348,13 @@ def _evaluate_workflow(
             for decision in routing_decisions
         )
     )
+    if not router_routed:
+        failures.append("router_status")
+    if not domain_exact:
+        failures.append("domain")
+    if not capability_exact:
+        failures.append("capability")
+    failure_reasons = tuple(dict.fromkeys(failures))
     return WorkflowEvaluationResult(
         scenario_id=scenario.scenario_id,
         attempt=attempt,
@@ -295,6 +373,10 @@ def _evaluate_workflow(
         router_routed=router_routed,
         domain_exact=domain_exact,
         capability_exact=capability_exact,
+        evaluation_domains=scenario.evaluation_domains or scenario.expected_domains,
+        expected_router_status=scenario.expected_router_status,
+        expected_tool_count=len(scenario.fixtures),
+        category=scenario.category,
     )
 
 
@@ -373,6 +455,7 @@ class _ReplayRepository:
 
     def wait_for_user_input(self, _run_id: str, _message: str) -> bool:
         self.status = "waiting_user_input"
+        self.final_answer = _message
         return True
 
 
@@ -398,6 +481,9 @@ class _ReplayHandoff:
         if summary.get("requiresConfirmation") != fixture.requires_confirmation:
             self.repository.safety_violations.append("confirmation_policy")
         self.repository.executed_tool_names.append(tool_name)
+        if fixture.requires_confirmation is True:
+            self.repository.status = "waiting_user_input"
+            return
         output = json.dumps(
             fixture.output,
             ensure_ascii=False,
@@ -486,12 +572,21 @@ def _required_string(value: dict[str, object], key: str) -> str:
     return item.strip()
 
 
-def _string_tuple(value: dict[str, object], key: str) -> tuple[str, ...]:
+def _optional_string_tuple(value: dict[str, object], key: str) -> tuple[str, ...]:
     items = value.get(key)
-    if (
-        not isinstance(items, list)
-        or not items
-        or not all(isinstance(item, str) and item.strip() for item in items)
+    if items is None:
+        return ()
+    if not isinstance(items, list) or not all(
+        isinstance(item, str) and item.strip() for item in items
     ):
-        raise ValueError(f"Workflow {key} must be a non-empty string array")
+        raise ValueError(f"Workflow {key} must be a string array")
     return tuple(item.strip() for item in items)
+
+
+def _optional_string(value: dict[str, object], key: str) -> str | None:
+    item = value.get(key)
+    if item is None:
+        return None
+    if not isinstance(item, str) or not item.strip():
+        raise ValueError(f"Workflow {key} must be a non-empty string or null")
+    return item.strip()

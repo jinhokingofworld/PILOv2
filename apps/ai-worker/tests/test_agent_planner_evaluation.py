@@ -79,6 +79,20 @@ def test_evaluation_input_hashes_include_meeting_catalog_when_provided(tmp_path)
     }
 
 
+def test_evaluation_input_hashes_include_workflow_catalog_when_provided(tmp_path) -> None:
+    suite_path = tmp_path / "suite.json"
+    workflow_path = tmp_path / "workflow-catalog.json"
+    suite_path.write_bytes(b'{"version":"suite:v1"}')
+    workflow_path.write_bytes(b'{"version":"workflow:v1"}')
+
+    hashes = build_evaluation_input_hashes(
+        suite_path,
+        workflow_catalog_path=workflow_path,
+    )
+
+    assert hashes["workflowCatalogSha256"] == hashlib.sha256(workflow_path.read_bytes()).hexdigest()
+
+
 def decision(**overrides):
     values = {
         "status": "tool_candidate",
