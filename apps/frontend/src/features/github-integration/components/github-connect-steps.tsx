@@ -28,6 +28,7 @@ type StepsProps = {
   projectOAuth: GithubProjectOAuthStatus | null;
   selectedInstallation: GithubAppInstallation | undefined;
   isLoading: boolean;
+  isWorkspaceOwner: boolean;
   isDisconnecting: boolean;
   isDisconnectingProjectOAuth: boolean;
   isDeletingInstallation: boolean;
@@ -52,6 +53,7 @@ export function GithubConnectSteps({
   projectOAuth,
   selectedInstallation,
   isLoading,
+  isWorkspaceOwner,
   isDisconnecting,
   isDisconnectingProjectOAuth,
   isDeletingInstallation,
@@ -158,12 +160,12 @@ export function GithubConnectSteps({
             </p>
             <div className="col-start-4 row-span-2 row-start-1 justify-self-end flex shrink-0 flex-wrap gap-2 max-[45rem]:col-span-2 max-[45rem]:col-start-2 max-[45rem]:row-span-1 max-[45rem]:row-start-4 max-[45rem]:justify-end">
               {hasInstallation ? (
-                <Button className={completedDestructiveButtonClassName} disabled={isDeletingInstallation || isLoading} onClick={onRequestDeleteInstallation} type="button" variant="outline">
+                isWorkspaceOwner ? <Button className={completedDestructiveButtonClassName} disabled={isDeletingInstallation || isLoading} onClick={onRequestDeleteInstallation} type="button" variant="outline">
                   {isDeletingInstallation ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Trash2 data-icon="inline-start" />}
                   GitHub에서 App 설치 해제
-                </Button>
+                </Button> : null
               ) : (
-                <Button
+                isWorkspaceOwner ? <Button
                   className="h-10 rounded-[8px] bg-[#3157d5] px-4 text-white hover:bg-[#2447bd]"
                   disabled={!access.canInstallGithubApp || isLoading || redirectAction === "installation"}
                   onClick={onStartInstallation}
@@ -171,7 +173,7 @@ export function GithubConnectSteps({
                 >
                   {redirectAction === "installation" ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <ExternalLink data-icon="inline-start" />}
                   {access.canInstallGithubApp ? "설치 시작" : "1단계 필요"}
-                </Button>
+                </Button> : null
               )}
             </div>
             {isInstallationDeleteRequested && selectedInstallation ? (

@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 const { NestFactory } = require("@nestjs/core");
 const { resolveDatabasePoolSettings } = require("../../dist/database/database.service.js");
 const { GithubSyncRunService } = require("../../dist/modules/github-integration/github-sync-run.service.js");
+const { forbidden } = require("../../dist/common/api-error.js");
 const { GithubSyncJobService } = require("../../dist/modules/github-integration/github-sync-job.service.js");
 const { GithubSyncWorkerModule } = require("../../dist/modules/github-integration/github-sync-worker.module.js");
 const { GithubSyncObservabilityService } = require("../../dist/modules/github-integration/github-sync-observability.service.js");
@@ -315,11 +316,84 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     }
   };
   const queued = [];
-  const service = new GithubSyncRunService(database, {}, { assertWorkspaceAccess: async () => {} }, {}, {}, { enqueueSyncJob: async (...args) => queued.push(args) });
+  const service = new GithubSyncRunService(database, {}, { assertWorkspaceAccess: async () => {}, assertWorkspaceOwnerAccess: async () => {} }, {}, {}, { enqueueSyncJob: async (...args) => queued.push(args) });
   const run = await service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId }, "manual");
   assert.equal(run.status, "queued");
   assert.deepEqual(queued, [[syncRunId, userId]]);
   assert.match(calls[1].text, /'queued'/);
+}
+
+{
+  const databaseCalls = [];
+  const service = new GithubSyncRunService(
+    { async queryOne(text) { databaseCalls.push(text); throw new Error("installation lookup must not run"); } },
+    {},
+    {
+      async assertWorkspaceOwnerAccess() { throw forbidden("Workspace owner access is required"); },
+      async assertWorkspaceAccess() { throw new Error("manual sync must not use member access"); }
+    },
+    {}, {}, { enqueueSyncJob: async () => {} }
+  );
+  await assert.rejects(
+    () => service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId }, "manual"),
+    error => error?.getStatus?.() === 403
+  );
+  assert.deepEqual(databaseCalls, [], "member access must stop manual sync before database side effects");
+}
+
+{
+  const activeRun = {
+    id: syncRunId,
+    workspace_id: workspaceId,
+    installation_id: installationId,
+    repository_id: null,
+    project_v2_id: null,
+    target: "full",
+    status: "queued",
+    trigger_source: "manual",
+    started_at: "2026-01-01T00:00:00.000Z",
+    finished_at: null,
+    fetched_count: 0,
+    created_count: 0,
+    updated_count: 0,
+    skipped_count: 0,
+    error_message: null,
+    cursor: {}
+  };
+  const database = {
+    async queryOne(text) {
+      if (/FROM github_installations/.test(text)) {
+        return { id: installationId, workspace_id: workspaceId, github_installation_id: 1, account_login: "org", account_type: "Organization" };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+    async transaction(callback) {
+      return callback({
+        async execute(text, values) {
+          assert.match(text, /pg_advisory_xact_lock/);
+          assert.deepEqual(values, [`github-manual-sync:${workspaceId}`]);
+        },
+        async query(text) {
+          assert.match(text, /trigger_source = 'manual'/);
+          assert.match(text, /status IN \('queued', 'running'\)/);
+          return [activeRun];
+        },
+        async queryOne() {
+          throw new Error("matching active run must not create another row");
+        }
+      });
+    }
+  };
+  const queued = [];
+  const service = new GithubSyncRunService(
+    database,
+    {},
+    { assertWorkspaceAccess: async () => {}, assertWorkspaceOwnerAccess: async () => {} },
+    {}, {}, { enqueueSyncJob: async (...args) => queued.push(args) }
+  );
+  const run = await service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId }, "manual");
+  assert.equal(run.id, syncRunId);
+  assert.deepEqual(queued, [], "reused active run must not enqueue another job");
 }
 
 {

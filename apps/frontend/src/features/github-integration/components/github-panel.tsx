@@ -649,6 +649,11 @@ export function GithubPanel() {
       return;
     }
 
+    if (!isWorkspaceOwner) {
+      setActionError("Workspace Owner만 GitHub App 설치를 관리할 수 있습니다.");
+      return;
+    }
+
     if (!connected) {
       setActionError("GitHub OAuth 연결 후 GitHub App을 설치할 수 있습니다.");
       return;
@@ -687,6 +692,11 @@ export function GithubPanel() {
   async function handleConfirmDeleteGithubAppInstallation() {
     if (!workspaceId || !selectedInstallationId) {
       setActionError("삭제할 GitHub App 설치를 확인할 수 없습니다.");
+      return;
+    }
+
+    if (!isWorkspaceOwner) {
+      setActionError("Workspace Owner만 GitHub App 설치를 관리할 수 있습니다.");
       return;
     }
 
@@ -786,6 +796,11 @@ export function GithubPanel() {
   async function handleStartGithubSyncRun() {
     if (!workspaceId) {
       setActionError("활성 워크스페이스를 확인할 수 없습니다.");
+      return;
+    }
+
+    if (!isWorkspaceOwner) {
+      setActionError("Workspace Owner만 GitHub 수동 동기화를 시작할 수 있습니다.");
       return;
     }
 

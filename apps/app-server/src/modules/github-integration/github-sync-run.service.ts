@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import { badRequest, conflict, notFound } from "../../common/api-error";
+import { DatabaseService, type DatabaseTransaction } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { ListGithubSyncRunsQuery, StartGithubSyncRunRequest } from "./dto";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
@@ -104,7 +104,11 @@ export class GithubSyncRunService {
     input: StartGithubSyncRunRequest | undefined,
     triggerSource: Exclude<GithubSyncTriggerSource, "legacy">
   ): Promise<GithubSyncRunPayload> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    if (triggerSource === "manual") {
+      await this.workspaceService.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
+    } else {
+      await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    }
 
     const target = this.readGithubSyncTarget(input?.target, "target");
     const installationId = this.validateRequiredString(
@@ -147,14 +151,21 @@ export class GithubSyncRunService {
       throw badRequest("GitHub ProjectV2 does not belong to the installation");
     }
 
-    const syncRun = await this.createGithubSyncRun({
+    const createInput = {
       workspaceId,
       installationId,
       repositoryId,
       projectV2Id,
       target,
       triggerSource
-    });
+    };
+    const { syncRun, reused } = triggerSource === "manual"
+      ? await this.createOrReuseManualGithubSyncRun(createInput)
+      : { syncRun: await this.createGithubSyncRun(createInput), reused: false };
+
+    if (reused) {
+      return this.mapGithubSyncRun(syncRun);
+    }
 
     if (this.syncJobService) {
       await this.syncJobService.enqueueSyncJob(syncRun.id, currentUserId);
@@ -290,6 +301,37 @@ export class GithubSyncRunService {
     };
   }
 
+  private async createOrReuseManualGithubSyncRun(input: {
+    workspaceId: string;
+    installationId: string;
+    repositoryId: string | null;
+    projectV2Id: string | null;
+    target: GithubSyncTarget;
+    triggerSource: Exclude<GithubSyncTriggerSource, "legacy">;
+  }): Promise<{ syncRun: GithubSyncRunRow; reused: boolean }> {
+    const run = async (transaction: DatabaseTransaction) => {
+      await transaction.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`github-manual-sync:${input.workspaceId}`]
+      );
+      const activeRuns = await this.findActiveManualGithubSyncRuns(input.workspaceId, transaction);
+      if (activeRuns.length > 0) {
+        if (activeRuns.every((activeRun) => activeRun.installation_id === input.installationId && activeRun.repository_id === input.repositoryId && activeRun.project_v2_id === input.projectV2Id && activeRun.target === input.target)) {
+          return { syncRun: activeRuns[0], reused: true };
+        }
+        throw conflict("A different GitHub manual sync is already active");
+      }
+      return { syncRun: await this.createGithubSyncRun(input, transaction), reused: false };
+    };
+    const databaseWithTransaction = this.database as unknown as {
+      transaction?: (callback: (transaction: DatabaseTransaction) => Promise<{ syncRun: GithubSyncRunRow; reused: boolean }>) => Promise<{ syncRun: GithubSyncRunRow; reused: boolean }>;
+    };
+    if (databaseWithTransaction.transaction) {
+      return databaseWithTransaction.transaction(run);
+    }
+    return { syncRun: await this.createGithubSyncRun(input), reused: false };
+  }
+
   private async createGithubSyncRun(input: {
     workspaceId: string;
     installationId: string;
@@ -297,8 +339,8 @@ export class GithubSyncRunService {
     projectV2Id: string | null;
     target: GithubSyncTarget;
     triggerSource: Exclude<GithubSyncTriggerSource, "legacy">;
-  }): Promise<GithubSyncRunRow> {
-    const row = await this.database.queryOne<GithubSyncRunRow>(
+  }, database: Pick<DatabaseService, "queryOne"> | DatabaseTransaction = this.database): Promise<GithubSyncRunRow> {
+    const row = await database.queryOne<GithubSyncRunRow>(
       `
         INSERT INTO github_sync_runs (
           workspace_id,
@@ -343,6 +385,22 @@ export class GithubSyncRunService {
     }
 
     return row;
+  }
+
+  private async findActiveManualGithubSyncRuns(
+    workspaceId: string,
+    database: Pick<DatabaseService, "query"> | DatabaseTransaction = this.database
+  ): Promise<GithubSyncRunRow[]> {
+    return database.query<GithubSyncRunRow>(
+      `
+        ${this.githubSyncRunSelectSql()}
+        WHERE workspace_id = $1
+          AND trigger_source = 'manual'
+          AND status IN ('queued', 'running')
+        ORDER BY started_at DESC NULLS LAST, created_at DESC, id DESC
+      `,
+      [workspaceId]
+    );
   }
 
   private async updateGithubSyncRunProgress(

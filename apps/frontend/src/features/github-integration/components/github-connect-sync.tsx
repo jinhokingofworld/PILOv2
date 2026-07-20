@@ -53,6 +53,7 @@ const projectScopedSyncTargets = new Set<GithubSyncTarget>([
 
 type GithubConnectSyncProps = {
   isLoading: boolean;
+  isWorkspaceOwner: boolean;
   installations: GithubAppInstallation[];
   selectedInstallationId: string;
   selectedProjectV2Id: string;
@@ -67,6 +68,7 @@ type GithubConnectSyncProps = {
 
 export function GithubConnectSync({
   isLoading,
+  isWorkspaceOwner,
   installations,
   selectedInstallationId,
   selectedProjectV2Id,
@@ -88,7 +90,7 @@ export function GithubConnectSync({
         title="동기화"
         tone="sync"
       >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        {isWorkspaceOwner ? <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="min-w-0 flex-1">
             <span
               className="text-[12px] font-semibold uppercase tracking-[0.06em] text-muted-foreground"
@@ -147,7 +149,9 @@ export function GithubConnectSync({
             )}
             동기화 시작
           </Button>
-        </div>
+        </div> : (
+          <p className="text-[12px] text-[#687184]">Workspace Owner만 수동 동기화를 시작할 수 있습니다.</p>
+        )}
         {isProjectTargetMissingSelection ? (
           <p className="mt-2 text-[12px] text-amber-700">
             Project v2를 먼저 선택해 주세요.

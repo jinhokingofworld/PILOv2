@@ -44,11 +44,19 @@ class FakeDatabase {
 class FakeWorkspaceService {
   constructor() {
     this.accessChecks = [];
+    this.ownerChecks = [];
+    this.ownerError = null;
   }
 
   async assertWorkspaceAccess(currentUserId, workspaceId) {
     this.accessChecks.push({ currentUserId, workspaceId });
     return { id: workspaceId };
+  }
+
+  async assertWorkspaceOwnerAccess(currentUserId, workspaceId) {
+    this.ownerChecks.push({ currentUserId, workspaceId });
+    if (this.ownerError) throw this.ownerError;
+    return { id: workspaceId, role: "owner" };
   }
 }
 
