@@ -777,7 +777,20 @@ assert.match(canvasViewportQueries, /staleTime: 0/);
 assert.doesNotMatch(canvasViewportQueries, /isPiloFrameCollapsed/);
 assert.match(canvasViewportQueries, /shouldLoadFrameChildren/);
 assert.match(canvasViewportQueries, /mergeFrameChildren/);
-assert.doesNotMatch(canvasViewportQueries, /getShapeDetail/);
+const frameChildrenLoaderSource = canvasViewportQueries.slice(
+  canvasViewportQueries.indexOf("const loadFrameChildren = useCallback"),
+  canvasViewportQueries.indexOf("const loadFrameSubtree = useCallback"),
+);
+const frameSubtreeLoaderSource = canvasViewportQueries.slice(
+  canvasViewportQueries.indexOf("const loadFrameSubtree = useCallback"),
+  canvasViewportQueries.indexOf("const loadViewportShapes = useCallback"),
+);
+const viewportShapeLoaderSource = canvasViewportQueries.slice(
+  canvasViewportQueries.indexOf("const loadViewportShapes = useCallback"),
+);
+assert.doesNotMatch(frameChildrenLoaderSource, /getShapeDetail/);
+assert.match(frameSubtreeLoaderSource, /getShapeDetail!\(rootFrameId/);
+assert.doesNotMatch(viewportShapeLoaderSource, /getShapeDetail/);
 assert.doesNotMatch(canvasViewportQueries, /shape-detail/);
 assert.match(canvasViewportQueries, /createViewportShapeLoadBounds/);
 assert.match(canvasViewportQueries, /doesLoadedViewportCoverBounds/);

@@ -3,7 +3,10 @@ import {
   buildCanvasAgentShapeSummaries,
   MAX_CANVAS_AGENT_SHAPE_SUMMARIES,
 } from "./canvas-agent-shape-context.ts";
-import { focusCanvasAgentResult } from "./canvas-agent-camera.ts";
+import {
+  focusCanvasAgentResult,
+  getCanvasAgentReadyShapeIds,
+} from "./canvas-agent-camera.ts";
 import {
   buildCanvasAgentDeepLink,
   getCanvasAgentDriveShapeId,
@@ -211,6 +214,7 @@ function shape(id, x, text) {
 {
   const calls = [];
   const editor = {
+    getShape: (id) => ({ id, parentId: "page:page" }),
     getShapePageBounds: (id) => id === "shape:a"
       ? { x: 100, y: 200, w: 180, h: 120 }
       : { x: 400, y: 500, w: 200, h: 160 },
@@ -227,4 +231,22 @@ function shape(id, x, text) {
   assert.deepEqual(calls[0].bounds, { x: 100, y: 200, w: 500, h: 460 });
   assert.equal(calls[0].options.targetZoom, 1);
   assert.equal(calls[0].options.inset, 160);
+}
+
+{
+  const shapes = new Map([
+    ["shape:root", { id: "shape:root", parentId: "page:page" }],
+    ["shape:child", { id: "shape:child", parentId: "shape:root" }],
+    ["shape:orphan", { id: "shape:orphan", parentId: "shape:missing" }],
+  ]);
+  const editor = {
+    getShape: (id) => shapes.get(String(id)),
+  };
+
+  assert.deepEqual(
+    getCanvasAgentReadyShapeIds(editor, ["shape:child", "shape:orphan"]),
+    ["shape:child"],
+  );
+  shapes.delete("shape:root");
+  assert.deepEqual(getCanvasAgentReadyShapeIds(editor, ["shape:child"]), []);
 }

@@ -8,7 +8,10 @@ import { createCanvasAgentClient } from "../api/canvas-agent-client";
 import type { CanvasDriveFileReference } from "../integrations/drive/canvas-drive-file";
 import { isCanvasDrivePreviewMimeType } from "../integrations/drive/canvas-drive-file";
 import { createCanvasDrivePreviewUrl } from "../integrations/drive/canvas-drive-client";
-import { focusCanvasAgentResult } from "./canvas-agent-camera";
+import {
+  focusCanvasAgentResult,
+  getCanvasAgentReadyShapeIds,
+} from "./canvas-agent-camera";
 import {
   CANVAS_AGENT_RUN_QUERY_KEY,
   getCanvasAgentDriveShapeId,
@@ -62,9 +65,7 @@ export function CanvasAgentDeepLinkHandler({
     }
 
     function focusLoadedShapes(shapeIds: string[]) {
-      const loadedShapeIds = shapeIds.filter((shapeId) =>
-        editor.getShape(shapeId as TLShapeId),
-      );
+      const loadedShapeIds = getCanvasAgentReadyShapeIds(editor, shapeIds);
       if (!loadedShapeIds.length) return false;
       editor.setSelectedShapes(loadedShapeIds as TLShapeId[]);
       return focusCanvasAgentResult(editor, loadedShapeIds, null);

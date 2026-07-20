@@ -251,18 +251,26 @@ export function useCanvasShapePersistence({
   );
 
   const mergeLoadedFreeformShapes = useCallback(
-    (loadedShapes: PiloCanvasFreeformShape[]) => {
+    (
+      loadedShapes: PiloCanvasFreeformShape[],
+      options?: { cachedRoomStateShapeIds?: ReadonlySet<string> },
+    ) => {
       const nextLoadedShapes = loadedShapes.filter((shape) => {
         const shapeId = getFreeformShapeId(shape);
+        const isCachedRoomStateShape = Boolean(
+          shapeId && options?.cachedRoomStateShapeIds?.has(shapeId),
+        );
 
         return (
           (!shapeId ||
-            !pendingLocalShapeVersionsRef.current.has(shapeId)) &&
-          shouldAcceptPersistedCanvasShape({
-            deletedShapeIds: deletedShapeIdsRef.current,
-            roomStateShapeIds: roomStateShapeIdsRef.current,
-            shapeId,
-          })
+            (!deletedShapeIdsRef.current.has(shapeId) &&
+              !pendingLocalShapeVersionsRef.current.has(shapeId))) &&
+          (isCachedRoomStateShape ||
+            shouldAcceptPersistedCanvasShape({
+              deletedShapeIds: deletedShapeIdsRef.current,
+              roomStateShapeIds: roomStateShapeIdsRef.current,
+              shapeId,
+            }))
         );
       });
 

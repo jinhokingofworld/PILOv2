@@ -17,7 +17,10 @@ import {
   readCanvasAgentToolHelpOverview,
   resolveCanvasAgentToolTarget,
 } from "./canvas-agent-tool-targets";
-import { focusCanvasAgentResult } from "./canvas-agent-camera";
+import {
+  focusCanvasAgentResult,
+  getCanvasAgentReadyShapeIds,
+} from "./canvas-agent-camera";
 import { insertCanvasAgentHtmlArtifact } from "./canvas-agent-html-insertion";
 import { buildCanvasAgentShapeSummaries } from "./canvas-agent-shape-context";
 import {
@@ -145,8 +148,9 @@ export function useCanvasAgent({
       }
       const focusProgressResult = (attempt = 0) => {
         if (runIdRef.current !== nextRun.id) return;
-        const loadedShapeIds = progress.highlightedShapeIds.filter((shapeId) =>
-          editor.getShape(shapeId as TLShapeId),
+        const loadedShapeIds = getCanvasAgentReadyShapeIds(
+          editor,
+          progress.highlightedShapeIds,
         );
         if (loadedShapeIds.length) {
           editor.select(...(loadedShapeIds as TLShapeId[]));

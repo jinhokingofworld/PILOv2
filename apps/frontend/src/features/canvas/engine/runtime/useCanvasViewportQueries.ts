@@ -55,7 +55,10 @@ type UseCanvasViewportQueriesOptions = {
   board: CanvasBoardDetail;
   canvasClient: CanvasViewSettingApiClient | null;
   latestViewportBoundsRef: RuntimeRef<PiloCanvasViewportBounds | null>;
-  mergeLoadedFreeformShapes: (loadedShapes: PiloCanvasFreeformShape[]) => void;
+  mergeLoadedFreeformShapes: (
+    loadedShapes: PiloCanvasFreeformShape[],
+    options?: { cachedRoomStateShapeIds?: ReadonlySet<string> },
+  ) => void;
   queryClient: QueryClient;
   remoteShapeContentHashRef: RuntimeRef<Map<string, string>>;
   remoteShapeRevisionRef: RuntimeRef<Map<string, number>>;
@@ -363,7 +366,18 @@ export function useCanvasViewportQueries({
             shapeDetailCacheRef.current.set(shape.id, shape);
           }
         });
-        mergeLoadedFreeformShapes(nextLoadedShapes);
+        const cachedRoomStateShapeIds = new Set(
+          nextLoadedShapes.flatMap((shape) =>
+            typeof shape.id === "string" &&
+            roomStateShapeIdsRef.current.has(shape.id) &&
+            shapeDetailCacheRef.current.get(shape.id) === shape
+              ? [shape.id]
+              : [],
+          ),
+        );
+        mergeLoadedFreeformShapes(nextLoadedShapes, {
+          cachedRoomStateShapeIds,
+        });
         nextLoadedShapes.forEach((shape) => {
           if (shouldLoadFrameChildren(shape)) {
             loadFrameChildren(shape.id, nextVisitedFrameIds);
@@ -523,6 +537,74 @@ export function useCanvasViewportQueries({
       const visitedFrameIds = new Set<string>();
       setFrameSubtreeLoading(rootFrameId, true);
 
+      async function loadRootFrame() {
+        const cachedRoot = shapeDetailCacheRef.current.get(rootFrameId);
+
+        if (
+          cachedRoot?.type === "frame" &&
+          !deletedShapeIdsRef.current.has(rootFrameId)
+        ) {
+          unloadedShapeIdsRef.current.delete(rootFrameId);
+          mergeLoadedFreeformShapes([cachedRoot], {
+            cachedRoomStateShapeIds: roomStateShapeIdsRef.current.has(rootFrameId)
+              ? new Set([rootFrameId])
+              : undefined,
+          });
+          return true;
+        }
+
+        if (
+          storageMode !== "api" ||
+          !canvasClient?.getShapeDetail
+        ) {
+          return false;
+        }
+
+        const persistedRootValue = await runCanvasLazyLoadWithRetry({
+          load: () =>
+            canvasClient.getShapeDetail!(rootFrameId, {
+              workspaceId: board.workspaceId,
+            }),
+          shouldContinue: () =>
+            isMountedRef.current &&
+            activeBoardIdRef.current === board.id,
+        });
+        if (
+          !isMountedRef.current ||
+          activeBoardIdRef.current !== board.id
+        ) {
+          return false;
+        }
+
+        rememberPersistedShapeMetadata(persistedRootValue);
+        const persistedRoots = normalizeCanvasFreeformShapes([
+          persistedRootValue,
+        ]) as PiloCanvasFreeformShape[];
+        const latestCachedRoot = shapeDetailCacheRef.current.get(rootFrameId);
+        const mergedRoots = mergeCanvasRoomStateAndPersistedShapes({
+          cachedShapes: latestCachedRoot ? [latestCachedRoot] : [],
+          deletedShapeIds: deletedShapeIdsRef.current,
+          persistedShapes: persistedRoots,
+          roomStateShapeIds: roomStateShapeIdsRef.current,
+        });
+        const rootFrame = mergedRoots.find(
+          (shape) => shape.id === rootFrameId && shape.type === "frame",
+        );
+
+        if (!rootFrame) return false;
+
+        unloadedShapeIdsRef.current.delete(rootFrameId);
+        shapeDetailCacheRef.current.set(rootFrameId, rootFrame);
+        mergeLoadedFreeformShapes([rootFrame], {
+          cachedRoomStateShapeIds:
+            latestCachedRoot === rootFrame &&
+            roomStateShapeIdsRef.current.has(rootFrameId)
+              ? new Set([rootFrameId])
+              : undefined,
+        });
+        return true;
+      }
+
       async function visit(frameId: string, depth: number): Promise<void> {
         if (visitedFrameIds.has(frameId) || visitedFrameIds.size >= 160 || depth > 12) return;
         visitedFrameIds.add(frameId);
@@ -587,7 +669,20 @@ export function useCanvasViewportQueries({
             unloadedShapeIdsRef.current.delete(shape.id);
             shapeDetailCacheRef.current.set(shape.id, shape);
           });
-          if (nextShapes.length) mergeLoadedFreeformShapes(nextShapes);
+          if (nextShapes.length) {
+            const cachedRoomStateShapeIds = new Set(
+              nextShapes.flatMap((shape) =>
+                typeof shape.id === "string" &&
+                roomStateShapeIdsRef.current.has(shape.id) &&
+                shapeDetailCacheRef.current.get(shape.id) === shape
+                  ? [shape.id]
+                  : [],
+              ),
+            );
+            mergeLoadedFreeformShapes(nextShapes, {
+              cachedRoomStateShapeIds,
+            });
+          }
 
           await Promise.all(
             nextShapes.flatMap((shape) =>
@@ -606,6 +701,8 @@ export function useCanvasViewportQueries({
       let keepLoadingIndicator = false;
 
       try {
+        const rootLoaded = await loadRootFrame();
+        if (!rootLoaded) return;
         await visit(rootFrameId, 0);
       } catch (error) {
         if (
