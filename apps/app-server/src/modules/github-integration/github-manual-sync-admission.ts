@@ -27,16 +27,17 @@ export function readGithubManualSyncIdempotencyKey(value: unknown): string {
     throw badRequest(INVALID_IDEMPOTENCY_KEY_MESSAGE);
   }
 
-  const key = value.trim();
+  const keyByteLength = Buffer.byteLength(value, "utf8");
   if (
-    !key ||
-    !PRINTABLE_ASCII_KEY_PATTERN.test(key) ||
-    Buffer.byteLength(key, "utf8") > MAX_IDEMPOTENCY_KEY_BYTES
+    keyByteLength < 1 ||
+    keyByteLength > MAX_IDEMPOTENCY_KEY_BYTES ||
+    !PRINTABLE_ASCII_KEY_PATTERN.test(value) ||
+    /^ +$/.test(value)
   ) {
     throw badRequest(INVALID_IDEMPOTENCY_KEY_MESSAGE);
   }
 
-  return key;
+  return value;
 }
 
 export function hashGithubManualSyncIdempotencyKey(value: string): string {

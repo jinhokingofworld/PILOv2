@@ -26,8 +26,17 @@ const scope = {
   target: "source"
 };
 
-assert.equal(readGithubManualSyncIdempotencyKey("  retry-key  "), "retry-key");
-for (const value of [undefined, "", "   ", "line\nbreak", "\u007f", "a".repeat(129)]) {
+assert.equal(readGithubManualSyncIdempotencyKey("  retry-key  "), "  retry-key  ");
+for (const value of [
+  undefined,
+  "",
+  "   ",
+  "line\nbreak",
+  "\u007f",
+  "\u00a0retry-key\u00a0",
+  "\ufeffretry-key\ufeff",
+  "a".repeat(129)
+]) {
   assert.throws(
     () => readGithubManualSyncIdempotencyKey(value),
     (error) => error.getResponse().error.message === "Idempotency-Key must be printable ASCII between 1 and 128 bytes"
@@ -37,6 +46,10 @@ for (const value of [undefined, "", "   ", "line\nbreak", "\u007f", "a".repeat(1
 assert.equal(
   hashGithubManualSyncIdempotencyKey("retry-key"),
   "86df9ac2413f27fc568266668e88b6efdca4b7f8f0f102189d0a74867a69c99d"
+);
+assert.notEqual(
+  hashGithubManualSyncIdempotencyKey("  retry-key  "),
+  hashGithubManualSyncIdempotencyKey("retry-key")
 );
 assert.equal(
   fingerprintGithubManualSyncScope(scope),
