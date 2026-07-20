@@ -43,6 +43,9 @@ jobs:
   prepare:
     if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
+    outputs:
+      baseline_sha: ${{ steps.revisions.outputs.baseline_sha }}
+      candidate_sha: ${{ steps.revisions.outputs.candidate_sha }}
 
     steps:
       - name: Checkout baseline evaluation source
@@ -56,6 +59,13 @@ jobs:
         with:
           ref: ${{ inputs.candidate_ref }}
           path: candidate
+
+      - name: Resolve immutable evaluation revisions
+        id: revisions
+        run: |
+          set -euo pipefail
+          echo "baseline_sha=$(git -C baseline rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$(git -C candidate rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -127,7 +137,7 @@ jobs:
       - name: Checkout evaluation source
         uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.target == 'baseline' && inputs.baseline_ref || inputs.candidate_ref }}
+          ref: ${{ matrix.target == 'baseline' && needs.prepare.outputs.baseline_sha || needs.prepare.outputs.candidate_sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -198,13 +208,13 @@ jobs:
       - name: Checkout baseline evaluation source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.baseline_ref }}
+          ref: ${{ needs.prepare.outputs.baseline_sha }}
           path: baseline
 
       - name: Checkout candidate evaluation source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.candidate_ref }}
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
           path: candidate
 
       - name: Set up Python
