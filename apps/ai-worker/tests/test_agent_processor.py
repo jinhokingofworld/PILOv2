@@ -15,6 +15,7 @@ from app.agent_processor import (
     AgentPlannerDecision,
     AgentPlannerOutputError,
     AgentPlanningRequest,
+    AgentProcessResult,
     AgentRouterOutputError,
     AgentRoutingDecision,
     AgentRoutingRequest,
@@ -22,6 +23,7 @@ from app.agent_processor import (
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
     OpenAiAgentRouterClient,
+    SqlErdInspectContinuation,
     _agent_planner_schema,
     _agent_planner_system_prompt,
     _agent_planner_user_prompt,
@@ -1023,6 +1025,17 @@ def sql_erd_focus_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
     return catalog
 
 
+def _sql_erd_bypass_planning_context(*table_refs: str) -> str:
+    return "tool inspect_sql_erd_schema: " + json.dumps(
+        {
+            "sessionId": SQL_ERD_SESSION_ID,
+            "sessionRevision": 7,
+            "modelFingerprint": "fnv1a32:1234abcd",
+            "projection": {"tables": [{"ref": ref} for ref in table_refs]},
+        }
+    )
+
+
 def test_sql_erd_planning_emits_queue_router_planner_handoff_and_turn_latency() -> None:
     tools = [
         tool_snapshot(
@@ -1110,6 +1123,175 @@ def test_sql_erd_planning_emits_queue_router_planner_handoff_and_turn_latency() 
     assert observer.calls[2]["provider_total_tokens"] == 26
     assert all(call["surface"] == "sql_erd" for call in observer.calls)
     assert all(call["turn_sequence"] == 1 for call in observer.calls)
+
+
+def _sql_erd_bypass_tools() -> list[dict[str, object]]:
+    return [
+        tool_snapshot(
+            name="inspect_sql_erd_schema",
+            executionMode="contextual",
+            inputSchema={"type": "object", "additionalProperties": False, "properties": {}},
+        ),
+        tool_snapshot(
+            name="focus_sql_erd_tables",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["primaryTableRefs"],
+                "additionalProperties": False,
+                "properties": {"primaryTableRefs": {"type": "array"}},
+            },
+        ),
+    ]
+
+
+def _run_sql_erd_bypass(
+    context: AgentRunContext,
+    decision: AgentPlannerDecision,
+    retrieval_mode: str = TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+) -> tuple[
+    AgentProcessResult,
+    FakeAgentRunRepository,
+    FakePlannerClient,
+    FakeRouterClient,
+    FakeExecutionHandoffClient,
+]:
+    tools = _sql_erd_bypass_tools()
+    repository = FakeAgentRunRepository(context=context)
+    planner_client = FakePlannerClient(decision=decision)
+    router_client = FakeRouterClient(
+        decision=routing_decision(domains=("sql_erd",), capability_ids=("sql_erd.tables.focus",))
+    )
+    handoff_client = FakeExecutionHandoffClient()
+    result = create_processor(
+        repository, planner_client, handoff_client, router_client, retrieval_mode
+    ).process_payload(
+        agent_payload(
+            requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+            tools=tools,
+            toolCapabilityCatalog=sql_erd_focus_catalog(tools),
+        )
+    )
+    return result, repository, planner_client, router_client, handoff_client
+
+
+def test_sql_erd_inspect_focus_continuation_bypasses_router_and_handoffs(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED", "true")
+    result, _repository, planner, router, handoff = _run_sql_erd_bypass(
+        run_context(
+            planning_context=_sql_erd_bypass_planning_context("t1"),
+            sql_erd_inspect_continuation=SqlErdInspectContinuation(
+                "sql_erd_inspect_focus", "inspect_sql_erd_schema", "focus_sql_erd_tables"
+            ),
+        ),
+        planner_decision(
+            tool_name="focus_sql_erd_tables",
+            tool_input={
+                "sessionId": SQL_ERD_SESSION_ID,
+                "sessionRevision": 7,
+                "modelFingerprint": "fnv1a32:1234abcd",
+                "primaryTableRefs": ["t1"],
+            },
+        ),
+    )
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert router.requests == []
+    assert [tool.name for tool in planner.requests[0].tools] == ["focus_sql_erd_tables"]
+    assert planner.requests[0].routing is None
+    assert planner.requests[0].completion_tool_names == ("focus_sql_erd_tables",)
+    assert planner.requests[0].workflow_incomplete is True
+    assert handoff.calls == [RUN_ID]
+
+
+def test_sql_erd_inspect_complete_continuation_bypasses_router_and_allows_completion(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AGENT_SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED", "true")
+    result, repository, planner, router, handoff = _run_sql_erd_bypass(
+        run_context(
+            planning_context=_sql_erd_bypass_planning_context("t1"),
+            sql_erd_inspect_continuation=SqlErdInspectContinuation(
+                "sql_erd_inspect_complete", "inspect_sql_erd_schema", None
+            ),
+        ),
+        planner_decision(
+            status="completed",
+            final_answer_draft="The inspection is complete.",
+            tool_name=None,
+            tool_input={},
+        ),
+    )
+
+    assert result.reason == "agent_planning_completed"
+    assert router.requests == []
+    assert planner.requests[0].tools == ()
+    assert planner.requests[0].routing is None
+    assert planner.requests[0].completion_tool_names == ("inspect_sql_erd_schema",)
+    assert handoff.calls == []
+    assert repository.completed_runs[0][0] == RUN_ID
+
+
+@pytest.mark.parametrize(
+    ("flag_value", "planning_context", "continuation", "retrieval_mode", "router_calls", "tools"),
+    [
+        (
+            "false",
+            _sql_erd_bypass_planning_context("t1"),
+            ("sql_erd_inspect_focus", "focus_sql_erd_tables"),
+            TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+            1,
+            ["focus_sql_erd_tables"],
+        ),
+        (
+            "true",
+            'tool inspect_sql_erd_schema: {"projection":{"tables":"invalid"}}',
+            ("sql_erd_inspect_focus", "focus_sql_erd_tables"),
+            TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+            1,
+            ["focus_sql_erd_tables"],
+        ),
+        (
+            "true",
+            _sql_erd_bypass_planning_context("t1"),
+            ("sql_erd_inspect_focus", None),
+            TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+            1,
+            ["focus_sql_erd_tables"],
+        ),
+        (
+            "true",
+            _sql_erd_bypass_planning_context("t1"),
+            ("sql_erd_inspect_focus", "focus_sql_erd_tables"),
+            TOOL_RETRIEVAL_MODE_SHADOW,
+            0,
+            ["inspect_sql_erd_schema", "focus_sql_erd_tables"],
+        ),
+    ],
+)
+def test_sql_erd_inspect_continuation_invalid_state_uses_router_fallback(
+    monkeypatch,
+    flag_value: str,
+    planning_context: str,
+    continuation: tuple[str, str | None],
+    retrieval_mode: str,
+    router_calls: int,
+    tools: list[str],
+) -> None:
+    monkeypatch.setenv("AGENT_SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED", flag_value)
+    _result, _repository, planner, router, _handoff = _run_sql_erd_bypass(
+        run_context(
+            planning_context=planning_context,
+            sql_erd_inspect_continuation=SqlErdInspectContinuation(
+                continuation[0], "inspect_sql_erd_schema", continuation[1]
+            ),
+        ),
+        planner_decision(tool_name="focus_sql_erd_tables", tool_input={}),
+        retrieval_mode,
+    )
+
+    assert len(router.requests) == router_calls
+    assert [tool.name for tool in planner.requests[0].tools] == tools
 
 
 def test_non_sql_erd_planning_does_not_emit_latency_events() -> None:

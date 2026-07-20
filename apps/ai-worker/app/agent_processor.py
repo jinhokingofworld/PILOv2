@@ -452,6 +452,13 @@ class _AgentLatencyScope:
     queue_emitted: bool = False
 
 
+@dataclass(frozen=True)
+class _SqlErdRouterBypassPlan:
+    tools: tuple[AgentToolSchema, ...]
+    completion_tool_names: tuple[str, ...]
+    workflow_incomplete: bool
+
+
 class AgentGroundedAnswerProcessor:
     """Keeps bounded Meeting evidence in-memory: only App Server internal HTTPS carries it."""
 
@@ -918,7 +925,24 @@ class AgentRunProcessor:
             self._emit_queue_latency(job, latency_scope)
             routing: AgentRoutingDecision | None = None
             completion_tool_names: tuple[str, ...] = ()
-            if self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER:
+            bypass_plan = (
+                _sql_erd_router_bypass_plan(
+                    context,
+                    selection_job,
+                    context_surface,
+                )
+                if self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER
+                else None
+            )
+            if bypass_plan is not None:
+                planner_tools = bypass_plan.tools
+                completion_tool_names = bypass_plan.completion_tool_names
+                planner_selection = AgentPlannerToolSelection(
+                    tools=planner_tools,
+                    retrieval=None,
+                    used_shortlist=True,
+                )
+            elif self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER:
                 if self.router_client is None or selection_job.tool_capability_catalog is None:
                     raise AgentRouterOutputError(
                         "Agent router configuration or capability catalog is missing"
@@ -1028,7 +1052,7 @@ class AgentRunProcessor:
                     _planning_tool_result_names(context.planning_context)
                 )
             )
-            if not planner_tools and not routed_workflow_completed:
+            if not planner_tools and not routed_workflow_completed and bypass_plan is None:
                 output_summary = _retrieval_clarification_summary(
                     job,
                     self.tool_retrieval_mode,
@@ -1060,10 +1084,15 @@ class AgentRunProcessor:
                     ),
                 )
             planner_job = replace(selection_job, tools=planner_tools)
-            workflow_incomplete = routing is not None and _has_incomplete_routed_workflow(
-                selection_job,
-                routing,
-                context.planning_context,
+            workflow_incomplete = (
+                bypass_plan.workflow_incomplete
+                if bypass_plan is not None
+                else routing is not None
+                and _has_incomplete_routed_workflow(
+                    selection_job,
+                    routing,
+                    context.planning_context,
+                )
             )
             planner_started_at = self.latency_observer.start()
             try:
@@ -3997,6 +4026,56 @@ def _sql_erd_inspect_continuation_contract_enabled(request: AgentPlanningRequest
         and request.context_surface == "sql_erd"
         and any(tool.name == SQL_ERD_INSPECTION_TOOL_NAME for tool in request.tools)
     )
+
+
+def _sql_erd_router_bypass_plan(
+    context: AgentRunContext,
+    selection_job: AgentRunJob,
+    context_surface: str | None,
+) -> _SqlErdRouterBypassPlan | None:
+    continuation = context.sql_erd_inspect_continuation
+    if (
+        os.environ.get(SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED, "false").lower() != "true"
+        or context_surface != "sql_erd"
+        or continuation is None
+    ):
+        return None
+    latest_tool_result = _latest_planning_tool_result(context.planning_context)
+    if latest_tool_result is None:
+        return None
+    tool_name, output = latest_tool_result
+    projection = output.get("projection")
+    if tool_name != SQL_ERD_INSPECTION_TOOL_NAME or not isinstance(projection, dict):
+        return None
+    if not isinstance(projection.get("tables"), list):
+        return None
+    if (
+        continuation.kind == "sql_erd_inspect_focus"
+        and continuation.prerequisite_tool_name == SQL_ERD_INSPECTION_TOOL_NAME
+        and continuation.next_tool_name == SQL_ERD_FOCUS_TOOL_NAME
+    ):
+        focus_tool = next(
+            (tool for tool in selection_job.tools if tool.name == SQL_ERD_FOCUS_TOOL_NAME),
+            None,
+        )
+        if focus_tool is None:
+            return None
+        return _SqlErdRouterBypassPlan(
+            tools=(focus_tool,),
+            completion_tool_names=(SQL_ERD_FOCUS_TOOL_NAME,),
+            workflow_incomplete=True,
+        )
+    if (
+        continuation.kind == "sql_erd_inspect_complete"
+        and continuation.prerequisite_tool_name == SQL_ERD_INSPECTION_TOOL_NAME
+        and continuation.next_tool_name is None
+    ):
+        return _SqlErdRouterBypassPlan(
+            tools=(),
+            completion_tool_names=(SQL_ERD_INSPECTION_TOOL_NAME,),
+            workflow_incomplete=False,
+        )
+    return None
 
 
 def _agent_planner_workflow_constraint(
