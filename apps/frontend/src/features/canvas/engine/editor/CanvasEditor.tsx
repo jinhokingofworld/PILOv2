@@ -2787,8 +2787,8 @@ function CanvasRealtimePreviewApplier({
   return null;
 }
 
-const PILO_CODE_IMPORT_GRID_GAP_X = 56;
-const PILO_CODE_IMPORT_GRID_GAP_Y = 64;
+const PILO_CODE_IMPORT_GRID_GAP_X = 112;
+const PILO_CODE_IMPORT_GRID_GAP_Y = 128;
 const PILO_CODE_IMPORT_MAX_COLUMNS = 3;
 
 function getCodeImportGridPosition({

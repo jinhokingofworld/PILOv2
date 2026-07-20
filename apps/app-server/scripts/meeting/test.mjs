@@ -2301,6 +2301,43 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
+          assert.match(
+            text,
+            /lower\(regexp_replace\(BTRIM\(COALESCE\(meeting_reports\.user_title, meeting_reports\.title\)\), '\\s\+', ' ', 'g'\)\) = \$3/
+          );
+          assert.match(text, /LIMIT \$4/);
+          assert.deepEqual(values, [
+            workspaceId,
+            currentUserId,
+            "backend meeting",
+            2
+          ]);
+          return [
+            meetingReportRow({
+              id: reportId,
+              title: "Backend meeting",
+              user_title: "Backend meeting"
+            })
+          ];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReportsForAgent(currentUserId, workspaceId, {
+    reportTitle: "  Backend   Meeting  ",
+    limit: 1
+  });
+
+  assert.equal(database.queries.length, 1);
+  assert.equal(result.reports[0].title, "Backend meeting");
+}
+
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
           assert.match(text, /LEFT JOIN meeting_rooms/);
           assert.match(text, /ORDER BY meeting_reports\.created_at DESC/);
           assert.match(text, /LIMIT \$3/);

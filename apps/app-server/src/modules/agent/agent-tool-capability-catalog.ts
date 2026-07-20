@@ -155,7 +155,7 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("meeting.participants.list", "meeting", ["resolve_meeting_resource", "get_meeting_participants"], "특정 회의의 현재 또는 과거 참여자를 조회할 때", ["회의록 또는 후속 작업 조회 요청"]),
   capability("meeting.reports.list", "meeting", ["list_meeting_reports"], "최신 N건 또는 기간별 회의록 목록을 조회할 때", ["단일 회의록 상세 또는 요약 요청"], ["최근 회의록 보여줘", "최근 3건 회의록"]),
   capability("meeting.report.detail", "meeting", ["list_meeting_reports", "get_meeting_report"], "특정 회의록의 상태나 상세를 확인할 때", ["회의록 목록만 필요한 요청"]),
-  capability("meeting.report.summary", "meeting", ["list_meeting_reports", "summarize_meeting_report"], "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때", ["원문 근거 검색 요청"]),
+  capability("meeting.report.summary", "meeting", ["summarize_meeting_report"], "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때", ["원문 근거 검색 요청"]),
   capability("meeting.evidence.search", "meeting", ["search_meeting_transcript"], "회의 발언 또는 Activity 근거를 검색할 때", ["결정 item에 직접 연결된 근거만 요청할 때"]),
   capability("meeting.decision.evidence", "meeting", ["list_meeting_reports", "get_meeting_decision_evidence"], "특정 결정사항의 직접 근거를 확인할 때", ["일반 회의 대화 검색 요청"]),
   capability("meeting.action_items.list", "meeting", ["find_action_items"], "담당자, 상태, 회의 기준으로 후속 작업을 찾을 때", ["후속 작업 변경, 승인 또는 반려 요청"]),

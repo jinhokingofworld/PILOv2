@@ -42,6 +42,8 @@ export type AgentCandidateSelection = {
 
 const SQL_ERD_SESSION_PATH = "/sql-erd/session";
 const CANVAS_PATH = "/canvas";
+const MEETING_REPORT_PATH = "/report";
+const DRIVE_FILES_PATH = "/files";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_AGENT_CANDIDATES = 5;
@@ -232,7 +234,9 @@ export function getAgentResourceLinks(
     for (const resourceRef of step.resourceRefs) {
       const link =
         toSqlErdSessionLink(resourceRef) ??
-        toCanvasLink(resourceRef, step.outputSummary);
+        toCanvasLink(resourceRef, step.outputSummary) ??
+        toMeetingReportLink(resourceRef) ??
+        toDriveDocumentLink(resourceRef);
       if (link) {
         links.set(link.key, link);
       }
@@ -240,6 +244,89 @@ export function getAgentResourceLinks(
   }
 
   return [...links.values()];
+}
+
+function toMeetingReportLink(
+  resourceRef: Record<string, unknown>,
+): AgentResourceLink | null {
+  if (
+    resourceRef.domain !== "meeting" ||
+    resourceRef.resourceType !== "meeting_report" ||
+    typeof resourceRef.resourceId !== "string" ||
+    !UUID_PATTERN.test(resourceRef.resourceId) ||
+    !hasExactInternalResourceUrl(
+      resourceRef.url,
+      MEETING_REPORT_PATH,
+      "reportId",
+      resourceRef.resourceId,
+    )
+  ) {
+    return null;
+  }
+  return {
+    href: `${MEETING_REPORT_PATH}?reportId=${encodeURIComponent(resourceRef.resourceId)}`,
+    key: `meeting:report:${resourceRef.resourceId}`,
+    label: "회의록 보기",
+  };
+}
+
+function toDriveDocumentLink(
+  resourceRef: Record<string, unknown>,
+): AgentResourceLink | null {
+  if (
+    resourceRef.domain !== "drive" ||
+    resourceRef.resourceType !== "document" ||
+    typeof resourceRef.resourceId !== "string" ||
+    !UUID_PATTERN.test(resourceRef.resourceId) ||
+    !hasExactInternalResourceUrl(
+      resourceRef.url,
+      DRIVE_FILES_PATH,
+      "documentId",
+      resourceRef.resourceId,
+    )
+  ) {
+    return null;
+  }
+  const title = normalizeCandidateTitle(resourceRef.label);
+  return {
+    href: `${DRIVE_FILES_PATH}?documentId=${encodeURIComponent(resourceRef.resourceId)}`,
+    key: `drive:document:${resourceRef.resourceId}`,
+    label: title ? `${title} 보기` : "관련 문서 보기",
+  };
+}
+
+function hasExactInternalResourceUrl(
+  value: unknown,
+  path: string,
+  queryKey: string,
+  resourceId: string,
+): boolean {
+  if (
+    typeof value !== "string" ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.includes("\\")
+  ) {
+    return false;
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(value, "https://pilo.local");
+  } catch {
+    return false;
+  }
+  const queryKeys = [...parsedUrl.searchParams.keys()];
+  const resourceIds = parsedUrl.searchParams.getAll(queryKey);
+  return (
+    parsedUrl.origin === "https://pilo.local" &&
+    parsedUrl.pathname === path &&
+    parsedUrl.hash === "" &&
+    queryKeys.length === 1 &&
+    queryKeys[0] === queryKey &&
+    resourceIds.length === 1 &&
+    resourceIds[0] === resourceId
+  );
 }
 
 export function applyAgentSqlErdTableFocus(

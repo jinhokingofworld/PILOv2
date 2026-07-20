@@ -9,6 +9,7 @@ import {
   useCanvasRemoteShapePresence,
 } from "@/features/canvas/collaboration/CanvasRemotePresenceContext";
 import {
+  PILO_COLLAPSED_CODE_BLOCK_SIZE,
   piloCodeLanguages,
   type PiloCodeBlockShape,
   type PiloCodeBlockShapeProps,
@@ -27,11 +28,6 @@ import {
   isPiloCodeBlockCollapsed,
 } from "../canvas-shape-metadata";
 import { isPiloCodeBlockShape } from "../PiloCanvasShapeGuards";
-
-const PILO_COLLAPSED_CODE_BLOCK_SIZE = {
-  h: 72,
-  w: 180,
-};
 
 export function PiloCodeBlockComponent({
   shape,

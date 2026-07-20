@@ -28,8 +28,31 @@ export function focusCanvasAgentResult(
   return bounds !== null;
 }
 
+export function getCanvasAgentReadyShapeIds(
+  editor: Editor,
+  shapeIds: string[],
+) {
+  return shapeIds.filter((shapeId) => {
+    const visitedShapeIds = new Set<string>();
+    let currentShape = editor.getShape(shapeId as TLShapeId);
+
+    while (currentShape) {
+      const currentShapeId = String(currentShape.id);
+      if (visitedShapeIds.has(currentShapeId)) return false;
+      visitedShapeIds.add(currentShapeId);
+
+      const parentId = String(currentShape.parentId);
+      if (!parentId.startsWith("shape:")) return true;
+      currentShape = editor.getShape(parentId as TLShapeId);
+      if (!currentShape) return false;
+    }
+
+    return false;
+  });
+}
+
 function combinedShapeBounds(editor: Editor, shapeIds: string[]) {
-  const bounds = shapeIds.flatMap((shapeId) => {
+  const bounds = getCanvasAgentReadyShapeIds(editor, shapeIds).flatMap((shapeId) => {
     const shapeBounds = editor.getShapePageBounds(shapeId as TLShapeId);
     return shapeBounds
       ? [{ x: shapeBounds.x, y: shapeBounds.y, w: shapeBounds.w, h: shapeBounds.h }]

@@ -330,7 +330,6 @@ def test_full_catalog_keeps_meeting_decision_to_calendar_handoff_out_of_unsuppor
         "calendar.events.create",
     )
     assert set(selection.tool_names) == {
-        "list_meeting_reports",
         "summarize_meeting_report",
         "create_calendar_event",
     }

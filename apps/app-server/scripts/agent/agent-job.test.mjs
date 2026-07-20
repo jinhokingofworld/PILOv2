@@ -67,7 +67,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "9c3d0ed910a431c5877e933a51ac8182e661c378a7fb0505604f21525ccf142a";
+  "4d442509d64ae9a20695372dc3904b3ee1bded72072e85cbbf427c3e87c0e2be";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -201,6 +201,13 @@ const payload = {
       "update_meeting_report_action_item",
       "approve_meeting_report_action_item"
     ]
+  );
+  assert.deepEqual(
+    capabilityCatalog.capabilities.find(
+      (capability) => capability.id === "meeting.report.summary"
+    )?.toolNames,
+    ["summarize_meeting_report"],
+    "meeting report summary must not require the optional list lookup"
   );
   const updateActionItem = capabilityCatalog.descriptors.find(
     (descriptor) => descriptor.toolName === "update_meeting_report_action_item"
