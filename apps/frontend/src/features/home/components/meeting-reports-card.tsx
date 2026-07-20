@@ -3,10 +3,7 @@
 import { useRouter } from "next/navigation";
 import { FileText } from "lucide-react";
 
-import {
-  homeMeetingReportListLimit,
-  type HomeMeetingReportsState
-} from "../hooks/use-home-dashboard-data";
+import type { HomeMeetingReportsState } from "../hooks/use-home-dashboard-data";
 import {
   formatMeetingReportTitle,
   getMeetingReportFallbackSummary
@@ -17,7 +14,6 @@ import {
   DashboardCardMessage,
   DashboardNavigationAction
 } from "./dashboard-card";
-import { MeetingReportsBackground } from "./home-backgrounds";
 import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
 export function MeetingReportsCard({
@@ -26,11 +22,13 @@ export function MeetingReportsCard({
   meetingReportsState: HomeMeetingReportsState;
 }) {
   const router = useRouter();
-  const visibleMeetingReports = meetingReportsState.reports.slice(
-    0,
-    homeMeetingReportListLimit
-  );
+  const visibleMeetingReports = meetingReportsState.reports.slice(0, 3);
   const isLoading = meetingReportsState.status === "loading";
+  const meetingReportDescription = isLoading
+    ? "회의록을 불러오는 중입니다"
+    : meetingReportsState.status === "error"
+      ? "회의록 상태를 확인할 수 없습니다"
+      : `오늘 회의 ${meetingReportsState.todayCount}개`;
 
   return (
     <DashboardCard
@@ -40,15 +38,13 @@ export function MeetingReportsCard({
           href="/report"
         />
       }
-      background={<MeetingReportsBackground />}
-      className="border-[#CBEFBD] bg-[#F5FCF2] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]"
+      className="min-h-[280px]"
       cursorTarget={{ id: "meeting-reports", label: "회의록", type: "home_card" }}
-      description={null}
+      description={meetingReportDescription}
       icon={<FileText className="size-4" />}
-      title="회의록"
-      titleClassName="text-[#1F7A00]"
+      title="최근 회의록"
     >
-      <div className="grid min-h-0 flex-1 grid-rows-[repeat(4,minmax(0,1fr))] gap-2 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
         {isLoading ? (
           <DashboardCardMessage rowSpanClassName="row-span-4">
             회의록 불러오는 중
@@ -67,14 +63,14 @@ export function MeetingReportsCard({
               })}
               key={report.id}
               aria-label={`${formatMeetingReportTitle(report)} 회의록으로 이동`}
-              className="flex min-h-0 flex-col justify-center overflow-hidden rounded-lg border bg-background/90 p-2.5 text-left shadow-sm backdrop-blur transition hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="flex min-h-[54px] flex-col justify-center overflow-hidden rounded-[10px] border border-[#eceef2] bg-[#fbfbfc] px-3 py-2.5 text-left transition hover:border-[#dfe2e8] hover:bg-white hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               onClick={() => router.push(buildMeetingReportHref(report.id))}
               type="button"
             >
-              <p className="min-w-0 truncate text-sm font-medium leading-5">
+              <p className="min-w-0 truncate text-[14px] font-medium leading-5 text-[#202124]">
                 {formatMeetingReportTitle(report)}
               </p>
-              <p className="mt-0.5 min-w-0 truncate text-xs leading-4 text-muted-foreground">
+              <p className="mt-0.5 min-w-0 truncate text-[13px] leading-4 text-[#6b6f78]">
                 {report.summary?.trim() || getMeetingReportFallbackSummary(report)}
               </p>
             </button>

@@ -11,7 +11,7 @@ export function getCalendarRangeDates(anchorDate: Date, dayCount: number) {
   });
 }
 
-export function formatCalendarRangeMonthTitle(dates: Date[]) {
+export function formatCalendarRangeTitle(dates: Date[]) {
   const firstDate = dates[0];
   const lastDate = dates[dates.length - 1];
 
@@ -19,10 +19,12 @@ export function formatCalendarRangeMonthTitle(dates: Date[]) {
     return "";
   }
 
-  const firstMonth = `${firstDate.getMonth() + 1}월`;
-  const lastMonth = `${lastDate.getMonth() + 1}월`;
+  const formatter = new Intl.DateTimeFormat("ko-KR", {
+    day: "numeric",
+    month: "long"
+  });
 
-  return firstMonth === lastMonth ? firstMonth : `${firstMonth} - ${lastMonth}`;
+  return `${formatter.format(firstDate)} – ${formatter.format(lastDate)}`;
 }
 
 export function formatRelativeTimeFromNow(value: string) {
