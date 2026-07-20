@@ -416,6 +416,12 @@ export function AgentChatWidget() {
   }, [hasPendingConfirmation]);
 
   useEffect(() => {
+    if (isOpen) {
+      shouldAutoScrollRef.current = true;
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen || !shouldAutoScrollRef.current) {
       return;
     }

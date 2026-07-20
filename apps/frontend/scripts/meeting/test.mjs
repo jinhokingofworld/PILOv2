@@ -215,6 +215,7 @@ assert.match(meetingHook, /MeetingWorkspaceDataStatus/);
 assert.match(meetingHook, /updateMeetingReportContent/);
 assert.match(meetingHook, /reportsEnabled/);
 assert.match(meetingHook, /process\.env\.NODE_ENV === "development"/);
+assert.match(meetingHook, /process\.env\.NEXT_PUBLIC_ENABLE_MEETING_MOCK === "true"/);
 assert.match(meetingHook, /canLoadLocalMockReports/);
 assert.match(meetingHook, /const canLoadReports = canLoad \|\| canLoadLocalMockReports/);
 assert.match(meetingHook, /getLocalMeetingMockReportList/);
@@ -467,7 +468,16 @@ assert.match(meetingReportSection, /reference\.sourceIndex === sourceIndex/);
 assert.match(meetingReportSection, /activityEvidenceForItem/);
 assert.match(meetingReportSection, /활동 \{activityEvidence\.length\}건/);
 assert.match(meetingReportSection, /selectedActivityEvidence/);
+assert.match(meetingReportSection, /selectedActivityEvidenceSourceLabel/);
 assert.match(meetingReportSection, /selectActivityEvidence/);
+assert.match(meetingReportSection, /getActivityEvidence\(report, "summary"\)/);
+assert.match(meetingReportSection, /getActivityEvidence\(report, "discussion"\)/);
+assert.match(meetingReportSection, /getActivityEvidence\(\s*report,\s*"action_item",\s*item\.sourceIndex\s*\)/);
+assert.match(meetingReportSection, /activityEvidence=\{summaryActivityEvidence\}/);
+assert.match(meetingReportSection, /activityEvidence=\{discussionActivityEvidence\}/);
+assert.match(meetingReportSection, /activityEvidence=\{activityEvidence\}/);
+assert.match(meetingReportSection, /후속 작업 \$\{item\.sourceIndex \+ 1\}/);
+assert.doesNotMatch(meetingReportSection, /selectedActivityDecisionIndex/);
 assert.doesNotMatch(meetingReportSection, /기록된 활동 근거가 없습니다/);
 assert.match(meetingReportSection, /grid gap-5 border-b pb-5/);
 assert.match(meetingReportSection, /md:flex-nowrap/);
@@ -500,7 +510,7 @@ assert.match(meetingReportSection, /승인/);
 assert.match(meetingReportSection, /editing/);
 assert.match(
   meetingReportSection,
-  /!editing && evidenceSegments\.length[\s\S]*?flex flex-wrap items-center justify-between gap-2[\s\S]*?<EvidenceTimeButtons[\s\S]*?취소[\s\S]*?승인/
+  /!editing && \(evidenceSegments\.length \|\| activityEvidence\.length\)[\s\S]*?flex flex-wrap items-center justify-between gap-2[\s\S]*?<EvidenceTimeButtons[\s\S]*?취소[\s\S]*?승인/
 );
 assert.match(meetingReportSection, /endDate: endDate \|\| startDate/);
 assert.match(meetingReportSection, /종료 날짜 \(비우면 시작 날짜\)/);

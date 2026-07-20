@@ -53,7 +53,9 @@ const emptyReportsState: MeetingWorkspaceReportsState = {
   nextCursor: null,
   reports: []
 };
-const canUseLocalMeetingMockData = process.env.NODE_ENV === "development";
+const canUseLocalMeetingMockData =
+  process.env.NODE_ENV === "development" &&
+  process.env.NEXT_PUBLIC_ENABLE_MEETING_MOCK === "true";
 
 function errorFromUnknown(error: unknown) {
   return error instanceof Error

@@ -379,15 +379,15 @@ function EvidenceTimeButtons({
 }: {
   activityEvidence?: MeetingReportActivityEvidence[];
   onActivitySelect?: (activityEvidence: MeetingReportActivityEvidence[]) => void;
-  onSelect: (segment: MeetingReportTranscriptSegment) => void;
+  onSelect?: (segment: MeetingReportTranscriptSegment) => void;
   segments: MeetingReportTranscriptSegment[];
 }) {
-  if (!segments.length && !activityEvidence.length) return null;
+  if ((!segments.length || !onSelect) && !activityEvidence.length) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs">
       <span className="font-medium text-muted-foreground">근거</span>
-      {segments.map((segment) => {
+      {onSelect ? segments.map((segment) => {
         const timestamp = formatTranscriptTimestamp(segment.startedAtMs);
         return (
           <button
@@ -401,7 +401,7 @@ function EvidenceTimeButtons({
             시간 {timestamp}
           </button>
         );
-      })}
+      }) : null}
       {activityEvidence.length && onActivitySelect ? (
         <button
           type="button"
@@ -418,16 +418,20 @@ function EvidenceTimeButtons({
 }
 
 function ReportTextBlock({
+  activityEvidence = [],
   asList = false,
   emptyLabel,
   evidenceSegments = [],
+  onActivitySelect,
   onEvidenceSelect,
   title,
   value
 }: {
+  activityEvidence?: MeetingReportActivityEvidence[];
   asList?: boolean;
   emptyLabel: string;
   evidenceSegments?: MeetingReportTranscriptSegment[];
+  onActivitySelect?: (activityEvidence: MeetingReportActivityEvidence[]) => void;
   onEvidenceSelect?: (segment: MeetingReportTranscriptSegment) => void;
   title: string;
   value: string | null;
@@ -451,8 +455,10 @@ function ReportTextBlock({
           <span className="text-muted-foreground">{emptyLabel}</span>
         )}
       </div>
-      {onEvidenceSelect ? (
+      {onEvidenceSelect || onActivitySelect ? (
         <EvidenceTimeButtons
+          activityEvidence={activityEvidence}
+          onActivitySelect={onActivitySelect}
           segments={evidenceSegments}
           onSelect={onEvidenceSelect}
         />
@@ -462,10 +468,12 @@ function ReportTextBlock({
 }
 
 function EditableReportTextBlock({
+  activityEvidence = [],
   asList = false,
   editable,
   emptyLabel,
   evidenceSegments = [],
+  onActivitySelect,
   onEvidenceSelect,
   onSave,
   saving,
@@ -473,10 +481,12 @@ function EditableReportTextBlock({
   title,
   value
 }: {
+  activityEvidence?: MeetingReportActivityEvidence[];
   asList?: boolean;
   editable: boolean;
   emptyLabel: string;
   evidenceSegments?: MeetingReportTranscriptSegment[];
+  onActivitySelect?: (activityEvidence: MeetingReportActivityEvidence[]) => void;
   onEvidenceSelect?: (segment: MeetingReportTranscriptSegment) => void;
   onSave: (value: string) => Promise<void>;
   saving: boolean;
@@ -563,8 +573,13 @@ function EditableReportTextBlock({
           )}
         </div>
       )}
-      {onEvidenceSelect ? (
-        <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
+      {onEvidenceSelect || onActivitySelect ? (
+        <EvidenceTimeButtons
+          activityEvidence={activityEvidence}
+          onActivitySelect={onActivitySelect}
+          segments={evidenceSegments}
+          onSelect={onEvidenceSelect}
+        />
       ) : null}
     </section>
   );
@@ -734,8 +749,10 @@ function getActionItemDeliveryErrorMessage(errorCode: string | null) {
 function ActionItemReviewCard({
   actionItem,
   actionItemAssignees,
+  activityEvidence,
   busy,
   evidenceSegments,
+  onActivityEvidenceSelect,
   onDeliver,
   onDismiss,
   onEvidenceSelect,
@@ -744,8 +761,12 @@ function ActionItemReviewCard({
 }: {
   actionItem: MeetingReportActionItem;
   actionItemAssignees: MeetingReportDetail["actionItemAssignees"];
+  activityEvidence: MeetingReportActivityEvidence[];
   busy: boolean;
   evidenceSegments: MeetingReportTranscriptSegment[];
+  onActivityEvidenceSelect: (
+    activityEvidence: MeetingReportActivityEvidence[]
+  ) => void;
   onDeliver: (input: MeetingReportActionItemDeliveryInput) => Promise<void>;
   onDismiss: () => void;
   onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
@@ -987,8 +1008,13 @@ function ActionItemReviewCard({
         </div>
       )}
 
-      {!editing && evidenceSegments.length ? (
-        <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
+      {!editing && (evidenceSegments.length || activityEvidence.length) ? (
+        <EvidenceTimeButtons
+          activityEvidence={activityEvidence}
+          onActivitySelect={onActivityEvidenceSelect}
+          segments={evidenceSegments}
+          onSelect={onEvidenceSelect}
+        />
       ) : null}
 
       {actionItem.delivery ? (
@@ -1174,14 +1200,18 @@ function MeetingReportDetailModal({
   const [selectedActivityEvidence, setSelectedActivityEvidence] = useState<
     MeetingReportActivityEvidence[] | null
   >(null);
-  const [selectedActivityDecisionIndex, setSelectedActivityDecisionIndex] = useState<
-    number | null
-  >(null);
+  const [selectedActivityEvidenceSourceLabel, setSelectedActivityEvidenceSourceLabel] =
+    useState<string | null>(null);
   const selectedEvidencePanelRef = useRef<HTMLElement | null>(null);
   const actionItemsWithEvidence = report
     ? actionItems.map((item, index) => ({
         item,
         evidenceSegments: getEvidenceSegments(
+          report,
+          "action_item",
+          item.sourceIndex
+        ),
+        activityEvidence: getActivityEvidence(
           report,
           "action_item",
           item.sourceIndex
@@ -1193,7 +1223,7 @@ function MeetingReportDetailModal({
     setDetailView("detail");
     setSelectedEvidenceSegment(null);
     setSelectedActivityEvidence(null);
-    setSelectedActivityDecisionIndex(null);
+    setSelectedActivityEvidenceSourceLabel(null);
     setEditingTitle(false);
     setTitleDraft(report?.title ?? "");
   }, [report?.id, report?.evidenceSegments, report?.activityEvidence]);
@@ -1216,17 +1246,17 @@ function MeetingReportDetailModal({
 
   function selectTranscriptSegment(segment: MeetingReportTranscriptSegment) {
     setSelectedActivityEvidence(null);
-    setSelectedActivityDecisionIndex(null);
+    setSelectedActivityEvidenceSourceLabel(null);
     setSelectedEvidenceSegment(segment);
   }
 
   function selectActivityEvidence(
     activityEvidence: MeetingReportActivityEvidence[],
-    sourceIndex: number
+    sourceLabel: string
   ) {
     setSelectedEvidenceSegment(null);
     setSelectedActivityEvidence(activityEvidence);
-    setSelectedActivityDecisionIndex(sourceIndex);
+    setSelectedActivityEvidenceSourceLabel(sourceLabel);
   }
 
   function startTitleEdit() {
@@ -1250,6 +1280,12 @@ function MeetingReportDetailModal({
   const summaryEvidence = report ? getEvidenceSegments(report, "summary") : [];
   const discussionEvidence = report
     ? getEvidenceSegments(report, "discussion")
+    : [];
+  const summaryActivityEvidence = report
+    ? getActivityEvidence(report, "summary")
+    : [];
+  const discussionActivityEvidence = report
+    ? getActivityEvidence(report, "discussion")
     : [];
   const decisionItems = report?.decisionItems ?? [];
   const canEditContent = Boolean(report?.canEdit && report.status === "COMPLETED");
@@ -1450,18 +1486,24 @@ function MeetingReportDetailModal({
                 </section>
 
                 <ReportTextBlock
+                  activityEvidence={summaryActivityEvidence}
                   emptyLabel={
                     isReportInProgress(report.status)
                       ? "회의록을 생성하는 중입니다."
                       : "등록된 요약이 없습니다."
                   }
                   evidenceSegments={summaryEvidence}
+                  onActivitySelect={(activityEvidence) => selectActivityEvidence(
+                    activityEvidence,
+                    "요약"
+                  )}
                   onEvidenceSelect={selectTranscriptSegment}
                   title="요약"
                   value={report.summary}
                 />
 
                 <EditableReportTextBlock
+                  activityEvidence={discussionActivityEvidence}
                   editable={canEditContent}
                   emptyLabel={
                     isReportInProgress(report.status)
@@ -1469,6 +1511,10 @@ function MeetingReportDetailModal({
                       : "등록된 논의사항이 없습니다."
                   }
                   evidenceSegments={discussionEvidence}
+                  onActivitySelect={(activityEvidence) => selectActivityEvidence(
+                    activityEvidence,
+                    "논의사항"
+                  )}
                   onEvidenceSelect={selectTranscriptSegment}
                   onSave={(discussionPoints) => onUpdateContent({
                     expectedVersion: report.contentVersion,
@@ -1494,7 +1540,9 @@ function MeetingReportDetailModal({
                     }
                     evidenceForItem={(item) => getEvidenceSegments(report, "decision", item.sourceIndex)}
                     items={decisionItems}
-                    onActivityEvidenceSelect={selectActivityEvidence}
+                    onActivityEvidenceSelect={(activityEvidence, sourceIndex) =>
+                      selectActivityEvidence(activityEvidence, `결정 ${sourceIndex + 1}`)
+                    }
                     onEvidenceSelect={selectTranscriptSegment}
                     onSave={(item, text) => onUpdateContent({
                       expectedVersion: report.contentVersion,
@@ -1519,7 +1567,9 @@ function MeetingReportDetailModal({
                       "decision",
                       sourceIndex
                     )}
-                    onActivityEvidenceSelect={selectActivityEvidence}
+                    onActivityEvidenceSelect={(activityEvidence, sourceIndex) =>
+                      selectActivityEvidence(activityEvidence, `결정 ${sourceIndex + 1}`)
+                    }
                     onEvidenceSelect={selectTranscriptSegment}
                     value={report.decisions}
                   />
@@ -1535,13 +1585,20 @@ function MeetingReportDetailModal({
                   {actionItems.length ? (
                     <ul className="grid gap-2">
                       {actionItemsWithEvidence.map(
-                        ({ evidenceSegments, item }) => (
+                        ({ activityEvidence, evidenceSegments, item }) => (
                           <ActionItemReviewCard
                             key={item.id}
                             actionItem={item}
                             actionItemAssignees={report.actionItemAssignees}
+                            activityEvidence={activityEvidence}
                             busy={mutatingActionItemId === item.id}
                             evidenceSegments={evidenceSegments}
+                            onActivityEvidenceSelect={(selectedActivityEvidence) =>
+                              selectActivityEvidence(
+                                selectedActivityEvidence,
+                                `후속 작업 ${item.sourceIndex + 1}`
+                              )
+                            }
                             onDeliver={(input) => onDeliverActionItem(item, input)}
                             onDismiss={() => onDismissActionItem(item)}
                             onEvidenceSelect={selectTranscriptSegment}
@@ -1595,7 +1652,7 @@ function MeetingReportDetailModal({
                         onClick={() => {
                           setSelectedEvidenceSegment(null);
                           setSelectedActivityEvidence(null);
-                          setSelectedActivityDecisionIndex(null);
+                          setSelectedActivityEvidenceSourceLabel(null);
                         }}
                       >
                         닫기
@@ -1613,7 +1670,7 @@ function MeetingReportDetailModal({
                     ) : selectedActivityEvidence ? (
                       <>
                         <p className="text-xs font-semibold text-muted-foreground">
-                          결정 {(selectedActivityDecisionIndex ?? 0) + 1}과 연결된 Workspace 활동 {selectedActivityEvidence.length}건
+                          {selectedActivityEvidenceSourceLabel ?? "선택한 항목"}과 연결된 Workspace 활동 {selectedActivityEvidence.length}건
                         </p>
                         <ul className="grid gap-2">
                           {selectedActivityEvidence.map((activity) => (

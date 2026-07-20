@@ -228,6 +228,7 @@ assert.doesNotMatch(agentChatWidget, /오늘 일정 보기/);
 assert.doesNotMatch(agentChatWidget, /prompt: "오늘 일정 보여줘"/);
 assert.match(agentChatWidget, /messageListRef/);
 assert.match(agentChatWidget, /shouldAutoScrollRef/);
+assert.match(agentChatWidget, /if \(isOpen\) \{\s*shouldAutoScrollRef\.current = true;/);
 assert.match(agentChatWidget, /onScroll=\{handleMessageListScroll\}/);
 assert.match(agentChatWidget, /top: messageList\.scrollHeight/);
 assert.match(agentChatWidget, /behavior: "smooth"/);
