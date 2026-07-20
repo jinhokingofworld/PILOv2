@@ -1,4 +1,5 @@
 import json
+from math import ceil
 from pathlib import Path
 
 import pytest
@@ -85,13 +86,14 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
     }
     terraform = tmp_path / "main.tf"
     terraform.write_text(
-        'environment = {\n  AGENT_TOOL_RETRIEVAL_MODE = "shortlist"\n}\n',
+        'ai_worker = { AGENT_TOOL_RETRIEVAL_MODE = "llm_router" }\n'
+        'agent_worker = { AGENT_TOOL_RETRIEVAL_MODE = "llm_router" }\n',
         encoding="utf-8",
     )
     runbook = tmp_path / "runbook.md"
     runbook.write_text(
-        "AGENT_TOOL_RETRIEVAL_MODE `shortlist` `shadow` Terraform apply "
-        "usedShortlist fallback reason confirmation 실행 직전",
+        "AGENT_TOOL_RETRIEVAL_MODE `llm_router` `shadow` Terraform apply "
+        "toolRouting domains capabilityIds confirmation 실행 직전",
         encoding="utf-8",
     )
     catalog_sha = __import__("hashlib").sha256(CATALOG_PATH.read_bytes()).hexdigest()
@@ -102,14 +104,55 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
         "counterexample": (72, 0.95, 0.95),
         "context": (54, 0.95, 0.95),
     }
-    for variant, (attempts, exact_rate, tool_accuracy) in variants.items():
+    repetitions = 5
+    for variant, (case_count, exact_rate, tool_accuracy) in variants.items():
+        attempts = case_count * repetitions
+        exact_count = ceil(attempts * exact_rate)
+        exact_overall_rate = round(exact_count / attempts, 4)
         mode_report = {
             "totalAttempts": attempts,
             "exactAttemptRate": exact_rate,
             "toolSelectionAccuracy": tool_accuracy,
+            "requiredInputAccuracy": 1.0,
+            "routingFunnel": {
+                "toolSelectionAttempts": attempts,
+                "stages": {
+                    "routerRouted": {
+                        "count": attempts,
+                        "conditionalRate": 1.0,
+                        "overallRate": 1.0,
+                    },
+                    "domainExact": {
+                        "count": exact_count,
+                        "conditionalRate": exact_overall_rate,
+                        "overallRate": exact_overall_rate,
+                    },
+                    "toolExact": {
+                        "count": exact_count,
+                        "conditionalRate": 1.0,
+                        "overallRate": exact_overall_rate,
+                    },
+                    "requiredInputExact": {
+                        "count": exact_count,
+                        "conditionalRate": 1.0,
+                        "overallRate": exact_overall_rate,
+                    },
+                    "executionPolicyExact": {
+                        "count": exact_count,
+                        "conditionalRate": 1.0,
+                        "overallRate": exact_overall_rate,
+                    },
+                    "endToEndExact": {
+                        "count": exact_count,
+                        "conditionalRate": 1.0,
+                        "overallRate": exact_overall_rate,
+                    },
+                },
+            },
             "retrieval": {
                 "shortlistViolations": 0,
                 "supportedToUnsupportedRate": 0.0,
+                "domainRecallAtK": 1.0,
                 "capabilityRecallAtK": 1.0,
             },
         }
@@ -117,11 +160,12 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
             write_json(
                 tmp_path / f"meeting-{variant}.json",
                 {
-                    "legacy": mode_report,
-                    "shadow": mode_report,
+                    **mode_report,
                     "metadata": {
                         "suiteVersion": f"meeting-agent-regression:v1:{variant}",
-                        "compareShadowRetrieval": True,
+                        "llmRouting": True,
+                        "compareShadowRetrieval": False,
+                        "repetitions": repetitions,
                         "meetingCatalogSha256": catalog_sha,
                         "registryInventorySha256": hashes["inventorySha256"],
                         "registryCatalogSha256": hashes["catalogSha256"],
@@ -172,11 +216,11 @@ def test_phase4e_readiness_fails_when_retrieval_threshold_is_not_met(tmp_path: P
         evaluate_phase4e_dev_readiness(inputs)
 
 
-def test_phase4e_readiness_fails_when_dev_is_not_shortlist(tmp_path: Path) -> None:
+def test_phase4e_readiness_fails_when_dev_is_not_llm_router(tmp_path: Path) -> None:
     inputs = readiness_inputs(tmp_path)
     inputs.dev_terraform.write_text('AGENT_TOOL_RETRIEVAL_MODE = "shadow"\n', encoding="utf-8")
 
-    with pytest.raises(ValueError, match="default to shortlist"):
+    with pytest.raises(ValueError, match="default to llm_router"):
         evaluate_phase4e_dev_readiness(inputs)
 
 
@@ -197,10 +241,55 @@ def test_phase4e_readiness_fails_when_actual_meeting_eval_is_below_threshold(
 ) -> None:
     inputs = readiness_inputs(tmp_path)
     report = json.loads(inputs.meeting_evaluation_reports[0].read_text(encoding="utf-8"))
-    report["shadow"]["exactAttemptRate"] = 0.99
+    report["exactAttemptRate"] = 0.99
     write_json(inputs.meeting_evaluation_reports[0], report)
 
     with pytest.raises(ValueError, match="Meeting evaluation threshold failed"):
+        evaluate_phase4e_dev_readiness(inputs)
+
+
+def test_phase4e_readiness_fails_when_router_domain_funnel_is_below_threshold(
+    tmp_path: Path,
+) -> None:
+    inputs = readiness_inputs(tmp_path)
+    report = json.loads(inputs.meeting_evaluation_reports[0].read_text(encoding="utf-8"))
+    funnel = report["routingFunnel"]
+    degraded_count = funnel["toolSelectionAttempts"] - 1
+    degraded_rate = round(degraded_count / funnel["toolSelectionAttempts"], 4)
+    for stage_name in (
+        "domainExact",
+        "toolExact",
+        "requiredInputExact",
+        "executionPolicyExact",
+        "endToEndExact",
+    ):
+        funnel["stages"][stage_name]["count"] = degraded_count
+        funnel["stages"][stage_name]["conditionalRate"] = 1.0
+        funnel["stages"][stage_name]["overallRate"] = degraded_rate
+    funnel["stages"]["domainExact"]["conditionalRate"] = degraded_rate
+    write_json(inputs.meeting_evaluation_reports[0], report)
+
+    with pytest.raises(ValueError, match="Router domain threshold failed"):
+        evaluate_phase4e_dev_readiness(inputs)
+
+
+def test_phase4e_readiness_requires_five_repetitions(tmp_path: Path) -> None:
+    inputs = readiness_inputs(tmp_path)
+    report = json.loads(inputs.meeting_evaluation_reports[0].read_text(encoding="utf-8"))
+    report["metadata"]["repetitions"] = 4
+    write_json(inputs.meeting_evaluation_reports[0], report)
+
+    with pytest.raises(ValueError, match="at least 5 repetitions"):
+        evaluate_phase4e_dev_readiness(inputs)
+
+
+def test_phase4e_readiness_requires_complete_repeated_attempts(tmp_path: Path) -> None:
+    inputs = readiness_inputs(tmp_path)
+    report = json.loads(inputs.meeting_evaluation_reports[0].read_text(encoding="utf-8"))
+    report["totalAttempts"] -= 1
+    write_json(inputs.meeting_evaluation_reports[0], report)
+
+    with pytest.raises(ValueError, match="Incomplete Meeting evaluation"):
         evaluate_phase4e_dev_readiness(inputs)
 
 

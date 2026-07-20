@@ -15,7 +15,7 @@ _UUID_PATTERN = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
     re.IGNORECASE,
 )
-_DEV_MODE_PATTERN = re.compile(r'AGENT_TOOL_RETRIEVAL_MODE\s*=\s*"shortlist"')
+_DEV_MODE_PATTERN = re.compile(r'AGENT_TOOL_RETRIEVAL_MODE\s*=\s*"llm_router"')
 _FORBIDDEN_OUTPUT_KEY_PARTS = (
     "authorization",
     "credential",
@@ -39,10 +39,30 @@ _REQUIRED_WRITE_CHAINS = {
     ),
 }
 _MEETING_EVALUATION_VARIANTS = {
-    "canonical": {"caseCount": 216, "exactAttemptRate": 1.0},
-    "held_out": {"caseCount": 54, "toolSelectionAccuracy": 0.95},
-    "counterexample": {"caseCount": 72, "toolSelectionAccuracy": 0.95},
-    "context": {"caseCount": 54, "exactAttemptRate": 0.95},
+    "canonical": {
+        "caseCount": 216,
+        "exactAttemptRate": 1.0,
+        "domainExactOverallRate": 1.0,
+        "conditionalToolAccuracy": 1.0,
+    },
+    "held_out": {
+        "caseCount": 54,
+        "toolSelectionAccuracy": 0.95,
+        "domainExactOverallRate": 0.95,
+        "conditionalToolAccuracy": 0.95,
+    },
+    "counterexample": {
+        "caseCount": 72,
+        "toolSelectionAccuracy": 0.95,
+        "domainExactOverallRate": 0.95,
+        "conditionalToolAccuracy": 0.95,
+    },
+    "context": {
+        "caseCount": 54,
+        "exactAttemptRate": 0.95,
+        "domainExactOverallRate": 0.95,
+        "conditionalToolAccuracy": 0.95,
+    },
 }
 
 
@@ -87,7 +107,7 @@ def evaluate_phase4e_dev_readiness(inputs: Phase4eReadinessInputs) -> dict[str, 
             {"id": "tool_retrieval_quality", "status": "passed"},
             {"id": "prompt_injection_security", "status": "passed"},
             {"id": "meeting_write_runtime_contracts", "status": "passed"},
-            {"id": "dev_shortlist_default", "status": "passed"},
+            {"id": "dev_llm_router_default", "status": "passed"},
             {"id": "shadow_rollback_runbook", "status": "passed"},
         ],
         "registry": registry_hashes,
@@ -96,7 +116,7 @@ def evaluate_phase4e_dev_readiness(inputs: Phase4eReadinessInputs) -> dict[str, 
         "retrieval": retrieval_metrics,
         "security": security_counts,
         "runtime": {"writeContractCount": write_contract_count},
-        "rollout": {"defaultMode": "shortlist", "rollbackMode": "shadow"},
+        "rollout": {"defaultMode": "llm_router", "rollbackMode": "shadow"},
         "inputSha256": {
             "meetingCatalog": _file_sha256(inputs.meeting_catalog),
             "rolloutRunbook": _file_sha256(inputs.rollout_runbook),
@@ -127,8 +147,11 @@ def _validate_meeting_evaluations(
         expected = _MEETING_EVALUATION_VARIANTS.get(variant)
         if expected is None or variant in summaries:
             raise ValueError("Duplicate or unknown Meeting evaluation variant")
-        if metadata.get("compareShadowRetrieval") is not True:
-            raise ValueError("Meeting evaluation must compare shadow and shortlist")
+        if (
+            metadata.get("llmRouting") is not True
+            or metadata.get("compareShadowRetrieval") is not False
+        ):
+            raise ValueError("Meeting evaluation must use two-stage LLM routing")
         if metadata.get("meetingCatalogSha256") != meeting_catalog_sha256:
             raise ValueError("Meeting evaluation is not bound to the fixture catalog")
         received_registry = {
@@ -139,48 +162,108 @@ def _validate_meeting_evaluations(
         if received_registry != registry_hashes:
             raise ValueError("Meeting evaluation is not bound to the registry snapshot")
 
-        mode_metrics: dict[str, object] = {}
-        for report_key, runtime_mode in (("legacy", "shadow"), ("shadow", "shortlist")):
-            mode_report = _object(report.get(report_key), "Missing Meeting mode evaluation")
-            attempts = mode_report.get("totalAttempts")
-            case_count = expected["caseCount"]
-            if not isinstance(attempts, int) or attempts < case_count:
-                raise ValueError(f"Incomplete Meeting evaluation: {variant}/{runtime_mode}")
-            for metric_name, threshold in expected.items():
-                if metric_name == "caseCount":
-                    continue
-                metric = mode_report.get(metric_name)
-                if not isinstance(metric, int | float) or float(metric) < float(threshold):
+        case_count = expected["caseCount"]
+        repetitions = metadata.get("repetitions")
+        if not isinstance(repetitions, int) or isinstance(repetitions, bool) or repetitions < 5:
+            raise ValueError(f"Meeting evaluation requires at least 5 repetitions: {variant}")
+        expected_attempts = case_count * repetitions
+        attempts = report.get("totalAttempts")
+        if attempts != expected_attempts:
+            raise ValueError(f"Incomplete Meeting evaluation: {variant}/llm_router")
+        funnel = _object(report.get("routingFunnel"), "Missing LLM routing funnel")
+        funnel_attempts = funnel.get("toolSelectionAttempts")
+        if funnel_attempts != expected_attempts:
+            raise ValueError(f"Incomplete Meeting routing funnel: {variant}")
+        stages = _validate_routing_funnel(funnel, funnel_attempts)
+        domain_stage = stages["domainExact"]
+        tool_stage = stages["toolExact"]
+        end_stage = stages["endToEndExact"]
+        derived_metrics = {
+            "domainExactOverallRate": domain_stage.get("overallRate"),
+            "conditionalToolAccuracy": tool_stage.get("conditionalRate"),
+        }
+        for metric_name, threshold in expected.items():
+            if metric_name == "caseCount":
+                continue
+            metric = derived_metrics.get(metric_name, report.get(metric_name))
+            if not isinstance(metric, int | float) or float(metric) < float(threshold):
+                if metric_name == "domainExactOverallRate":
+                    raise ValueError(f"Router domain threshold failed: {variant}")
+                raise ValueError(
+                    f"Meeting evaluation threshold failed: " f"{variant}/llm_router/{metric_name}"
+                )
+
+        retrieval = _object(report.get("retrieval"), "Missing LLM routing evaluation")
+        if retrieval.get("shortlistViolations") != 0:
+            raise ValueError("Planner selected a tool outside the Router tool set")
+        supported_rate = retrieval.get("supportedToUnsupportedRate")
+        if supported_rate not in (0, 0.0, None):
+            raise ValueError("LLM Router marked a supported request unsupported")
+        if variant in {"canonical", "held_out", "counterexample"}:
+            minimum = 1.0 if variant == "canonical" else 0.95
+            for metric_name in ("domainRecallAtK", "capabilityRecallAtK"):
+                metric = retrieval.get(metric_name)
+                if not isinstance(metric, int | float) or float(metric) < minimum:
                     raise ValueError(
-                        f"Meeting evaluation threshold failed: "
-                        f"{variant}/{runtime_mode}/{metric_name}"
+                        f"Meeting Router recall threshold failed: {variant}/{metric_name}"
                     )
-            retrieval = _object(mode_report.get("retrieval"), "Missing retrieval evaluation")
-            if runtime_mode == "shortlist":
-                if retrieval.get("shortlistViolations") != 0:
-                    raise ValueError("Meeting shortlist evaluation escaped the shortlist")
-                supported_rate = retrieval.get("supportedToUnsupportedRate")
-                if supported_rate not in (0, 0.0, None):
-                    raise ValueError("Meeting shortlist marked a supported request unsupported")
-                if variant in {"canonical", "held_out", "counterexample"}:
-                    capability_recall = retrieval.get("capabilityRecallAtK")
-                    minimum = 1.0 if variant == "canonical" else 0.95
-                    if (
-                        not isinstance(capability_recall, int | float)
-                        or float(capability_recall) < minimum
-                    ):
-                        raise ValueError(
-                            f"Meeting capability threshold failed: {variant}/shortlist"
-                        )
-            mode_metrics[runtime_mode] = {
-                "attempts": attempts,
-                "exactAttemptRate": mode_report.get("exactAttemptRate"),
-                "toolSelectionAccuracy": mode_report.get("toolSelectionAccuracy"),
-            }
-        summaries[variant] = mode_metrics
+        summaries[variant] = {
+            "mode": "llm_router",
+            "attempts": attempts,
+            "exactAttemptRate": report.get("exactAttemptRate"),
+            "domainExactOverallRate": domain_stage.get("overallRate"),
+            "conditionalToolAccuracy": tool_stage.get("conditionalRate"),
+            "endToEndExactOverallRate": end_stage.get("overallRate"),
+            "toolSelectionAccuracy": report.get("toolSelectionAccuracy"),
+        }
     if set(summaries) != set(_MEETING_EVALUATION_VARIANTS):
         raise ValueError("Meeting evaluation variants are incomplete")
-    return {"variants": summaries, "modeCount": 2}
+    return {"variants": summaries, "modeCount": 1}
+
+
+def _validate_routing_funnel(
+    funnel: dict[str, object], attempts: int
+) -> dict[str, dict[str, object]]:
+    raw_stages = _object(funnel.get("stages"), "Missing LLM routing funnel stages")
+    names = (
+        "routerRouted",
+        "domainExact",
+        "toolExact",
+        "requiredInputExact",
+        "executionPolicyExact",
+        "endToEndExact",
+    )
+    stages: dict[str, dict[str, object]] = {}
+    previous_count = attempts
+    for name in names:
+        stage = _object(raw_stages.get(name), f"Missing LLM routing funnel stage: {name}")
+        count = stage.get("count")
+        conditional_rate = stage.get("conditionalRate")
+        overall_rate = stage.get("overallRate")
+        if (
+            not isinstance(count, int)
+            or isinstance(count, bool)
+            or count < 0
+            or count > previous_count
+            or not isinstance(conditional_rate, int | float)
+            or isinstance(conditional_rate, bool)
+            or not 0 <= float(conditional_rate) <= 1
+            or not isinstance(overall_rate, int | float)
+            or isinstance(overall_rate, bool)
+            or not 0 <= float(overall_rate) <= 1
+        ):
+            raise ValueError(f"Invalid LLM routing funnel stage: {name}")
+        if float(overall_rate) != _fraction(count, attempts) or float(
+            conditional_rate
+        ) != _fraction(count, previous_count):
+            raise ValueError(f"Invalid LLM routing funnel stage: {name}")
+        stages[name] = stage
+        previous_count = count
+    return stages
+
+
+def _fraction(numerator: int, denominator: int) -> float:
+    return round(numerator / denominator, 4) if denominator else 0.0
 
 
 def _validate_registry(value: dict[str, object]) -> dict[str, str]:
@@ -363,16 +446,17 @@ def _validate_meeting_catalog(value: dict[str, object]) -> dict[str, int]:
 
 def _validate_dev_rollout(terraform_path: Path, runbook_path: Path) -> None:
     terraform = terraform_path.read_text(encoding="utf-8")
-    if len(_DEV_MODE_PATTERN.findall(terraform)) != 1:
-        raise ValueError("dev Agent Worker must default to shortlist exactly once")
+    if len(_DEV_MODE_PATTERN.findall(terraform)) != 2:
+        raise ValueError("dev Agent Workers must default to llm_router exactly twice")
     runbook = runbook_path.read_text(encoding="utf-8")
     required_phrases = (
         "AGENT_TOOL_RETRIEVAL_MODE",
-        "`shortlist`",
+        "`llm_router`",
         "`shadow`",
         "Terraform apply",
-        "usedShortlist",
-        "fallback reason",
+        "toolRouting",
+        "domains",
+        "capabilityIds",
         "confirmation",
         "실행 직전",
     )

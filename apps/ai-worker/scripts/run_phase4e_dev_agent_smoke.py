@@ -20,7 +20,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run privacy-safe Phase 4-E dev Agent smoke.")
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--workspace-id", required=True)
-    parser.add_argument("--expected-mode", choices=("shadow", "shortlist"), required=True)
+    parser.add_argument("--expected-mode", choices=("shadow", "llm_router"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     token = os.environ.get("PHASE4E_DEV_AGENT_TOKEN")
