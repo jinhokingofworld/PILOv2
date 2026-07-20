@@ -2219,6 +2219,7 @@ await import("./pr-review/test.mjs");
 await import("./pr-review-decision-realtime.test.mjs");
 await import("./pr-review-room-delete.test.mjs");
 await import("./sql-erd/test.mjs");
+await import("../src/features/sql-erd/session-header-title-store.test.mjs");
 await import("./sql-erd-realtime.test.mjs");
 await import("../src/shared/page-cursor/page-cursor.test.mjs");
 await import("../src/features/workspace-onboarding/github-onboarding.test.mjs");

@@ -16,6 +16,17 @@ export function getSqlErdSessionHeaderTitleSnapshot() {
   return snapshot;
 }
 
+export function resolveSqlErdSessionHeaderTitle(
+  currentSnapshot: SqlErdSessionHeaderTitleSnapshot | null,
+  currentSessionId: string | null,
+  fallback: string
+) {
+  return currentSnapshot?.sessionId === currentSessionId &&
+    currentSnapshot.title
+    ? currentSnapshot.title
+    : fallback;
+}
+
 export function subscribeSqlErdSessionHeaderTitle(listener: () => void) {
   listeners.add(listener);
   return () => {
