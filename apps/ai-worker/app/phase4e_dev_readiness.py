@@ -167,8 +167,11 @@ def _validate_meeting_evaluations(
             raise ValueError("Meeting evaluation is not bound to the registry snapshot")
 
         inventory = evaluation_inventory[variant]
-        case_count = inventory["caseCount"]
-        tool_selection_case_count = inventory["toolSelectionCaseCount"]
+        workflow_mode = variant == "multi_tool"
+        case_count = inventory["workflowCount"] if workflow_mode else inventory["caseCount"]
+        tool_selection_case_count = (
+            case_count if workflow_mode else inventory["toolSelectionCaseCount"]
+        )
         repetitions = metadata.get("repetitions")
         if not isinstance(repetitions, int) or isinstance(repetitions, bool) or repetitions < 5:
             raise ValueError(f"Meeting evaluation requires at least 5 repetitions: {variant}")
@@ -207,16 +210,23 @@ def _validate_meeting_evaluations(
                 if metric_name == "domainExactOverallRate":
                     raise ValueError(f"Router domain threshold failed: {variant}")
                 raise ValueError(
-                    f"Meeting evaluation threshold failed: " f"{variant}/llm_router/{metric_name}"
+                    f"Meeting evaluation threshold failed: {variant}/llm_router/{metric_name}"
                 )
 
-        retrieval = _object(report.get("retrieval"), "Missing LLM routing evaluation")
-        if retrieval.get("shortlistViolations") != 0:
-            raise ValueError("Planner selected a tool outside the Router tool set")
-        supported_rate = retrieval.get("supportedToUnsupportedRate")
-        if supported_rate not in (0, 0.0, None):
-            raise ValueError("LLM Router marked a supported request unsupported")
-        if variant in {"canonical", "held_out", "counterexample", "multi_tool"}:
+        if workflow_mode:
+            workflow_evaluation = _object(
+                report.get("workflowEvaluation"), "Missing workflow evaluation"
+            )
+            if workflow_evaluation.get("safetyViolations") != 0:
+                raise ValueError("Meeting workflow evaluation has safety violations")
+        else:
+            retrieval = _object(report.get("retrieval"), "Missing LLM routing evaluation")
+            if retrieval.get("shortlistViolations") != 0:
+                raise ValueError("Planner selected a tool outside the Router tool set")
+            supported_rate = retrieval.get("supportedToUnsupportedRate")
+            if supported_rate not in (0, 0.0, None):
+                raise ValueError("LLM Router marked a supported request unsupported")
+        if variant in {"canonical", "held_out", "counterexample"}:
             minimum = 1.0 if variant == "canonical" else 0.95
             for metric_name in ("domainRecallAtK", "capabilityRecallAtK"):
                 metric = retrieval.get(metric_name)
@@ -535,6 +545,7 @@ def _validate_meeting_catalog(
         multi_tool_stage_count += len(stages)
         evaluation_inventory["multi_tool"]["caseCount"] += len(stages)
         evaluation_inventory["multi_tool"]["toolSelectionCaseCount"] += tool_stage_count
+    evaluation_inventory["multi_tool"]["workflowCount"] = multi_tool_workflow_count
 
     for capability_id, expected_chain in _REQUIRED_WRITE_CHAINS.items():
         capability = by_id.get(capability_id)

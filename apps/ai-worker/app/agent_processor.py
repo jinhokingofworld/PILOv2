@@ -3213,6 +3213,7 @@ class OpenAiAgentRouterClient:
         except Exception as error:
             raise AgentRouterOutputError("Agent router provider failure") from error
 
+        responses = [response]
         output_text = _response_output_text(response)
         try:
             decision = normalize_agent_routing_decision(
@@ -3231,17 +3232,17 @@ class OpenAiAgentRouterClient:
                 raise InfrastructureError("OpenAI Agent router retryable failure") from error
             except Exception as error:
                 raise AgentRouterOutputError("Agent router repair provider failure") from error
+            responses.append(response)
             decision = normalize_agent_routing_decision(
                 parse_agent_router_output(_response_output_text(response)),
                 request.catalog,
                 context_surface=request.context_surface,
             )
-        usage = getattr(response, "usage", None)
         return replace(
             decision,
-            provider_input_tokens=_optional_nonnegative_int_attribute(usage, "input_tokens"),
-            provider_output_tokens=_optional_nonnegative_int_attribute(usage, "output_tokens"),
-            provider_total_tokens=_optional_nonnegative_int_attribute(usage, "total_tokens"),
+            provider_input_tokens=_sum_response_usage(responses, "input_tokens"),
+            provider_output_tokens=_sum_response_usage(responses, "output_tokens"),
+            provider_total_tokens=_sum_response_usage(responses, "total_tokens"),
         )
 
 
@@ -3600,6 +3601,7 @@ class OpenAiAgentPlannerClient:
         except Exception as error:
             raise AgentPlannerOutputError("Agent planner provider failure") from error
 
+        responses = [response]
         output_text = _response_output_text(response)
         try:
             decision = _validate_agent_planner_provider_decision(
@@ -3622,6 +3624,7 @@ class OpenAiAgentPlannerClient:
                 raise InfrastructureError("OpenAI Agent planner retryable failure") from error
             except Exception as error:
                 raise AgentPlannerOutputError("Agent planner repair provider failure") from error
+            responses.append(response)
             decision = _validate_agent_planner_provider_decision(
                 parse_agent_planner_output(
                     _response_output_text(response),
@@ -3631,13 +3634,22 @@ class OpenAiAgentPlannerClient:
                 workflow_constraint,
                 completion_allowed=completion_allowed,
             )
-        usage = getattr(response, "usage", None)
         return replace(
             decision,
-            provider_input_tokens=_optional_nonnegative_int_attribute(usage, "input_tokens"),
-            provider_output_tokens=_optional_nonnegative_int_attribute(usage, "output_tokens"),
-            provider_total_tokens=_optional_nonnegative_int_attribute(usage, "total_tokens"),
+            provider_input_tokens=_sum_response_usage(responses, "input_tokens"),
+            provider_output_tokens=_sum_response_usage(responses, "output_tokens"),
+            provider_total_tokens=_sum_response_usage(responses, "total_tokens"),
         )
+
+
+def _sum_response_usage(responses: list[object], key: str) -> int | None:
+    values = [
+        item
+        for response in responses
+        if (item := _optional_nonnegative_int_attribute(getattr(response, "usage", None), key))
+        is not None
+    ]
+    return sum(values) if values else None
 
 
 def _optional_nonnegative_int_attribute(value: object, key: str) -> int | None:

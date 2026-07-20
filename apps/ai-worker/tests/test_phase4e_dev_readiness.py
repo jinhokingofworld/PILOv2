@@ -103,12 +103,14 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
     repetitions = 5
     for variant in variants:
         suite = load_meeting_regression_suite(CATALOG_PATH, TOOL_SNAPSHOT_PATH, variant)
-        case_count = len(suite.cases)
+        case_count = 6 if variant == "multi_tool" else len(suite.cases)
         tool_selection_case_count = sum(
             case.expectation.tool_name is not None for case in suite.cases
         )
         attempts = case_count * repetitions
-        tool_selection_attempts = tool_selection_case_count * repetitions
+        tool_selection_attempts = (
+            attempts if variant == "multi_tool" else tool_selection_case_count * repetitions
+        )
         mode_report = {
             "totalCases": case_count,
             "totalAttempts": attempts,
@@ -167,12 +169,17 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
                     "workflowAttempts": 30,
                     "exactWorkflowAttempts": 30,
                     "exactWorkflowRate": 1.0,
-                    "stageAttempts": attempts,
                 }
                 if variant == "multi_tool"
                 else None
             ),
         }
+        if variant == "multi_tool":
+            mode_report.pop("retrieval")
+            mode_report["workflowEvaluation"] = {
+                "taskSuccessRate": 1.0,
+                "safetyViolations": 0,
+            }
         evaluation_reports.append(
             write_json(
                 tmp_path / f"meeting-{variant}.json",
@@ -231,7 +238,7 @@ def test_phase4e_readiness_combines_all_gates_without_raw_values(tmp_path: Path)
         "held_out": (55, 275, 275),
         "counterexample": (74, 370, 365),
         "context": (55, 275, 275),
-        "multi_tool": (18, 90, 60),
+        "multi_tool": (6, 30, 30),
     }
     serialized = json.dumps(report, ensure_ascii=False)
     assert "회의방 목록 보여줘" not in serialized

@@ -4456,7 +4456,11 @@ def test_openai_router_repairs_malformed_output_once_with_the_same_schema(monkey
                     if len(self.calls) == 1
                     else valid_payload
                 ),
-                usage=None,
+                usage=SimpleNamespace(
+                    input_tokens=10 if len(self.calls) == 1 else 20,
+                    output_tokens=2 if len(self.calls) == 1 else 4,
+                    total_tokens=12 if len(self.calls) == 1 else 24,
+                ),
             )
 
     class FakeOpenAI:
@@ -4493,6 +4497,9 @@ def test_openai_router_repairs_malformed_output_once_with_the_same_schema(monkey
     assert len(FakeResponses.calls) == 2
     assert FakeResponses.calls[1]["text"] == FakeResponses.calls[0]["text"]
     assert "repair" in str(FakeResponses.calls[1]["input"]).lower()
+    assert decision.provider_input_tokens == 30
+    assert decision.provider_output_tokens == 6
+    assert decision.provider_total_tokens == 36
 
 
 def test_openai_planner_repairs_malformed_output_once_with_the_same_schema(monkeypatch) -> None:
@@ -4526,7 +4533,11 @@ def test_openai_planner_repairs_malformed_output_once_with_the_same_schema(monke
                     if len(self.calls) == 1
                     else valid_payload
                 ),
-                usage=None,
+                usage=SimpleNamespace(
+                    input_tokens=10 if len(self.calls) == 1 else 20,
+                    output_tokens=2 if len(self.calls) == 1 else 4,
+                    total_tokens=12 if len(self.calls) == 1 else 24,
+                ),
             )
 
     class FakeOpenAI:
@@ -4562,6 +4573,9 @@ def test_openai_planner_repairs_malformed_output_once_with_the_same_schema(monke
     assert len(FakeResponses.calls) == 2
     assert FakeResponses.calls[1]["text"] == FakeResponses.calls[0]["text"]
     assert "repair" in str(FakeResponses.calls[1]["input"]).lower()
+    assert decision.provider_input_tokens == 30
+    assert decision.provider_output_tokens == 6
+    assert decision.provider_total_tokens == 36
 
 
 def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:

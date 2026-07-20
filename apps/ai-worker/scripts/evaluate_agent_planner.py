@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -19,6 +20,19 @@ from app.agent_planner_evaluation import (
 )
 from app.agent_processor import OpenAiAgentPlannerClient, OpenAiAgentRouterClient
 from app.agent_tool_retrieval import TOOL_RETRIEVER_VERSION
+from app.agent_workflow_evaluation import (
+    build_workflow_evaluation_report,
+    evaluate_workflow_suite,
+    load_workflow_catalog,
+    load_workflow_scenarios,
+)
+
+_EVALUATOR_SOURCE_PATHS = (
+    Path("app/agent_planner_evaluation.py"),
+    Path("app/agent_workflow_evaluation.py"),
+    Path("app/agent_planner_comparison.py"),
+    Path("scripts/evaluate_agent_planner.py"),
+)
 
 
 def main() -> None:
@@ -37,6 +51,11 @@ def main() -> None:
         help="Path to the Meeting regression capability catalog JSON.",
     )
     parser.add_argument(
+        "--workflow-catalog",
+        type=Path,
+        help="Path to the cross-domain Agent workflow catalog JSON.",
+    )
+    parser.add_argument(
         "--tool-capability-catalog",
         type=Path,
         help="Path to an App Server-generated capability catalog snapshot.",
@@ -48,7 +67,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--meeting-variant",
-        choices=("canonical", "held_out", "counterexample", "context", "multi_tool"),
+        choices=(
+            "canonical",
+            "held_out",
+            "counterexample",
+            "context",
+            "multi_tool",
+            "agent_workflow",
+        ),
         default="canonical",
         help="Meeting regression prompt set to evaluate when --meeting-catalog is provided.",
     )
@@ -134,15 +160,26 @@ def main() -> None:
     if not api_key:
         raise SystemExit("OPENAI_API_KEY is required")
 
-    suite = (
-        load_meeting_regression_suite(
-            args.meeting_catalog,
-            args.suite,
-            args.meeting_variant,
-        )
-        if args.meeting_catalog
-        else load_evaluation_suite(args.suite)
+    workflow_catalog = (
+        load_workflow_catalog(args.workflow_catalog) if args.workflow_catalog else None
     )
+    if args.meeting_variant == "agent_workflow":
+        if workflow_catalog is None:
+            raise SystemExit("agent_workflow evaluation requires --workflow-catalog")
+        suite = replace(
+            load_evaluation_suite(args.suite),
+            version=f"{workflow_catalog.version}:agent_workflow",
+        )
+    else:
+        suite = (
+            load_meeting_regression_suite(
+                args.meeting_catalog,
+                args.suite,
+                args.meeting_variant,
+            )
+            if args.meeting_catalog
+            else load_evaluation_suite(args.suite)
+        )
     if args.tool_capability_catalog:
         suite = attach_tool_capability_catalog(suite, args.tool_capability_catalog)
     if args.shard_count > 1:
@@ -160,13 +197,36 @@ def main() -> None:
         suite.job.tool_capability_catalog is None
     ):
         raise SystemExit("--tool-capability-catalog is required for routing evaluation")
+    workflow_mode = args.meeting_variant in {"multi_tool", "agent_workflow"}
+    if workflow_mode and (args.compare_shadow_retrieval or not args.llm_routing):
+        raise SystemExit("workflow evaluation requires --llm-routing")
     planner = OpenAiAgentPlannerClient(api_key, args.model, args.timeout_seconds)
     router = (
         OpenAiAgentRouterClient(api_key, args.router_model, args.timeout_seconds)
         if args.llm_routing
         else None
     )
-    if args.compare_shadow_retrieval:
+    if workflow_mode:
+        assert router is not None
+        if args.meeting_variant == "agent_workflow":
+            assert workflow_catalog is not None
+            scenarios = workflow_catalog.scenarios
+        else:
+            assert args.meeting_variant == "multi_tool"
+            if args.meeting_catalog is None:
+                raise SystemExit("multi_tool evaluation requires --meeting-catalog")
+            scenarios = load_workflow_scenarios(args.meeting_catalog)
+        workflow_results = evaluate_workflow_suite(
+            planner,
+            router,
+            suite.job,
+            scenarios,
+            current_date=args.current_date,
+            timezone=args.timezone,
+            repetitions=args.repetitions,
+        )
+        report = build_workflow_evaluation_report(workflow_results)
+    elif args.compare_shadow_retrieval:
         legacy_results = evaluate_suite(
             planner,
             suite,
@@ -218,6 +278,7 @@ def main() -> None:
         "retrievalTopK": args.retrieval_top_k,
         "retrieverVersion": TOOL_RETRIEVER_VERSION,
         "evaluationSeed": args.seed,
+        "evaluatorSha256": _evaluator_sha256(),
         "shardCount": args.shard_count,
         "shardIndex": args.shard_index,
         "timeoutSeconds": args.timeout_seconds,
@@ -231,6 +292,7 @@ def main() -> None:
             args.suite,
             args.meeting_catalog,
             args.tool_capability_catalog,
+            args.workflow_catalog,
         ),
         **_registry_binding(args.registry_snapshot),
         "sourceRevision": _git_revision(),
@@ -251,6 +313,17 @@ def _git_revision() -> str:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
+
+
+def _evaluator_sha256() -> str:
+    root = Path(__file__).parents[1]
+    digest = hashlib.sha256()
+    for relative_path in _EVALUATOR_SOURCE_PATHS:
+        digest.update(relative_path.as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((root / relative_path).read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _registry_binding(path: Path | None) -> dict[str, str]:

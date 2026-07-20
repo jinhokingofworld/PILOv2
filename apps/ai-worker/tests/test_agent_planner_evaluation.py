@@ -18,6 +18,7 @@ from app.agent_planner_evaluation import (
 from app.agent_processor import (
     AgentPlannerDecision,
     AgentPlannerOutputError,
+    AgentRouterOutputError,
     AgentRoutingDecision,
 )
 from app.agent_tool_retrieval import (
@@ -47,6 +48,18 @@ class FakeRouter:
         return next(self.decisions)
 
 
+class FailingOnceRouter:
+    def __init__(self, decision):
+        self.decision = decision
+        self.requests = []
+
+    def route(self, request):
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            raise AgentRouterOutputError("invalid router output")
+        return self.decision
+
+
 class RejectingPlanner:
     def plan(self, request):
         raise AgentPlannerOutputError("Agent planner selected a tool outside the shortlist")
@@ -64,6 +77,20 @@ def test_evaluation_input_hashes_include_meeting_catalog_when_provided(tmp_path)
         "suiteSha256": hashlib.sha256(suite_path.read_bytes()).hexdigest(),
         "meetingCatalogSha256": hashlib.sha256(catalog_path.read_bytes()).hexdigest(),
     }
+
+
+def test_evaluation_input_hashes_include_workflow_catalog_when_provided(tmp_path) -> None:
+    suite_path = tmp_path / "suite.json"
+    workflow_path = tmp_path / "workflow-catalog.json"
+    suite_path.write_bytes(b'{"version":"suite:v1"}')
+    workflow_path.write_bytes(b'{"version":"workflow:v1"}')
+
+    hashes = build_evaluation_input_hashes(
+        suite_path,
+        workflow_catalog_path=workflow_path,
+    )
+
+    assert hashes["workflowCatalogSha256"] == hashlib.sha256(workflow_path.read_bytes()).hexdigest()
 
 
 def decision(**overrides):
@@ -127,6 +154,91 @@ def test_context_regression_case_forwards_safe_planning_context() -> None:
     assert planner.requests[0].planning_context == case.planning_context
     assert "previous resource:" in planner.requests[0].planning_context
     assert "00000000-0000-4000-8000-000000000001" not in planner.requests[0].planning_context
+
+
+def test_evaluation_continues_after_one_router_output_failure(tmp_path) -> None:
+    path = write_suite(
+        tmp_path,
+        [
+            {
+                "id": f"calendar-{index}",
+                "prompt": "오늘 일정 보여줘",
+                "expected": {
+                    "status": "tool_candidate",
+                    "toolName": "list_calendar_events",
+                    "domain": "calendar",
+                    "capabilityId": "calendar.list",
+                },
+            }
+            for index in (1, 2)
+        ],
+    )
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["toolCapabilityCatalog"] = {
+        "version": "agent-tool-capabilities:v1",
+        "capabilities": [
+            {
+                "id": "calendar.list",
+                "domain": "calendar",
+                "toolNames": ["list_calendar_events"],
+                "whenToUse": "일정을 조회할 때",
+                "mustNotUseFor": [],
+                "positiveExamples": ["오늘 일정"],
+            }
+        ],
+        "descriptors": [
+            {
+                "toolName": "list_calendar_events",
+                "domain": "calendar",
+                "action": "list_calendar_events",
+                "operation": "read",
+                "capabilityIds": ["calendar.list"],
+                "whenToUse": "일정을 조회할 때",
+                "mustNotUseFor": [],
+                "acceptedSelectorFields": ["start", "end"],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+                "riskLevel": "low",
+                "executionMode": "auto",
+                "contextSurface": None,
+                "inputSchemaSha256": compute_input_schema_sha256(raw["tools"][0]["inputSchema"]),
+            }
+        ],
+    }
+    catalog = raw["toolCapabilityCatalog"]
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    suite = load_evaluation_suite(path)
+    router = FailingOnceRouter(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("calendar",),
+            capability_ids=("calendar.list",),
+            intent_summary="일정을 조회한다.",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        )
+    )
+    planner = FakePlanner([decision()])
+
+    results = evaluate_suite(
+        planner,
+        suite,
+        current_date="2026-07-21",
+        router=router,
+        use_llm_routing=True,
+    )
+    report = build_evaluation_report(results)
+
+    assert len(results) == 2
+    assert results[0].runtime_failure == "router_output"
+    assert results[0].passed is False
+    assert results[1].passed is True
+    assert len(planner.requests) == 1
+    assert report["results"][0]["runtimeFailure"] == "router_output"
 
 
 def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unknown_prompt(
