@@ -648,6 +648,7 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
         "requiredInputAccuracy": _accuracy(input_cases, "input"),
         "confirmationAccuracy": _accuracy(confirmation_cases, "confirmation"),
         "clarificationAccuracy": _accuracy(clarification_cases, "missing_fields"),
+        "routingFunnel": _routing_funnel(results),
         "planner": {
             "latencyMs": _latency_summary([result.planner_latency_ms for result in results]),
             "averageEstimatedToolSchemaTokens": _average(
@@ -715,6 +716,52 @@ def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[s
             }
             for result in results
         ],
+    }
+
+
+def _routing_funnel(results: tuple[CaseEvaluationResult, ...]) -> dict[str, object]:
+    tool_results = [
+        result
+        for result in results
+        if result.routing_status is not None and result.expected.tool_name is not None
+    ]
+    total = len(tool_results)
+    previous_count = total
+    cumulative = list(tool_results)
+    stages: dict[str, object] = {}
+
+    predicates = (
+        ("routerRouted", lambda result: result.routing_status == "routed"),
+        (
+            "domainExact",
+            lambda result: result.expected_domain is None
+            or set(result.retrieved_domains) == {result.expected_domain},
+        ),
+        ("toolExact", lambda result: "tool" not in result.failure_reasons),
+        ("requiredInputExact", lambda result: "input" not in result.failure_reasons),
+        (
+            "executionPolicyExact",
+            lambda result: not {
+                "status",
+                "confirmation",
+                "missing_fields",
+            }.intersection(result.failure_reasons),
+        ),
+        ("endToEndExact", lambda result: result.passed),
+    )
+    for name, predicate in predicates:
+        cumulative = [result for result in cumulative if predicate(result)]
+        count = len(cumulative)
+        stages[name] = {
+            "count": count,
+            "conditionalRate": _fraction(count, previous_count),
+            "overallRate": _fraction(count, total),
+        }
+        previous_count = count
+
+    return {
+        "toolSelectionAttempts": total,
+        "stages": stages,
     }
 
 
@@ -1000,6 +1047,12 @@ def _rate(values: list[bool]) -> float | None:
     if not values:
         return None
     return round(sum(values) / len(values), 4)
+
+
+def _fraction(numerator: int, denominator: int) -> float | None:
+    if denominator == 0:
+        return None
+    return round(numerator / denominator, 4)
 
 
 def _inverse_rate(value: float | None) -> float | None:
