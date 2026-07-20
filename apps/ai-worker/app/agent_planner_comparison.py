@@ -172,10 +172,13 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
         if exact_workflow_attempts > workflow_attempts:
             raise ValueError("Invalid multi-tool exact workflow count")
         exact_workflow_rate = _fraction(exact_workflow_attempts, workflow_attempts)
-        if _rate(
-            multi_tool_summary.get("exactWorkflowRate"),
-            "Invalid multi-tool workflow rate",
-        ) != exact_workflow_rate:
+        if (
+            _rate(
+                multi_tool_summary.get("exactWorkflowRate"),
+                "Invalid multi-tool workflow rate",
+            )
+            != exact_workflow_rate
+        ):
             raise ValueError("Invalid multi-tool workflow rate")
         summary["multiToolWorkflowAttempts"] = workflow_attempts
         summary["multiToolExactWorkflowAttempts"] = exact_workflow_attempts

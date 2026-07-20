@@ -195,9 +195,7 @@ def _validate_meeting_evaluations(
         }
         multi_tool_summary = report.get("multiToolWorkflows")
         if variant == "multi_tool":
-            multi_tool_summary = _object(
-                multi_tool_summary, "Missing multi-tool workflow summary"
-            )
+            multi_tool_summary = _object(multi_tool_summary, "Missing multi-tool workflow summary")
             derived_metrics["multiToolExactWorkflowRate"] = multi_tool_summary.get(
                 "exactWorkflowRate"
             )
@@ -237,9 +235,7 @@ def _validate_meeting_evaluations(
             "conditionalToolAccuracy": tool_stage.get("conditionalRate"),
             "endToEndExactOverallRate": end_stage.get("overallRate"),
             "toolSelectionAccuracy": report.get("toolSelectionAccuracy"),
-            "multiToolExactWorkflowRate": derived_metrics.get(
-                "multiToolExactWorkflowRate"
-            ),
+            "multiToolExactWorkflowRate": derived_metrics.get("multiToolExactWorkflowRate"),
         }
     if set(summaries) != set(_MEETING_EVALUATION_VARIANTS):
         raise ValueError("Meeting evaluation variants are incomplete")
