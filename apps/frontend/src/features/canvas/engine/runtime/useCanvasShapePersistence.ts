@@ -15,6 +15,7 @@ import type {
   CanvasViewSettingApiClient,
 } from "./canvas-runtime-types";
 import { shouldAcceptPersistedCanvasShape } from "./canvas-roomstate-hydration";
+import { orderCanvasShapesByParentDependency } from "./canvas-shape-dependency-order";
 import {
   buildFreeformShapeMap,
   getChangedFreeformShapeIds,
@@ -255,7 +256,7 @@ export function useCanvasShapePersistence({
       loadedShapes: PiloCanvasFreeformShape[],
       options?: { cachedRoomStateShapeIds?: ReadonlySet<string> },
     ) => {
-      const nextLoadedShapes = loadedShapes.filter((shape) => {
+      const acceptedLoadedShapes = loadedShapes.filter((shape) => {
         const shapeId = getFreeformShapeId(shape);
         const isCachedRoomStateShape = Boolean(
           shapeId && options?.cachedRoomStateShapeIds?.has(shapeId),
@@ -272,6 +273,46 @@ export function useCanvasShapePersistence({
               shapeId,
             }))
         );
+      });
+
+      acceptedLoadedShapes.forEach((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+
+        if (shapeId) {
+          shapeDetailCacheRef.current.set(shapeId, shape);
+        }
+      });
+
+      const anonymousShapes = acceptedLoadedShapes.filter(
+        (shape) => !getFreeformShapeId(shape),
+      );
+      const loadedShapeMap = buildFreeformShapeMap(acceptedLoadedShapes);
+      const visibleShapeIds = new Set(
+        freeformShapesRef.current.flatMap((shape) => {
+          const shapeId = getFreeformShapeId(shape);
+
+          return shapeId ? [shapeId] : [];
+        }),
+      );
+      const { orderedShapeIds, unresolvedShapeIds } =
+        orderCanvasShapesByParentDependency({
+          candidateShapes: acceptedLoadedShapes,
+          visibleShapeIds,
+        });
+      const nextLoadedShapes = [
+        ...orderedShapeIds.flatMap((shapeId) => {
+          const shape = loadedShapeMap.get(shapeId);
+
+          return shape ? [shape] : [];
+        }),
+        ...anonymousShapes,
+      ];
+
+      orderedShapeIds.forEach((shapeId) => {
+        unloadedShapeIdsRef.current.delete(shapeId);
+      });
+      unresolvedShapeIds.forEach((shapeId) => {
+        unloadedShapeIdsRef.current.add(shapeId);
       });
 
       if (!nextLoadedShapes.length) return;
@@ -296,6 +337,8 @@ export function useCanvasShapePersistence({
       deletedShapeIdsRef,
       pendingLocalShapeVersionsRef,
       roomStateShapeIdsRef,
+      shapeDetailCacheRef,
+      unloadedShapeIdsRef,
       onLoadedShapesMerged,
       setFreeformShapes,
     ],

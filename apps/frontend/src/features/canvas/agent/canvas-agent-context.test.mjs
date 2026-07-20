@@ -16,6 +16,7 @@ import {
   buildCanvasAgentHtmlInsertionPlan,
   buildHtmlFileName,
 } from "./canvas-agent-html-insertion-plan.ts";
+import { completeCanvasAgentFocusProgress } from "./canvas-agent-progress.ts";
 import {
   buildCanvasAgentSelectedScene,
   CanvasAgentSelectedSceneError,
@@ -29,6 +30,25 @@ function shape(id, x, text) {
     x,
     y: 20,
   };
+}
+
+{
+  const completedProgress = completeCanvasAgentFocusProgress(
+    {
+      highlightedShapeIds: ["shape:dashboard"],
+      loadRootShapeIds: ["shape:root"],
+      message: "검색 결과를 불러오고 있습니다.",
+      targetViewport: { x: 20_000, y: 20_000, width: 640, height: 360 },
+      toolTarget: null,
+      toolTargetLabel: null,
+    },
+    "검색 결과로 이동했습니다.",
+  );
+
+  assert.equal(completedProgress.message, "검색 결과로 이동했습니다.");
+  assert.deepEqual(completedProgress.highlightedShapeIds, []);
+  assert.deepEqual(completedProgress.loadRootShapeIds, []);
+  assert.equal(completedProgress.targetViewport, null);
 }
 
 {

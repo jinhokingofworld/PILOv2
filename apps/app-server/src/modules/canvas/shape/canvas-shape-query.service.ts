@@ -121,6 +121,7 @@ export class CanvasShapeQueryService {
         WHERE s.canvas_id = $1
           AND s.deleted_at IS NULL
           AND s.parent_shape_id IS NULL
+          AND COALESCE(s.raw_shape ->> 'parentId', '') NOT LIKE 'shape:%'
           AND s.x <= $3
           AND s.max_x >= $2
           AND s.y <= $5
