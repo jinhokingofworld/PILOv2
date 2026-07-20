@@ -230,6 +230,11 @@ module "ecs" {
         SQS_PR_REVIEW_ANALYSIS_QUEUE_URL      = module.sqs.pr_review_analysis_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL         = module.sqs.github_webhooks_queue_url
         SQS_GITHUB_SYNC_JOBS_QUEUE_URL        = module.sqs.github_sync_jobs_queue_url
+        GITHUB_MANUAL_SYNC_USER_LIMIT          = tostring(var.github_manual_sync_user_limit)
+        GITHUB_MANUAL_SYNC_WORKSPACE_LIMIT     = tostring(var.github_manual_sync_workspace_limit)
+        GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS = tostring(var.github_manual_sync_rate_window_seconds)
+        GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS    = tostring(var.github_manual_sync_cooldown_seconds)
+        GITHUB_MANUAL_SYNC_MAX_QUEUED_JOBS     = tostring(var.github_manual_sync_max_queued_jobs)
         SQS_WORKSPACE_INDEXING_QUEUE_URL      = module.sqs.workspace_indexing_queue_url
         FRONTEND_URL                          = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
         API_PUBLIC_ORIGIN                     = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
