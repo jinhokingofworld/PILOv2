@@ -171,15 +171,13 @@ test("viewer preserves one video host and implements Fullscreen API accessibilit
   assert.equal((viewer.match(/<video/g) ?? []).length, 0);
 });
 
-test("header controls remain adjacent to avatars in normal and immersive shells", () => {
+test("header controls remain adjacent to avatars in the shared workspace header", () => {
   assert.match(
     shell,
     /<ScreenShareHeaderControl mode="header" \/>\s*<WorkspaceMemberAvatars mode="header" \/>/,
   );
-  assert.match(
-    shell,
-    /<ScreenShareHeaderControl mode="floating" \/>[\s\S]*<WorkspaceMemberAvatars mode="floating" \/>/,
-  );
+  assert.doesNotMatch(shell, /mode="floating"/);
+  assert.match(shell, /data-sqltoerd-workspace-header/);
 });
 
 function screenShareSession(id, userId, displayName) {

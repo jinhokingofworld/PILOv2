@@ -7732,7 +7732,15 @@ assert.match(sessionPage, /useSearchParams/);
 assert.match(sessionPage, /key=\{sessionId\}/);
 assert.doesNotMatch(sessionPage, /window\.location\.search/);
 assert.match(sessionPage, /sql-erd-full-bleed/);
-assert.match(sessionPage, /h-screen/);
+assert.match(
+  sessionPage,
+  /sql-erd-full-bleed h-full min-h-0 overflow-hidden/
+);
+assert.equal(
+  sessionPage.match(/flex h-full min-h-0 items-center justify-center/g)?.length,
+  2
+);
+assert.doesNotMatch(sessionPage, /h-screen/);
 assert.match(sessionRouteBridge, /SqlErdSessionPage as default/);
 assert.match(sessionRouteBridge, /import "tldraw\/tldraw\.css"/);
 assert.doesNotMatch(page, /-m-6/);
@@ -8208,6 +8216,15 @@ assert.match(panel, /const inspectorSubtitle = getInspectorSubtitle\(viewModel\)
 assert.match(panel, /const inspectorTitle = getInspectorTitle\(viewModel\)/);
 assert.match(panel, /\{inspectorTitle\}/);
 assert.match(panel, /inspectorSubtitle \?/);
+assert.match(panel, /data-sqltoerd-inspector-summary/);
+assert.match(panel, /data-sqltoerd-inspector-table-name/);
+assert.match(panel, /data-sqltoerd-inspector-table-counts/);
+assert.match(panel, /data-sqltoerd-inspector-columns/);
+assert.match(panel, /data-sqltoerd-inspector-relationships/);
+assert.match(panel, />COLUMNS</);
+assert.match(panel, />RELATIONSHIPS</);
+assert.match(panel, /viewModel\.table\.columns\.map/);
+assert.match(panel, /font-mono/);
 assert.doesNotMatch(panel, /viewModel\.title\}.*table/i);
 assert.doesNotMatch(panel, /min-h-\[calc\(100vh-8\.5rem\)\]/);
 assert.doesNotMatch(panel, /rounded-lg border bg-background shadow-sm/);
@@ -8354,6 +8371,14 @@ assert.match(canvasSurface, /getSqlErdFocusedTableRole/);
 assert.match(canvasSurface, /getSqlErdFocusedRelationRole/);
 assert.match(canvasSurface, /SQLTOERD_MINIMUM_READABLE_ZOOM/);
 assert.match(canvasSurface, /resetSqlErdCanvas\(editor, shapes\)/);
+assert.match(
+  canvasSurface,
+  /resetSqlErdCanvas[\s\S]*?fitSqlErdCanvas\(editor, \{[\s\S]*?enforceMinimumReadableZoom: false[\s\S]*?\}\)/
+);
+assert.match(
+  canvasSurface,
+  /function fitSqlErdCanvas\([\s\S]*?editor: Editor,[\s\S]*?enforceMinimumReadableZoom = true/
+);
 assert.match(
   canvasSurface,
   /const handleMount = useCallback\([\s\S]*?editor\.setCurrentTool\("select\.idle"\);[\s\S]*?resetSqlErdCanvas\(editor, shapes\);/

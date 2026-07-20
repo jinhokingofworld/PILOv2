@@ -3808,19 +3808,47 @@ function InspectorPanel({
       >
         <PanelRightClose className="size-4" />
       </button>
-      <div className="flex min-h-20 items-center justify-between gap-3 border-b px-6">
-        <div className="min-w-0">
-          <p className="text-xl font-semibold">{inspectorTitle}</p>
-          {inspectorSubtitle ? (
-            <p className="truncate text-base text-muted-foreground">
-              {inspectorSubtitle}
+      <div
+        className="border-b px-5 py-5"
+        data-sqltoerd-inspector-summary
+      >
+        {viewModel.type === "table" ? (
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-muted-foreground">
+              선택 정보
             </p>
-          ) : null}
-        </div>
+            <p
+              className="mt-3 truncate font-mono text-xl font-semibold text-foreground"
+              data-sqltoerd-inspector-table-name
+            >
+              {viewModel.title}
+            </p>
+            <div
+              className="mt-3 flex flex-wrap gap-2"
+              data-sqltoerd-inspector-table-counts
+            >
+              <span className="rounded-md bg-muted px-3 py-1.5 text-sm text-muted-foreground">
+                {viewModel.columnCount} columns
+              </span>
+              <span className="rounded-md bg-muted px-3 py-1.5 text-sm text-muted-foreground">
+                {viewModel.relations.length} relations
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="min-w-0">
+            <p className="text-lg font-semibold">{inspectorTitle}</p>
+            {inspectorSubtitle ? (
+              <p className="truncate text-sm text-muted-foreground">
+                {inspectorSubtitle}
+              </p>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div
-        className="flex flex-1 flex-col gap-6 overflow-auto p-6"
+        className="flex flex-1 flex-col gap-6 overflow-auto p-5"
         data-workspace-follow-surface="sql-erd-inspector"
       >
         <InspectorContent
@@ -4147,7 +4175,26 @@ function TableInspector({
 
   return (
     <>
-      <InspectorSectionTitle>테이블 정보</InspectorSectionTitle>
+      <div data-sqltoerd-inspector-columns>
+        <InspectorSectionTitle>COLUMNS</InspectorSectionTitle>
+        <div className="mt-3 overflow-hidden rounded-xl border bg-background">
+          {viewModel.table.columns.map((column) => (
+            <div
+              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b px-4 py-3.5 text-sm last:border-b-0"
+              key={column.id}
+            >
+              <span className="min-w-0 break-words font-mono text-foreground">
+                {column.name}
+              </span>
+              <span className="max-w-40 break-all text-right font-mono text-muted-foreground">
+                {column.dataType}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <TableRelationshipList relations={viewModel.relations} />
+      <InspectorSectionTitle>테이블 편집</InspectorSectionTitle>
       <div className="space-y-3 rounded-md border p-3">
         <label className="grid gap-1.5 text-sm font-medium">
           테이블명
@@ -4194,12 +4241,6 @@ function TableInspector({
           테이블 삭제 SQL diff 보기
         </button>
       </div>
-      <div className="space-y-2">
-        <InspectorRow label="테이블명" value={viewModel.title} />
-        <InspectorRow label="컬럼" value={`${viewModel.columnCount}`} />
-        <InspectorRow label="관계" value={`${viewModel.relations.length}`} />
-      </div>
-      <RelationList relations={viewModel.relations} />
     </>
   );
 }
@@ -5022,6 +5063,33 @@ function formatSqlErdCardinality(cardinality: SqlErdRelationCardinality) {
   }
 
   return "0~N개";
+}
+
+function TableRelationshipList({ relations }: { relations: RelationSummary[] }) {
+  return (
+    <div data-sqltoerd-inspector-relationships>
+      <InspectorSectionTitle>RELATIONSHIPS</InspectorSectionTitle>
+      {relations.length ? (
+        <div className="mt-3 space-y-2.5">
+          {relations.map((relation) => (
+            <div
+              className="rounded-xl border bg-background px-4 py-3.5 text-sm leading-6"
+              key={relation.id}
+            >
+              <p className="font-semibold text-primary">FK</p>
+              <p className="break-words font-mono text-foreground">
+                {relation.fromLabel} → {relation.toLabel}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-xl border border-dashed p-4 text-sm leading-6 text-muted-foreground">
+          연결된 관계가 없습니다
+        </p>
+      )}
+    </div>
+  );
 }
 
 function RelationList({ relations }: { relations: RelationSummary[] }) {

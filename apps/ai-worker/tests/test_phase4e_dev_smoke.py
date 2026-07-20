@@ -7,31 +7,40 @@ from app.phase4e_dev_smoke import (
 )
 
 
-def run(tool_status: str = "pending", mode: str = "shortlist") -> dict[str, object]:
+def run(tool_status: str = "pending", mode: str = "llm_router") -> dict[str, object]:
+    observation = (
+        {
+            "toolRouting": {
+                "mode": "llm_router",
+                "status": "routed",
+                "domains": ["meeting"],
+                "capabilityIds": ["meeting.recording.end"],
+            }
+        }
+        if mode == "llm_router"
+        else {"toolRetrieval": {"mode": mode, "usedShortlist": False}}
+    )
     return {
         "steps": [
             {
                 "type": "planner",
-                "outputSummary": {
-                    "toolRetrieval": {"mode": mode, "usedShortlist": mode == "shortlist"}
-                },
+                "outputSummary": observation,
             },
             {"type": "tool", "toolName": "end_meeting_recording", "status": tool_status},
         ]
     }
 
 
-def test_dev_smoke_requires_real_shortlist_observation() -> None:
+def test_dev_smoke_requires_llm_router_observation() -> None:
     value = run()
-    value["steps"][0]["outputSummary"]["toolRetrieval"]["primaryToolName"] = "end_meeting_recording"
     assert (
-        validate_observation(value, "shortlist", "end_meeting_recording")[
-            "retrievalObservationCount"
+        validate_observation(value, "llm_router", "end_meeting_recording")[
+            "routingObservationCount"
         ]
         == 1
     )
     with pytest.raises(ValueError, match="expected retrieval mode"):
-        validate_observation(run(mode="shadow"), "shortlist", "end_meeting_recording")
+        validate_observation(run(mode="shadow"), "llm_router", "end_meeting_recording")
 
 
 def test_dev_smoke_accepts_shadow_with_the_expected_primary_tool() -> None:

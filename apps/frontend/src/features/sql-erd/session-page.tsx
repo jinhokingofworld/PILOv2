@@ -22,7 +22,7 @@ function SqlErdSessionRoute() {
 
   if (!sessionId) {
     return (
-      <div className="flex h-screen items-center justify-center bg-muted/20 px-6">
+      <div className="flex h-full min-h-0 items-center justify-center bg-muted/20 px-6">
         <div className="max-w-md rounded-xl border bg-background p-8 text-center shadow-sm">
           <h1 className="text-xl font-semibold">Session을 선택해 주세요</h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -42,7 +42,7 @@ function SqlErdSessionRoute() {
   }
 
   return (
-    <div className="sql-erd-full-bleed h-screen overflow-hidden">
+    <div className="sql-erd-full-bleed h-full min-h-0 overflow-hidden">
       <SqlErdPanel key={sessionId} sessionId={sessionId} />
     </div>
   );
@@ -50,7 +50,7 @@ function SqlErdSessionRoute() {
 
 function SqlErdSessionLoading() {
   return (
-    <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+    <div className="flex h-full min-h-0 items-center justify-center bg-background text-sm text-muted-foreground">
       Session을 불러오는 중입니다.
     </div>
   );
