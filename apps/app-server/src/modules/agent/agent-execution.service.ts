@@ -15,7 +15,10 @@ import {
 import { isTerminalAgentCapabilityTool } from "./agent-tool-capability-catalog";
 import { buildAgentReadResultAnswer } from "./agent-read-result-formatter";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
-import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
+import {
+  AgentGroundedAnswerService,
+  type MeetingReportHybridContext
+} from "./agent-grounded-answer.service";
 import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
@@ -84,6 +87,7 @@ interface PlannedToolCandidate {
   executionMode: AgentToolExecutionMode;
   requiresConfirmation: boolean | null;
   capabilityIds: string[];
+  meetingReportHybridContext?: MeetingReportHybridContext;
 }
 
 const RISK_LEVELS = ["low", "medium", "high"] as const;
@@ -282,7 +286,8 @@ export class AgentExecutionService {
         requestContext,
         input.prompt,
         input.timezone,
-        postExecutionDisposition
+        postExecutionDisposition,
+        candidate.meetingReportHybridContext
       );
     }
 
@@ -310,7 +315,8 @@ export class AgentExecutionService {
       requestContext,
       input.prompt,
       input.timezone,
-      postExecutionDisposition
+      postExecutionDisposition,
+      candidate.meetingReportHybridContext
     );
   }
 
@@ -453,6 +459,7 @@ export class AgentExecutionService {
       throw badRequest("Agent planner output requires App Server validation");
     }
 
+    const capabilityIds = this.readCapabilityIds(output.toolRouting);
     return {
       toolName,
       toolSchemaVersion,
@@ -460,7 +467,46 @@ export class AgentExecutionService {
       riskLevel,
       executionMode,
       requiresConfirmation,
-      capabilityIds: this.readCapabilityIds(output.toolRouting)
+      capabilityIds,
+      ...this.readMeetingReportHybridContext(
+        output.meetingReportHybridContext,
+        toolName,
+        capabilityIds
+      )
+    };
+  }
+
+  private readMeetingReportHybridContext(
+    value: AgentJsonValue | undefined,
+    toolName: string,
+    capabilityIds: string[]
+  ): { meetingReportHybridContext?: MeetingReportHybridContext } {
+    if (value === undefined) return {};
+    if (
+      toolName !== "search_meeting_transcript" ||
+      !capabilityIds.includes("meeting.report.hybrid_search") ||
+      !this.isPlainObject(value) ||
+      Object.keys(value).sort().join(",") !== "exactMatchCount,requestedReportTitle"
+    ) {
+      throw badRequest("MeetingReport hybrid context is invalid");
+    }
+    const title = value.requestedReportTitle;
+    const count = value.exactMatchCount;
+    if (
+      typeof title !== "string" ||
+      title.trim().length < 1 ||
+      title.trim().length > 500 ||
+      typeof count !== "number" ||
+      !Number.isInteger(count) ||
+      count < 0
+    ) {
+      throw badRequest("MeetingReport hybrid context is invalid");
+    }
+    return {
+      meetingReportHybridContext: {
+        requestedReportTitle: title.trim(),
+        exactMatchCount: count
+      }
     };
   }
 
@@ -577,7 +623,8 @@ export class AgentExecutionService {
     prompt?: string,
     timezone?: string,
     postExecutionDisposition: AgentToolPostExecutionDisposition =
-      "continue_planning"
+      "continue_planning",
+    meetingReportHybridContext?: MeetingReportHybridContext
   ): Promise<AgentExecutionResult> {
     if (!definition.prepareExecution) {
       return this.failRun(currentUserId, workspaceId, runId, {
@@ -636,7 +683,8 @@ export class AgentExecutionService {
         requestContext,
         prompt,
         timezone,
-        postExecutionDisposition
+        postExecutionDisposition,
+        meetingReportHybridContext
       );
     } catch (error) {
       if (this.isAgentErrorCode(error, "CONFIRMATION_NOT_PENDING")) {
@@ -896,7 +944,8 @@ export class AgentExecutionService {
     prompt?: string,
     timezone?: string,
     postExecutionDisposition: AgentToolPostExecutionDisposition =
-      "continue_planning"
+      "continue_planning",
+    meetingReportHybridContext?: MeetingReportHybridContext
   ): Promise<AgentExecutionResult> {
     const claim = await this.agentLoggingService.startNextToolExecutionClaimIfAbsent(
       currentUserId,
@@ -909,7 +958,8 @@ export class AgentExecutionService {
           toolName: definition.name,
           riskLevel: definition.riskLevel,
           executionMode: definition.executionMode,
-          input: this.sanitizeJsonObject(plannerInput)
+          input: this.sanitizeJsonObject(plannerInput),
+          ...(meetingReportHybridContext ? { meetingReportHybridContext } : {})
         }
       }
     );
@@ -957,7 +1007,17 @@ export class AgentExecutionService {
       }
 
       if (definition.requiresGroundedAnswer) {
-        await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs, groundingSources: result.groundingSources, executionLease: lease });
+        await this.agentGroundedAnswerService.completeToolAndQueue({
+          currentUserId,
+          workspaceId,
+          runId,
+          stepId: step.id,
+          outputSummary,
+          resourceRefs,
+          groundingSources: result.groundingSources,
+          meetingReportHybridContext,
+          executionLease: lease
+        });
         await this.agentGroundedAnswerOutboxPublisherService
           .publish(runId)
           .catch(() => undefined);

@@ -1369,10 +1369,7 @@ def test_routed_meeting_hybrid_chain_exposes_title_lookup_then_transcript_search
         ),
     )
 
-    assert [tool.name for tool in first] == [
-        "list_meeting_reports",
-        "search_meeting_transcript",
-    ]
+    assert [tool.name for tool in first] == ["list_meeting_reports"]
     assert [tool.name for tool in second] == ["search_meeting_transcript"]
     assert exhausted == ()
 
@@ -1463,10 +1460,7 @@ def test_routed_multistep_chain_ignores_previous_user_cycle_results() -> None:
         ),
     )
 
-    assert [tool.name for tool in pending] == [
-        "list_calendar_events",
-        "update_calendar_event",
-    ]
+    assert [tool.name for tool in pending] == ["list_calendar_events"]
 
 
 def test_llm_router_rejects_schema_budget_overflow() -> None:
@@ -3582,6 +3576,7 @@ def test_hybrid_search_exact_one_uses_current_run_opaque_context_ref() -> None:
             + context_ref
             + '","resourceType":"meeting_report","ordinal":1}'
         ),
+        routed_capability_ids=("meeting.report.hybrid_search",),
     )
 
     assert normalized.status == "tool_candidate"
@@ -3589,6 +3584,10 @@ def test_hybrid_search_exact_one_uses_current_run_opaque_context_ref() -> None:
     assert normalized.output_summary["input"] == {
         "query": "API 배포 일정 결정",
         "contextRef": context_ref,
+    }
+    assert normalized.output_summary["meetingReportHybridContext"] == {
+        "requestedReportTitle": "온보딩 주간회의",
+        "exactMatchCount": 1,
     }
     assert "reportId" not in normalized.output_summary["input"]
 
@@ -3609,10 +3608,46 @@ def test_hybrid_search_exact_zero_falls_back_to_workspace_content_query() -> Non
             'tool list_meeting_reports: {"reportTitle":"온보딩 주간회의",'
             '"count":0,"reports":[]}'
         ),
+        routed_capability_ids=("meeting.report.hybrid_search",),
     )
 
     assert normalized.status == "tool_candidate"
     assert normalized.output_summary["input"] == {"query": "API 배포 일정 결정"}
+    assert normalized.output_summary["meetingReportHybridContext"] == {
+        "requestedReportTitle": "온보딩 주간회의",
+        "exactMatchCount": 0,
+    }
+
+
+def test_hybrid_search_keeps_lookup_scope_across_other_domain_tool_result() -> None:
+    context_ref = "ctx_abcdefabcdefabcdefabcdef"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_transcript",
+            tool_input={"query": "온보딩 주간회의 API 배포 일정"},
+        ),
+        _meeting_transcript_search_job(),
+        prompt="‘온보딩 주간회의’에서 API 배포 일정 찾아줘",
+        planning_context=(
+            "user: ‘온보딩 주간회의’에서 API 배포 일정 찾아줘\n"
+            'tool list_meeting_reports: {"reportTitle":"온보딩 주간회의",'
+            '"count":1,"reports":[{"title":"온보딩 주간회의"}]}\n'
+            'previous resource: {"turn":2,"contextRef":"'
+            + context_ref
+            + '","resourceType":"meeting_report","ordinal":1}\n'
+            'tool list_calendar_events: {"count":0,"events":[]}'
+        ),
+        routed_capability_ids=("meeting.report.hybrid_search",),
+    )
+
+    assert normalized.output_summary["input"] == {
+        "query": "API 배포 일정",
+        "contextRef": context_ref,
+    }
+    assert normalized.output_summary["meetingReportHybridContext"] == {
+        "requestedReportTitle": "온보딩 주간회의",
+        "exactMatchCount": 1,
+    }
 
 
 def test_hybrid_workspace_fallback_removes_title_date_and_command_wording() -> None:
@@ -3631,6 +3666,7 @@ def test_hybrid_workspace_fallback_removes_title_date_and_command_wording() -> N
             'tool list_meeting_reports: {"reportTitle":"온보딩 주간회의",'
             '"count":0,"reports":[]}'
         ),
+        routed_capability_ids=("meeting.report.hybrid_search",),
     )
 
     assert normalized.output_summary["input"] == {"query": "API 배포 일정"}
@@ -3652,6 +3688,7 @@ def test_hybrid_search_exact_multiple_preserves_title_for_candidate_selection() 
             '"roomName":"Backend","count":2,'
             '"reports":[{"title":"API 설계 회의"},{"title":"API 설계 회의"}]}'
         ),
+        routed_capability_ids=("meeting.report.hybrid_search",),
     )
 
     assert normalized.status == "tool_candidate"

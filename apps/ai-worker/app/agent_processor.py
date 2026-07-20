@@ -65,6 +65,7 @@ TOOL_RETRIEVAL_MODES = {
 TOOL_CAPABILITY_CATALOG_VERSION_PATTERN = re.compile(r"^agent-tool-capabilities:v[0-9]+$")
 TOOL_CAPABILITY_CATALOG_SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 DEFAULT_TOOL_RETRIEVAL_TOP_K = 8
+MEETING_REPORT_HYBRID_CAPABILITY_ID = "meeting.report.hybrid_search"
 MEETING_REPORT_ID_TOOLS = {"get_meeting_report", "summarize_meeting_report"}
 MEETING_REPORT_TOOLS = {"list_meeting_reports", *MEETING_REPORT_ID_TOOLS}
 USER_VISIBLE_UUID_PATTERN = re.compile(
@@ -346,9 +347,6 @@ def select_pending_agent_planner_tools_for_routing(
         raise AgentRouterOutputError("Agent router requires a valid capability catalog")
 
     completed_tool_names = _completed_planning_tool_names(planning_context)
-    if not completed_tool_names:
-        return selected_tools
-
     capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
     pending_names: set[str] = set()
     for capability_id in routing.capability_ids:
@@ -408,6 +406,7 @@ class AgentPlannerDecision:
     requires_confirmation: bool | None
     missing_fields: tuple[str, ...]
     unsupported_reason: str | None
+    meeting_report_hybrid_context: dict[str, object] | None = None
     provider_input_tokens: int | None = None
     provider_output_tokens: int | None = None
     provider_total_tokens: int | None = None
@@ -1023,6 +1022,7 @@ class AgentRunProcessor:
                 planning_context=context.planning_context,
                 strict_tool_selection=len(planner_tools) < len(job.tools),
                 completion_tool_names=completion_tool_names,
+                routed_capability_ids=(routing.capability_ids if routing is not None else ()),
             )
             if workflow_incomplete and normalized.status in {"completed", "unsupported"}:
                 raise AgentPlannerOutputError(
@@ -1403,6 +1403,7 @@ def normalize_agent_planner_decision(
     planning_context: str = "",
     strict_tool_selection: bool = False,
     completion_tool_names: tuple[str, ...] = (),
+    routed_capability_ids: tuple[str, ...] = (),
 ) -> NormalizedPlannerDecision:
     decision = _normalize_meeting_report_hybrid_title_lookup(
         decision,
@@ -1426,6 +1427,7 @@ def normalize_agent_planner_decision(
         job,
         prompt=prompt,
         planning_context=planning_context,
+        routed_capability_ids=routed_capability_ids,
     )
     decision = _normalize_meeting_thread_context_reference(
         decision,
@@ -1556,6 +1558,13 @@ def normalize_agent_planner_decision(
                 "toolInputValidation": "app_server_required",
             }
         )
+        if (
+            tool.name == "search_meeting_transcript"
+            and decision.meeting_report_hybrid_context is not None
+        ):
+            output_summary["meetingReportHybridContext"] = dict(
+                decision.meeting_report_hybrid_context
+            )
         if not final_answer:
             final_answer = "요청을 처리하기 위한 Agent tool plan을 만들었습니다."
     elif status == "needs_clarification":
@@ -2226,18 +2235,20 @@ def _normalize_meeting_report_hybrid_search(
     *,
     prompt: str,
     planning_context: str,
+    routed_capability_ids: tuple[str, ...],
 ) -> AgentPlannerDecision:
     if (
         decision.status != "tool_candidate"
         or decision.tool_name != "search_meeting_transcript"
         or not any(tool.name == "search_meeting_transcript" for tool in job.tools)
+        or MEETING_REPORT_HYBRID_CAPABILITY_ID not in routed_capability_ids
     ):
         return decision
 
-    latest_result = _latest_planning_tool_result(planning_context)
-    if latest_result is None or latest_result[0] != "list_meeting_reports":
+    lookup_state = _pending_meeting_report_hybrid_lookup(planning_context)
+    if lookup_state is None:
         return decision
-    output = latest_result[1]
+    output, report_refs = lookup_state
     report_title = output.get("reportTitle")
     count = output.get("count")
     if (
@@ -2271,8 +2282,6 @@ def _normalize_meeting_report_hybrid_search(
     if count == 0:
         message = "exact 제목 조회 결과가 없어 Workspace 전체 근거를 검색합니다."
     elif count == 1:
-        references = _meeting_thread_context_references(planning_context)
-        report_refs = _latest_thread_context_references(references, "meeting_report")
         if len(report_refs) != 1:
             return _meeting_context_clarification("meeting_report_context")
         tool_input["contextRef"] = report_refs[0]["contextRef"]
@@ -2301,7 +2310,66 @@ def _normalize_meeting_report_hybrid_search(
         requires_confirmation=False,
         missing_fields=(),
         unsupported_reason=None,
+        meeting_report_hybrid_context={
+            "requestedReportTitle": report_title.strip()[:500],
+            "exactMatchCount": count,
+        },
     )
+
+
+def _pending_meeting_report_hybrid_lookup(
+    planning_context: str,
+) -> tuple[dict[str, object], tuple[dict[str, object], ...]] | None:
+    pending_output: dict[str, object] | None = None
+    pending_refs: list[dict[str, object]] = []
+    collecting_refs = False
+    for line in _current_prompt_cycle_planning_lines(planning_context):
+        tool_result = _planning_tool_result_line(line)
+        if tool_result is not None:
+            tool_name, output = tool_result
+            collecting_refs = False
+            if tool_name == "search_meeting_transcript":
+                pending_output = None
+                pending_refs = []
+            elif tool_name == "list_meeting_reports":
+                report_title = output.get("reportTitle")
+                count = output.get("count")
+                if (
+                    isinstance(report_title, str)
+                    and report_title.strip()
+                    and not isinstance(count, bool)
+                    and isinstance(count, int)
+                    and count >= 0
+                ):
+                    pending_output = output
+                    pending_refs = []
+                    collecting_refs = True
+            continue
+
+        if not collecting_refs or pending_output is None:
+            continue
+        reference = _meeting_context_reference_line(line)
+        if reference is not None and reference.get("resourceType") == "meeting_report":
+            pending_refs.append(reference)
+
+    if pending_output is None:
+        return None
+    return pending_output, tuple(pending_refs)
+
+
+def _planning_tool_result_line(
+    line: str,
+) -> tuple[str, dict[str, object]] | None:
+    if not line.startswith("tool "):
+        return None
+    tool_name, found, output_json = line[len("tool ") :].partition(": ")
+    if not found or not tool_name:
+        return None
+    try:
+        output = json.loads(output_json)
+    except (TypeError, ValueError):
+        return None
+    return (tool_name, output) if isinstance(output, dict) else None
 
 
 def _normalize_meeting_report_hybrid_title_lookup(
@@ -2490,26 +2558,32 @@ def _normalize_meeting_thread_context_reference(
 
 def _meeting_thread_context_references(planning_context: str) -> list[dict[str, object]]:
     references: list[dict[str, object]] = []
-    prefix = "previous resource: "
     for line in planning_context.splitlines():
-        if not line.startswith(prefix):
-            continue
-        try:
-            value = json.loads(line[len(prefix) :])
-        except json.JSONDecodeError:
-            continue
-        if (
-            isinstance(value, dict)
-            and isinstance(value.get("turn"), int)
-            and isinstance(value.get("contextRef"), str)
-            and re.fullmatch(r"ctx_[0-9a-f]{24}", value["contextRef"])
-            and value.get("resourceType")
-            in {"meeting", "meeting_report", "meeting_report_action_item"}
-            and isinstance(value.get("ordinal"), int)
-            and value["ordinal"] >= 1
-        ):
-            references.append(value)
+        reference = _meeting_context_reference_line(line)
+        if reference is not None:
+            references.append(reference)
     return references
+
+
+def _meeting_context_reference_line(line: str) -> dict[str, object] | None:
+    prefix = "previous resource: "
+    if not line.startswith(prefix):
+        return None
+    try:
+        value = json.loads(line[len(prefix) :])
+    except json.JSONDecodeError:
+        return None
+    if (
+        isinstance(value, dict)
+        and isinstance(value.get("turn"), int)
+        and isinstance(value.get("contextRef"), str)
+        and re.fullmatch(r"ctx_[0-9a-f]{24}", value["contextRef"])
+        and value.get("resourceType") in {"meeting", "meeting_report", "meeting_report_action_item"}
+        and isinstance(value.get("ordinal"), int)
+        and value["ordinal"] >= 1
+    ):
+        return value
+    return None
 
 
 def _latest_thread_context_references(
