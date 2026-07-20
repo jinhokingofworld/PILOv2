@@ -8,6 +8,13 @@
 
 **Tech Stack:** Python 3 dataclass/logging/time.monotonic, pytest, NestJS/TypeScript Logger/performance.now, Node assertion scripts, CloudWatch Logs Insights
 
+## Execution Status
+
+- [x] Task 1: AI Worker privacy-safe latency observer
+- [x] Task 2: AI Worker planning-stage instrumentation
+- [x] Task 3: App Server tool-stage instrumentation
+- [x] Task 4: CloudWatch runbook and focused regression verification
+
 ## Global Constraints
 
 - API request/response, DB schema, migration, frontend 동작을 변경하지 않는다.
