@@ -372,8 +372,8 @@ export class GithubSyncRunService {
       await transaction.execute("SELECT pg_advisory_xact_lock(hashtextextended('github-manual-sync:global-admission', 0))");
       await transaction.execute("SELECT pg_advisory_xact_lock(hashtextextended('github-manual-sync:workspace:' || $1, 0))", [input.workspaceId]);
 
-      const replay = await transaction.queryOne<GithubSyncRunRow & { scope_fingerprint: string }>(`
-        SELECT request.scope_fingerprint, run.id, run.workspace_id, run.installation_id, run.repository_id,
+      const replay = await transaction.queryOne<GithubSyncRunRow & { request_fingerprint: string }>(`
+        SELECT request.request_fingerprint, run.id, run.workspace_id, run.installation_id, run.repository_id,
           run.project_v2_id, run.target, run.status, run.trigger_source, run.started_at, run.finished_at,
           run.fetched_count, run.created_count, run.updated_count, run.skipped_count, run.error_message, run.cursor
         FROM github_sync_manual_requests AS request
@@ -381,7 +381,7 @@ export class GithubSyncRunService {
         WHERE request.workspace_id=$1 AND request.requested_by_user_id=$2 AND request.idempotency_key_hash=$3`,
         [input.workspaceId, requestedByUserId, keyHash]);
       if (replay) {
-        if (replay.scope_fingerprint !== scopeFingerprint) throw new GithubManualSyncIdempotencyConflictError();
+        if (replay.request_fingerprint !== scopeFingerprint) throw new GithubManualSyncIdempotencyConflictError();
         this.observability?.emitManualSyncIdempotencyReplay();
         return { syncRun: replay, reused: true, preparedJob: null };
       }
@@ -429,7 +429,7 @@ export class GithubSyncRunService {
 
   private async insertManualRequestLedger(transaction: DatabaseTransaction, workspaceId: string, userId: string, keyHash: string, scopeFingerprint: string, syncRunId: string): Promise<void> {
     await transaction.execute(`INSERT INTO github_sync_manual_requests
-      (workspace_id, requested_by_user_id, idempotency_key_hash, scope_fingerprint, sync_run_id)
+      (workspace_id, requested_by_user_id, idempotency_key_hash, request_fingerprint, sync_run_id)
       VALUES ($1, $2, $3, $4, $5)`, [workspaceId, userId, keyHash, scopeFingerprint, syncRunId]);
   }
 

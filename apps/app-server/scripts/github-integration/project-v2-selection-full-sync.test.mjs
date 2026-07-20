@@ -205,7 +205,7 @@ await assertFullSyncOnlyDetailsSelectedProjects("Organization", [
   const service = new GithubSyncRunService(
     {},
     {},
-    { assertWorkspaceAccess: async () => {} },
+    { assertWorkspaceAccess: async () => {}, assertWorkspaceOwnerAccess: async () => {} },
     {},
     {}
   );

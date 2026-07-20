@@ -131,7 +131,7 @@ const runRow = (id = "run-1") => ({
   created_count: 0, updated_count: 0, skipped_count: 0, error_message: null, cursor: {}
 });
 
-async function admitManual({ replay = null, active = [], userTotal = 0, workspaceTotal = 0, queuedTotal = 0, failPrepare = false } = {}) {
+async function admitManual({ replay = null, active = [], userTotal = 0, workspaceTotal = 0, userCooldown = null, workspaceCooldown = null, queuedTotal = 0, sharedQueue = null, failPrepare = false } = {}) {
   const events = [];
   const database = {
     async queryOne(text) {
@@ -150,9 +150,9 @@ async function admitManual({ replay = null, active = [], userTotal = 0, workspac
             if (/FROM github_sync_runs AS run/.test(text)) {
               const total = events.includes("user-limit") ? workspaceTotal : userTotal;
               events.push(events.includes("user-limit") ? "workspace-limit" : "user-limit");
-              return { total, window_retry_after_seconds: 19, cooldown_retry_after_seconds: null };
+              return { total, window_retry_after_seconds: 19, cooldown_retry_after_seconds: events.includes("workspace-limit") ? workspaceCooldown : userCooldown };
             }
-            if (/FROM github_sync_jobs AS job/.test(text)) return { total: queuedTotal, retry_after_seconds: 7 };
+            if (/FROM github_sync_jobs AS job/.test(text)) return { total: sharedQueue?.total ?? queuedTotal, retry_after_seconds: 7 };
             if (/INSERT INTO github_sync_runs/.test(text)) return runRow("new-run");
             throw new Error(`unexpected transaction query ${text}`);
           }
@@ -163,7 +163,7 @@ async function admitManual({ replay = null, active = [], userTotal = 0, workspac
   };
   const published = [];
   const jobs = {
-    async prepareSyncJob(_tx, syncRunId) { if (failPrepare) throw new Error("prepare failed"); events.push("prepare"); return { id: "job-1", syncRunId, leaseGeneration: "1" }; },
+    async prepareSyncJob(_tx, syncRunId) { if (failPrepare) throw new Error("prepare failed"); events.push("prepare"); if (sharedQueue) sharedQueue.total += 1; return { id: "job-1", syncRunId, leaseGeneration: "1" }; },
     async publishPreparedSyncJob(job) { published.push(job); }
   };
   const service = new GithubSyncRunService(database, { getGithubManualSyncAdmissionConfig: () => ({ userLimit: 5, workspaceLimit: 10, rateWindowSeconds: 600, cooldownSeconds: 30, maxQueuedJobs: 100 }) }, { assertWorkspaceOwnerAccess: async () => {}, assertWorkspaceAccess: async () => {} }, {}, {}, jobs);
@@ -172,13 +172,13 @@ async function admitManual({ replay = null, active = [], userTotal = 0, workspac
 }
 
 {
-  const { start, events, published } = await admitManual({ replay: { ...runRow("old-run"), scope_fingerprint: fingerprintGithubManualSyncScope(scope) } });
+  const { start, events, published } = await admitManual({ replay: { ...runRow("old-run"), request_fingerprint: fingerprintGithubManualSyncScope(scope) } });
   assert.equal((await start()).id, "old-run");
   assert.deepEqual(events.slice(1, 3), ["global-lock", "workspace-lock"]);
   assert.deepEqual(published, []);
 }
 {
-  const { start } = await admitManual({ replay: { ...runRow(), scope_fingerprint: "different" } });
+  const { start } = await admitManual({ replay: { ...runRow(), request_fingerprint: "different" } });
   await assert.rejects(start, (error) => error.getStatus() === 409);
 }
 {
@@ -186,13 +186,44 @@ async function admitManual({ replay = null, active = [], userTotal = 0, workspac
   assert.equal((await start()).id, "active-run");
   assert.ok(events.includes("ledger")); assert.deepEqual(published, []);
 }
+{
+  const { start } = await admitManual({ active: [{ ...runRow("other-scope"), target: "full" }] });
+  await assert.rejects(start, (error) => error.getStatus() === 409);
+}
 for (const options of [{ userTotal: 5 }, { workspaceTotal: 10 }]) {
   const { start } = await admitManual(options);
   await assert.rejects(start, (error) => error.getStatus() === 429 && error.getResponse().error.details.retryAfterSeconds >= 1);
 }
+for (const options of [{ userCooldown: 23 }, { workspaceCooldown: 29 }]) {
+  const { start } = await admitManual(options);
+  await assert.rejects(start, (error) => error.getStatus() === 429 && error.getResponse().error.details.retryAfterSeconds === (options.userCooldown ?? options.workspaceCooldown));
+}
 {
   const { start } = await admitManual({ queuedTotal: 100 });
   await assert.rejects(start, (error) => error.getStatus() === 503 && error.getResponse().error.details.retryAfterSeconds === 7);
+}
+{
+  const sharedQueue = { total: 99 };
+  const first = await admitManual({ sharedQueue });
+  const second = await admitManual({ sharedQueue });
+  await first.start();
+  await assert.rejects(second.start, (error) => error.getStatus() === 503);
+  assert.equal(first.published.length, 1);
+  assert.equal(second.published.length, 0);
+}
+{
+  const calls = [];
+  const automatic = new GithubSyncRunService({
+    async queryOne(text) {
+      if (/github_installations/.test(text)) return { id: "installation-1" };
+      if (/INSERT INTO github_sync_runs/.test(text)) return { ...runRow("automatic-run"), trigger_source: "automatic" };
+      throw new Error(`unexpected automatic query ${text}`);
+    },
+    async transaction() { throw new Error("automatic sync must bypass manual admission transaction"); }
+  }, {}, { assertWorkspaceAccess: async () => calls.push("member"), assertWorkspaceOwnerAccess: async () => { throw new Error("automatic sync must not require owner"); } }, {}, {}, { enqueueSyncJob: async (...args) => calls.push(args) });
+  const result = await automatic.startGithubSyncRun("user-1", "workspace-1", { target: "source", installationId: "installation-1" }, "automatic");
+  assert.equal(result.id, "automatic-run");
+  assert.deepEqual(calls, ["member", ["automatic-run", "user-1"]]);
 }
 {
   const { start, events } = await admitManual({ failPrepare: true });
