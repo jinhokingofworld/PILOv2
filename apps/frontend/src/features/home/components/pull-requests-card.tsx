@@ -5,27 +5,20 @@ import { GitPullRequest } from "lucide-react";
 
 import type { GithubPullRequest } from "@/features/github-integration/types";
 import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
-import {
-  homePullRequestListLimit,
-  type HomePullRequestsState
-} from "../hooks/use-home-dashboard-data";
+import type { HomePullRequestsState } from "../hooks/use-home-dashboard-data";
 import {
   DashboardCard,
   DashboardCardMessage,
   DashboardNavigationAction,
   StatusPill
 } from "./dashboard-card";
-import { PullRequestsBackground } from "./home-backgrounds";
 
 export function PullRequestsCard({
   pullRequestsState
 }: {
   pullRequestsState: HomePullRequestsState;
 }) {
-  const visiblePullRequests = pullRequestsState.pullRequests.slice(
-    0,
-    homePullRequestListLimit
-  );
+  const visiblePullRequests = pullRequestsState.pullRequests.slice(0, 3);
   const isLoading = pullRequestsState.status === "loading";
 
   return (
@@ -33,15 +26,13 @@ export function PullRequestsCard({
       action={
         <DashboardNavigationAction ariaLabel="PR 리뷰로 이동" href="/pr-review" />
       }
-      background={<PullRequestsBackground />}
-      className="border-[#C8CCF2] bg-[#F5F6FF] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]"
+      className="min-h-[280px]"
       cursorTarget={{ id: "pull-requests", label: "PR", type: "home_card" }}
       description={null}
       icon={<GitPullRequest className="size-4" />}
-      title="PR"
-      titleClassName="text-[#000080]"
+      title="PR 리뷰"
     >
-      <div className="grid min-h-0 flex-1 grid-rows-[repeat(3,minmax(0,1fr))] gap-2 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
         {isLoading ? (
           <DashboardCardMessage rowSpanClassName="row-span-3">
             PR 불러오는 중
@@ -84,12 +75,12 @@ function PullRequestRow({ pullRequest }: { pullRequest: GithubPullRequest }) {
         type: "home_pull_request"
       })}
       aria-label={`${pullRequest.title} PR 리뷰로 이동`}
-      className="flex min-h-0 min-w-0 flex-col justify-center overflow-hidden rounded-lg border bg-background/90 p-3 text-left shadow-sm backdrop-blur transition hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="flex min-h-[54px] min-w-0 flex-col justify-center overflow-hidden rounded-[10px] border border-[#eceef2] bg-[#fbfbfc] px-3 py-2.5 text-left transition hover:border-[#dfe2e8] hover:bg-white hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       onClick={handleOpenPullRequest}
       type="button"
     >
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <p className="min-w-0 flex-1 truncate text-sm font-medium">
+        <p className="min-w-0 flex-1 truncate text-[14px] font-medium text-[#202124]">
           {pullRequest.title}
         </p>
         <StatusPill
@@ -97,7 +88,7 @@ function PullRequestRow({ pullRequest }: { pullRequest: GithubPullRequest }) {
           tone={pullRequest.draft ? "muted" : "neutral"}
         />
       </div>
-      <p className="mt-1 min-w-0 truncate text-xs text-muted-foreground">
+      <p className="mt-1 min-w-0 truncate text-[13px] text-[#747882]">
         {pullRequest.headBranch} → {pullRequest.baseBranch} ·{" "}
         {pullRequest.changedFilesCount} files
       </p>

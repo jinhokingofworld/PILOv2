@@ -46,3 +46,34 @@ test("CalendarCard는 14일 전체와 기존 이동 계약을 유지한다", asy
   assert.match(source, /router\.push\(`\/calendar\?date=\$\{dateValue\}`\)/);
   assert.doesNotMatch(source, /calendarDates\.slice\(0,\s*7\)/);
 });
+
+test("워크스페이스 현황은 반응형 3개 feed로 구성된다", async () => {
+  const source = await readHomeSource(
+    "./components/middle-dashboard-cards.tsx"
+  );
+
+  assert.match(source, /md:grid-cols-2/);
+  assert.match(source, /xl:grid-cols-3/);
+  assert.match(source, /md:col-span-2 xl:col-span-1/);
+});
+
+test("각 feed는 기존 상세 이동을 유지하며 최대 3개를 표시한다", async () => {
+  const [issuesSource, pullRequestsSource, meetingReportsSource] =
+    await Promise.all([
+      readHomeSource("./components/issues-card.tsx"),
+      readHomeSource("./components/pull-requests-card.tsx"),
+      readHomeSource("./components/meeting-reports-card.tsx")
+    ]);
+
+  assert.match(issuesSource, /issues\.slice\(0,\s*3\)/);
+  assert.match(issuesSource, /router\.push\(boardIssueHref\)/);
+  assert.match(pullRequestsSource, /pullRequests\.slice\(0,\s*3\)/);
+  assert.match(pullRequestsSource, /pullRequestId: pullRequest\.id/);
+  assert.match(pullRequestsSource, /repositoryId: pullRequest\.repositoryId/);
+  assert.match(pullRequestsSource, /router\.push\(`\/pr-review\?/);
+  assert.match(meetingReportsSource, /reports\.slice\(0,\s*3\)/);
+  assert.match(
+    meetingReportsSource,
+    /router\.push\(buildMeetingReportHref\(report\.id\)\)/
+  );
+});
