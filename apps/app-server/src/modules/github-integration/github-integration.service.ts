@@ -27,6 +27,7 @@ import { GithubSourceReadService } from "./github-source-read.service";
 import { GithubSyncExecutorService } from "./github-sync-executor.service";
 import { GithubSyncJobService } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
+import { readGithubManualSyncIdempotencyKey } from "./github-manual-sync-admission";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubWebhookService } from "./github-webhook.service";
 import type {
@@ -736,13 +737,16 @@ export class GithubIntegrationService {
   async startGithubSyncRun(
     currentUserId: string,
     workspaceId: string,
-    input: StartGithubSyncRunRequest | undefined
+    input: StartGithubSyncRunRequest | undefined,
+    idempotencyKey: string | undefined
   ): Promise<GithubSyncRunPayload> {
+    const manualIdempotencyKey = readGithubManualSyncIdempotencyKey(idempotencyKey);
     return this.githubSyncRunService.startGithubSyncRun(
       currentUserId,
       workspaceId,
       input,
-      "manual"
+      "manual",
+      manualIdempotencyKey
     );
   }
 

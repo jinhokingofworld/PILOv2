@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { readFile } from "node:fs/promises";
 
 const require = createRequire(import.meta.url);
 const {
@@ -19,6 +20,28 @@ const {
   GithubSyncObservabilityService
 } = require("../../dist/modules/github-integration/github-sync-observability.service.js");
 const { GithubSyncRunService } = require("../../dist/modules/github-integration/github-sync-run.service.js");
+
+const controllerSource = await readFile(
+  new URL("../../src/modules/github-integration/github-integration.controller.ts", import.meta.url),
+  "utf8"
+);
+const facadeSource = await readFile(
+  new URL("../../src/modules/github-integration/github-integration.service.ts", import.meta.url),
+  "utf8"
+);
+const manualSyncController = controllerSource.slice(
+  controllerSource.indexOf('  @Post("workspaces/:workspaceId/github/sync-runs")'),
+  controllerSource.indexOf('\n  @Get("workspaces/:workspaceId/github/sync-runs")')
+);
+const manualSyncFacade = facadeSource.slice(
+  facadeSource.indexOf("  async startGithubSyncRun("),
+  facadeSource.indexOf("\n  async listGithubSyncRuns(")
+);
+
+assert.match(manualSyncController, /@Headers\("idempotency-key"\) idempotencyKey: string \| undefined/);
+assert.match(manualSyncController, /workspaceId,\s*body,\s*idempotencyKey/s);
+assert.match(manualSyncFacade, /readGithubManualSyncIdempotencyKey\(idempotencyKey\)/);
+assert.match(manualSyncFacade, /workspaceId,\s*input,\s*"manual",\s*manualIdempotencyKey/s);
 
 const scope = {
   installationId: "installation-1",
