@@ -107,9 +107,7 @@ def test_catalog_prompts_are_uuid_free_and_held_out_from_canonical_prompts() -> 
 
         assert canonical.isdisjoint(held_out)
         assert all(not UUID_PATTERN.search(prompt) for prompt in user_prompts)
-    assert all(
-        not UUID_PATTERN.search(case["prompt"]) for case in catalog["multiToolCases"]
-    )
+    assert all(not UUID_PATTERN.search(case["prompt"]) for case in catalog["multiToolCases"])
 
 
 def test_catalog_declares_zero_single_multiple_and_homonym_resolution_cases() -> None:

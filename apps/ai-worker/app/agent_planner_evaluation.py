@@ -371,9 +371,7 @@ def _meeting_multi_tool_cases(
             if not isinstance(input_contains, dict):
                 raise ValueError("Multi-tool workflow inputContains must be an object")
             requires_confirmation = stage.get("requiresConfirmation")
-            if requires_confirmation is not None and not isinstance(
-                requires_confirmation, bool
-            ):
+            if requires_confirmation is not None and not isinstance(requires_confirmation, bool):
                 raise ValueError("Multi-tool workflow confirmation must be a boolean")
             planning_context = "\n".join(f"tool {name}: {{}}" for name in completed)
             cases.append(
@@ -639,9 +637,7 @@ def evaluate_case(
     expected_domain = case.expectation.domain or (
         expected_descriptor.domain if expected_descriptor else None
     )
-    expected_domains = case.expectation.domains or (
-        (expected_domain,) if expected_domain else ()
-    )
+    expected_domains = case.expectation.domains or ((expected_domain,) if expected_domain else ())
     expected_capability_ids = case.expectation.capability_ids or (
         (case.expectation.capability_id,) if case.expectation.capability_id else ()
     )
@@ -739,9 +735,7 @@ def _routing_completion_tool_names(
     catalog = job.tool_capability_catalog
     if catalog is None:
         return ()
-    capability_by_id = {
-        capability.capability_id: capability for capability in catalog.capabilities
-    }
+    capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
     names: list[str] = []
     for capability_id in capability_ids:
         capability = capability_by_id.get(capability_id)
@@ -924,8 +918,7 @@ def _routing_funnel(results: tuple[CaseEvaluationResult, ...]) -> dict[str, obje
         (
             "capabilityExact",
             lambda result: not result.expected_capability_ids
-            or set(result.retrieved_capability_ids)
-            == set(result.expected_capability_ids),
+            or set(result.retrieved_capability_ids) == set(result.expected_capability_ids),
         ),
         ("toolExact", lambda result: "tool" not in result.failure_reasons),
         ("requiredInputExact", lambda result: "input" not in result.failure_reasons),
@@ -978,8 +971,7 @@ def _multi_tool_workflow_summary(
                 for result in workflow_results
             )
             and all(
-                set(result.retrieved_capability_ids)
-                == set(result.expected_capability_ids)
+                set(result.retrieved_capability_ids) == set(result.expected_capability_ids)
                 for result in workflow_results
             )
         ):
@@ -1213,10 +1205,7 @@ def _retrieval_recall(results: list[CaseEvaluationResult]) -> float | None:
 def _domain_recall(results: list[CaseEvaluationResult]) -> float | None:
     eligible = [result for result in results if result.expected_domains]
     return _rate(
-        [
-            bool(set(result.expected_domains) <= set(result.retrieved_domains))
-            for result in eligible
-        ]
+        [bool(set(result.expected_domains) <= set(result.retrieved_domains)) for result in eligible]
     )
 
 
@@ -1224,10 +1213,7 @@ def _capability_recall(results: list[CaseEvaluationResult]) -> float | None:
     eligible = [result for result in results if result.expected_capability_ids]
     return _rate(
         [
-            bool(
-                set(result.expected_capability_ids)
-                <= set(result.retrieved_capability_ids)
-            )
+            bool(set(result.expected_capability_ids) <= set(result.retrieved_capability_ids))
             for result in eligible
         ]
     )
@@ -1581,8 +1567,10 @@ def _require_string(value: dict[object, object], key: str) -> str:
 
 def _string_tuple(value: dict[object, object], key: str) -> tuple[str, ...]:
     items = value.get(key)
-    if not isinstance(items, list) or not items or not all(
-        isinstance(item, str) and item.strip() for item in items
+    if (
+        not isinstance(items, list)
+        or not items
+        or not all(isinstance(item, str) and item.strip() for item in items)
     ):
         raise ValueError(f"Evaluation suite field is invalid: {key}")
     normalized = tuple(item.strip() for item in items)
