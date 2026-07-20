@@ -47,6 +47,9 @@ test("MembersCard는 기존 멤버 데이터로 팀 현황을 요약한다", asy
 test("CalendarCard는 14일 전체와 기존 이동 계약을 유지한다", async () => {
   const source = await readHomeSource("./components/calendar-card.tsx");
 
+  assert.match(source, /이번 주 · 다음 주 일정/);
+  assert.doesNotMatch(source, /향후 2주 일정/);
+  assert.match(source, /formatCalendarRangeTitle\(calendarDates\)/);
   assert.match(source, /calendarDates\.map/);
   assert.match(source, /grid-cols-7/);
   assert.match(source, /grid-rows-2/);

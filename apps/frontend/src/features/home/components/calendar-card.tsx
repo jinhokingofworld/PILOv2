@@ -9,7 +9,7 @@ import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-tar
 import type { HomeWeekCalendarEventsState } from "../hooks/use-home-dashboard-data";
 import {
   formatCalendarDate,
-  formatCalendarRangeMonthTitle,
+  formatCalendarRangeTitle,
   isCalendarEventOnDate,
   isSameCalendarDate
 } from "../utils/home-date";
@@ -51,7 +51,7 @@ function ReadonlyCalendar({
     error: calendarEventsError,
     status: calendarEventsStatus
   } = calendarEventsState;
-  const calendarTitle = formatCalendarRangeMonthTitle(calendarDates);
+  const calendarTitle = formatCalendarRangeTitle(calendarDates);
   const todayValue = formatCalendarDate(today);
   const todayEvents = calendarEvents.filter((event) =>
     isCalendarEventOnDate(event, todayValue)
@@ -75,7 +75,7 @@ function ReadonlyCalendar({
           </span>
           <div className="min-w-0">
             <p className="truncate text-[16px] font-semibold tracking-[-0.01em] text-[#202124]">
-              향후 2주 일정
+              이번 주 · 다음 주 일정
             </p>
             <p className="truncate text-[12px] text-[#6b6f78]">{calendarTitle}</p>
           </div>
