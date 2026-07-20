@@ -3,6 +3,8 @@ import logging
 import time
 from dataclasses import replace
 
+import pytest
+
 from app.agent_processor import AGENT_TOOL_SCHEMA_VERSION, parse_agent_run_job_payload
 from app.agent_prompt_security import PromptSecuritySource
 from app.job_dispatcher import JobProcessResult
@@ -979,6 +981,132 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
     assert "LIMIT 17" in timeline_query
     assert "ORDER BY occurred_at ASC" in timeline_query
     assert timeline_values == (job.run_id, job.run_id)
+
+
+def test_agent_repository_recovers_bounded_sql_erd_inspect_continuation() -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    connection = FakeAgentContextConnection(
+        run_row={
+            "id": "33333333-3333-3333-3333-333333333333",
+            "workspace_id": "22222222-2222-2222-2222-222222222222",
+            "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+            "status": "planning",
+            "prompt": "Inspect the SQLtoERD schema.",
+            "timezone": "Asia/Seoul",
+            "planner_turn_count": 2,
+            "queue_wait_ms": 37,
+            "latest_planner_tool_name": "inspect_sql_erd_schema",
+            "latest_planner_output_json": {
+                "toolName": "inspect_sql_erd_schema",
+                "continuation": {
+                    "kind": "sql_erd_inspect_focus",
+                    "prerequisiteToolName": "inspect_sql_erd_schema",
+                    "nextToolName": "focus_sql_erd_tables",
+                },
+            },
+            "latest_planner_step_order": 10,
+            "latest_tool_name": "inspect_sql_erd_schema",
+            "latest_tool_step_order": 11,
+            "outbox_reason": "tool_result",
+            "thread_id": None,
+        }
+    )
+    repository.connection = connection
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "turnSequence": 3,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    continuation = context.sql_erd_inspect_continuation
+    assert continuation is not None
+    assert continuation.kind == "sql_erd_inspect_focus"
+    assert continuation.prerequisite_tool_name == "inspect_sql_erd_schema"
+    assert continuation.next_tool_name == "focus_sql_erd_tables"
+    run_query, _run_values = connection.executed[0]
+    assert "latest_planner_output_json" in run_query
+    assert "latest_tool_step_order" in run_query
+    assert "outbox.reason AS outbox_reason" in run_query
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {
+            "latest_planner_output_json": {
+                "toolName": "inspect_sql_erd_schema",
+                "continuation": {
+                    "kind": "unexpected",
+                    "prerequisiteToolName": "inspect_sql_erd_schema",
+                    "nextToolName": "focus_sql_erd_tables",
+                },
+            }
+        },
+        {"latest_tool_step_order": 12},
+        {"latest_tool_name": "focus_sql_erd_tables"},
+        {
+            "latest_planner_output_json": {
+                "toolName": "inspect_sql_erd_schema",
+                "continuation": {"kind": "sql_erd_inspect_focus"},
+            }
+        },
+    ],
+)
+def test_agent_repository_discards_invalid_sql_erd_inspect_continuation_state(
+    overrides: dict[str, object],
+) -> None:
+    repository = object.__new__(PgAgentRunRepository)
+    run_row: dict[str, object] = {
+        "id": "33333333-3333-3333-3333-333333333333",
+        "workspace_id": "22222222-2222-2222-2222-222222222222",
+        "requested_by_user_id": "11111111-1111-1111-1111-111111111111",
+        "status": "planning",
+        "prompt": "Inspect the SQLtoERD schema.",
+        "timezone": "Asia/Seoul",
+        "planner_turn_count": 2,
+        "queue_wait_ms": 37,
+        "latest_planner_tool_name": "inspect_sql_erd_schema",
+        "latest_planner_output_json": {
+            "toolName": "inspect_sql_erd_schema",
+            "continuation": {
+                "kind": "sql_erd_inspect_focus",
+                "prerequisiteToolName": "inspect_sql_erd_schema",
+                "nextToolName": "focus_sql_erd_tables",
+            },
+        },
+        "latest_planner_step_order": 10,
+        "latest_tool_name": "inspect_sql_erd_schema",
+        "latest_tool_step_order": 11,
+        "outbox_reason": "tool_result",
+        "thread_id": None,
+    }
+    run_row.update(overrides)
+    repository.connection = FakeAgentContextConnection(run_row=run_row)
+    job = parse_agent_run_job_payload(
+        {
+            "jobType": "agent_run_requested",
+            "runId": "33333333-3333-3333-3333-333333333333",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            "toolSchemaVersion": AGENT_TOOL_SCHEMA_VERSION,
+            "turnSequence": 3,
+            "tools": [],
+        }
+    )
+
+    context = repository.get_run_context(job)
+
+    assert context is not None
+    assert context.sql_erd_inspect_continuation is None
 
 
 def test_agent_repository_uses_only_latest_user_message_as_resumed_turn_security_source() -> None:

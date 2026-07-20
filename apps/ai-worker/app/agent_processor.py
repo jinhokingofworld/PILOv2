@@ -78,6 +78,10 @@ SQL_ERD_RELATED_TABLE_REF_LIMIT = 30
 SQL_ERD_CONTEXT_TABLE_REF_LIMIT = 20
 SQL_ERD_INSPECTION_TOOL_NAME = "inspect_sql_erd_schema"
 SQL_ERD_FOCUS_TOOL_NAME = "focus_sql_erd_tables"
+SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED = "AGENT_SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED"
+SQL_ERD_INSPECT_CONTINUATION_KINDS = frozenset(
+    {"sql_erd_inspect_focus", "sql_erd_inspect_complete"}
+)
 TOOL_INPUT_SENSITIVE_KEY_ALLOWLIST = {
     SQL_ERD_INSPECTION_TOOL_NAME: frozenset({"sessionSelectionToken"}),
 }
@@ -134,6 +138,13 @@ class AgentToolSchema:
 
 
 @dataclass(frozen=True)
+class SqlErdInspectContinuation:
+    kind: str
+    prerequisite_tool_name: str
+    next_tool_name: str | None
+
+
+@dataclass(frozen=True)
 class AgentRunContext:
     run_id: str
     workspace_id: str
@@ -144,6 +155,7 @@ class AgentRunContext:
     planner_turn_count: int = 0
     queue_wait_ms: int | None = None
     latest_planner_tool_name: str | None = None
+    sql_erd_inspect_continuation: SqlErdInspectContinuation | None = None
     planning_context: str = ""
     untrusted_context_sources: tuple[PromptSecuritySource, ...] = ()
     current_user_source: PromptSecuritySource | None = None
@@ -411,6 +423,7 @@ class AgentPlannerDecision:
     requires_confirmation: bool | None
     missing_fields: tuple[str, ...]
     unsupported_reason: str | None
+    continuation_kind: str | None = None
     provider_input_tokens: int | None = None
     provider_output_tokens: int | None = None
     provider_total_tokens: int | None = None
@@ -437,6 +450,13 @@ class _AgentLatencyScope:
     targeted: bool = False
     queue_wait_ms: int | None = None
     queue_emitted: bool = False
+
+
+@dataclass(frozen=True)
+class _SqlErdRouterBypassPlan:
+    tools: tuple[AgentToolSchema, ...]
+    completion_tool_names: tuple[str, ...]
+    workflow_incomplete: bool
 
 
 class AgentGroundedAnswerProcessor:
@@ -905,7 +925,24 @@ class AgentRunProcessor:
             self._emit_queue_latency(job, latency_scope)
             routing: AgentRoutingDecision | None = None
             completion_tool_names: tuple[str, ...] = ()
-            if self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER:
+            bypass_plan = (
+                _sql_erd_router_bypass_plan(
+                    context,
+                    selection_job,
+                    context_surface,
+                )
+                if self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER
+                else None
+            )
+            if bypass_plan is not None:
+                planner_tools = bypass_plan.tools
+                completion_tool_names = bypass_plan.completion_tool_names
+                planner_selection = AgentPlannerToolSelection(
+                    tools=planner_tools,
+                    retrieval=None,
+                    used_shortlist=True,
+                )
+            elif self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER:
                 if self.router_client is None or selection_job.tool_capability_catalog is None:
                     raise AgentRouterOutputError(
                         "Agent router configuration or capability catalog is missing"
@@ -1015,7 +1052,7 @@ class AgentRunProcessor:
                     _planning_tool_result_names(context.planning_context)
                 )
             )
-            if not planner_tools and not routed_workflow_completed:
+            if not planner_tools and not routed_workflow_completed and bypass_plan is None:
                 output_summary = _retrieval_clarification_summary(
                     job,
                     self.tool_retrieval_mode,
@@ -1047,10 +1084,15 @@ class AgentRunProcessor:
                     ),
                 )
             planner_job = replace(selection_job, tools=planner_tools)
-            workflow_incomplete = routing is not None and _has_incomplete_routed_workflow(
-                selection_job,
-                routing,
-                context.planning_context,
+            workflow_incomplete = (
+                bypass_plan.workflow_incomplete
+                if bypass_plan is not None
+                else routing is not None
+                and _has_incomplete_routed_workflow(
+                    selection_job,
+                    routing,
+                    context.planning_context,
+                )
             )
             planner_started_at = self.latency_observer.start()
             try:
@@ -1616,6 +1658,11 @@ def normalize_agent_planner_decision(
     strict_tool_selection: bool = False,
     completion_tool_names: tuple[str, ...] = (),
 ) -> NormalizedPlannerDecision:
+    continuation = _validated_sql_erd_inspect_continuation(
+        decision,
+        {tool.name for tool in job.tools},
+        completion_tool_names,
+    )
     decision = _normalize_calendar_relative_date_query(
         decision,
         job,
@@ -1739,6 +1786,8 @@ def normalize_agent_planner_decision(
         "finalAnswerDraft": final_answer,
         "toolSchemaVersion": job.tool_schema_version,
     }
+    if continuation is not None:
+        output_summary["continuation"] = continuation
     risk_level: str | None = None
 
     if status == "tool_candidate" and tool is not None:
@@ -1774,6 +1823,37 @@ def normalize_agent_planner_decision(
         output_summary=output_summary,
         risk_level=risk_level,
     )
+
+
+def _validated_sql_erd_inspect_continuation(
+    decision: AgentPlannerDecision,
+    eligible_tool_names: set[str],
+    completion_tool_names: tuple[str, ...],
+) -> dict[str, object] | None:
+    continuation_kind = decision.continuation_kind
+    if continuation_kind is None:
+        return None
+    if continuation_kind not in SQL_ERD_INSPECT_CONTINUATION_KINDS:
+        raise AgentPlannerOutputError("Agent planner returned an invalid continuation kind")
+    if decision.status != "tool_candidate" or decision.tool_name != SQL_ERD_INSPECTION_TOOL_NAME:
+        raise AgentPlannerOutputError(
+            "Agent planner returned an invalid continuation tool or status"
+        )
+    if completion_tool_names != (SQL_ERD_FOCUS_TOOL_NAME,):
+        raise AgentPlannerOutputError(
+            "Agent planner returned a continuation for a compound workflow"
+        )
+    if continuation_kind == "sql_erd_inspect_focus" and (
+        SQL_ERD_FOCUS_TOOL_NAME not in eligible_tool_names
+    ):
+        raise AgentPlannerOutputError("Agent planner returned an ineligible continuation")
+    return {
+        "kind": continuation_kind,
+        "prerequisiteToolName": SQL_ERD_INSPECTION_TOOL_NAME,
+        "nextToolName": (
+            SQL_ERD_FOCUS_TOOL_NAME if continuation_kind == "sql_erd_inspect_focus" else None
+        ),
+    }
 
 
 def _missing_required_tool_input_fields(
@@ -3481,6 +3561,7 @@ class OpenAiAgentPlannerClient:
     def plan(self, request: AgentPlanningRequest) -> AgentPlannerDecision:
         workflow_constraint = _agent_planner_workflow_constraint(request)
         completion_allowed = _agent_planner_completion_allowed(request)
+        continuation_contract_enabled = _sql_erd_inspect_continuation_contract_enabled(request)
         response_schema = {
             "format": {
                 "type": "json_schema",
@@ -3490,17 +3571,22 @@ class OpenAiAgentPlannerClient:
                     workflow_constraint,
                     completion_allowed=completion_allowed,
                     workflow_incomplete=request.workflow_incomplete,
+                    continuation_contract_enabled=continuation_contract_enabled,
                 ),
             }
         }
         original_input = [
             {
                 "role": "system",
-                "content": _agent_planner_system_prompt(),
+                "content": _agent_planner_system_prompt(continuation_contract_enabled),
             },
             {
                 "role": "user",
-                "content": _agent_planner_user_prompt(request, workflow_constraint),
+                "content": _agent_planner_user_prompt(
+                    request,
+                    workflow_constraint,
+                    continuation_contract_enabled=continuation_contract_enabled,
+                ),
             },
         ]
         try:
@@ -3517,7 +3603,10 @@ class OpenAiAgentPlannerClient:
         output_text = _response_output_text(response)
         try:
             decision = _validate_agent_planner_provider_decision(
-                parse_agent_planner_output(output_text),
+                parse_agent_planner_output(
+                    output_text,
+                    continuation_contract_enabled=continuation_contract_enabled,
+                ),
                 request,
                 workflow_constraint,
                 completion_allowed=completion_allowed,
@@ -3534,7 +3623,10 @@ class OpenAiAgentPlannerClient:
             except Exception as error:
                 raise AgentPlannerOutputError("Agent planner repair provider failure") from error
             decision = _validate_agent_planner_provider_decision(
-                parse_agent_planner_output(_response_output_text(response)),
+                parse_agent_planner_output(
+                    _response_output_text(response),
+                    continuation_contract_enabled=continuation_contract_enabled,
+                ),
                 request,
                 workflow_constraint,
                 completion_allowed=completion_allowed,
@@ -3579,10 +3671,19 @@ def _validate_agent_planner_provider_decision(
         and decision.tool_name != workflow_constraint.required_tool_name
     ):
         raise AgentPlannerOutputError("Agent planner violated the workflow constraint")
+    _validated_sql_erd_inspect_continuation(
+        decision,
+        eligible_tool_names,
+        request.completion_tool_names,
+    )
     return decision
 
 
-def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
+def parse_agent_planner_output(
+    output_text: str,
+    *,
+    continuation_contract_enabled: bool = False,
+) -> AgentPlannerDecision:
     if not isinstance(output_text, str) or not output_text.strip():
         raise AgentPlannerOutputError("Agent planner returned no output")
 
@@ -3603,6 +3704,8 @@ def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
         "missingFields",
         "unsupportedReason",
     }
+    if continuation_contract_enabled:
+        required_fields.add("continuationKind")
     if set(payload) != required_fields:
         raise AgentPlannerOutputError("Agent planner output fields are invalid")
     if not isinstance(payload.get("requiresConfirmation"), bool):
@@ -3624,6 +3727,11 @@ def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
     requires_confirmation = payload["requiresConfirmation"]
     missing_fields = _planner_string_list(missing_fields_value)
     unsupported_reason = _planner_optional_string(payload, "unsupportedReason")
+    continuation_kind = (
+        _planner_optional_string(payload, "continuationKind")
+        if continuation_contract_enabled
+        else None
+    )
 
     return AgentPlannerDecision(
         status=status,
@@ -3634,11 +3742,12 @@ def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
         requires_confirmation=requires_confirmation,
         missing_fields=tuple(missing_fields),
         unsupported_reason=unsupported_reason,
+        continuation_kind=continuation_kind,
     )
 
 
-def _agent_planner_system_prompt() -> str:
-    return (
+def _agent_planner_system_prompt(continuation_contract_enabled: bool = False) -> str:
+    prompt = (
         "You are the PILO Workspace Agent planner. "
         "Return only JSON that matches the schema. "
         "When workflowConstraint is present, select its requiredToolName instead of returning "
@@ -3785,11 +3894,21 @@ def _agent_planner_system_prompt() -> str:
         "Never include provider raw responses, tokens, secrets, credentials, cookies, "
         "authorization headers, or long transcripts."
     )
+    if continuation_contract_enabled:
+        prompt += (
+            " When continuationKind is available, use sql_erd_inspect_focus only when the "
+            "inspect_sql_erd_schema result should be followed by focus_sql_erd_tables, use "
+            "sql_erd_inspect_complete only when the inspection alone completes the request, "
+            "and otherwise return null."
+        )
+    return prompt
 
 
 def _agent_planner_user_prompt(
     request: AgentPlanningRequest,
     workflow_constraint: AgentPlannerWorkflowConstraint | None = None,
+    *,
+    continuation_contract_enabled: bool = False,
 ) -> str:
     constraint = workflow_constraint or _agent_planner_workflow_constraint(request)
     tools = [
@@ -3802,39 +3921,42 @@ def _agent_planner_user_prompt(
         }
         for tool in request.tools
     ]
-    return json.dumps(
-        {
-            "runId": request.run_id,
-            "timezone": request.timezone,
-            "currentDate": request.current_date,
-            "toolSchemaVersion": request.tool_schema_version,
-            "contextSurface": request.context_surface,
-            "tools": tools,
-            "routing": (
-                {
-                    "domains": list(request.routing.domains),
-                    "capabilityIds": list(request.routing.capability_ids),
-                    "intentSummary": request.routing.intent_summary,
-                    "confidence": request.routing.confidence,
-                }
-                if request.routing is not None
-                else None
-            ),
-            "prompt": request.prompt,
-            "planningContext": request.planning_context,
-            "completionAllowed": _agent_planner_completion_allowed(request),
-            "workflowConstraint": (
-                {
-                    "requiredToolName": constraint.required_tool_name,
-                    "completionAllowed": False,
-                }
-                if constraint is not None
-                else None
-            ),
-            "workflowIncomplete": request.workflow_incomplete,
-        },
-        ensure_ascii=False,
-    )
+    payload: dict[str, object] = {
+        "runId": request.run_id,
+        "timezone": request.timezone,
+        "currentDate": request.current_date,
+        "toolSchemaVersion": request.tool_schema_version,
+        "contextSurface": request.context_surface,
+        "tools": tools,
+        "routing": (
+            {
+                "domains": list(request.routing.domains),
+                "capabilityIds": list(request.routing.capability_ids),
+                "intentSummary": request.routing.intent_summary,
+                "confidence": request.routing.confidence,
+            }
+            if request.routing is not None
+            else None
+        ),
+        "prompt": request.prompt,
+        "planningContext": request.planning_context,
+        "completionAllowed": _agent_planner_completion_allowed(request),
+        "workflowConstraint": (
+            {
+                "requiredToolName": constraint.required_tool_name,
+                "completionAllowed": False,
+            }
+            if constraint is not None
+            else None
+        ),
+        "workflowIncomplete": request.workflow_incomplete,
+    }
+    if continuation_contract_enabled:
+        payload["continuationContract"] = {
+            "field": "continuationKind",
+            "allowedValues": ["sql_erd_inspect_focus", "sql_erd_inspect_complete", None],
+        }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _agent_planner_schema(
@@ -3842,6 +3964,7 @@ def _agent_planner_schema(
     *,
     completion_allowed: bool = False,
     workflow_incomplete: bool = False,
+    continuation_contract_enabled: bool = False,
 ) -> dict[str, object]:
     statuses = (
         ["tool_candidate", "needs_clarification"]
@@ -3857,7 +3980,7 @@ def _agent_planner_schema(
     if workflow_constraint is not None:
         tool_name_schema["enum"] = [workflow_constraint.required_tool_name, None]
 
-    return {
+    schema: dict[str, object] = {
         "type": "object",
         "additionalProperties": False,
         "required": [
@@ -3887,6 +4010,76 @@ def _agent_planner_schema(
             "unsupportedReason": {"type": ["string", "null"]},
         },
     }
+    if continuation_contract_enabled:
+        required_fields = schema["required"]
+        properties = schema["properties"]
+        assert isinstance(required_fields, list)
+        assert isinstance(properties, dict)
+        required_fields.append("continuationKind")
+        properties["continuationKind"] = {
+            "type": ["string", "null"],
+            "enum": ["sql_erd_inspect_focus", "sql_erd_inspect_complete", None],
+        }
+    return schema
+
+
+def _sql_erd_inspect_continuation_contract_enabled(request: AgentPlanningRequest) -> bool:
+    return (
+        os.environ.get(SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED, "false").lower() == "true"
+        and request.context_surface == "sql_erd"
+        and any(tool.name == SQL_ERD_INSPECTION_TOOL_NAME for tool in request.tools)
+        and request.completion_tool_names == (SQL_ERD_FOCUS_TOOL_NAME,)
+    )
+
+
+def _sql_erd_router_bypass_plan(
+    context: AgentRunContext,
+    selection_job: AgentRunJob,
+    context_surface: str | None,
+) -> _SqlErdRouterBypassPlan | None:
+    continuation = context.sql_erd_inspect_continuation
+    if (
+        os.environ.get(SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED, "false").lower() != "true"
+        or context_surface != "sql_erd"
+        or continuation is None
+    ):
+        return None
+    latest_tool_result = _latest_planning_tool_result(context.planning_context)
+    if latest_tool_result is None:
+        return None
+    tool_name, output = latest_tool_result
+    projection = output.get("projection")
+    if tool_name != SQL_ERD_INSPECTION_TOOL_NAME or not isinstance(projection, dict):
+        return None
+    if not isinstance(projection.get("tables"), list):
+        return None
+    if (
+        continuation.kind == "sql_erd_inspect_focus"
+        and continuation.prerequisite_tool_name == SQL_ERD_INSPECTION_TOOL_NAME
+        and continuation.next_tool_name == SQL_ERD_FOCUS_TOOL_NAME
+    ):
+        focus_tool = next(
+            (tool for tool in selection_job.tools if tool.name == SQL_ERD_FOCUS_TOOL_NAME),
+            None,
+        )
+        if focus_tool is None:
+            return None
+        return _SqlErdRouterBypassPlan(
+            tools=(focus_tool,),
+            completion_tool_names=(SQL_ERD_FOCUS_TOOL_NAME,),
+            workflow_incomplete=True,
+        )
+    if (
+        continuation.kind == "sql_erd_inspect_complete"
+        and continuation.prerequisite_tool_name == SQL_ERD_INSPECTION_TOOL_NAME
+        and continuation.next_tool_name is None
+    ):
+        return _SqlErdRouterBypassPlan(
+            tools=(),
+            completion_tool_names=(SQL_ERD_INSPECTION_TOOL_NAME,),
+            workflow_incomplete=False,
+        )
+    return None
 
 
 def _agent_planner_workflow_constraint(
