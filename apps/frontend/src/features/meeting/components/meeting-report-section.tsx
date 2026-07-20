@@ -5,16 +5,19 @@ import {
   ArrowLeft,
   ArrowDownWideNarrow,
   ArrowUpWideNarrow,
+  CalendarPlus,
   Check,
   CheckCircle2,
   Clock3,
   FileText,
   ListChecks,
   Loader2,
+  MousePointerClick,
   Pencil,
   RefreshCw,
   RotateCcw,
   Search,
+  Users,
   X,
   XCircle
 } from "lucide-react";
@@ -73,6 +76,9 @@ type ReportSortDirection = "newest" | "oldest";
 
 type MeetingReportTranscriptSegment = NonNullable<
   MeetingReportDetail["evidenceSegments"]
+>[number];
+type MeetingReportActivityEvidence = NonNullable<
+  MeetingReportDetail["activityEvidence"]
 >[number];
 
 const REPORT_POLL_INTERVAL_MS = 10000;
@@ -138,26 +144,21 @@ function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt" | "tit
   return report.title?.trim() || `${formatReportDateTime(report.createdAt)} 회의록`;
 }
 
-function formatActivityEvidenceReference(sourceType: string, sourceIndex: number) {
-  const label = {
-    summary: "요약",
-    discussion: "논의",
-    decision: "결정",
-    action_item: "후속 작업"
-  }[sourceType] ?? sourceType;
-  return sourceType === "decision" ? label : `${label} ${sourceIndex + 1}`;
-}
-
-function ReportParticipantSummary({ report }: { report: MeetingReportSummary }) {
+function getReportParticipantSummaryText(report: MeetingReportSummary) {
   const summary = report.participantSummary;
   if (!summary || summary.totalCount === 0) return null;
   const names = summary.participants
     .map((participant) => participant.name?.trim() || "이름 없음")
     .join(", ");
+  return `${summary.totalCount}명${names ? ` · ${names}` : ""}${summary.hasMore ? " 외" : ""}`;
+}
+
+function ReportParticipantSummary({ report }: { report: MeetingReportSummary }) {
+  const summaryText = getReportParticipantSummaryText(report);
+  if (!summaryText) return null;
   return (
     <span className="text-xs text-muted-foreground">
-      참석 {summary.totalCount}명{names ? ` · ${names}` : ""}
-      {summary.hasMore ? " 외" : ""}
+      참석 {summaryText}
     </span>
   );
 }
@@ -357,14 +358,31 @@ function getEvidenceSegments(
   return segments.sort((left, right) => left.segmentIndex - right.segmentIndex);
 }
 
+function getActivityEvidence(
+  report: MeetingReportDetail,
+  sourceType: string,
+  sourceIndex?: number
+) {
+  return (report.activityEvidence ?? [])
+    .filter((activity) => activity.references.some((reference) => (
+      reference.sourceType === sourceType &&
+      (sourceIndex === undefined || reference.sourceIndex === sourceIndex)
+    )))
+    .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+}
+
 function EvidenceTimeButtons({
+  activityEvidence = [],
+  onActivitySelect,
   onSelect,
   segments
 }: {
+  activityEvidence?: MeetingReportActivityEvidence[];
+  onActivitySelect?: (activityEvidence: MeetingReportActivityEvidence[]) => void;
   onSelect: (segment: MeetingReportTranscriptSegment) => void;
   segments: MeetingReportTranscriptSegment[];
 }) {
-  if (!segments.length) return null;
+  if (!segments.length && !activityEvidence.length) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -380,10 +398,21 @@ function EvidenceTimeButtons({
             onClick={() => onSelect(segment)}
           >
             <Clock3 className="size-3" />
-            {timestamp}
+            시간 {timestamp}
           </button>
         );
       })}
+      {activityEvidence.length && onActivitySelect ? (
+        <button
+          type="button"
+          className="inline-flex h-7 items-center gap-1 rounded-full border bg-muted/40 px-2 font-medium text-muted-foreground transition hover:border-primary/40 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`연결된 활동 근거 ${activityEvidence.length}건 보기`}
+          onClick={() => onActivitySelect(activityEvidence)}
+        >
+          <MousePointerClick className="size-3" />
+          활동 {activityEvidence.length}건
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -542,17 +571,24 @@ function EditableReportTextBlock({
 }
 
 function DecisionItemsBlock({
+  activityEvidenceForItem,
   editable,
   emptyLabel,
   evidenceForItem,
+  onActivityEvidenceSelect,
   onEvidenceSelect,
   onSave,
   saving,
   items
 }: {
+  activityEvidenceForItem: (item: MeetingReportDecisionItem) => MeetingReportActivityEvidence[];
   editable: boolean;
   emptyLabel: string;
   evidenceForItem: (item: MeetingReportDecisionItem) => MeetingReportTranscriptSegment[];
+  onActivityEvidenceSelect: (
+    activityEvidence: MeetingReportActivityEvidence[],
+    sourceIndex: number
+  ) => void;
   onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
   onSave: (item: MeetingReportDecisionItem, text: string) => Promise<void>;
   saving: boolean;
@@ -601,10 +637,76 @@ function DecisionItemsBlock({
                 ) : (
                   <p className="whitespace-pre-wrap break-words">{item.text}</p>
                 )}
-                <EvidenceTimeButtons segments={evidenceForItem(item)} onSelect={onEvidenceSelect} />
+                <EvidenceTimeButtons
+                  activityEvidence={activityEvidenceForItem(item)}
+                  onActivitySelect={(activityEvidence) => onActivityEvidenceSelect(
+                    activityEvidence,
+                    item.sourceIndex
+                  )}
+                  segments={evidenceForItem(item)}
+                  onSelect={onEvidenceSelect}
+                />
               </li>
             );
           })}
+        </ul>
+      ) : (
+        <div className="min-h-24 rounded-lg border bg-background p-3 text-sm leading-6 text-muted-foreground">
+          {emptyLabel}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DecisionTextItemsBlock({
+  activityEvidenceForItem,
+  emptyLabel,
+  evidenceForItem,
+  onActivityEvidenceSelect,
+  onEvidenceSelect,
+  value
+}: {
+  activityEvidenceForItem: (sourceIndex: number) => MeetingReportActivityEvidence[];
+  emptyLabel: string;
+  evidenceForItem: (sourceIndex: number) => MeetingReportTranscriptSegment[];
+  onActivityEvidenceSelect: (
+    activityEvidence: MeetingReportActivityEvidence[],
+    sourceIndex: number
+  ) => void;
+  onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
+  value: string | null;
+}) {
+  const items = (value ?? "")
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean);
+
+  return (
+    <section className="grid gap-2">
+      <h3 className="font-heading text-xl font-semibold">결정사항</h3>
+      {items.length ? (
+        <ul className="grid gap-2">
+          {items.map((item, sourceIndex) => (
+            <li
+              key={`${item}-${sourceIndex}`}
+              className="grid gap-2 rounded-lg border bg-background p-3 text-sm leading-6"
+            >
+              <span className="text-xs font-medium text-muted-foreground">
+                결정 {sourceIndex + 1}
+              </span>
+              <p className="whitespace-pre-wrap break-words">{item}</p>
+              <EvidenceTimeButtons
+                activityEvidence={activityEvidenceForItem(sourceIndex)}
+                onActivitySelect={(activityEvidence) => onActivityEvidenceSelect(
+                  activityEvidence,
+                  sourceIndex
+                )}
+                onSelect={onEvidenceSelect}
+                segments={evidenceForItem(sourceIndex)}
+              />
+            </li>
+          ))}
         </ul>
       ) : (
         <div className="min-h-24 rounded-lg border bg-background p-3 text-sm leading-6 text-muted-foreground">
@@ -1069,6 +1171,12 @@ function MeetingReportDetailModal({
   const [selectedEvidenceSegment, setSelectedEvidenceSegment] = useState<
     MeetingReportTranscriptSegment | null
   >(null);
+  const [selectedActivityEvidence, setSelectedActivityEvidence] = useState<
+    MeetingReportActivityEvidence[] | null
+  >(null);
+  const [selectedActivityDecisionIndex, setSelectedActivityDecisionIndex] = useState<
+    number | null
+  >(null);
   const selectedEvidencePanelRef = useRef<HTMLElement | null>(null);
   const actionItemsWithEvidence = report
     ? actionItems.map((item, index) => ({
@@ -1084,9 +1192,11 @@ function MeetingReportDetailModal({
   useEffect(() => {
     setDetailView("detail");
     setSelectedEvidenceSegment(null);
+    setSelectedActivityEvidence(null);
+    setSelectedActivityDecisionIndex(null);
     setEditingTitle(false);
     setTitleDraft(report?.title ?? "");
-  }, [report?.id, report?.evidenceSegments]);
+  }, [report?.id, report?.evidenceSegments, report?.activityEvidence]);
 
   useEffect(() => {
     if (!editingTitle) {
@@ -1095,17 +1205,28 @@ function MeetingReportDetailModal({
   }, [editingTitle, report?.title]);
 
   useEffect(() => {
-    if (!selectedEvidenceSegment) return;
+    if (!selectedEvidenceSegment && !selectedActivityEvidence) return;
 
     const panel = selectedEvidencePanelRef.current;
     if (!panel) return;
 
     panel.scrollIntoView({ behavior: "smooth", block: "center" });
     panel.focus({ preventScroll: true });
-  }, [selectedEvidenceSegment?.id]);
+  }, [selectedActivityEvidence, selectedEvidenceSegment]);
 
   function selectTranscriptSegment(segment: MeetingReportTranscriptSegment) {
+    setSelectedActivityEvidence(null);
+    setSelectedActivityDecisionIndex(null);
     setSelectedEvidenceSegment(segment);
+  }
+
+  function selectActivityEvidence(
+    activityEvidence: MeetingReportActivityEvidence[],
+    sourceIndex: number
+  ) {
+    setSelectedEvidenceSegment(null);
+    setSelectedActivityEvidence(activityEvidence);
+    setSelectedActivityDecisionIndex(sourceIndex);
   }
 
   function startTitleEdit() {
@@ -1130,9 +1251,11 @@ function MeetingReportDetailModal({
   const discussionEvidence = report
     ? getEvidenceSegments(report, "discussion")
     : [];
-  const decisionEvidence = report ? getEvidenceSegments(report, "decision") : [];
   const decisionItems = report?.decisionItems ?? [];
   const canEditContent = Boolean(report?.canEdit && report.status === "COMPLETED");
+  const participantSummaryText = report
+    ? getReportParticipantSummaryText(report)
+    : null;
 
   return (
     <DialogPrimitive.Root
@@ -1205,7 +1328,7 @@ function MeetingReportDetailModal({
               </section>
             ) : report ? (
               <div className="grid gap-5">
-                <section className="grid gap-4 rounded-lg border bg-muted/20 p-4">
+                <section className="grid gap-5 border-b pb-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       {editingTitle ? (
@@ -1279,44 +1402,45 @@ function MeetingReportDetailModal({
                     <ReportStatusPill status={report.status} />
                   </div>
 
-                  <dl className="grid gap-3 text-sm sm:grid-cols-2">
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        실패 단계
-                      </dt>
-                      <dd className="mt-1">
-                        {getReportFailedStepLabel(report.failedStep)}
-                      </dd>
+                  <dl className="flex min-w-0 flex-wrap items-center gap-y-3 text-sm md:flex-nowrap">
+                    <div className="flex shrink-0 items-center gap-2 pr-4">
+                      <CalendarPlus className="size-4 text-muted-foreground" />
+                      <dt className="font-medium text-muted-foreground">생성일</dt>
+                      <dd>{formatReportDateTime(report.createdAt)}</dd>
                     </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        재생성 횟수
-                      </dt>
-                      <dd className="mt-1">{report.retryCount}회</dd>
+                    <div className="flex shrink-0 items-center gap-2 sm:border-l sm:pl-4 sm:pr-4">
+                      <RefreshCw className="size-4 text-muted-foreground" />
+                      <dt className="font-medium text-muted-foreground">수정일</dt>
+                      <dd>{formatReportDateTime(report.updatedAt)}</dd>
                     </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        생성일
-                      </dt>
-                      <dd className="mt-1">
-                        {formatReportDateTime(report.createdAt)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">참석자</dt>
-                      <dd className="mt-1">
-                        <ReportParticipantSummary report={report} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        수정일
-                      </dt>
-                      <dd className="mt-1">
-                        {formatReportDateTime(report.updatedAt)}
+                    <div className="flex min-w-0 items-center gap-2 sm:border-l sm:pl-4">
+                      <Users className="size-4 shrink-0 text-muted-foreground" />
+                      <dt className="shrink-0 font-medium text-muted-foreground">참석자</dt>
+                      <dd
+                        className="min-w-0 truncate"
+                        title={participantSummaryText ?? "참석자 정보 없음"}
+                      >
+                        {participantSummaryText ?? "정보 없음"}
                       </dd>
                     </div>
                   </dl>
+
+                  {report.failedStep || report.retryCount > 0 ? (
+                    <dl className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
+                      {report.failedStep ? (
+                        <div className="flex items-center gap-1.5">
+                          <dt className="font-medium">실패 단계</dt>
+                          <dd>{getReportFailedStepLabel(report.failedStep)}</dd>
+                        </div>
+                      ) : null}
+                      {report.retryCount > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <dt className="font-medium">재생성 횟수</dt>
+                          <dd>{report.retryCount}회</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  ) : null}
 
                   {report.errorMessage ? (
                     <div className="rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive">
@@ -1357,6 +1481,11 @@ function MeetingReportDetailModal({
 
                 {decisionItems.length ? (
                   <DecisionItemsBlock
+                    activityEvidenceForItem={(item) => getActivityEvidence(
+                      report,
+                      "decision",
+                      item.sourceIndex
+                    )}
                     editable={canEditContent}
                     emptyLabel={
                       isReportInProgress(report.status)
@@ -1365,6 +1494,7 @@ function MeetingReportDetailModal({
                     }
                     evidenceForItem={(item) => getEvidenceSegments(report, "decision", item.sourceIndex)}
                     items={decisionItems}
+                    onActivityEvidenceSelect={selectActivityEvidence}
                     onEvidenceSelect={selectTranscriptSegment}
                     onSave={(item, text) => onUpdateContent({
                       expectedVersion: report.contentVersion,
@@ -1373,47 +1503,27 @@ function MeetingReportDetailModal({
                     saving={updatingContent}
                   />
                 ) : (
-                  <ReportTextBlock
-                  asList
-                  emptyLabel={
-                    isReportInProgress(report.status)
-                      ? "결정사항을 정리하는 중입니다."
-                      : "등록된 결정사항이 없습니다."
-                  }
-                  evidenceSegments={decisionEvidence}
-                  onEvidenceSelect={selectTranscriptSegment}
-                  title="결정사항"
-                  value={report.decisions}
+                  <DecisionTextItemsBlock
+                    activityEvidenceForItem={(sourceIndex) => getActivityEvidence(
+                      report,
+                      "decision",
+                      sourceIndex
+                    )}
+                    emptyLabel={
+                      isReportInProgress(report.status)
+                        ? "결정사항을 정리하는 중입니다."
+                        : "등록된 결정사항이 없습니다."
+                    }
+                    evidenceForItem={(sourceIndex) => getEvidenceSegments(
+                      report,
+                      "decision",
+                      sourceIndex
+                    )}
+                    onActivityEvidenceSelect={selectActivityEvidence}
+                    onEvidenceSelect={selectTranscriptSegment}
+                    value={report.decisions}
                   />
                 )}
-
-                <section className="mt-8 grid gap-3 rounded-xl border bg-muted/20 p-5">
-                  <div>
-                    <h3 className="font-heading text-xl font-semibold">활동 근거</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Transcript와 별도로 녹음 구간에 기록된 Workspace 활동입니다.
-                    </p>
-                  </div>
-                  {report.activityEvidence?.length ? (
-                    <ul className="grid gap-2">
-                      {report.activityEvidence.map((activity) => (
-                        <li key={activity.id} className="rounded-md border bg-background p-3 text-sm">
-                          <p className="text-xs font-semibold text-muted-foreground">
-                            {formatReportDateTime(activity.occurredAt)} · {activity.action}
-                          </p>
-                          <p className="mt-1 whitespace-pre-wrap break-words">{activity.summary}</p>
-                          {activity.references.length ? (
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              연결된 산출물: {activity.references.map((reference) => formatActivityEvidenceReference(reference.sourceType, reference.sourceIndex)).join(", ")}
-                            </p>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">기록된 활동 근거가 없습니다.</p>
-                  )}
-                </section>
 
                 <section className="mt-8 grid gap-3 border-t-2 border-border/70 pt-8">
                   <div className="flex flex-wrap items-center gap-3">
@@ -1468,29 +1578,60 @@ function MeetingReportDetailModal({
                   )}
                 </section>
 
-                {selectedEvidenceSegment ? (
+                {selectedEvidenceSegment || selectedActivityEvidence ? (
                   <section
                     ref={selectedEvidencePanelRef}
                     tabIndex={-1}
                     className="grid gap-2 rounded-lg border border-primary/30 bg-primary/5 p-4"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-heading text-xl font-semibold">근거 Transcript</h3>
+                      <h3 className="font-heading text-xl font-semibold">
+                        {selectedEvidenceSegment ? "근거 Transcript" : "활동 근거"}
+                      </h3>
                       <Button
                         type="button"
                         size="sm"
                         variant="ghost"
-                        onClick={() => setSelectedEvidenceSegment(null)}
+                        onClick={() => {
+                          setSelectedEvidenceSegment(null);
+                          setSelectedActivityEvidence(null);
+                          setSelectedActivityDecisionIndex(null);
+                        }}
                       >
                         닫기
                       </Button>
                     </div>
-                    <p className="text-xs font-semibold text-muted-foreground">
-                      {formatTranscriptTimestamp(selectedEvidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(selectedEvidenceSegment.endedAtMs)}
-                    </p>
-                    <p className="whitespace-pre-wrap break-words text-sm leading-6">
-                      {selectedEvidenceSegment.text}
-                    </p>
+                    {selectedEvidenceSegment ? (
+                      <>
+                        <p className="text-xs font-semibold text-muted-foreground">
+                          {formatTranscriptTimestamp(selectedEvidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(selectedEvidenceSegment.endedAtMs)}
+                        </p>
+                        <p className="whitespace-pre-wrap break-words text-sm leading-6">
+                          {selectedEvidenceSegment.text}
+                        </p>
+                      </>
+                    ) : selectedActivityEvidence ? (
+                      <>
+                        <p className="text-xs font-semibold text-muted-foreground">
+                          결정 {(selectedActivityDecisionIndex ?? 0) + 1}과 연결된 Workspace 활동 {selectedActivityEvidence.length}건
+                        </p>
+                        <ul className="grid gap-2">
+                          {selectedActivityEvidence.map((activity) => (
+                            <li
+                              key={activity.id}
+                              className="rounded-md border bg-background p-3 text-sm"
+                            >
+                              <p className="text-xs font-semibold text-muted-foreground">
+                                {formatReportDateTime(activity.occurredAt)} · {activity.action}
+                              </p>
+                              <p className="mt-1 whitespace-pre-wrap break-words leading-6">
+                                {activity.summary}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
                   </section>
                 ) : null}
               </div>
