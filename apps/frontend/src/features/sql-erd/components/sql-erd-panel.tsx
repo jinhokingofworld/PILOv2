@@ -34,7 +34,6 @@ import {
 } from "@codemirror/view";
 import {
   Database,
-  Home,
   List as ListIcon,
   LocateFixed,
   MapPin,
@@ -2388,11 +2387,6 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   ]);
 
   useEffect(() => {
-    setIsSourceOpen(window.matchMedia("(min-width: 1024px)").matches);
-    setIsInspectorOpen(window.matchMedia("(min-width: 1280px)").matches);
-  }, []);
-
-  useEffect(() => {
     setAgentTableFocusRevisionValidated(false);
     setAgentTableFocus(consumeStagedSqlErdAgentTableFocus(sessionId));
 
@@ -3033,7 +3027,6 @@ function SourcePanel({
     >
       <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4">
         <div className="flex min-w-0 items-center gap-2">
-          <SqlErdHomeNavigationButton />
           <SqlErdSessionListNavigationButton />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -3137,25 +3130,6 @@ function SourcePanel({
   );
 }
 
-function SqlErdHomeNavigationButton() {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Link
-            aria-label="홈으로 이동"
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            href="/home"
-          >
-            <Home className="size-4" />
-          </Link>
-        }
-      />
-      <TooltipContent side="right">홈으로 이동</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function SqlErdSessionListNavigationButton() {
   return (
     <Tooltip>
@@ -3178,8 +3152,7 @@ function SqlErdSessionListNavigationButton() {
 function CollapsedSourcePanel({ onToggle }: { onToggle: () => void }) {
   return (
     <aside className="flex w-12 shrink-0 flex-col border-r bg-muted/20">
-      <div className="flex min-h-24 flex-col items-center justify-center gap-1 border-b">
-        <SqlErdHomeNavigationButton />
+      <div className="flex min-h-14 flex-col items-center justify-center border-b">
         <SqlErdSessionListNavigationButton />
       </div>
       <button
