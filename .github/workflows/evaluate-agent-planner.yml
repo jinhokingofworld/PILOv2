@@ -122,7 +122,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     strategy:
-      max-parallel: 8
+      max-parallel: 10
       matrix:
         target:
           - baseline
@@ -132,6 +132,7 @@ jobs:
           - held_out
           - counterexample
           - context
+          - multi_tool
 
     steps:
       - name: Checkout evaluation source
@@ -249,10 +250,12 @@ jobs:
             --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-held_out-evaluation.json" \
             --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-counterexample-evaluation.json" \
             --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-context-evaluation.json" \
+            --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-multi_tool-evaluation.json" \
             --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-canonical-evaluation.json" \
             --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-held_out-evaluation.json" \
             --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-counterexample-evaluation.json" \
             --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-context-evaluation.json" \
+            --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-multi_tool-evaluation.json" \
             --output "$RUNNER_TEMP/agent-router-planner-comparison.json"
 
       - name: Run deterministic supporting gates
@@ -277,6 +280,7 @@ jobs:
             --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-held_out-evaluation.json" \
             --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-counterexample-evaluation.json" \
             --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-context-evaluation.json" \
+            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-multi_tool-evaluation.json" \
             --dev-terraform ../../infra/envs/dev/main.tf \
             --rollout-runbook ../../docs/infra/agent-tool-retrieval-dev-rollout.md \
             --output "$RUNNER_TEMP/phase4e-dev-readiness.json"

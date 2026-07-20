@@ -396,6 +396,11 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
         "stages": {
             "routerRouted": {"count": 1, "conditionalRate": 1.0, "overallRate": 1.0},
             "domainExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 1.0},
+            "capabilityExact": {
+                "count": 1,
+                "conditionalRate": 1.0,
+                "overallRate": 1.0,
+            },
             "toolExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 1.0},
             "requiredInputExact": {
                 "count": 1,
@@ -577,6 +582,7 @@ def test_llm_routing_funnel_attributes_domain_loss_before_tool_loss(tmp_path) ->
     assert report["routingFunnel"]["stages"] == {
         "routerRouted": {"count": 2, "conditionalRate": 1.0, "overallRate": 1.0},
         "domainExact": {"count": 1, "conditionalRate": 0.5, "overallRate": 0.5},
+        "capabilityExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 0.5},
         "toolExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 0.5},
         "requiredInputExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 0.5},
         "executionPolicyExact": {

@@ -107,6 +107,9 @@ def test_catalog_prompts_are_uuid_free_and_held_out_from_canonical_prompts() -> 
 
         assert canonical.isdisjoint(held_out)
         assert all(not UUID_PATTERN.search(prompt) for prompt in user_prompts)
+    assert all(
+        not UUID_PATTERN.search(case["prompt"]) for case in catalog["multiToolCases"]
+    )
 
 
 def test_catalog_declares_zero_single_multiple_and_homonym_resolution_cases() -> None:
@@ -160,6 +163,11 @@ def test_catalog_builds_separate_canonical_and_held_out_planner_suites() -> None
         PLANNER_SUITE_PATH,
         variant="context",
     )
+    multi_tool = load_meeting_regression_suite(
+        CATALOG_PATH,
+        PLANNER_SUITE_PATH,
+        variant="multi_tool",
+    )
 
     assert canonical.version == "meeting-agent-regression:v1:canonical"
     assert held_out.version == "meeting-agent-regression:v1:held_out"
@@ -167,8 +175,10 @@ def test_catalog_builds_separate_canonical_and_held_out_planner_suites() -> None
     assert len(held_out.cases) == 18 * 3 + 1
     assert len(counterexamples.cases) == 18 * 4 + 2
     assert len(context.cases) == 18 * 3 + 1
+    assert len(multi_tool.cases) == 6 * 3
     assert {case.kind for case in counterexamples.cases} == {"counterexample"}
     assert {case.kind for case in context.cases} == {"context"}
+    assert {case.kind for case in multi_tool.cases} == {"multi_tool"}
     assert all(case.planning_context.startswith("previous assistant:") for case in context.cases)
     assert all("-" not in case.planning_context for case in context.cases)
     assert {case.prompt for case in canonical.cases}.isdisjoint(
@@ -204,6 +214,22 @@ def test_catalog_builds_separate_canonical_and_held_out_planner_suites() -> None
     assert quality_cases["quality:meeting_summary_sections_context"].planning_context.startswith(
         "previous assistant:"
     )
+    assert len({case.workflow_id for case in multi_tool.cases}) == 6
+    assert all(case.workflow_stage_count == 3 for case in multi_tool.cases)
+    assert all(
+        len(case.expectation.domains) == 2
+        and len(case.expectation.capability_ids) == 2
+        and len(set(case.expectation.required_tool_names)) == 2
+        for case in multi_tool.cases
+    )
+    for workflow_id in {case.workflow_id for case in multi_tool.cases}:
+        stages = [case for case in multi_tool.cases if case.workflow_id == workflow_id]
+        assert [case.workflow_stage for case in stages] == [1, 2, 3]
+        assert stages[0].planning_context == ""
+        assert stages[1].planning_context.startswith("tool ")
+        assert len(stages[2].planning_context.splitlines()) == 2
+        assert stages[2].expectation.status == "completed"
+        assert stages[2].expectation.tool_name is None
 
 
 def test_phase5_quality_cases_cover_variants_resolution_and_uuid_safety() -> None:
