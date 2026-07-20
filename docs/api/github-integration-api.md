@@ -1031,7 +1031,8 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 ## Asynchronous sync execution
 
 Manual `POST /workspaces/{workspaceId}/github/sync-runs` returns `202 Accepted`.
-It requires an `Idempotency-Key` header: trimmed printable ASCII, 1–128 bytes. The
+It requires an `Idempotency-Key` header containing exactly 1-128 raw printable ASCII
+bytes. Leading and trailing printable ASCII spaces are preserved and distinct. The
 server stores only its lowercase SHA-256 hash. A replay with the same manual-sync scope
 returns the original run; a compatible active run is reused. Both `202` replay/reuse
 responses do not create or enqueue another job. Reusing a key with a different scope
