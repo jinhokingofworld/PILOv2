@@ -49,7 +49,13 @@ export function PrReviewAnalysisStatus({
   const analysisError = session.analysisError;
 
   return (
-    <main className="mx-auto flex min-h-[60vh] w-full max-w-2xl items-center px-4 py-10">
+    <main
+      className="mx-auto flex min-h-[60vh] w-full max-w-2xl items-center px-4 py-10"
+      style={{
+        fontFamily:
+          'Pretendard, "Noto Sans KR", "Malgun Gothic", Inter, sans-serif'
+      }}
+    >
       <Card className="w-full rounded-lg">
         <CardHeader className="items-center text-center">
           <span
@@ -65,12 +71,12 @@ export function PrReviewAnalysisStatus({
               <AlertCircle className="size-6" />
             )}
           </span>
-          <CardTitle className="mt-3 text-xl">
+          <CardTitle className="mt-3 break-keep text-balance text-xl">
             {isAnalyzing ? "PR 분석 중" : "PR 분석을 완료하지 못했습니다"}
           </CardTitle>
-          <CardDescription className="max-w-lg leading-6">
+          <CardDescription className="max-w-lg break-keep text-balance leading-6">
             {isAnalyzing
-              ? "변경 파일과 PR 정보를 분석하고 있습니다. 분석이 끝나면 자동으로 Review room을 엽니다."
+              ? "변경 파일과 PR 정보를 분석하고 있습니다. 분석이 끝나면 자동으로 리뷰 공간을 엽니다."
               : (analysisError?.message ??
                 "분석을 완료하지 못했습니다. 새 분석을 시작해주세요.")}
           </CardDescription>
