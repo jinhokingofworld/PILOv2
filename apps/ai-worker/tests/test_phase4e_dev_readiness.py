@@ -1,9 +1,9 @@
 import json
-from math import ceil
 from pathlib import Path
 
 import pytest
 
+from app.agent_planner_evaluation import load_meeting_regression_suite
 from app.phase4e_dev_readiness import (
     PHASE4E_READINESS_FORMAT,
     Phase4eReadinessInputs,
@@ -11,6 +11,7 @@ from app.phase4e_dev_readiness import (
 )
 
 CATALOG_PATH = Path(__file__).parents[1] / "evals" / "meeting_agent_capability_catalog_v1.json"
+TOOL_SNAPSHOT_PATH = Path(__file__).parents[1] / "evals" / "agent_planner_korean_v1.json"
 
 
 def write_json(path: Path, value: object) -> Path:
@@ -98,54 +99,54 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
     )
     catalog_sha = __import__("hashlib").sha256(CATALOG_PATH.read_bytes()).hexdigest()
     evaluation_reports = []
-    variants = {
-        "canonical": (216, 1.0, 1.0),
-        "held_out": (54, 0.95, 0.95),
-        "counterexample": (72, 0.95, 0.95),
-        "context": (54, 0.95, 0.95),
-    }
+    variants = ("canonical", "held_out", "counterexample", "context")
     repetitions = 5
-    for variant, (case_count, exact_rate, tool_accuracy) in variants.items():
+    for variant in variants:
+        suite = load_meeting_regression_suite(CATALOG_PATH, TOOL_SNAPSHOT_PATH, variant)
+        case_count = len(suite.cases)
+        tool_selection_case_count = sum(
+            case.expectation.tool_name is not None for case in suite.cases
+        )
         attempts = case_count * repetitions
-        exact_count = ceil(attempts * exact_rate)
-        exact_overall_rate = round(exact_count / attempts, 4)
+        tool_selection_attempts = tool_selection_case_count * repetitions
         mode_report = {
+            "totalCases": case_count,
             "totalAttempts": attempts,
-            "exactAttemptRate": exact_rate,
-            "toolSelectionAccuracy": tool_accuracy,
+            "exactAttemptRate": 1.0,
+            "toolSelectionAccuracy": 1.0,
             "requiredInputAccuracy": 1.0,
             "routingFunnel": {
-                "toolSelectionAttempts": attempts,
+                "toolSelectionAttempts": tool_selection_attempts,
                 "stages": {
                     "routerRouted": {
-                        "count": attempts,
+                        "count": tool_selection_attempts,
                         "conditionalRate": 1.0,
                         "overallRate": 1.0,
                     },
                     "domainExact": {
-                        "count": exact_count,
-                        "conditionalRate": exact_overall_rate,
-                        "overallRate": exact_overall_rate,
+                        "count": tool_selection_attempts,
+                        "conditionalRate": 1.0,
+                        "overallRate": 1.0,
                     },
                     "toolExact": {
-                        "count": exact_count,
+                        "count": tool_selection_attempts,
                         "conditionalRate": 1.0,
-                        "overallRate": exact_overall_rate,
+                        "overallRate": 1.0,
                     },
                     "requiredInputExact": {
-                        "count": exact_count,
+                        "count": tool_selection_attempts,
                         "conditionalRate": 1.0,
-                        "overallRate": exact_overall_rate,
+                        "overallRate": 1.0,
                     },
                     "executionPolicyExact": {
-                        "count": exact_count,
+                        "count": tool_selection_attempts,
                         "conditionalRate": 1.0,
-                        "overallRate": exact_overall_rate,
+                        "overallRate": 1.0,
                     },
                     "endToEndExact": {
-                        "count": exact_count,
+                        "count": tool_selection_attempts,
                         "conditionalRate": 1.0,
-                        "overallRate": exact_overall_rate,
+                        "overallRate": 1.0,
                     },
                 },
             },
@@ -200,6 +201,19 @@ def test_phase4e_readiness_combines_all_gates_without_raw_values(tmp_path: Path)
         "selectorCardinalityCount": 4,
     }
     assert report["runtime"] == {"writeContractCount": 4}
+    assert {
+        variant: (
+            summary["cases"],
+            summary["attempts"],
+            summary["toolSelectionAttempts"],
+        )
+        for variant, summary in report["evaluation"]["variants"].items()
+    } == {
+        "canonical": (217, 1085, 1085),
+        "held_out": (55, 275, 275),
+        "counterexample": (74, 370, 365),
+        "context": (55, 275, 275),
+    }
     serialized = json.dumps(report, ensure_ascii=False)
     assert "회의방 목록 보여줘" not in serialized
     assert "resourceId" not in serialized

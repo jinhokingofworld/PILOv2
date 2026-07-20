@@ -40,25 +40,21 @@ _REQUIRED_WRITE_CHAINS = {
 }
 _MEETING_EVALUATION_VARIANTS = {
     "canonical": {
-        "caseCount": 216,
         "exactAttemptRate": 1.0,
         "domainExactOverallRate": 1.0,
         "conditionalToolAccuracy": 1.0,
     },
     "held_out": {
-        "caseCount": 54,
         "toolSelectionAccuracy": 0.95,
         "domainExactOverallRate": 0.95,
         "conditionalToolAccuracy": 0.95,
     },
     "counterexample": {
-        "caseCount": 72,
         "toolSelectionAccuracy": 0.95,
         "domainExactOverallRate": 0.95,
         "conditionalToolAccuracy": 0.95,
     },
     "context": {
-        "caseCount": 54,
         "exactAttemptRate": 0.95,
         "domainExactOverallRate": 0.95,
         "conditionalToolAccuracy": 0.95,
@@ -89,11 +85,12 @@ def evaluate_phase4e_dev_readiness(inputs: Phase4eReadinessInputs) -> dict[str, 
     retrieval_metrics = _validate_retrieval(retrieval, registry_hashes)
     security_counts = _validate_security(security)
     write_contract_count = _validate_app_server(app_server, registry_hashes)
-    regression_counts = _validate_meeting_catalog(meeting_catalog)
+    regression_counts, evaluation_inventory = _validate_meeting_catalog(meeting_catalog)
     evaluation_metrics = _validate_meeting_evaluations(
         inputs.meeting_evaluation_reports,
         registry_hashes,
         _file_sha256(inputs.meeting_catalog),
+        evaluation_inventory,
     )
     _validate_dev_rollout(inputs.dev_terraform, inputs.rollout_runbook)
 
@@ -131,6 +128,7 @@ def _validate_meeting_evaluations(
     paths: tuple[Path, ...],
     registry_hashes: dict[str, str],
     meeting_catalog_sha256: str,
+    evaluation_inventory: dict[str, dict[str, int]],
 ) -> dict[str, object]:
     if len(paths) != len(_MEETING_EVALUATION_VARIANTS):
         raise ValueError("Phase 4-E requires all four Meeting evaluation reports")
@@ -162,17 +160,22 @@ def _validate_meeting_evaluations(
         if received_registry != registry_hashes:
             raise ValueError("Meeting evaluation is not bound to the registry snapshot")
 
-        case_count = expected["caseCount"]
+        inventory = evaluation_inventory[variant]
+        case_count = inventory["caseCount"]
+        tool_selection_case_count = inventory["toolSelectionCaseCount"]
         repetitions = metadata.get("repetitions")
         if not isinstance(repetitions, int) or isinstance(repetitions, bool) or repetitions < 5:
             raise ValueError(f"Meeting evaluation requires at least 5 repetitions: {variant}")
+        if report.get("totalCases") != case_count:
+            raise ValueError(f"Incomplete Meeting evaluation cases: {variant}/llm_router")
         expected_attempts = case_count * repetitions
         attempts = report.get("totalAttempts")
         if attempts != expected_attempts:
             raise ValueError(f"Incomplete Meeting evaluation: {variant}/llm_router")
         funnel = _object(report.get("routingFunnel"), "Missing LLM routing funnel")
+        expected_funnel_attempts = tool_selection_case_count * repetitions
         funnel_attempts = funnel.get("toolSelectionAttempts")
-        if funnel_attempts != expected_attempts:
+        if funnel_attempts != expected_funnel_attempts:
             raise ValueError(f"Incomplete Meeting routing funnel: {variant}")
         stages = _validate_routing_funnel(funnel, funnel_attempts)
         domain_stage = stages["domainExact"]
@@ -183,8 +186,6 @@ def _validate_meeting_evaluations(
             "conditionalToolAccuracy": tool_stage.get("conditionalRate"),
         }
         for metric_name, threshold in expected.items():
-            if metric_name == "caseCount":
-                continue
             metric = derived_metrics.get(metric_name, report.get(metric_name))
             if not isinstance(metric, int | float) or float(metric) < float(threshold):
                 if metric_name == "domainExactOverallRate":
@@ -209,7 +210,9 @@ def _validate_meeting_evaluations(
                     )
         summaries[variant] = {
             "mode": "llm_router",
+            "cases": case_count,
             "attempts": attempts,
+            "toolSelectionAttempts": funnel_attempts,
             "exactAttemptRate": report.get("exactAttemptRate"),
             "domainExactOverallRate": domain_stage.get("overallRate"),
             "conditionalToolAccuracy": tool_stage.get("conditionalRate"),
@@ -381,7 +384,9 @@ def _validate_app_server(value: dict[str, object], registry_hashes: dict[str, st
     return len(contracts)
 
 
-def _validate_meeting_catalog(value: dict[str, object]) -> dict[str, int]:
+def _validate_meeting_catalog(
+    value: dict[str, object],
+) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
     if value.get("version") != "meeting-agent-regression:v1":
         raise ValueError("Unsupported Meeting regression catalog")
     prefixes = value.get("canonicalPrefixes")
@@ -399,22 +404,79 @@ def _validate_meeting_catalog(value: dict[str, object]) -> dict[str, int]:
     held_out_count = 0
     counterexample_count = 0
     context_count = 0
+    evaluation_inventory = {
+        variant: {"caseCount": 0, "toolSelectionCaseCount": 0}
+        for variant in _MEETING_EVALUATION_VARIANTS
+    }
     for capability in capabilities:
         if not isinstance(capability, dict):
             raise ValueError("Invalid Meeting regression capability")
-        canonical_count += len(_string_list(capability, "canonicalSeeds")) * len(prefixes)
-        held_out_count += len(_string_list(capability, "heldOutParaphrases"))
-        context_count += len(_string_list(capability, "contextFollowups"))
+        canonical_case_count = len(_string_list(capability, "canonicalSeeds")) * len(prefixes)
+        held_out_case_count = len(_string_list(capability, "heldOutParaphrases"))
+        context_case_count = len(_string_list(capability, "contextFollowups"))
+        canonical_count += canonical_case_count
+        held_out_count += held_out_case_count
+        context_count += context_case_count
+        current_expectation = _object(
+            capability.get("currentExpectation"), "Missing Meeting current expectation"
+        )
+        current_tool = current_expectation.get("toolName")
+        if current_tool is not None and (not isinstance(current_tool, str) or not current_tool):
+            raise ValueError("Invalid Meeting current expectation tool")
+        for variant, count in (
+            ("canonical", canonical_case_count),
+            ("held_out", held_out_case_count),
+            ("context", context_case_count),
+        ):
+            evaluation_inventory[variant]["caseCount"] += count
+            if current_tool:
+                evaluation_inventory[variant]["toolSelectionCaseCount"] += count
         counterexamples = capability.get("counterexamples")
         if not isinstance(counterexamples, list):
             raise ValueError("Invalid Meeting counterexamples")
-        counterexample_count += len(counterexamples)
         for counterexample in counterexamples:
-            if (
-                not isinstance(counterexample, dict)
-                or counterexample.get("expectedCapability") not in by_id
-            ):
+            if not isinstance(counterexample, dict):
                 raise ValueError("Invalid Meeting counterexample target")
+            expected_capability = by_id.get(_required_string(counterexample, "expectedCapability"))
+            if expected_capability is None:
+                raise ValueError("Invalid Meeting counterexample target")
+            expected = _object(
+                expected_capability.get("currentExpectation"),
+                "Missing Meeting current expectation",
+            )
+            expected_tool = expected.get("toolName")
+            if expected_tool is not None and (
+                not isinstance(expected_tool, str) or not expected_tool
+            ):
+                raise ValueError("Invalid Meeting current expectation tool")
+            counterexample_count += 1
+            evaluation_inventory["counterexample"]["caseCount"] += 1
+            if expected_tool:
+                evaluation_inventory["counterexample"]["toolSelectionCaseCount"] += 1
+
+    quality_cases = value.get("qualityCases", [])
+    if not isinstance(quality_cases, list):
+        raise ValueError("Invalid Meeting quality cases")
+    quality_case_ids: set[str] = set()
+    for quality_case in quality_cases:
+        if not isinstance(quality_case, dict):
+            raise ValueError("Invalid Meeting quality case")
+        quality_case_id = _required_string(quality_case, "id")
+        if quality_case_id in quality_case_ids:
+            raise ValueError("Meeting quality case IDs must be unique")
+        quality_case_ids.add(quality_case_id)
+        variant = _required_string(quality_case, "kind")
+        if variant not in evaluation_inventory:
+            raise ValueError("Invalid Meeting quality case variant")
+        expectation = _object(
+            quality_case.get("expected"), "Missing Meeting quality case expectation"
+        )
+        tool_name = expectation.get("toolName")
+        if tool_name is not None and (not isinstance(tool_name, str) or not tool_name):
+            raise ValueError("Invalid Meeting quality case tool")
+        evaluation_inventory[variant]["caseCount"] += 1
+        if tool_name:
+            evaluation_inventory[variant]["toolSelectionCaseCount"] += 1
 
     for capability_id, expected_chain in _REQUIRED_WRITE_CHAINS.items():
         capability = by_id.get(capability_id)
@@ -434,14 +496,17 @@ def _validate_meeting_catalog(value: dict[str, object]) -> dict[str, int]:
     serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
     if _UUID_PATTERN.search(serialized):
         raise ValueError("Meeting regression catalog contains a raw UUID")
-    return {
-        "capabilityCount": len(capabilities),
-        "canonicalCount": canonical_count,
-        "heldOutCount": held_out_count,
-        "counterexampleCount": counterexample_count,
-        "multiTurnCount": context_count,
-        "selectorCardinalityCount": len(cardinalities),
-    }
+    return (
+        {
+            "capabilityCount": len(capabilities),
+            "canonicalCount": canonical_count,
+            "heldOutCount": held_out_count,
+            "counterexampleCount": counterexample_count,
+            "multiTurnCount": context_count,
+            "selectorCardinalityCount": len(cardinalities),
+        },
+        evaluation_inventory,
+    )
 
 
 def _validate_dev_rollout(terraform_path: Path, runbook_path: Path) -> None:

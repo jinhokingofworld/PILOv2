@@ -186,7 +186,9 @@ PYTHONPATH=. .venv/bin/python scripts/check_phase4e_dev_readiness.py \
 
 `phase4e-dev-readiness` artifact에는 registry·catalog·fixture SHA, Router domain·Planner Tool·입력·정책·
 end-to-end funnel, attempt 수·정확도, recall metric, bounded check ID만
-포함한다. 사용자 발화, raw resource reference, tool input, UUID, credential은 포함하지 않는다. canonical
-216건, held-out 54건, counterexample 72건, multi-turn 54건과 0/1/N·동명이인 selector fixture가 빠지면
-fail-closed한다. canonical은 exact 100%, held-out/counterexample tool 선택은 95%, context exact는 95%를
-요구하며 Router domain exact/recall, capability recall과 Router Tool 집합 이탈 여부도 함께 검사한다.
+포함한다. 사용자 발화, raw resource reference, tool input, UUID, credential은 포함하지 않는다. capability에서
+생성하는 canonical 216건, held-out 54건, counterexample 72건, multi-turn 54건에 `qualityCases`를 더한 실제
+평가 case는 각각 217/55/74/55건이다. readiness는 catalog에서 전체 case와 Tool 선택 대상 case를 별도로
+계산하며 둘 중 하나라도 빠지면 fail-closed한다. canonical은 exact 100%, held-out/counterexample Tool 선택은
+95%, context exact는 95%를 요구하며 Router domain exact/recall, capability recall과 Router Tool 집합 이탈
+여부도 함께 검사한다.

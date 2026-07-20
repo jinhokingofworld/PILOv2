@@ -116,21 +116,46 @@ def _attempt_signatures(report: dict[str, object]) -> tuple[tuple[object, ...], 
     return tuple(signatures)
 
 
-def _report_summary(report: dict[str, object]) -> dict[str, float | int]:
+def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
     funnel = _object(report.get("routingFunnel"), "Missing routing funnel")
     stages = _object(funnel.get("stages"), "Missing routing funnel stages")
-    summary: dict[str, float | int] = {
-        "attempts": _nonnegative_int(report.get("totalAttempts"), "Invalid attempt count"),
-        "toolSelectionAttempts": _nonnegative_int(
-            funnel.get("toolSelectionAttempts"), "Invalid tool selection attempt count"
-        ),
-        "exactAttemptRate": _number(report.get("exactAttemptRate"), "Invalid exact rate"),
-        "toolSelectionAccuracy": _number(
-            report.get("toolSelectionAccuracy"), "Invalid tool selection accuracy"
-        ),
-        "requiredInputAccuracy": _number(
-            report.get("requiredInputAccuracy"), "Invalid required input accuracy"
-        ),
+    attempts = _nonnegative_int(report.get("totalAttempts"), "Invalid attempt count")
+    results = _attempt_results(report, attempts)
+    passed_attempts = sum(item["passed"] is True for item in results)
+    tool_results = [item for item in results if _has_expected_tool(item)]
+    input_results = [item for item in results if _has_expected_input(item)]
+    tool_passed_attempts = sum("tool" not in item["failureReasons"] for item in tool_results)
+    input_passed_attempts = sum("input" not in item["failureReasons"] for item in input_results)
+    tool_selection_attempts = _nonnegative_int(
+        funnel.get("toolSelectionAttempts"), "Invalid tool selection attempt count"
+    )
+    if tool_selection_attempts != len(tool_results):
+        raise ValueError("Routing funnel does not match Tool assertion attempts")
+    exact_attempt_rate = _fraction(passed_attempts, attempts)
+    tool_selection_accuracy = (
+        _fraction(tool_passed_attempts, len(tool_results)) if tool_results else None
+    )
+    required_input_accuracy = (
+        _fraction(input_passed_attempts, len(input_results)) if input_results else None
+    )
+    reported_passed_attempts = _nonnegative_int(
+        report.get("passedAttempts"), "Invalid passed attempt count"
+    )
+    if reported_passed_attempts > attempts or reported_passed_attempts != passed_attempts:
+        raise ValueError("Invalid passed attempt count")
+    _validate_report_rate(report, "exactAttemptRate", exact_attempt_rate)
+    _validate_report_rate(report, "toolSelectionAccuracy", tool_selection_accuracy)
+    _validate_report_rate(report, "requiredInputAccuracy", required_input_accuracy)
+    summary: dict[str, float | int | None] = {
+        "attempts": attempts,
+        "passedAttempts": passed_attempts,
+        "toolSelectionAttempts": tool_selection_attempts,
+        "toolSelectionPassedAttempts": tool_passed_attempts,
+        "requiredInputAttempts": len(input_results),
+        "requiredInputPassedAttempts": input_passed_attempts,
+        "exactAttemptRate": exact_attempt_rate,
+        "toolSelectionAccuracy": tool_selection_accuracy,
+        "requiredInputAccuracy": required_input_accuracy,
     }
     previous_count = int(summary["toolSelectionAttempts"])
     for stage_name in _FUNNEL_STAGES:
@@ -155,13 +180,23 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int]:
     return summary
 
 
-def _aggregate(reports: Iterable[dict[str, object]]) -> dict[str, float | int]:
+def _aggregate(reports: Iterable[dict[str, object]]) -> dict[str, float | int | None]:
     summaries = [_report_summary(report) for report in reports]
     attempts = sum(int(summary["attempts"]) for summary in summaries)
+    passed_attempts = sum(int(summary["passedAttempts"]) for summary in summaries)
     tool_attempts = sum(int(summary["toolSelectionAttempts"]) for summary in summaries)
-    result: dict[str, float | int] = {
+    tool_passed_attempts = sum(int(summary["toolSelectionPassedAttempts"]) for summary in summaries)
+    input_attempts = sum(int(summary["requiredInputAttempts"]) for summary in summaries)
+    input_passed_attempts = sum(
+        int(summary["requiredInputPassedAttempts"]) for summary in summaries
+    )
+    result: dict[str, float | int | None] = {
         "attempts": attempts,
+        "passedAttempts": passed_attempts,
         "toolSelectionAttempts": tool_attempts,
+        "toolSelectionPassedAttempts": tool_passed_attempts,
+        "requiredInputAttempts": input_attempts,
+        "requiredInputPassedAttempts": input_passed_attempts,
     }
     previous_count = tool_attempts
     for stage_name in _FUNNEL_STAGES:
@@ -172,14 +207,16 @@ def _aggregate(reports: Iterable[dict[str, object]]) -> dict[str, float | int]:
         previous_count = count
     result["conditionalToolAccuracy"] = result["toolExactConditionalRate"]
     result["endToEndExactRate"] = result["endToEndExactOverallRate"]
-    result["exactAttemptRate"] = result["endToEndExactOverallRate"]
-    result["toolSelectionAccuracy"] = result["toolExactOverallRate"]
-    result["requiredInputAccuracy"] = result["requiredInputExactOverallRate"]
+    result["exactAttemptRate"] = _fraction(passed_attempts, attempts)
+    result["toolSelectionAccuracy"] = _fraction(tool_passed_attempts, tool_attempts)
+    result["requiredInputAccuracy"] = (
+        _fraction(input_passed_attempts, input_attempts) if input_attempts else None
+    )
     return result
 
 
 def _summary_delta(
-    baseline: dict[str, float | int], candidate: dict[str, float | int]
+    baseline: dict[str, float | int | None], candidate: dict[str, float | int | None]
 ) -> dict[str, float]:
     metric_names = (
         "exactAttemptRate",
@@ -192,8 +229,49 @@ def _summary_delta(
     return {
         name: round(float(candidate[name]) - float(baseline[name]), 4)
         for name in metric_names
-        if name in baseline and name in candidate
+        if isinstance(baseline.get(name), int | float)
+        and not isinstance(baseline.get(name), bool)
+        and isinstance(candidate.get(name), int | float)
+        and not isinstance(candidate.get(name), bool)
     }
+
+
+def _attempt_results(report: dict[str, object], attempts: int) -> list[dict[str, object]]:
+    raw_results = report.get("results")
+    if not isinstance(raw_results, list) or len(raw_results) != attempts:
+        raise ValueError("Evaluation report attempt results are incomplete")
+    results = [_object(item, "Invalid evaluation attempt") for item in raw_results]
+    for item in results:
+        if not isinstance(item.get("passed"), bool):
+            raise ValueError("Invalid evaluation attempt result")
+        failure_reasons = item.get("failureReasons")
+        if not isinstance(failure_reasons, list) or not all(
+            isinstance(reason, str) for reason in failure_reasons
+        ):
+            raise ValueError("Invalid evaluation attempt failure reasons")
+        _object(item.get("expected"), "Missing evaluation attempt expectation")
+    return results
+
+
+def _has_expected_tool(result: dict[str, object]) -> bool:
+    expected = _object(result.get("expected"), "Missing evaluation attempt expectation")
+    return isinstance(expected.get("toolName"), str) and bool(expected["toolName"])
+
+
+def _has_expected_input(result: dict[str, object]) -> bool:
+    expected = _object(result.get("expected"), "Missing evaluation attempt expectation")
+    input_fields = expected.get("inputFields")
+    return isinstance(input_fields, list) and bool(input_fields)
+
+
+def _validate_report_rate(report: dict[str, object], key: str, expected: float | None) -> None:
+    actual = report.get(key)
+    if expected is None:
+        if actual is not None:
+            raise ValueError(f"Invalid report rate: {key}")
+        return
+    if _rate(actual, f"Invalid report rate: {key}") != expected:
+        raise ValueError(f"Invalid report rate: {key}")
 
 
 def _common_revision(reports: Iterable[dict[str, object]]) -> str:
