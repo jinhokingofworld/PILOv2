@@ -34,7 +34,6 @@ import {
 } from "@codemirror/view";
 import {
   Database,
-  Home,
   List as ListIcon,
   LocateFixed,
   MapPin,
@@ -214,6 +213,10 @@ import {
   type SqlErdNormalizedSqlPreview
 } from "@/features/sql-erd/utils/sql-diff-apply";
 import { cn } from "@/lib/utils";
+import {
+  clearSqlErdSessionHeaderTitle,
+  setSqlErdSessionHeaderTitle
+} from "@/features/sql-erd/session-header-title-store";
 
 const emptySqlErdViewSession: SqlErdViewSession = {
   id: null,
@@ -537,6 +540,14 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   );
   const sqlErdViewSession =
     sqlErdEditState.lastSuccessfulSnapshot;
+  useEffect(() => {
+    setSqlErdSessionHeaderTitle(
+      sessionId,
+      sqlErdViewSession.id === sessionId ? sqlErdViewSession.title : null
+    );
+
+    return () => clearSqlErdSessionHeaderTitle(sessionId);
+  }, [sessionId, sqlErdViewSession.id, sqlErdViewSession.title]);
   const [sessionLoadState, setSessionLoadState] =
     useState<SqlErdSessionLoadState>({
       label: "Loading",
@@ -2376,11 +2387,6 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   ]);
 
   useEffect(() => {
-    setIsSourceOpen(window.matchMedia("(min-width: 1024px)").matches);
-    setIsInspectorOpen(window.matchMedia("(min-width: 1280px)").matches);
-  }, []);
-
-  useEffect(() => {
     setAgentTableFocusRevisionValidated(false);
     setAgentTableFocus(consumeStagedSqlErdAgentTableFocus(sessionId));
 
@@ -2699,10 +2705,6 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           (lastResolvedDialect !== null ||
             sqlErdEditState.draftDialect !== "auto")
         }
-        emptyState={{
-          sessionLoadState,
-          title: sqlErdViewSession.title
-        }}
         isOpen={isInspectorOpen}
         modelJson={sqlErdViewSession.modelJson}
         onAddForeignKey={handlePreviewForeignKeyAdd}
@@ -3021,7 +3023,6 @@ function SourcePanel({
     >
       <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4">
         <div className="flex min-w-0 items-center gap-2">
-          <SqlErdHomeNavigationButton />
           <SqlErdSessionListNavigationButton />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -3125,25 +3126,6 @@ function SourcePanel({
   );
 }
 
-function SqlErdHomeNavigationButton() {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Link
-            aria-label="홈으로 이동"
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            href="/home"
-          >
-            <Home className="size-4" />
-          </Link>
-        }
-      />
-      <TooltipContent side="right">홈으로 이동</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function SqlErdSessionListNavigationButton() {
   return (
     <Tooltip>
@@ -3166,8 +3148,7 @@ function SqlErdSessionListNavigationButton() {
 function CollapsedSourcePanel({ onToggle }: { onToggle: () => void }) {
   return (
     <aside className="flex w-12 shrink-0 flex-col border-r bg-muted/20">
-      <div className="flex min-h-24 flex-col items-center justify-center gap-1 border-b">
-        <SqlErdHomeNavigationButton />
+      <div className="flex min-h-14 flex-col items-center justify-center border-b">
         <SqlErdSessionListNavigationButton />
       </div>
       <button
@@ -3713,15 +3694,9 @@ function AutosavePausedBanner({
   );
 }
 
-type InspectorEmptyState = {
-  sessionLoadState: SqlErdSessionLoadState;
-  title: string;
-};
-
 type InspectorPanelProps = PanelToggleProps & {
   canAddForeignKey: boolean;
   canEditSchema: boolean;
-  emptyState: InspectorEmptyState;
   modelJson: SqltoerdModelJsonV1;
   onAddForeignKey: (input: {
     fromColumnId: string;
@@ -3760,7 +3735,6 @@ type InspectorPanelProps = PanelToggleProps & {
 function InspectorPanel({
   canAddForeignKey,
   canEditSchema,
-  emptyState,
   isOpen,
   modelJson,
   onAddForeignKey,
@@ -3783,13 +3757,20 @@ function InspectorPanel({
 
   if (!isOpen) {
     return (
-      <CollapsedPanelButton
-        ariaLabel="상세 정보 패널 열기"
-        icon={<PanelRightOpen className="size-4" />}
-        label="상세"
-        onClick={onToggle}
-        side="right"
-      />
+      <aside className="flex w-12 shrink-0 flex-col items-center border-l bg-muted/20 py-2">
+        <button
+          aria-label="상세 정보 패널 열기"
+          className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          data-sqltoerd-inspector-toggle
+          onClick={onToggle}
+          type="button"
+        >
+          <PanelRightOpen className="size-4" />
+        </button>
+        <span className="mt-2 text-xs font-medium text-muted-foreground [writing-mode:vertical-rl]">
+          상세
+        </span>
+      </aside>
     );
   }
 
@@ -3799,17 +3780,8 @@ function InspectorPanel({
       id="inspector"
       style={{ width }}
     >
-      <button
-        aria-label="상세 정보 패널 닫기"
-        className="absolute top-1/2 -left-4 z-20 inline-flex size-8 -translate-y-1/2 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-md transition-colors hover:bg-muted hover:text-foreground"
-        data-sqltoerd-inspector-toggle
-        onClick={onToggle}
-        type="button"
-      >
-        <PanelRightClose className="size-4" />
-      </button>
       <div
-        className="border-b px-5 py-5"
+        className="flex items-start justify-between gap-3 border-b px-5 py-5"
         data-sqltoerd-inspector-summary
       >
         {viewModel.type === "table" ? (
@@ -3837,14 +3809,28 @@ function InspectorPanel({
           </div>
         ) : (
           <div className="min-w-0">
-            <p className="text-lg font-semibold">{inspectorTitle}</p>
+            <p className="text-sm font-semibold text-muted-foreground">
+              선택 정보
+            </p>
+            <p className="mt-2 truncate text-lg font-semibold">
+              {inspectorTitle}
+            </p>
             {inspectorSubtitle ? (
-              <p className="truncate text-sm text-muted-foreground">
+              <p className="mt-1 truncate font-mono text-sm text-muted-foreground">
                 {inspectorSubtitle}
               </p>
             ) : null}
           </div>
         )}
+        <button
+          aria-label="상세 정보 패널 닫기"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          data-sqltoerd-inspector-toggle
+          onClick={onToggle}
+          type="button"
+        >
+          <PanelRightClose className="size-4" />
+        </button>
       </div>
 
       <div
@@ -3854,7 +3840,6 @@ function InspectorPanel({
         <InspectorContent
           canAddForeignKey={canAddForeignKey}
           canEditSchema={canEditSchema}
-          emptyState={emptyState}
           modelJson={modelJson}
           onAddForeignKey={onAddForeignKey}
           onConvertAnnotationToForeignKey={onConvertAnnotationToForeignKey}
@@ -3866,13 +3851,6 @@ function InspectorPanel({
         />
 
         <div className="mt-auto grid gap-2">
-          <button
-            className="inline-flex h-11 cursor-not-allowed items-center justify-center rounded-md border bg-background px-3 text-lg font-medium text-muted-foreground opacity-70"
-            disabled
-            type="button"
-          >
-            Add column
-          </button>
           <InspectorPinControl
             onClear={onClearTablePin}
             onNavigate={onNavigateToPinnedTable}
@@ -3909,7 +3887,7 @@ function InspectorPinControl({
     return (
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
         <button
-          className="inline-flex h-11 min-w-0 items-center justify-center gap-2 rounded-md border bg-background px-3 text-lg font-medium text-foreground transition-colors hover:bg-muted"
+          className="inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-md border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
           onClick={onPin}
           type="button"
         >
@@ -4023,7 +4001,6 @@ function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {
 function InspectorContent({
   canAddForeignKey,
   canEditSchema,
-  emptyState,
   modelJson,
   onAddForeignKey,
   onConvertAnnotationToForeignKey,
@@ -4035,7 +4012,6 @@ function InspectorContent({
 }: {
   canAddForeignKey: boolean;
   canEditSchema: boolean;
-  emptyState: InspectorEmptyState;
   modelJson: SqltoerdModelJsonV1;
   onAddForeignKey: (input: {
     fromColumnId: string;
@@ -4111,30 +4087,16 @@ function InspectorContent({
   }
 
   return (
-    <div className="rounded-md border border-dashed p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background">
-            <Database className="size-4 text-muted-foreground" />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-lg font-semibold">{emptyState.title}</p>
-            <p className="mt-1 text-base leading-7 text-muted-foreground">
-              {emptyState.sessionLoadState.message}
-            </p>
-          </div>
-        </div>
-        <StatusPill
-          label={emptyState.sessionLoadState.label}
-          tone={emptyState.sessionLoadState.tone}
-        />
+    <div className="rounded-xl border border-dashed bg-muted/20 px-5 py-8 text-center">
+      <div className="mx-auto flex size-10 items-center justify-center rounded-lg border bg-background">
+        <Database className="size-4 text-muted-foreground" />
       </div>
-      <div className="mt-4 border-t pt-4">
-        <p className="text-lg font-medium">선택 정보</p>
-        <p className="mt-1 text-base leading-7 text-muted-foreground">
-          선택한 테이블, 컬럼, 관계가 없습니다
-        </p>
-      </div>
+      <p className="mt-4 text-sm font-semibold text-foreground">
+        선택된 항목이 없습니다
+      </p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+        캔버스에서 항목을 선택하면 상세 정보를 확인할 수 있습니다
+      </p>
     </div>
   );
 }
@@ -4195,7 +4157,7 @@ function TableInspector({
       </div>
       <TableRelationshipList relations={viewModel.relations} />
       <InspectorSectionTitle>테이블 편집</InspectorSectionTitle>
-      <div className="space-y-3 rounded-md border p-3">
+      <div className="space-y-3 rounded-xl border bg-muted/10 p-4">
         <label className="grid gap-1.5 text-sm font-medium">
           테이블명
           <input
@@ -4354,8 +4316,20 @@ function ColumnInspector({
 
   return (
     <>
+      <div className="overflow-hidden rounded-xl border bg-background px-4">
+        <InspectorRow label="테이블" value={getTableDisplayName(table)} />
+        <InspectorRow label="컬럼명" value={column.name} />
+        <InspectorRow label="컬럼 타입" value={column.dataType} />
+        <InspectorRow label="NULL 허용" value={column.nullable ? "예" : "아니오"} />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {column.primaryKey ? <ConstraintPill label="PK" /> : null}
+        {column.foreignKey ? <ConstraintPill label="FK" /> : null}
+        {column.unique ? <ConstraintPill label="UQ" /> : null}
+        {!column.nullable ? <ConstraintPill label="NN" /> : null}
+      </div>
       <InspectorSectionTitle>컬럼 정보</InspectorSectionTitle>
-      <div className="space-y-3 rounded-md border p-3">
+      <div className="space-y-3 rounded-xl border bg-muted/10 p-4">
         <label className="grid gap-1.5 text-sm font-medium">
           컬럼명
           <input
@@ -4419,20 +4393,8 @@ function ColumnInspector({
           컬럼 삭제 SQL diff 보기
         </button>
       </div>
-      <div className="space-y-2">
-        <InspectorRow label="테이블" value={getTableDisplayName(table)} />
-        <InspectorRow label="컬럼명" value={column.name} />
-        <InspectorRow label="컬럼 타입" value={column.dataType} />
-        <InspectorRow label="NULL 허용" value={column.nullable ? "예" : "아니오"} />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {column.primaryKey ? <ConstraintPill label="PK" /> : null}
-        {column.foreignKey ? <ConstraintPill label="FK" /> : null}
-        {column.unique ? <ConstraintPill label="UQ" /> : null}
-        {!column.nullable ? <ConstraintPill label="NN" /> : null}
-      </div>
       <RelationList relations={viewModel.relations} />
-      <div className="space-y-3 rounded-md border p-3">
+      <div className="space-y-3 rounded-xl border bg-muted/10 p-4">
         <div className="flex items-center justify-between gap-3">
           <p className="text-base font-medium">FK 관계</p>
           <button
@@ -5097,7 +5059,7 @@ function RelationList({ relations }: { relations: RelationSummary[] }) {
     return (
       <div>
         <InspectorSectionTitle>연결 관계</InspectorSectionTitle>
-        <p className="rounded-md border border-dashed p-4 text-base leading-7 text-muted-foreground">
+        <p className="rounded-xl border border-dashed p-4 text-sm leading-6 text-muted-foreground">
           연결된 관계가 없습니다
         </p>
       </div>
@@ -5110,7 +5072,7 @@ function RelationList({ relations }: { relations: RelationSummary[] }) {
       <div className="space-y-2">
         {relations.map((relation) => (
           <div
-            className="rounded-md border bg-background p-4 text-base leading-7"
+            className="rounded-xl border bg-background p-4 text-sm leading-6"
             key={relation.id}
           >
             <p className="font-medium text-foreground">{relation.fromLabel}</p>
@@ -5124,7 +5086,7 @@ function RelationList({ relations }: { relations: RelationSummary[] }) {
 
 function ConstraintPill({ label }: { label: string }) {
   return (
-    <span className="inline-flex h-9 items-center rounded-md border bg-muted/40 px-3 text-base font-semibold text-muted-foreground">
+    <span className="inline-flex h-7 items-center rounded-md border bg-muted/40 px-2.5 text-xs font-semibold text-muted-foreground">
       {label}
     </span>
   );
@@ -5132,7 +5094,7 @@ function ConstraintPill({ label }: { label: string }) {
 
 function InspectorSectionTitle({ children }: { children: ReactNode }) {
   return (
-    <p className="text-base font-semibold text-muted-foreground">
+    <p className="text-sm font-semibold tracking-wide text-muted-foreground">
       {children}
     </p>
   );
@@ -5145,43 +5107,10 @@ type InspectorRowProps = {
 
 function InspectorRow({ label, value }: InspectorRowProps) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b py-3 text-lg">
+    <div className="flex items-start justify-between gap-4 border-b py-3 text-sm last:border-b-0">
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <span className="break-all text-right font-medium">{value}</span>
     </div>
-  );
-}
-
-type CollapsedPanelButtonProps = {
-  ariaLabel: string;
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-  side?: "left" | "right";
-};
-
-function CollapsedPanelButton({
-  ariaLabel,
-  icon,
-  label,
-  onClick,
-  side = "left"
-}: CollapsedPanelButtonProps) {
-  return (
-    <button
-      aria-label={ariaLabel}
-      className={cn(
-        "flex w-12 shrink-0 flex-col items-center gap-3 bg-muted/20 py-3 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-        side === "right" ? "border-l" : "border-r"
-      )}
-      onClick={onClick}
-      type="button"
-    >
-      {icon}
-      <span className="text-xs font-medium [writing-mode:vertical-rl]">
-        {label}
-      </span>
-    </button>
   );
 }
 

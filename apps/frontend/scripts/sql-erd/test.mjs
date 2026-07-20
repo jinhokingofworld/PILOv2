@@ -7184,8 +7184,19 @@ assert.deepEqual(
     isSelected: false
   }),
   {
-    stroke: "rgba(37, 99, 235, 0.74)",
-    strokeWidth: 3
+    stroke: "rgba(37, 99, 235, 0.98)",
+    strokeWidth: 4
+  }
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdRelationVisualStyle({
+    isContextual: true,
+    isHovered: true,
+    isSelected: false
+  }),
+  {
+    stroke: "rgba(37, 99, 235, 0.98)",
+    strokeWidth: 4
   }
 );
 assert.deepEqual(
@@ -8153,13 +8164,14 @@ assert.doesNotMatch(panel, /previousModelJson: parseStart\.session\.modelJson/);
 assert.match(panel, /relationSourceCompartmentRef/);
 assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
 assert.match(panel, /import Link from "next\/link"/);
-assert.match(panel, /\bHome\b/);
-assert.match(panel, /function SqlErdHomeNavigationButton/);
+assert.doesNotMatch(panel, /\bHome\b/);
+assert.doesNotMatch(panel, /function SqlErdHomeNavigationButton/);
 assert.match(panel, /href="\/sql-erd"/);
 assert.match(panel, /세션 목록으로 이동/);
 assert.match(panel, /function CollapsedSourcePanel/);
-assert.match(panel, /href="\/home"/);
-assert.match(panel, /aria-label="홈으로 이동"/);
+assert.doesNotMatch(panel, /href="\/home"/);
+assert.doesNotMatch(panel, /setIsSourceOpen\(window\.matchMedia/);
+assert.doesNotMatch(panel, /setIsInspectorOpen\(window\.matchMedia/);
 assert.match(panel, /<CollapsedSourcePanel onToggle=\{onToggle\} \/>/);
 assert.match(panel, /EditorView\.scrollIntoView/);
 assert.match(panel, /y: "center"/);
@@ -8210,8 +8222,8 @@ assert.match(panel, /aria-valuenow=\{width\}/);
 assert.match(panel, /onPointerDown/);
 assert.match(panel, /sourcePanelWidth/);
 assert.match(panel, /inspectorPanelWidth/);
-assert.match(panel, /emptyState=\{\{/);
-assert.match(panel, /title: sqlErdViewSession\.title/);
+assert.doesNotMatch(panel, /emptyState=\{\{/);
+assert.doesNotMatch(panel, /type InspectorEmptyState/);
 assert.match(panel, /const inspectorSubtitle = getInspectorSubtitle\(viewModel\)/);
 assert.match(panel, /const inspectorTitle = getInspectorTitle\(viewModel\)/);
 assert.match(panel, /\{inspectorTitle\}/);
@@ -8221,6 +8233,8 @@ assert.match(panel, /data-sqltoerd-inspector-table-name/);
 assert.match(panel, /data-sqltoerd-inspector-table-counts/);
 assert.match(panel, /data-sqltoerd-inspector-columns/);
 assert.match(panel, /data-sqltoerd-inspector-relationships/);
+assert.match(panel, /캔버스에서 항목을 선택하면 상세 정보를 확인할 수 있습니다/);
+assert.doesNotMatch(panel, />Add column</);
 assert.match(panel, />COLUMNS</);
 assert.match(panel, />RELATIONSHIPS</);
 assert.match(panel, /viewModel\.table\.columns\.map/);
@@ -8461,8 +8475,9 @@ assert.doesNotMatch(tableShape, /text-overflow/);
 assert.match(panel, /data-sqltoerd-inspector-toggle/);
 assert.match(
   panel,
-  /className="absolute top-1\/2 -left-[\s\S]*?data-sqltoerd-inspector-toggle/
+  /className="inline-flex size-8[\s\S]*?data-sqltoerd-inspector-toggle/
 );
+assert.doesNotMatch(panel, /className="absolute top-1\/2 -left-/);
 
 assert.match(relationShape, /SQLTOERD_RELATION_SHAPE_TYPE/);
 assert.match(relationShape, /SQLTOERD_RELATION_HOVER_EVENT/);
