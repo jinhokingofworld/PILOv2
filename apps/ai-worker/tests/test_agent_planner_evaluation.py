@@ -15,7 +15,11 @@ from app.agent_planner_evaluation import (
     load_meeting_regression_suite,
     select_shadow_planner_tools,
 )
-from app.agent_processor import AgentPlannerDecision, AgentRoutingDecision
+from app.agent_processor import (
+    AgentPlannerDecision,
+    AgentPlannerOutputError,
+    AgentRoutingDecision,
+)
 from app.agent_tool_retrieval import (
     compute_input_schema_sha256,
     compute_tool_capability_catalog_sha,
@@ -41,6 +45,11 @@ class FakeRouter:
     def route(self, request):
         self.requests.append(request)
         return next(self.decisions)
+
+
+class RejectingPlanner:
+    def plan(self, request):
+        raise AgentPlannerOutputError("Agent planner selected a tool outside the shortlist")
 
 
 def test_evaluation_input_hashes_include_meeting_catalog_when_provided(tmp_path) -> None:
@@ -405,6 +414,44 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
             },
         },
     }
+
+    rejected_router = FakeRouter(
+        [
+            AgentRoutingDecision(
+                status="routed",
+                domains=("calendar",),
+                capability_ids=("calendar.list",),
+                intent_summary="이번 주 일정을 조회한다.",
+                confidence="high",
+                clarification_question=None,
+                unsupported_reason=None,
+            )
+        ]
+    )
+    rejected_report = build_evaluation_report(
+        evaluate_suite(
+            RejectingPlanner(),
+            replace(suite, cases=(suite.cases[0],)),
+            current_date="2026-07-11",
+            router=rejected_router,
+            use_llm_routing=True,
+            shadow_top_k=1,
+        )
+    )
+
+    assert rejected_report["totalAttempts"] == 1
+    assert rejected_report["passedAttempts"] == 0
+    assert rejected_report["retrieval"]["shortlistViolations"] == 1
+    assert rejected_report["results"][0]["failureReasons"] == [
+        "planner_output",
+        "tool",
+        "shortlist_tool",
+    ]
+    assert rejected_report["results"][0]["failureCategoryCandidates"] == [
+        "wrong_tool",
+        "shortlist_violation",
+        "planner_output_error",
+    ]
 
 
 def test_llm_routing_funnel_attributes_domain_loss_before_tool_loss(tmp_path) -> None:
