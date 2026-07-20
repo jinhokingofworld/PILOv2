@@ -11,6 +11,7 @@ from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from app.agent_latency import AgentLatencyObserver
 from app.agent_prompt_security import (
     PromptSecurityAssessment,
     PromptSecuritySource,
@@ -141,6 +142,8 @@ class AgentRunContext:
     prompt: str
     timezone: str
     planner_turn_count: int = 0
+    queue_wait_ms: int | None = None
+    latest_planner_tool_name: str | None = None
     planning_context: str = ""
     untrusted_context_sources: tuple[PromptSecuritySource, ...] = ()
     current_user_source: PromptSecuritySource | None = None
@@ -427,6 +430,13 @@ class AgentProcessResult:
     delete_message: bool
     reason: str
     run_id: str | None = None
+
+
+@dataclass
+class _AgentLatencyScope:
+    targeted: bool = False
+    queue_wait_ms: int | None = None
+    queue_emitted: bool = False
 
 
 class AgentGroundedAnswerProcessor:
@@ -723,6 +733,7 @@ class AgentRunProcessor:
         tool_retrieval_mode: str | None = None,
         tool_retrieval_top_k: int = DEFAULT_TOOL_RETRIEVAL_TOP_K,
         tool_retrieval_schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
+        latency_observer: AgentLatencyObserver | None = None,
     ) -> None:
         self.repository = repository
         self.planner_client = planner_client
@@ -734,6 +745,7 @@ class AgentRunProcessor:
         )
         self.tool_retrieval_top_k = tool_retrieval_top_k
         self.tool_retrieval_schema_token_budget = tool_retrieval_schema_token_budget
+        self.latency_observer = latency_observer or AgentLatencyObserver()
 
     def process_payload(self, payload: dict[str, object]) -> AgentProcessResult:
         try:
@@ -741,22 +753,50 @@ class AgentRunProcessor:
         except ValueError:
             return AgentProcessResult(delete_message=True, reason="invalid_agent_job")
 
+        latency_scope = _AgentLatencyScope()
+        planning_started_at = self.latency_observer.start()
         try:
-            return self.process_job(job)
+            result = self.process_job(job, latency_scope)
         except AgentExecutionHandoffError:
-            return AgentProcessResult(
+            result = AgentProcessResult(
                 delete_message=False,
                 reason="agent_execution_handoff_unavailable",
                 run_id=job.run_id,
             )
         except InfrastructureError:
-            return AgentProcessResult(
+            result = AgentProcessResult(
                 delete_message=False,
                 reason="infrastructure_failure",
                 run_id=job.run_id,
             )
+        except Exception:
+            self._observe_latency(
+                job,
+                stage="planning_turn",
+                outcome="failure",
+                started_at=planning_started_at,
+                failure_type="unknown",
+                targeted=latency_scope.targeted,
+            )
+            raise
+        self._observe_latency(
+            job,
+            stage="planning_turn",
+            outcome=_planning_latency_outcome(result.reason),
+            started_at=planning_started_at,
+            failure_type=(
+                "repository_error" if result.reason == "infrastructure_failure" else None
+            ),
+            targeted=latency_scope.targeted,
+        )
+        return result
 
-    def process_job(self, job: AgentRunJob) -> AgentProcessResult:
+    def process_job(
+        self,
+        job: AgentRunJob,
+        latency_scope: _AgentLatencyScope | None = None,
+    ) -> AgentProcessResult:
+        latency_scope = latency_scope or _AgentLatencyScope()
         lock_acquired = self.repository.try_acquire_run_lock(job.run_id)
         if not lock_acquired:
             return self._result(
@@ -769,6 +809,7 @@ class AgentRunProcessor:
             context = self.repository.get_run_context(job)
             if context is None:
                 return self._result(job, delete_message=True, reason="agent_run_not_found")
+            latency_scope.queue_wait_ms = context.queue_wait_ms
 
             status = context.status
             if status in TERMINAL_AGENT_RUN_STATUSES:
@@ -789,7 +830,15 @@ class AgentRunProcessor:
                 )
 
             if status == "running":
-                return self._handoff_execution(job, retried=True)
+                latency_scope.targeted = context.latest_planner_tool_name in {
+                    SQL_ERD_INSPECTION_TOOL_NAME,
+                    SQL_ERD_FOCUS_TOOL_NAME,
+                }
+                return self._handoff_execution(
+                    job,
+                    retried=True,
+                    latency_scope=latency_scope,
+                )
 
             if status != "planning":
                 return self._result(
@@ -813,11 +862,16 @@ class AgentRunProcessor:
                     ),
                 )
 
-            return self._plan_run(job, context)
+            return self._plan_run(job, context, latency_scope)
         finally:
             self.repository.release_run_lock(job.run_id)
 
-    def _plan_run(self, job: AgentRunJob, context: AgentRunContext) -> AgentProcessResult:
+    def _plan_run(
+        self,
+        job: AgentRunJob,
+        context: AgentRunContext,
+        latency_scope: _AgentLatencyScope,
+    ) -> AgentProcessResult:
         step_id: str | None = None
         try:
             step_id = self.repository.start_planner_step(job, context)
@@ -841,6 +895,14 @@ class AgentRunProcessor:
                 job.request_context["surface"] if job.request_context is not None else None
             )
             selection_job = _restrict_agent_job_to_context_surface(job, context_surface)
+            latency_scope.targeted = _sql_erd_latency_target_hint(
+                selection_job,
+                context.prompt,
+                context.planning_context,
+                top_k=self.tool_retrieval_top_k,
+                schema_token_budget=self.tool_retrieval_schema_token_budget,
+            )
+            self._emit_queue_latency(job, latency_scope)
             routing: AgentRoutingDecision | None = None
             completion_tool_names: tuple[str, ...] = ()
             if self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER:
@@ -848,19 +910,55 @@ class AgentRunProcessor:
                     raise AgentRouterOutputError(
                         "Agent router configuration or capability catalog is missing"
                     )
-                routing = normalize_agent_routing_decision(
-                    self.router_client.route(
-                        AgentRoutingRequest(
-                            prompt=context.prompt,
-                            timezone=context.timezone,
-                            current_date=current_date,
-                            catalog=selection_job.tool_capability_catalog,
-                            planning_context=context.planning_context,
-                            context_surface=context_surface,
-                        )
+                router_started_at = self.latency_observer.start()
+                try:
+                    routing = normalize_agent_routing_decision(
+                        self.router_client.route(
+                            AgentRoutingRequest(
+                                prompt=context.prompt,
+                                timezone=context.timezone,
+                                current_date=current_date,
+                                catalog=selection_job.tool_capability_catalog,
+                                planning_context=context.planning_context,
+                                context_surface=context_surface,
+                            )
+                        ),
+                        selection_job.tool_capability_catalog,
+                        context_surface=context_surface,
+                    )
+                except Exception as error:
+                    self._observe_latency(
+                        job,
+                        stage="router",
+                        outcome="failure",
+                        started_at=router_started_at,
+                        failure_type=_latency_failure_type(error),
+                        targeted=latency_scope.targeted,
+                    )
+                    raise
+                routed_tool_names = {
+                    tool_name
+                    for capability in selection_job.tool_capability_catalog.capabilities
+                    if capability.capability_id in routing.capability_ids
+                    for tool_name in capability.tool_names
+                }
+                latency_scope.targeted = latency_scope.targeted or bool(
+                    routed_tool_names & {SQL_ERD_INSPECTION_TOOL_NAME, SQL_ERD_FOCUS_TOOL_NAME}
+                )
+                self._emit_queue_latency(job, latency_scope)
+                self._observe_latency(
+                    job,
+                    stage="router",
+                    outcome=(
+                        "clarification"
+                        if routing.status == "needs_clarification"
+                        else "fallback" if routing.status == "unsupported" else "success"
                     ),
-                    selection_job.tool_capability_catalog,
-                    context_surface=context_surface,
+                    started_at=router_started_at,
+                    provider_input_tokens=routing.provider_input_tokens,
+                    provider_output_tokens=routing.provider_output_tokens,
+                    provider_total_tokens=routing.provider_total_tokens,
+                    targeted=latency_scope.targeted,
                 )
                 if routing.status == "needs_clarification":
                     return self._complete_routing_clarification(
@@ -954,35 +1052,71 @@ class AgentRunProcessor:
                 routing,
                 context.planning_context,
             )
-            decision = self.planner_client.plan(
-                AgentPlanningRequest(
-                    run_id=job.run_id,
+            planner_started_at = self.latency_observer.start()
+            try:
+                decision = self.planner_client.plan(
+                    AgentPlanningRequest(
+                        run_id=job.run_id,
+                        prompt=context.prompt,
+                        timezone=context.timezone,
+                        current_date=current_date,
+                        tool_schema_version=job.tool_schema_version,
+                        tools=planner_tools,
+                        planning_context=context.planning_context,
+                        context_surface=context_surface,
+                        routing=routing,
+                        completion_tool_names=completion_tool_names,
+                        workflow_incomplete=workflow_incomplete,
+                    )
+                )
+                if decision.tool_name in {
+                    SQL_ERD_INSPECTION_TOOL_NAME,
+                    SQL_ERD_FOCUS_TOOL_NAME,
+                }:
+                    latency_scope.targeted = True
+                normalized = normalize_agent_planner_decision(
+                    decision,
+                    planner_job,
                     prompt=context.prompt,
-                    timezone=context.timezone,
                     current_date=current_date,
-                    tool_schema_version=job.tool_schema_version,
-                    tools=planner_tools,
+                    timezone=context.timezone,
                     planning_context=context.planning_context,
-                    context_surface=context_surface,
-                    routing=routing,
+                    strict_tool_selection=len(planner_tools) < len(job.tools),
                     completion_tool_names=completion_tool_names,
-                    workflow_incomplete=workflow_incomplete,
                 )
-            )
-            normalized = normalize_agent_planner_decision(
-                decision,
-                planner_job,
-                prompt=context.prompt,
-                current_date=current_date,
-                timezone=context.timezone,
-                planning_context=context.planning_context,
-                strict_tool_selection=len(planner_tools) < len(job.tools),
-                completion_tool_names=completion_tool_names,
-            )
-            if workflow_incomplete and normalized.status in {"completed", "unsupported"}:
-                raise AgentPlannerOutputError(
-                    "Agent planner ended before the routed workflow was complete"
+                if workflow_incomplete and normalized.status in {
+                    "completed",
+                    "unsupported",
+                }:
+                    raise AgentPlannerOutputError(
+                        "Agent planner ended before the routed workflow was complete"
+                    )
+            except Exception as error:
+                self._emit_queue_latency(job, latency_scope)
+                self._observe_latency(
+                    job,
+                    stage="planner",
+                    outcome="failure",
+                    started_at=planner_started_at,
+                    failure_type=_latency_failure_type(error),
+                    targeted=latency_scope.targeted,
                 )
+                raise
+            self._emit_queue_latency(job, latency_scope)
+            self._observe_latency(
+                job,
+                stage="planner",
+                outcome=(
+                    "clarification"
+                    if normalized.status in {"needs_clarification", "unsupported"}
+                    else "success"
+                ),
+                started_at=planner_started_at,
+                provider_input_tokens=decision.provider_input_tokens,
+                provider_output_tokens=decision.provider_output_tokens,
+                provider_total_tokens=decision.provider_total_tokens,
+                targeted=latency_scope.targeted,
+            )
             output_summary = dict(normalized.output_summary)
             if routing is not None:
                 output_summary["toolRouting"] = _agent_routing_observation(
@@ -1014,7 +1148,11 @@ class AgentRunProcessor:
                     normalized.message,
                     normalized.risk_level,
                 )
-                return self._handoff_execution(job, retried=False)
+                return self._handoff_execution(
+                    job,
+                    retried=False,
+                    latency_scope=latency_scope,
+                )
 
             if normalized.status == "needs_clarification":
                 waiting = self.repository.wait_for_user_input(
@@ -1180,11 +1318,28 @@ class AgentRunProcessor:
         job: AgentRunJob,
         *,
         retried: bool,
+        latency_scope: _AgentLatencyScope,
     ) -> AgentProcessResult:
+        handoff_started_at = self.latency_observer.start()
         try:
             self.execution_handoff_client.execute(job.run_id)
         except InfrastructureError as error:
+            self._observe_latency(
+                job,
+                stage="execution_handoff",
+                outcome="failure",
+                started_at=handoff_started_at,
+                failure_type="domain_error",
+                targeted=latency_scope.targeted,
+            )
             raise AgentExecutionHandoffError() from error
+        self._observe_latency(
+            job,
+            stage="execution_handoff",
+            outcome="success",
+            started_at=handoff_started_at,
+            targeted=latency_scope.targeted,
+        )
         return self._result(
             job,
             delete_message=True,
@@ -1237,6 +1392,108 @@ class AgentRunProcessor:
             reason=reason,
             run_id=job.run_id,
         )
+
+    def _observe_latency(
+        self,
+        job: AgentRunJob,
+        *,
+        stage: str,
+        outcome: str,
+        started_at: float | None = None,
+        elapsed_ms: int | None = None,
+        tool_name: str | None = None,
+        provider_input_tokens: int | None = None,
+        provider_output_tokens: int | None = None,
+        provider_total_tokens: int | None = None,
+        failure_type: str | None = None,
+        targeted: bool = False,
+    ) -> None:
+        surface = job.request_context.get("surface") if job.request_context else None
+        if surface != "sql_erd" or not targeted:
+            return
+        self.latency_observer.observe(
+            run_id=job.run_id,
+            stage=stage,
+            outcome=outcome,
+            started_at=started_at,
+            elapsed_ms=elapsed_ms,
+            turn_sequence=job.turn_sequence,
+            surface=surface,
+            tool_name=tool_name,
+            retrieval_mode=self.tool_retrieval_mode,
+            provider_input_tokens=provider_input_tokens,
+            provider_output_tokens=provider_output_tokens,
+            provider_total_tokens=provider_total_tokens,
+            failure_type=failure_type,
+        )
+
+    def _emit_queue_latency(
+        self,
+        job: AgentRunJob,
+        latency_scope: _AgentLatencyScope,
+    ) -> None:
+        if (
+            not latency_scope.targeted
+            or latency_scope.queue_emitted
+            or latency_scope.queue_wait_ms is None
+        ):
+            return
+        self._observe_latency(
+            job,
+            stage="queue_wait",
+            outcome="success",
+            elapsed_ms=latency_scope.queue_wait_ms,
+            targeted=True,
+        )
+        latency_scope.queue_emitted = True
+
+
+def _planning_latency_outcome(reason: str) -> str:
+    if "clarification" in reason or "waiting_user_input" in reason:
+        return "clarification"
+    if reason in {"infrastructure_failure", "agent_execution_handoff_unavailable"}:
+        return "failure"
+    return "success"
+
+
+def _sql_erd_latency_target_hint(
+    job: AgentRunJob,
+    prompt: str,
+    planning_context: str,
+    *,
+    top_k: int,
+    schema_token_budget: int,
+) -> bool:
+    target_tool_names = {
+        SQL_ERD_INSPECTION_TOOL_NAME,
+        SQL_ERD_FOCUS_TOOL_NAME,
+    }
+    if _planning_tool_result_names(planning_context) & target_tool_names:
+        return True
+
+    selection = select_agent_planner_tool_selection(
+        job,
+        prompt,
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
+        top_k=top_k,
+        schema_token_budget=schema_token_budget,
+    )
+    retrieval_tool_names = (
+        set(selection.retrieval.tool_names) if selection.retrieval is not None else set()
+    )
+    if retrieval_tool_names & target_tool_names:
+        return True
+
+    eligible_tool_names = {tool.name for tool in job.tools}
+    return bool(eligible_tool_names) and eligible_tool_names.issubset(target_tool_names)
+
+
+def _latency_failure_type(error: BaseException) -> str:
+    if isinstance(error, InfrastructureError):
+        return "provider_error"
+    if isinstance(error, AgentRouterOutputError | AgentPlannerOutputError):
+        return "validation_error"
+    return "unknown"
 
 
 def _require_uuid_string(payload: dict[str, object], key: str) -> str:
