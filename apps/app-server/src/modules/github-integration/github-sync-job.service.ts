@@ -8,6 +8,7 @@ import { HttpStatus, Injectable, Logger, OnModuleDestroy, Optional } from "@nest
 import { QueryResultRow } from "pg";
 import { ApiError, badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
+import type { DatabaseTransaction } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubGraphqlRateLimitError, isGithubGraphqlRateLimitError } from "./github-app.client";
 import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
@@ -58,6 +59,12 @@ export class GithubSyncJobEnqueueError extends ApiError {
   }
 }
 
+export interface PreparedGithubSyncJob {
+  id: string;
+  syncRunId: string;
+  leaseGeneration: string;
+}
+
 @Injectable()
 export class GithubSyncJobService implements OnModuleDestroy {
   private readonly logger = new Logger(GithubSyncJobService.name);
@@ -79,7 +86,21 @@ export class GithubSyncJobService implements OnModuleDestroy {
     requestedByUserId: string,
     options?: { skipIfRunIsNoLongerQueued?: boolean }
   ): Promise<boolean> {
-    const job = await this.database.queryOne<{ id: string; lease_generation: string }>(
+    const job = await this.prepareSyncJob(this.database, syncRunId, requestedByUserId);
+    if (!job) {
+      if (options?.skipIfRunIsNoLongerQueued) return false;
+      throw badRequest("GitHub sync job could not be created");
+    }
+    await this.publishPreparedSyncJob(job);
+    return true;
+  }
+
+  async prepareSyncJob(
+    database: Pick<DatabaseService, "queryOne"> | Pick<DatabaseTransaction, "queryOne">,
+    syncRunId: string,
+    requestedByUserId: string
+  ): Promise<PreparedGithubSyncJob | null> {
+    const job = await database.queryOne<{ id: string; lease_generation: string }>(
       `WITH locked_polling_schedule AS MATERIALIZED (
         SELECT schedule.active_sync_run_id
         FROM github_project_v2_polling_schedules AS schedule
@@ -121,20 +142,19 @@ export class GithubSyncJobService implements OnModuleDestroy {
        RETURNING id, lease_generation`,
       [syncRunId, requestedByUserId]
     );
-    if (!job) {
-      if (options?.skipIfRunIsNoLongerQueued) return false;
-      throw badRequest("GitHub sync job could not be created");
-    }
+    return job ? { id: job.id, syncRunId, leaseGeneration: job.lease_generation } : null;
+  }
+
+  async publishPreparedSyncJob(job: PreparedGithubSyncJob): Promise<void> {
     try {
       await this.client().send(new SendMessageCommand({
         QueueUrl: this.requireEnv("SQS_GITHUB_SYNC_JOBS_QUEUE_URL"),
         MessageBody: JSON.stringify({ jobId: job.id })
       }));
     } catch {
-      await this.failEnqueue(syncRunId, job.id, job.lease_generation);
-      throw new GithubSyncJobEnqueueError(syncRunId);
+      await this.failEnqueue(job.syncRunId, job.id, job.leaseGeneration);
+      throw new GithubSyncJobEnqueueError(job.syncRunId);
     }
-    return true;
   }
 
   async enqueueWebhookDelivery(deliveryId: string): Promise<void> {

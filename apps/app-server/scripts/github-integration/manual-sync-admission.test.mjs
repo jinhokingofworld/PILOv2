@@ -18,6 +18,7 @@ const {
 const {
   GithubSyncObservabilityService
 } = require("../../dist/modules/github-integration/github-sync-observability.service.js");
+const { GithubSyncRunService } = require("../../dist/modules/github-integration/github-sync-run.service.js");
 
 const scope = {
   installationId: "installation-1",
@@ -122,5 +123,80 @@ assert.deepEqual(output.map((line) => JSON.parse(line)), [
   { event: "github_manual_sync_admission_rejected", limitScope: "workspace", retryAfterSeconds: 9 },
   { event: "github_manual_sync_queue_saturated", retryAfterSeconds: 15 }
 ]);
+
+const runRow = (id = "run-1") => ({
+  id, workspace_id: "workspace-1", installation_id: "installation-1", repository_id: null,
+  project_v2_id: null, target: "source", status: "queued", trigger_source: "manual",
+  started_at: "2026-01-01T00:00:00.000Z", finished_at: null, fetched_count: 0,
+  created_count: 0, updated_count: 0, skipped_count: 0, error_message: null, cursor: {}
+});
+
+async function admitManual({ replay = null, active = [], userTotal = 0, workspaceTotal = 0, queuedTotal = 0, failPrepare = false } = {}) {
+  const events = [];
+  const database = {
+    async queryOne(text) {
+      if (/FROM github_installations/.test(text)) return { id: "installation-1" };
+      if (/INSERT INTO github_sync_runs/.test(text)) return runRow("new-run");
+      throw new Error(`unexpected root query ${text}`);
+    },
+    async transaction(callback) {
+      events.push("begin");
+      try {
+        const value = await callback({
+          async execute(text) { events.push(/global-admission/.test(text) ? "global-lock" : /workspace:/.test(text) ? "workspace-lock" : "ledger"); },
+          async query(text) { assert.match(text, /trigger_source = 'manual'/); return active; },
+          async queryOne(text) {
+            if (/github_sync_manual_requests/.test(text)) return replay;
+            if (/FROM github_sync_runs AS run/.test(text)) {
+              const total = events.includes("user-limit") ? workspaceTotal : userTotal;
+              events.push(events.includes("user-limit") ? "workspace-limit" : "user-limit");
+              return { total, window_retry_after_seconds: 19, cooldown_retry_after_seconds: null };
+            }
+            if (/FROM github_sync_jobs AS job/.test(text)) return { total: queuedTotal, retry_after_seconds: 7 };
+            if (/INSERT INTO github_sync_runs/.test(text)) return runRow("new-run");
+            throw new Error(`unexpected transaction query ${text}`);
+          }
+        });
+        events.push("commit"); return value;
+      } catch (error) { events.push("rollback"); throw error; }
+    }
+  };
+  const published = [];
+  const jobs = {
+    async prepareSyncJob(_tx, syncRunId) { if (failPrepare) throw new Error("prepare failed"); events.push("prepare"); return { id: "job-1", syncRunId, leaseGeneration: "1" }; },
+    async publishPreparedSyncJob(job) { published.push(job); }
+  };
+  const service = new GithubSyncRunService(database, { getGithubManualSyncAdmissionConfig: () => ({ userLimit: 5, workspaceLimit: 10, rateWindowSeconds: 600, cooldownSeconds: 30, maxQueuedJobs: 100 }) }, { assertWorkspaceOwnerAccess: async () => {}, assertWorkspaceAccess: async () => {} }, {}, {}, jobs);
+  const start = () => service.startGithubSyncRun("user-1", "workspace-1", { target: "source", installationId: "installation-1" }, "manual", "key-1");
+  return { start, events, published };
+}
+
+{
+  const { start, events, published } = await admitManual({ replay: { ...runRow("old-run"), scope_fingerprint: fingerprintGithubManualSyncScope(scope) } });
+  assert.equal((await start()).id, "old-run");
+  assert.deepEqual(events.slice(1, 3), ["global-lock", "workspace-lock"]);
+  assert.deepEqual(published, []);
+}
+{
+  const { start } = await admitManual({ replay: { ...runRow(), scope_fingerprint: "different" } });
+  await assert.rejects(start, (error) => error.getStatus() === 409);
+}
+{
+  const { start, events, published } = await admitManual({ active: [runRow("active-run")] });
+  assert.equal((await start()).id, "active-run");
+  assert.ok(events.includes("ledger")); assert.deepEqual(published, []);
+}
+for (const options of [{ userTotal: 5 }, { workspaceTotal: 10 }]) {
+  const { start } = await admitManual(options);
+  await assert.rejects(start, (error) => error.getStatus() === 429 && error.getResponse().error.details.retryAfterSeconds >= 1);
+}
+{
+  const { start } = await admitManual({ queuedTotal: 100 });
+  await assert.rejects(start, (error) => error.getStatus() === 503 && error.getResponse().error.details.retryAfterSeconds === 7);
+}
+{
+  const { start, events } = await admitManual({ failPrepare: true });
+  await assert.rejects(start, /prepare failed/); assert.ok(events.includes("rollback"));
+}
 
 console.log("GitHub manual sync admission primitive tests passed");

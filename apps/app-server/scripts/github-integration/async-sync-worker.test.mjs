@@ -26,6 +26,12 @@ const installationId = "33333333-3333-4333-8333-333333333333";
 const syncRunId = "44444444-4444-4444-8444-444444444444";
 
 {
+  const worker = new GithubSyncJobService({}, {}, {}, {});
+  assert.equal(typeof worker.prepareSyncJob, "function", "manual admission must prepare its durable job inside the transaction");
+  assert.equal(typeof worker.publishPreparedSyncJob, "function", "manual admission must publish only after commit");
+}
+
+{
   const observabilityPath = `${root}/apps/app-server/src/modules/github-integration/github-sync-observability.service.ts`;
   assert.ok(existsSync(observabilityPath), "GitHub sync observability service must exist");
 
@@ -313,14 +319,32 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
       if (/FROM github_installations/.test(text)) return { id: installationId, workspace_id: workspaceId, github_installation_id: 1, account_login: "org", account_type: "Organization" };
       if (/INSERT INTO github_sync_runs/.test(text)) return { id: syncRunId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", status: "queued", trigger_source: "manual", started_at: "2026-01-01T00:00:00.000Z", finished_at: null, fetched_count: 0, created_count: 0, updated_count: 0, skipped_count: 0, error_message: null, cursor: {} };
       throw new Error(`Unexpected query: ${text}`);
+    },
+    async transaction(callback) {
+      return callback({
+        async execute(text) {
+          assert.match(text, /pg_advisory_xact_lock|INSERT INTO github_sync_manual_requests/);
+        },
+        async query(text) {
+          if (/trigger_source = 'manual'/.test(text)) return [];
+          throw new Error(`Unexpected query: ${text}`);
+        },
+        async queryOne(text) {
+          if (/github_sync_manual_requests/.test(text)) return null;
+          if (/FROM github_sync_runs AS run/.test(text)) return { total: 0, window_retry_after_seconds: 1, cooldown_retry_after_seconds: null };
+          if (/FROM github_sync_jobs AS job/.test(text)) return { total: 0, retry_after_seconds: 1 };
+          if (/INSERT INTO github_sync_runs/.test(text)) return { id: syncRunId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", status: "queued", trigger_source: "manual", started_at: "2026-01-01T00:00:00.000Z", finished_at: null, fetched_count: 0, created_count: 0, updated_count: 0, skipped_count: 0, error_message: null, cursor: {} };
+          throw new Error(`Unexpected transactional query: ${text}`);
+        }
+      });
     }
   };
   const queued = [];
-  const service = new GithubSyncRunService(database, {}, { assertWorkspaceAccess: async () => {}, assertWorkspaceOwnerAccess: async () => {} }, {}, {}, { enqueueSyncJob: async (...args) => queued.push(args) });
-  const run = await service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId }, "manual");
+  const service = new GithubSyncRunService(database, { getGithubManualSyncAdmissionConfig: () => ({ userLimit: 5, workspaceLimit: 10, rateWindowSeconds: 600, cooldownSeconds: 30, maxQueuedJobs: 100 }) }, { assertWorkspaceAccess: async () => {}, assertWorkspaceOwnerAccess: async () => {} }, {}, {}, { prepareSyncJob: async (_tx, runId) => ({ id: "job-1", syncRunId: runId, leaseGeneration: "1" }), publishPreparedSyncJob: async (...args) => queued.push(args) });
+  const run = await service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId }, "manual", "manual-test-key-1");
   assert.equal(run.status, "queued");
-  assert.deepEqual(queued, [[syncRunId, userId]]);
-  assert.match(calls[1].text, /'queued'/);
+  assert.deepEqual(queued, [[{ id: "job-1", syncRunId, leaseGeneration: "1" }]]);
+  assert.match(calls[0].text, /FROM github_installations/);
 }
 
 {
@@ -335,7 +359,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     {}, {}, { enqueueSyncJob: async () => {} }
   );
   await assert.rejects(
-    () => service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId }, "manual"),
+    () => service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId }, "manual", "manual-test-key-2"),
     error => error?.getStatus?.() === 403
   );
   assert.deepEqual(databaseCalls, [], "member access must stop manual sync before database side effects");
@@ -370,15 +394,16 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     async transaction(callback) {
       return callback({
         async execute(text, values) {
-          assert.match(text, /pg_advisory_xact_lock/);
-          assert.deepEqual(values, [`github-manual-sync:${workspaceId}`]);
+          assert.match(text, /pg_advisory_xact_lock|INSERT INTO github_sync_manual_requests/);
+          assert.ok(values === undefined || values[0] === workspaceId);
         },
         async query(text) {
           assert.match(text, /trigger_source = 'manual'/);
           assert.match(text, /status IN \('queued', 'running'\)/);
           return [activeRun];
         },
-        async queryOne() {
+        async queryOne(text) {
+          if (/github_sync_manual_requests/.test(text)) return null;
           throw new Error("matching active run must not create another row");
         }
       });
@@ -387,11 +412,11 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   const queued = [];
   const service = new GithubSyncRunService(
     database,
-    {},
+    { getGithubManualSyncAdmissionConfig: () => ({ userLimit: 5, workspaceLimit: 10, rateWindowSeconds: 600, cooldownSeconds: 30, maxQueuedJobs: 100 }) },
     { assertWorkspaceAccess: async () => {}, assertWorkspaceOwnerAccess: async () => {} },
-    {}, {}, { enqueueSyncJob: async (...args) => queued.push(args) }
+    {}, {}, { prepareSyncJob: async () => { throw new Error("reused run must not prepare"); }, publishPreparedSyncJob: async (...args) => queued.push(args) }
   );
-  const run = await service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId }, "manual");
+  const run = await service.startGithubSyncRun(userId, workspaceId, { target: "full", installationId }, "manual", "manual-test-key-3");
   assert.equal(run.id, syncRunId);
   assert.deepEqual(queued, [], "reused active run must not enqueue another job");
 }
