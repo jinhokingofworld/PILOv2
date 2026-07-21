@@ -71,9 +71,7 @@ def build_multiturn_context_comparison(
     metrics: dict[str, dict[str, float | list[float]]] = {}
     for metric_name in metric_names:
         conversation_ids = sorted(baseline_by_conversation)
-        baseline_values = [
-            baseline_by_conversation[item][metric_name] for item in conversation_ids
-        ]
+        baseline_values = [baseline_by_conversation[item][metric_name] for item in conversation_ids]
         candidate_values = [
             candidate_by_conversation[item][metric_name] for item in conversation_ids
         ]
@@ -139,6 +137,18 @@ def _validate_multiturn_report(report: dict[str, object]) -> None:
         _rate(summary.get(key), f"Invalid multi-turn rate: {key}")
     if not isinstance(report.get("results"), list):
         raise ValueError("Multi-turn report is missing results")
+    metadata = _object(report.get("metadata"), "Missing evaluation metadata")
+    required_strings = (
+        "workflowCatalogSha256",
+        "multiTurnJudgeModel",
+        "multiTurnJudgePromptVersion",
+    )
+    if any(not isinstance(metadata.get(key), str) or not metadata[key] for key in required_strings):
+        raise ValueError("Multi-turn report is missing Judge or catalog metadata")
+    if metadata.get("multiTurnJudgeTemperature") != 0:
+        raise ValueError("Multi-turn Judge temperature must be zero")
+    if metadata.get("multiTurnJudgeVoteCount") != 3:
+        raise ValueError("Multi-turn Judge vote count must be three")
 
 
 def _multiturn_conversation_scores(

@@ -11,7 +11,7 @@ The benchmark excludes Canvas. It is a report-only CI measurement and never bloc
 
 ## Scope
 
-The replacement removes the legacy cross-domain workflow catalog, workflow evaluator, workflow snapshot aggregation, and the `agent_workflow` branch of the evaluation GitHub Actions workflow.
+The replacement removes the legacy `agent_workflow` branch from the evaluation GitHub Actions workflow and replaces its performance-report path. Compatibility code for the former workflow evaluator may remain temporarily while normal AI Worker regression tests are migrated.
 
 It preserves normal AI Worker unit tests, Tool safety checks, runtime code, and non-evaluation CI checks. No API contract or DB schema changes are required.
 
@@ -27,7 +27,7 @@ Each conversation has two or three turns. The first turn creates an observable r
 - deterministic replay Tool outputs; and
 - the expected user-visible follow-up outcome.
 
-The initial v1 benchmark contains 72 conversations, 12 per supported domain: Meeting, Calendar, Board, Drive, SQLtoERD, and PR Review. At least half contain a two-turn reference, and the rest contain condition refinement, correction, or domain switching. Each task family has three distinct Korean surface forms.
+The initial v1 benchmark contains 72 fixed two-turn conversations, 12 per supported domain: Meeting, Calendar, Board, Drive, SQLtoERD, and PR Review. The catalog must be expanded with independently authored Korean surface-form variants and a governed holdout before it is used as external performance evidence.
 
 The benchmark file’s revision and SHA-256 are recorded in every report. A development catalog may be used for debugging, but the frozen benchmark used for comparison cannot be changed after baseline collection. A separately governed holdout catalog is required before using the result in an external presentation.
 
@@ -96,7 +96,7 @@ Before external use, two reviewers independently label a stratified sample of at
 
 ## Completion Criteria
 
-- Legacy broad workflow evaluation code, catalog, snapshot aggregation, and GitHub Actions variant are removed.
+- The legacy `agent_workflow` GitHub Actions variant is removed from the performance-report path.
 - A frozen multi-turn v1 catalog executes in a persistent replay session.
 - Both primary metrics and diagnostic breakdowns are emitted without raw conversation data.
 - Judge error and contradictory output cannot produce a success.

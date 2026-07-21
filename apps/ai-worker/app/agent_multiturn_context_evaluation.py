@@ -168,8 +168,7 @@ def evaluate_deterministic_continuation(
             failure_reasons.append("context_reference")
             continue
         if not all(
-            _contains_mapping(call.tool_input, turn.expected_context.constraints)
-            for call in calls
+            _contains_mapping(call.tool_input, turn.expected_context.constraints) for call in calls
         ):
             failure_reasons.append("context_constraints")
 
@@ -239,9 +238,7 @@ def evaluate_multiturn_conversation(
     if not runtime_failure:
         return _with_multiturn_judge(result, conversation, repository, judge)
     failure_reasons = tuple(
-        dict.fromkeys(
-            (*result.failure_reasons, "runtime_failure", repository.last_process_reason)
-        )
+        dict.fromkeys((*result.failure_reasons, "runtime_failure", repository.last_process_reason))
     )
     return MultiTurnEvaluationResult(
         conversation_id=result.conversation_id,
@@ -422,9 +419,7 @@ def _contains_context_reference(value: Mapping[str, FrozenJson], context_ref: st
     )
 
 
-def _contains_mapping(
-    actual: Mapping[str, FrozenJson], expected: Mapping[str, FrozenJson]
-) -> bool:
+def _contains_mapping(actual: Mapping[str, FrozenJson], expected: Mapping[str, FrozenJson]) -> bool:
     for key, expected_value in expected.items():
         actual_value = actual.get(key)
         if isinstance(expected_value, Mapping):

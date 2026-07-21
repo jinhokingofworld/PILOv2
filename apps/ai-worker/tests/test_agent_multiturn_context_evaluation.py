@@ -141,9 +141,7 @@ def test_frozen_catalog_covers_twelve_conversations_per_non_canvas_domain() -> N
 def test_multiturn_report_emits_only_primary_rates_and_non_raw_diagnostics() -> None:
     report = build_multiturn_context_report(
         (
-            MultiTurnEvaluationResult(
-                "meeting_01", 1, True, True, (), "pass", (), True, True
-            ),
+            MultiTurnEvaluationResult("meeting_01", 1, True, True, (), "pass", (), True, True),
             MultiTurnEvaluationResult(
                 "drive_01",
                 1,
@@ -185,9 +183,7 @@ def test_continuation_fails_when_right_tool_uses_context_from_a_different_turn()
                 expected_context=ExpectedContext(
                     "prior_tool_result", "report-16", {"contextRef": "report-16"}
                 ),
-                fixtures=(
-                    MultiTurnToolFixture("find_action_items", {"items": []}),
-                ),
+                fixtures=(MultiTurnToolFixture("find_action_items", {"items": []}),),
                 expected_outcome=ExpectedOutcome(True, ()),
             ),
         ),
@@ -250,9 +246,7 @@ def test_replay_preserves_prior_tool_result_across_user_turns() -> None:
                     "ctx_111111111111111111111111",
                     {"contextRef": "ctx_111111111111111111111111"},
                 ),
-                fixtures=(
-                    MultiTurnToolFixture("find_action_items", {"items": []}),
-                ),
+                fixtures=(MultiTurnToolFixture("find_action_items", {"items": []}),),
                 expected_outcome=ExpectedOutcome(True, ()),
             ),
         ),
