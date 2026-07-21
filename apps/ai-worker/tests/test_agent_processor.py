@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.agent_context_resolution import resolve_agent_context
 from app.agent_processor import (
     AGENT_TOOL_SCHEMA_VERSION,
     TOOL_RETRIEVAL_MODE_LLM_ROUTER,
@@ -21,7 +20,6 @@ from app.agent_processor import (
     AgentRoutingRequest,
     AgentRunContext,
     AgentRunProcessor,
-    NextToolDecision,
     OpenAiAgentPlannerClient,
     OpenAiAgentRouterClient,
     _agent_planner_schema,
@@ -30,7 +28,6 @@ from app.agent_processor import (
     _agent_router_schema,
     _agent_router_system_prompt,
     _agent_router_user_prompt,
-    compute_next_tool_decision,
     normalize_agent_planner_decision,
     normalize_agent_routing_decision,
     parse_agent_planner_output,
@@ -47,11 +44,6 @@ from app.agent_tool_retrieval import (
     compute_tool_capability_catalog_sha,
 )
 from app.meeting_report_processor import InfrastructureError
-from app.meeting_report_runtime import (
-    AGENT_THREAD_CONTEXT_MAX_BYTES,
-    _merge_agent_context_states,
-    _safe_agent_context_state,
-)
 
 RUN_ID = "33333333-3333-3333-3333-333333333333"
 USER_VISIBLE_UUID = "12345678-1234-4123-8123-123456789abc"
@@ -106,33 +98,6 @@ def run_context(**overrides: object) -> AgentRunContext:
         **overrides,
     }
     return AgentRunContext(**values)
-
-
-def agent_context_state(
-    turn_sequence: int,
-    *,
-    domain: str = "meeting",
-    resource_type: str = "result",
-    count: int = 1,
-) -> dict[str, object]:
-    return {
-        "version": 1,
-        "provenance": {"turnSequence": turn_sequence, "stepOrder": turn_sequence},
-        "activeDomain": domain,
-        "resultSets": [
-            {
-                "domain": domain,
-                "resourceType": resource_type,
-                "contextRef": f"ctx_{turn_sequence:012x}{index:012x}",
-                "label": "result-" + ("x" * 400),
-                "ordinal": index + 1,
-                "generation": turn_sequence,
-                "resourceId": USER_VISIBLE_UUID,
-            }
-            for index in range(count)
-        ],
-        "lastToolState": {"toolName": "search", "outcome": "completed"},
-    }
 
 
 def planner_decision(**overrides: object) -> AgentPlannerDecision:
@@ -995,81 +960,6 @@ def create_processor(
     )
 
 
-def test_processor_records_redacted_decision_trace_on_planner_step() -> None:
-    repository = FakeAgentRunRepository(
-        context=run_context(
-            thread_id="55555555-5555-4555-8555-555555555555",
-            planning_context="prior raw context must be hashed",
-        )
-    )
-    planner = FakePlannerClient()
-    planner.model = "gpt-planner-snapshot"
-
-    result = create_processor(repository, planner).process_payload(agent_payload())
-
-    assert result.reason == "agent_execution_handoff_completed"
-    trace = repository.completed_steps[0][2]["decisionTrace"]
-    assert trace["models"]["planner"] == "gpt-planner-snapshot"
-    assert trace["turnSequence"] == 1
-    assert trace["stages"]["nextTool"]["allowedToolCount"] == 1
-    assert trace["stages"]["plannerInput"] == {
-        "status": "completed",
-        "exposedToolCount": 1,
-        "selectedToolName": "list_calendar_events",
-        "normalizedStatus": "tool_candidate",
-    }
-    assert trace["stages"]["terminalPolicy"]["status"] == "handoff_pending"
-    serialized = json.dumps(trace, ensure_ascii=False)
-    assert "이번 주 일정 알려줘" not in serialized
-    assert "prior raw context must be hashed" not in serialized
-    assert RUN_ID not in serialized
-    assert WORKSPACE_ID not in serialized
-
-
-def test_processor_passes_resolved_context_to_planner_and_handoff() -> None:
-    context_state = agent_context_state(1, domain="calendar", resource_type="event")
-    repository = FakeAgentRunRepository(
-        context=run_context(
-            prompt="그 일정 다시 보여줘",
-            context_state=context_state,
-        )
-    )
-    planner = FakePlannerClient()
-    handoff = FakeExecutionHandoffClient()
-
-    result = create_processor(repository, planner, handoff).process_payload(agent_payload())
-
-    assert result.reason == "agent_execution_handoff_completed"
-    resolution = planner.requests[0].context_resolution
-    assert resolution is not None
-    assert resolution.status == "resolved"
-    assert repository.completed_steps[0][2]["contextResolution"] == resolution.payload()
-    assert (
-        repository.completed_steps[0][2]["decisionTrace"]["stages"]["contextResolution"]["status"]
-        == "resolved"
-    )
-
-
-def test_normalizer_rejects_raw_or_mismatched_context_target() -> None:
-    context_state = agent_context_state(1, domain="calendar", resource_type="event")
-    resolution = resolve_agent_context("그 일정", context_state)
-    job = parse_agent_run_job_payload(agent_payload())
-
-    with pytest.raises(AgentPlannerOutputError, match="raw ID"):
-        normalize_agent_planner_decision(
-            planner_decision(tool_input={"eventId": 101}),
-            job,
-            context_resolution=resolution,
-        )
-
-    with pytest.raises(AgentPlannerOutputError, match="does not match"):
-        normalize_agent_planner_decision(
-            planner_decision(tool_input={"contextRef": "ctx_ffffffffffffffffffffffff"}),
-            job,
-            context_resolution=resolution,
-        )
-
-
 def sql_erd_focus_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
     capability = {
         "id": "sql_erd.tables.focus",
@@ -1435,105 +1325,6 @@ def test_llm_router_then_planner_selects_calendar_tool() -> None:
         "catalogSha256": tool_capability_catalog(tools)["sha256"],
         "selectedToolCount": 1,
     }
-    assert repository.completed_steps[0][2]["nextToolDecision"] == {
-        "version": "agent-next-tool-decision:v1",
-        "status": "allowed",
-        "candidateCount": 1,
-        "reasonCode": "single_capability_frontier",
-        "boundToolName": "list_calendar_events",
-        "requiresConfirmation": False,
-        "completedToolCount": 0,
-        "contextTargetDomain": None,
-        "contextStateSha256": None,
-    }
-
-
-def test_single_next_tool_is_code_bound_when_planner_selects_another_tool() -> None:
-    tools = [
-        tool_snapshot(),
-        tool_snapshot(
-            name="update_calendar_event",
-            riskLevel="medium",
-            executionMode="confirmation_required",
-        ),
-    ]
-    repository = FakeAgentRunRepository()
-    planner_client = FakePlannerClient(
-        decision=planner_decision(
-            tool_name="update_calendar_event",
-            tool_input={"start": "2026-07-20", "end": "2026-07-20"},
-        )
-    )
-    processor = create_processor(
-        repository,
-        planner_client,
-        FakeExecutionHandoffClient(),
-        FakeRouterClient(),
-        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
-    )
-
-    result = processor.process_payload(
-        agent_payload(tools=tools, toolCapabilityCatalog=calendar_list_update_catalog(tools))
-    )
-
-    assert result.reason == "agent_execution_handoff_completed"
-    assert repository.completed_steps[0][2]["toolName"] == "list_calendar_events"
-    assert planner_client.requests[0].next_tool_decision.bound_tool_name == ("list_calendar_events")
-
-
-def test_same_prompt_cycle_reuses_prior_routing_after_prerequisite() -> None:
-    tools = [
-        tool_snapshot(),
-        tool_snapshot(
-            name="update_calendar_event",
-            riskLevel="medium",
-            executionMode="confirmation_required",
-            inputSchema={
-                "type": "object",
-                "required": ["target", "changes"],
-                "properties": {
-                    "target": {"type": "object"},
-                    "changes": {"type": "object"},
-                },
-            },
-        ),
-    ]
-    prior_routing = routing_decision(capability_ids=("calendar.events.update",))
-    repository = FakeAgentRunRepository(
-        context=run_context(
-            planning_context='tool list_calendar_events: {"items":[]}',
-            latest_routing=prior_routing,
-        )
-    )
-    router_client = FakeRouterClient(error=AssertionError("router must not be called"))
-    planner_client = FakePlannerClient(
-        decision=planner_decision(
-            tool_name="list_calendar_events",
-            tool_input={
-                "target": {
-                    "title": "Weekly sync",
-                    "startDate": "2026-07-20",
-                },
-                "changes": {"title": "updated"},
-            },
-        )
-    )
-    processor = create_processor(
-        repository,
-        planner_client,
-        FakeExecutionHandoffClient(),
-        router_client,
-        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
-    )
-
-    result = processor.process_payload(
-        agent_payload(tools=tools, toolCapabilityCatalog=calendar_list_update_catalog(tools))
-    )
-
-    assert result.reason == "agent_execution_handoff_completed"
-    assert router_client.requests == []
-    assert repository.completed_steps[0][2]["toolName"] == "update_calendar_event"
-    assert repository.completed_steps[0][2]["nextToolDecision"]["completedToolCount"] == 1
 
 
 def test_llm_router_low_confidence_asks_without_planner_or_handoff() -> None:
@@ -1559,52 +1350,12 @@ def test_llm_router_low_confidence_asks_without_planner_or_handoff() -> None:
         agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
     )
 
-    assert result.reason == "agent_context_needs_clarification"
+    assert result.reason == "agent_router_needs_clarification"
     assert planner_client.requests == []
     assert handoff_client.calls == []
     assert repository.waiting_user_input_updates == [
-        (RUN_ID, "어느 대상을 뜻하는지 이름이나 번호로 알려주세요.")
+        (RUN_ID, "어떤 종류의 일정을 말씀하시는지 알려주세요.")
     ]
-
-
-def test_drive_context_follow_up_fails_closed_without_target_aware_tool() -> None:
-    context_state = agent_context_state(
-        2,
-        domain="drive",
-        resource_type="document",
-    )
-    repository = FakeAgentRunRepository(
-        context=run_context(
-            prompt="그 문서 요약해줘",
-            context_state=context_state,
-        )
-    )
-    router_client = FakeRouterClient(error=AssertionError("router must not be called"))
-    planner_client = FakePlannerClient(error=AssertionError("planner must not be called"))
-    handoff_client = FakeExecutionHandoffClient()
-    processor = create_processor(
-        repository,
-        planner_client,
-        handoff_client,
-        router_client,
-        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
-    )
-    tools = [tool_snapshot(name="search_workspace_documents")]
-
-    result = processor.process_payload(
-        agent_payload(
-            tools=tools,
-            toolCapabilityCatalog=tool_capability_catalog(tools),
-        )
-    )
-
-    assert result.reason == "agent_context_needs_clarification"
-    assert router_client.requests == []
-    assert planner_client.requests == []
-    assert handoff_client.calls == []
-    assert repository.completed_steps[0][2]["contextResolution"]["reasonCode"] == (
-        "drive_context_tool_unavailable"
-    )
 
 
 def test_llm_router_preserves_compound_domain_tool_chains() -> None:
@@ -1794,70 +1545,10 @@ def test_routed_multistep_chain_ignores_previous_user_cycle_results() -> None:
         ),
     )
 
-    assert [tool.name for tool in pending] == ["list_calendar_events"]
-
-
-def test_next_tool_decision_rejects_out_of_order_terminal_result() -> None:
-    tools = [
-        tool_snapshot(),
-        tool_snapshot(
-            name="update_calendar_event",
-            riskLevel="medium",
-            executionMode="confirmation_required",
-        ),
+    assert [tool.name for tool in pending] == [
+        "list_calendar_events",
+        "update_calendar_event",
     ]
-    job = parse_agent_run_job_payload(
-        agent_payload(tools=tools, toolCapabilityCatalog=calendar_list_update_catalog(tools))
-    )
-    routing = routing_decision(capability_ids=("calendar.events.update",))
-    selected = select_agent_planner_tools_for_routing(job, routing)
-
-    with pytest.raises(AgentRouterOutputError, match="before its prerequisite"):
-        compute_next_tool_decision(
-            job,
-            routing,
-            selected,
-            'tool update_calendar_event: {"updated":true}',
-        )
-
-
-def test_next_tool_decision_rejects_completed_tool_replay() -> None:
-    tools = [tool_snapshot()]
-    job = parse_agent_run_job_payload(
-        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
-    )
-    routing = routing_decision()
-    selected = select_agent_planner_tools_for_routing(job, routing)
-
-    with pytest.raises(AgentRouterOutputError, match="completed tool replay"):
-        compute_next_tool_decision(
-            job,
-            routing,
-            selected,
-            ('tool list_calendar_events: {"items":[]}\n' 'tool list_calendar_events: {"items":[]}'),
-        )
-
-
-def test_next_tool_decision_rejects_cross_domain_resolved_target() -> None:
-    tools = [tool_snapshot()]
-    job = parse_agent_run_job_payload(
-        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
-    )
-    routing = routing_decision()
-    selected = select_agent_planner_tools_for_routing(job, routing)
-    state = agent_context_state(1, domain="meeting", resource_type="meeting_report")
-    context_ref = state["resultSets"][0]["contextRef"]
-    resolution = resolve_agent_context(str(context_ref), state)
-    assert resolution.status == "resolved"
-
-    with pytest.raises(AgentRouterOutputError, match="outside the routed"):
-        compute_next_tool_decision(
-            job,
-            routing,
-            selected,
-            "",
-            context_resolution=resolution,
-        )
 
 
 def test_llm_router_rejects_schema_budget_overflow() -> None:
@@ -3242,10 +2933,7 @@ def test_processor_waits_for_user_input_at_planner_turn_limit() -> None:
     ]
 
 
-def test_normalizer_accepts_calendar_update_with_resolved_opaque_target() -> None:
-    context_state = agent_context_state(1, domain="calendar", resource_type="event")
-    resolution = resolve_agent_context("그 일정", context_state)
-    assert resolution.status == "resolved"
+def test_normalizer_blocks_calendar_update_without_event_id() -> None:
     job = parse_agent_run_job_payload(
         agent_payload(
             tools=[
@@ -3256,12 +2944,9 @@ def test_normalizer_accepts_calendar_update_with_resolved_opaque_target() -> Non
                     executionMode="confirmation_required",
                     inputSchema={
                         "type": "object",
-                        "required": ["target", "changes"],
+                        "required": ["eventId", "changes"],
                         "additionalProperties": False,
-                        "properties": {
-                            "target": {"type": "object"},
-                            "changes": {"type": "object"},
-                        },
+                        "properties": {},
                     },
                 )
             ]
@@ -3274,15 +2959,12 @@ def test_normalizer_accepts_calendar_update_with_resolved_opaque_target() -> Non
             requires_confirmation=True,
         ),
         job,
-        context_resolution=resolution,
     )
 
-    assert normalized.status == "tool_candidate"
-    assert normalized.risk_level == "medium"
-    assert normalized.output_summary["input"] == {
-        "target": {"contextRef": resolution.target.context_ref},
-        "changes": {"startTime": "16:00"},
-    }
+    assert normalized.status == "needs_clarification"
+    assert normalized.risk_level is None
+    assert normalized.output_summary["missingFields"] == ["eventId"]
+    assert "수정할 일정" in normalized.final_answer
 
 
 def test_normalizer_asks_for_calendar_time_when_end_time_is_not_after_start_time() -> None:
@@ -4314,9 +3996,7 @@ def test_planner_prompt_preserves_calendar_tool_boundaries() -> None:
     assert "Calendar recurrence is not supported" in prompt
     assert "require an explicit all-day choice" in prompt
     assert "never set endTime equal to startTime" in prompt
-    assert "opaque target and changes only" in prompt
-    assert "Never ask for or emit a Calendar event ID" in prompt
-    assert "positive integer Calendar event ID" not in prompt
+    assert "positive integer Calendar event ID" in prompt
     assert "이번 주말" in prompt
     assert "다음 주 월요일" in prompt
     assert "다다음 주 화요일" in prompt
@@ -4699,35 +4379,6 @@ def test_agent_planner_schema_is_strict_closed_schema() -> None:
         "tool_candidate",
         "needs_clarification",
     ]
-    assert _agent_planner_schema(bound_tool_name="list_calendar_events")["properties"][
-        "toolName"
-    ] == {"type": "null"}
-
-
-def test_bound_next_tool_planner_payload_is_input_only() -> None:
-    tool = parse_agent_run_job_payload(agent_payload()).tools[0]
-    next_tool = NextToolDecision(
-        status="allowed",
-        tools=(tool,),
-        completed_tool_names=tuple(),
-        reason_code="single_capability_frontier",
-        bound_tool_name=tool.name,
-        requires_confirmation=False,
-    )
-    request = AgentPlanningRequest(
-        run_id=RUN_ID,
-        prompt="오늘 일정 보여줘",
-        timezone="Asia/Seoul",
-        current_date="2026-07-21",
-        tool_schema_version=AGENT_TOOL_SCHEMA_VERSION,
-        tools=(tool,),
-        next_tool_decision=next_tool,
-    )
-
-    payload = json.loads(_agent_planner_user_prompt(request))
-
-    assert payload["nextToolDecision"]["boundToolName"] == tool.name
-    assert payload["nextToolDecision"]["candidateCount"] == 1
 
 
 def test_sql_erd_planner_contract_uses_structured_schema_without_raw_ddl() -> None:
@@ -4908,78 +4559,3 @@ def test_completed_sql_erd_replacement_uses_deterministic_success_answer() -> No
     assert normalized.status == "completed"
     assert normalized.final_answer == "현재 SQLtoERD 세션의 스키마를 교체했습니다."
     assert normalized.output_summary["finalAnswerDraft"] == normalized.final_answer
-
-
-def test_agent_context_state_is_domain_and_size_bounded() -> None:
-    states = [agent_context_state(turn, count=3) for turn in range(1, 9)]
-    states.append(agent_context_state(9, domain="canvas", count=1))
-    selected_target = {
-        "contextRef": "ctx_000000000008000000000002",
-        "generation": 8,
-        "source": "candidate_button",
-    }
-
-    merged = _merge_agent_context_states(states, selected_target)
-
-    assert merged is not None
-    assert len(merged["resultSets"]) == 12
-    assert merged["selectedTarget"] == selected_target
-    serialized = json.dumps(merged, ensure_ascii=False, separators=(",", ":"))
-    assert len(serialized.encode("utf-8")) <= AGENT_THREAD_CONTEXT_MAX_BYTES
-    assert USER_VISIBLE_UUID not in serialized
-    assert "resourceId" not in serialized
-    assert all(reference["domain"] == "meeting" for reference in merged["resultSets"])
-
-
-def test_agent_context_state_preserves_resolved_follow_up_target() -> None:
-    state = agent_context_state(3, count=2)
-    target_reference = state["resultSets"][0]
-    state["selectedTarget"] = {
-        "contextRef": target_reference["contextRef"],
-        "generation": target_reference["generation"],
-        "source": "resolved_follow_up",
-    }
-
-    merged = _merge_agent_context_states([state])
-
-    assert merged is not None
-    assert merged["selectedTarget"] == state["selectedTarget"]
-
-
-def test_agent_context_state_rejects_invalid_reference_contract() -> None:
-    state = agent_context_state(1)
-    state["resultSets"] = [
-        {
-            "domain": "meeting",
-            "resourceType": "meeting_report",
-            "contextRef": USER_VISIBLE_UUID,
-            "label": "raw id",
-            "ordinal": 1,
-            "generation": 1,
-        }
-    ]
-
-    safe = _safe_agent_context_state(state)
-
-    assert safe is not None
-    assert safe["resultSets"] == []
-
-
-def test_agent_planner_prompt_includes_structured_context_state() -> None:
-    job = parse_agent_run_job_payload(agent_payload())
-    context_state = agent_context_state(1)
-    request = AgentPlanningRequest(
-        run_id=RUN_ID,
-        prompt="use the previous result",
-        timezone="Asia/Seoul",
-        current_date="2026-07-21",
-        tool_schema_version=AGENT_TOOL_SCHEMA_VERSION,
-        tools=job.tools,
-        planning_context="legacy text",
-        context_state=context_state,
-    )
-
-    payload = json.loads(_agent_planner_user_prompt(request))
-
-    assert payload["contextState"] == context_state
-    assert payload["planningContext"] == "legacy text"

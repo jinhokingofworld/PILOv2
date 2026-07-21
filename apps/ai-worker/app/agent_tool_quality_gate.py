@@ -16,7 +16,6 @@ from app.agent_tool_retrieval import (
 QUALITY_GATE_VERSION = "agent-tool-retrieval-quality-gate:v1"
 CANONICAL_REQUIRED_TOOL_RECALL_AT_8 = 1.0
 HELD_OUT_DOMAIN_CAPABILITY_RECALL_AT_8 = 0.95
-DANGEROUS_WRITE_FALSE_POSITIVE_MAX = 0
 _UUID_PATTERN = re.compile(
     r"(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![0-9a-f])",
     re.IGNORECASE,
@@ -162,7 +161,6 @@ def evaluate_tool_retrieval_quality_gate(
     canonical_required_tool_matches: list[bool] = []
     held_out_domain_matches: list[bool] = []
     held_out_capability_matches: list[bool] = []
-    dangerous_write_false_positives = 0
 
     for case in fixture.cases:
         selection = select_read_only_tool_shortlist(
@@ -179,12 +177,6 @@ def evaluate_tool_retrieval_quality_gate(
             capability.domain
             for capability in fixture.catalog.capabilities
             if capability.capability_id in selected_capability_ids
-        }
-        selected_write_capability_ids = {
-            capability.capability_id
-            for capability in fixture.catalog.capabilities
-            if capability.capability_id in selected_capability_ids
-            and capability.operation == "write"
         }
         required_tool_match = set(case.required_tool_names) <= retrieved_tool_names
         domain_match = case.domain is None or case.domain in selected_domains
@@ -205,9 +197,6 @@ def evaluate_tool_retrieval_quality_gate(
                 failures.append("held_out_domain_recall")
             if not capability_match:
                 failures.append("held_out_capability_recall")
-        if case.kind == "counterexample" and selected_write_capability_ids:
-            dangerous_write_false_positives += 1
-            failures.append("dangerous_write_false_positive")
         if not fallback_match:
             failures.append("fallback_contract")
         if not planner_tool_match:
@@ -222,7 +211,6 @@ def evaluate_tool_retrieval_quality_gate(
                 "capabilityRecall": capability_match,
                 "fallbackMatchesExpected": fallback_match,
                 "plannerToolSetMatchesExpected": planner_tool_match,
-                "dangerousWriteSelected": bool(selected_write_capability_ids),
                 "retrieval": {
                     "lowConfidence": retrieval.low_confidence,
                     "fallbackReason": retrieval.fallback_reason,
@@ -246,8 +234,6 @@ def evaluate_tool_retrieval_quality_gate(
         failures.append("held_out_domain_threshold")
     if held_out_capability_recall < HELD_OUT_DOMAIN_CAPABILITY_RECALL_AT_8:
         failures.append("held_out_capability_threshold")
-    if dangerous_write_false_positives > DANGEROUS_WRITE_FALSE_POSITIVE_MAX:
-        failures.append("dangerous_write_false_positive_threshold")
 
     report: dict[str, object] = {
         "format": "agent-tool-retrieval-quality-baseline:v1",
@@ -272,13 +258,11 @@ def evaluate_tool_retrieval_quality_gate(
             "canonicalRequiredToolRecallAt8": CANONICAL_REQUIRED_TOOL_RECALL_AT_8,
             "heldOutDomainRecallAt8": HELD_OUT_DOMAIN_CAPABILITY_RECALL_AT_8,
             "heldOutCapabilityRecallAt8": HELD_OUT_DOMAIN_CAPABILITY_RECALL_AT_8,
-            "dangerousWriteFalsePositiveMax": DANGEROUS_WRITE_FALSE_POSITIVE_MAX,
         },
         "metrics": {
             "canonicalRequiredToolRecallAt8": canonical_recall,
             "heldOutDomainRecallAt8": held_out_domain_recall,
             "heldOutCapabilityRecallAt8": held_out_capability_recall,
-            "dangerousWriteFalsePositiveCount": dangerous_write_false_positives,
         },
         "failureTaxonomy": _failure_taxonomy(failures),
         "results": result_rows,

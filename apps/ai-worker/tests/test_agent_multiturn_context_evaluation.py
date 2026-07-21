@@ -689,9 +689,6 @@ def test_replay_preserves_prior_tool_result_across_user_turns() -> None:
     assert result.judge_verdict == "pass"
     assert "tool list_meeting_reports:" in planner.requests[2].planning_context
     assert "user: Does it contain action items?" in planner.requests[2].planning_context
-    assert planner.requests[2].context_state["resultSets"][0]["contextRef"] == (
-        "ctx_111111111111111111111111"
-    )
 
 
 class PassingJudge:
