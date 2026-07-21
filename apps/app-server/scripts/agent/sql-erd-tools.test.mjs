@@ -282,7 +282,7 @@ assert.deepEqual(
 assert.deepEqual(
   resolveDeterministicSqlErdTableFocus(
     boundaryProjection,
-    "catalog 기능만 보여줘"
+    "catalog 테이블만 보여줘"
   )?.primaryTableRefs,
   ["t4"],
   "a table name inside another word must not count as an exact match"
@@ -291,9 +291,9 @@ assert.deepEqual(
   resolveDeterministicSqlErdTableFocus(
     boundaryProjection,
     "user와 users 테이블을 함께 보여줘"
-  )?.primaryTableRefs,
-  ["t1", "t2"],
-  "separately named tables in an explicit multi-table request must be preserved"
+  ),
+  null,
+  "multi-table requests must use the LLM resolver instead of assuming positive intent"
 );
 assert.equal(
   resolveDeterministicSqlErdTableFocus(
@@ -302,6 +302,49 @@ assert.equal(
   ),
   null,
   "exclusion intent must bypass deterministic matching instead of selecting the excluded table"
+);
+assert.equal(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "show orders, not users"
+  ),
+  null,
+  "English negation must use the LLM resolver"
+);
+assert.equal(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "users table이 아니라 orders table만 보여줘"
+  ),
+  null,
+  "Korean contrastive negation must use the LLM resolver"
+);
+
+const schemaCollisionProjection = {
+  version: 1,
+  tables: [
+    { ref: "t1", name: "users", schemaName: "public", columns: [] },
+    { ref: "t2", name: "users", schemaName: "auth", columns: [] }
+  ],
+  edges: [],
+  truncatedTableRefs: [],
+  truncated: false
+};
+assert.equal(
+  resolveDeterministicSqlErdTableFocus(
+    schemaCollisionProjection,
+    "users 테이블만 보여줘"
+  ),
+  null,
+  "an unqualified duplicate table name must remain ambiguous"
+);
+assert.deepEqual(
+  resolveDeterministicSqlErdTableFocus(
+    schemaCollisionProjection,
+    "auth.users 테이블만 보여줘"
+  )?.primaryTableRefs,
+  ["t2"],
+  "a schema-qualified table name may be resolved deterministically"
 );
 assert.deepEqual(
   focusProjection.tables.map((table) => [table.ref, table.name]),
@@ -1053,6 +1096,35 @@ const staleResult = await staleFocusDefinition.execute(
 assert.equal(staleResult.outputSummary.action, "needs_clarification");
 assert.equal(staleResult.outputSummary.reason, "schema_changed");
 assert.deepEqual(staleResult.resourceRefs, []);
+
+const staleEvidenceService = new FakeSqlErdService();
+const evidenceSourceBefore = `CREATE TYPE activity_log_action AS ENUM (
+  'meeting_started'
+);`;
+const evidenceSourceAfter = `CREATE TYPE activity_log_action AS ENUM (
+  'meeting_cancelled'
+);`;
+let staleEvidenceReadCount = 0;
+staleEvidenceService.getSession = async () => {
+  staleEvidenceReadCount += 1;
+  return sessionPayload({
+    ...stableSession,
+    sourceText:
+      staleEvidenceReadCount === 1 ? evidenceSourceBefore : evidenceSourceAfter
+  });
+};
+const staleEvidenceFocusDefinition = new SqlErdAgentToolsService(
+  staleEvidenceService
+)
+  .listDefinitions()
+  .find((candidate) => candidate.name === "focus_sql_erd_tables");
+const staleEvidenceResult = await staleEvidenceFocusDefinition.execute(
+  focusContext,
+  staleEvidenceFocusDefinition.validateInput({ featureQuery: "payments" })
+);
+assert.equal(staleEvidenceResult.outputSummary.action, "needs_clarification");
+assert.equal(staleEvidenceResult.outputSummary.reason, "schema_changed");
+assert.deepEqual(staleEvidenceResult.resourceRefs, []);
 
 for (const revokedRead of [1, 2]) {
   const revokedService = new FakeSqlErdService();

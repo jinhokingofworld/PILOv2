@@ -1,6 +1,36 @@
 import type { SqlErdAgentSchemaProjection } from "./sql-erd-table-focus";
 
 const MAX_PRIMARY_TABLES = 20;
+const DIRECT_FOCUS_TERMS = new Set([
+  "focus",
+  "focused",
+  "on",
+  "only",
+  "please",
+  "show",
+  "table",
+  "table에",
+  "tables",
+  "view",
+  "테이블",
+  "테이블로",
+  "테이블만",
+  "테이블에",
+  "테이블을",
+  "보기",
+  "보여줘",
+  "보여주세요",
+  "보고싶어",
+  "보고싶어요",
+  "집중",
+  "집중보기",
+  "집중적으로",
+  "집중해서",
+  "집중해줘",
+  "집중해주세요",
+  "표시해줘",
+  "표시해주세요"
+]);
 
 export type SqlErdFocusResolution =
   | {
@@ -25,13 +55,8 @@ export function resolveDeterministicSqlErdTableFocus(
   projection: SqlErdAgentSchemaProjection,
   featureQuery: string
 ): SqlErdFocusResolution | null {
-  if (hasExclusionIntent(featureQuery)) return null;
-
-  const queryTerms = tokenize(featureQuery);
-  const truncatedTableRefs = new Set(projection.truncatedTableRefs ?? []);
   const exactNameRefs = resolveExactTableNameRefs(projection, featureQuery);
-
-  if (exactNameRefs.length > 0) {
+  if (exactNameRefs.length === 1) {
     return buildFocusedResolution(
       projection,
       featureQuery,
@@ -40,38 +65,6 @@ export function resolveDeterministicSqlErdTableFocus(
       "deterministic"
     );
   }
-
-  const inflectionNameRefs = projection.tables
-    .filter(
-      (table) =>
-        !truncatedTableRefs.has(table.ref) &&
-        tableNameMatchesInflection(table.name, queryTerms)
-    )
-    .map((table) => table.ref);
-  if (inflectionNameRefs.length === 1) {
-    return buildFocusedResolution(
-      projection,
-      featureQuery,
-      inflectionNameRefs,
-      "high",
-      "deterministic"
-    );
-  }
-
-  const evidenceMatches = projection.tables
-    .map((table) => ({ ref: table.ref, score: evidenceScore(table, queryTerms) }))
-    .filter((candidate) => candidate.score >= 4)
-    .sort((left, right) => right.score - left.score);
-  if (evidenceMatches.length === 1) {
-    return buildFocusedResolution(
-      projection,
-      featureQuery,
-      [evidenceMatches[0].ref],
-      "medium",
-      "deterministic"
-    );
-  }
-
   return null;
 }
 
@@ -153,7 +146,22 @@ function resolveExactTableNameRefs(
 ): string[] {
   const queryTerms = exactTokens(featureQuery);
   const truncatedTableRefs = new Set(projection.truncatedTableRefs ?? []);
-  const matches = projection.tables
+  const qualifiedMatches = projection.tables
+    .filter((table) => !truncatedTableRefs.has(table.ref))
+    .flatMap((table) => {
+      if (!table.schemaName) return [];
+      const nameTerms = exactTokens(`${table.schemaName}.${table.name}`);
+      const ranges = findPhraseRanges(queryTerms, nameTerms);
+      return ranges.length > 0 ? [{ ref: table.ref, nameTerms, ranges }] : [];
+    });
+  const qualified = selectSingleStrictPositiveMatch(
+    queryTerms,
+    qualifiedMatches
+  );
+  if (qualified) return [qualified];
+  if (qualifiedMatches.length > 0) return [];
+
+  const unqualifiedMatches = projection.tables
     .filter((table) => !truncatedTableRefs.has(table.ref))
     .map((table) => {
       const nameTerms = exactTokens(table.name);
@@ -164,12 +172,11 @@ function resolveExactTableNameRefs(
       };
     })
     .filter((candidate) => candidate.ranges.length > 0);
-
-  return matches
+  const mostSpecificMatches = unqualifiedMatches
     .filter((candidate) =>
       candidate.ranges.some(
         ([start, end]) =>
-          !matches.some(
+          !unqualifiedMatches.some(
             (other) =>
               other.ref !== candidate.ref &&
               other.nameTerms.length > candidate.nameTerms.length &&
@@ -179,14 +186,37 @@ function resolveExactTableNameRefs(
               )
           )
       )
-    )
-    .map((candidate) => candidate.ref)
-    .slice(0, MAX_PRIMARY_TABLES);
+    );
+  const unqualified = selectSingleStrictPositiveMatch(
+    queryTerms,
+    mostSpecificMatches
+  );
+  return unqualified ? [unqualified] : [];
 }
 
-function hasExclusionIntent(value: string): boolean {
-  return /(?:말고|제외|빼고|아닌|\bexcept\b|\bexcluding\b|\bexclude\b|\bwithout\b|\bbut\s+not\b)/iu.test(
-    value
+function selectSingleStrictPositiveMatch(
+  queryTerms: string[],
+  matches: Array<{
+    ref: string;
+    nameTerms: string[];
+    ranges: Array<[number, number]>;
+  }>
+): string | null {
+  if (matches.length !== 1) return null;
+  const match = matches[0];
+  const directRange = match.ranges.find((range) =>
+    isStrictPositiveDirectRequest(queryTerms, range)
+  );
+  return directRange ? match.ref : null;
+}
+
+function isStrictPositiveDirectRequest(
+  queryTerms: string[],
+  [start, end]: [number, number]
+): boolean {
+  return queryTerms.every(
+    (term, index) =>
+      (index >= start && index < end) || DIRECT_FOCUS_TERMS.has(term)
   );
 }
 
@@ -210,54 +240,6 @@ function findPhraseRanges(
   return ranges;
 }
 
-function tableNameMatchesInflection(
-  tableName: string,
-  queryTerms: Set<string>
-): boolean {
-  const nameTerms = tokenize(tableName);
-  return (
-    nameTerms.size > 0 &&
-    [...nameTerms].every(
-      (term) => queryTerms.has(term) || queryTerms.has(singularize(term))
-    )
-  );
-}
-
-function evidenceScore(
-  table: SqlErdAgentSchemaProjection["tables"][number],
-  queryTerms: Set<string>
-): number {
-  if (queryTerms.size === 0) return 0;
-  let score = matchedTermCount(table.comment ?? "", queryTerms) * 3;
-  score += matchedTermCount(table.schemaName ?? "", queryTerms) * 2;
-  for (const column of table.columns ?? []) {
-    score += matchedTermCount(column.name, queryTerms) * 2;
-    score += matchedTermCount(column.comment ?? "", queryTerms) * 2;
-    score += matchedTermCount(column.dataType, queryTerms);
-    score += (column.enumValues ?? []).reduce(
-      (total, value) => total + matchedTermCount(value, queryTerms),
-      0
-    );
-  }
-  return score;
-}
-
-function matchedTermCount(value: string, queryTerms: Set<string>): number {
-  const valueTerms = tokenize(value);
-  return [...queryTerms].filter(
-    (term) => valueTerms.has(term) || valueTerms.has(singularize(term))
-  ).length;
-}
-
-function tokenize(value: string): Set<string> {
-  return new Set(
-    exactTokens(value)
-      .map((term) => stripKoreanParticle(term))
-      .map((term) => singularize(term))
-      .filter((term) => term.length >= 2)
-  );
-}
-
 function exactTokens(value: string): string[] {
   return normalize(value)
     .split(" ")
@@ -274,12 +256,6 @@ function normalize(value: string): string {
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
-}
-
-function singularize(value: string): string {
-  return /^[a-z0-9]+s$/u.test(value) && value.length > 3
-    ? value.slice(0, -1)
-    : value;
 }
 
 function invalidResult(): SqlErdFocusResolution {

@@ -490,6 +490,7 @@ export class SqlErdAgentToolsService {
       input.featureQuery,
       inspectedSession.sourceText
     );
+    const inspectedEvidenceFingerprint = createSqlErdModelFingerprint(projection);
     const resolution =
       resolveDeterministicSqlErdTableFocus(projection, input.featureQuery) ??
       (await this.resolveSqlErdTableFocusWithLlm(projection, input.featureQuery));
@@ -518,7 +519,16 @@ export class SqlErdAgentToolsService {
       );
     }
     const modelFingerprint = createSqlErdModelFingerprint(session.modelJson);
-    if (modelFingerprint !== inspectedFingerprint) {
+    const currentProjection = buildSqlErdAgentSchemaProjection(
+      session.modelJson,
+      input.featureQuery,
+      session.sourceText
+    );
+    const evidenceFingerprint = createSqlErdModelFingerprint(currentProjection);
+    if (
+      modelFingerprint !== inspectedFingerprint ||
+      evidenceFingerprint !== inspectedEvidenceFingerprint
+    ) {
       return this.focusClarification(
         "schema_changed",
         "ERD가 변경되었습니다. 최신 상태에서 집중 보기를 다시 요청해주세요."
