@@ -2852,6 +2852,7 @@ def test_shortlist_mode_keeps_supported_write_chain_and_falls_back_on_low_confid
         "fallbackReason": "no_metadata_match",
         "candidateCount": 0,
         "confidenceBucket": "none",
+        "capabilityIds": [],
         "primaryCapabilityId": None,
         "primaryToolName": None,
         "catalogVersion": "agent-tool-capabilities:v2",
@@ -2964,6 +2965,7 @@ def test_environment_flag_switches_between_shortlist_and_shadow(monkeypatch) -> 
     shadow_retrieval = shadow_repository.completed_steps[0][2]["toolRetrieval"]
     assert shadow_retrieval["mode"] == "shadow"
     assert shadow_retrieval["usedShortlist"] is False
+    assert shadow_retrieval["capabilityIds"] == ["calendar.events.list"]
     assert shadow_retrieval["primaryToolName"] == "list_calendar_events"
 
 

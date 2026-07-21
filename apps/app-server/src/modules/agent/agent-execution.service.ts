@@ -571,7 +571,11 @@ export class AgentExecutionService {
       throw badRequest("Agent planner output requires App Server validation");
     }
 
-    const capabilityIds = this.readCapabilityIds(output.toolRouting);
+    const routedCapabilityIds = this.readCapabilityIds(output.toolRouting);
+    const capabilityIds =
+      routedCapabilityIds.length > 0
+        ? routedCapabilityIds
+        : this.readCapabilityIds(output.toolRetrieval);
     return {
       toolName,
       toolSchemaVersion,

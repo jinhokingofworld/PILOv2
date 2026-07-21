@@ -1036,13 +1036,21 @@ export class AgentConfirmationService {
       `,
       [runId]
     );
-    const toolRouting = row?.output_json?.toolRouting;
-    if (!this.isPlainObject(toolRouting) || !Array.isArray(toolRouting.capabilityIds)) {
-      return [];
+    for (const source of [
+      row?.output_json?.toolRouting,
+      row?.output_json?.toolRetrieval
+    ]) {
+      if (!this.isPlainObject(source) || !Array.isArray(source.capabilityIds)) {
+        continue;
+      }
+      const capabilityIds = source.capabilityIds.filter(
+        (value): value is string => typeof value === "string" && value.length > 0
+      );
+      if (capabilityIds.length > 0) {
+        return capabilityIds;
+      }
     }
-    return toolRouting.capabilityIds.filter(
-      (value): value is string => typeof value === "string" && value.length > 0
-    );
+    return [];
   }
 
   private async findCompletedToolNames(runId: string): Promise<string[]> {

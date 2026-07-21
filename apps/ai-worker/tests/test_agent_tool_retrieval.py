@@ -253,7 +253,9 @@ def test_full_catalog_shortlists_current_meeting_leave_without_adjacent_actions(
 @pytest.mark.parametrize(
     "prompt",
     (
+        "어제 일정이 뭐야",
         "오늘 일정 보여줘",
+        "내일 일정 알려줘",
         "이번 주 일정 알려줘",
     ),
 )
@@ -490,6 +492,11 @@ def test_catalog_keeps_unsupported_capabilities_out_of_the_executable_tool_set()
     supported = retrieve_tool_shortlist("이번 주 일정 알려줘", catalog, top_k=1)
     assert supported.tool_names == ("list_calendar_events",)
     assert supported.unsupported_capability_id is None
+
+    tomorrow = retrieve_tool_shortlist("내일 일정 알려줘", catalog, top_k=1)
+    assert tomorrow.tool_names == ("list_calendar_events",)
+    assert tomorrow.fallback_reason is None
+    assert tomorrow.unsupported_capability_id is None
 
 
 @pytest.mark.parametrize(

@@ -12,7 +12,7 @@ _TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣_]+")
 _SUPPORTED_CATALOG_VERSIONS = frozenset(
     {"agent-tool-capabilities:v1", "agent-tool-capabilities:v2"}
 )
-TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v4"
+TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v5"
 _KOREAN_PARTICLES = (
     "으로",
     "에서",
@@ -44,6 +44,7 @@ _GENERIC_REQUEST_TOKENS = frozenset(
         "해요",
     }
 )
+_GENERIC_READ_REQUEST_MARKERS = ("알려", "뭐야", "뭔지", "무엇", "어떤")
 _TOKEN_ALIASES = {
     "board": ("보드",),
     "canvas": ("캔버스",),
@@ -55,7 +56,7 @@ _TOKEN_ALIASES = {
 }
 _INTENT_CUE_MARKERS = (
     ("조회", ("조회", "보여", "보기", "확인", "살펴")),
-    ("생성", ("생성", "만들", "추가")),
+    ("생성", ("생성", "만들", "추가", "넣")),
     ("변경", ("변경", "바꾸", "바꿔", "수정")),
     ("삭제", ("삭제", "지우", "지워", "제거")),
     ("검색", ("검색", "찾")),
@@ -96,6 +97,7 @@ _CAPABILITY_EXAMPLE_KINDS = frozenset(
     {"canonical", "paraphrase", "typo", "honorific", "abbreviation"}
 )
 DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET = 8_000
+CAPABILITY_NEGATIVE_TOKEN_PENALTY = 1.5
 
 
 @dataclass(frozen=True)
@@ -261,7 +263,7 @@ def retrieve_tool_shortlist(
     if schema_token_budget is not None and schema_token_budget < 1:
         raise ValueError("schema_token_budget must be positive")
 
-    prompt_tokens = set(_tokens(prompt))
+    prompt_tokens = _retrieval_prompt_tokens(prompt)
     capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
     descriptor_by_tool_name = {
         descriptor.tool_name: descriptor for descriptor in catalog.descriptors
@@ -276,7 +278,7 @@ def retrieve_tool_shortlist(
         metadata_tokens = _capability_metadata_tokens(capability)
         negative_tokens = set(_tokens(" ".join(capability.must_not_use_for))) - metadata_tokens
         score = _capability_match_score(prompt_tokens, capability)
-        score -= float(len(prompt_tokens & negative_tokens)) * 0.75
+        score -= float(len(prompt_tokens & negative_tokens)) * CAPABILITY_NEGATIVE_TOKEN_PENALTY
         metadata_scores.append(score)
         if semantic_reranker:
             score += semantic_reranker.score(prompt, terminal_descriptor)
@@ -287,7 +289,10 @@ def retrieve_tool_shortlist(
     best_metadata_score = max(metadata_scores, default=0.0)
     unsupported_ranked = sorted(
         (
-            (_capability_match_score(prompt_tokens, capability), capability.capability_id)
+            (
+                _unsupported_capability_match_score(prompt_tokens, capability),
+                capability.capability_id,
+            )
             for capability in catalog.capabilities
             if capability.availability == "unsupported"
         ),
@@ -337,7 +342,7 @@ def retrieve_tool_shortlist(
     if handoff_capability_ids:
         score_by_capability_id = {capability_id: score for score, capability_id in ranked}
         ranked = [
-            (score_by_capability_id[capability_id], capability_id)
+            (max(0.0, score_by_capability_id[capability_id]), capability_id)
             for capability_id in ("meeting.report.summary", "calendar.events.create")
         ]
         minimum_candidate_score = 0.0
@@ -539,8 +544,30 @@ def _capability_match_score(prompt_tokens: set[str], capability: CapabilityDefin
     return score
 
 
+def _unsupported_capability_match_score(
+    prompt_tokens: set[str], capability: CapabilityDefinition
+) -> float:
+    """Requires explicit unsupported intent, not just shared entity/date words."""
+
+    metadata_tokens = _capability_metadata_tokens(capability)
+    prompt_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in prompt_tokens & _INTENT_CUE_TOKENS}
+    capability_intent_families = {
+        _INTENT_CUE_FAMILY[cue] for cue in metadata_tokens & _INTENT_CUE_TOKENS
+    }
+    if capability_intent_families and not (prompt_intent_families & capability_intent_families):
+        return 0.0
+    return _capability_match_score(prompt_tokens, capability)
+
+
 def _is_intent_surface_token(token: str) -> bool:
     return any(marker in token for _, markers in _INTENT_CUE_MARKERS for marker in markers)
+
+
+def _retrieval_prompt_tokens(prompt: str) -> set[str]:
+    tokens = set(_tokens(prompt))
+    if any(marker in prompt.lower() for marker in _GENERIC_READ_REQUEST_MARKERS):
+        tokens.add("조회")
+    return tokens
 
 
 def _capability_metadata_tokens(capability: CapabilityDefinition) -> set[str]:

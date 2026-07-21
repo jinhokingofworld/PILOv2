@@ -402,7 +402,7 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
     observation = report["retrievalEvents"][0]
     assert observation["eventVersion"] == "agent-tool-retrieval-observation:v1"
     assert observation["catalogVersion"] == "agent-tool-capabilities:v1"
-    assert observation["retrieverVersion"] == "agent-tool-metadata-overlap:v4"
+    assert observation["retrieverVersion"] == "agent-tool-metadata-overlap:v5"
     assert observation["tokenUsage"]["providerTotalTokens"] == 150
     assert "shortlistToolNames" not in observation
     assert "prompt" not in observation
@@ -926,6 +926,7 @@ def test_fixed_korean_suite_loads() -> None:
     assert len(suite.cases) == 55
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
+        "get_calendar_event",
         "create_calendar_event",
         "update_calendar_event",
         "start_meeting_in_room",

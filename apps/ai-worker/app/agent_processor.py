@@ -4289,6 +4289,7 @@ def _tool_retrieval_observation(
         "fallbackReason": retrieval.fallback_reason if retrieval else None,
         "candidateCount": retrieval.candidate_count if retrieval else 0,
         "confidenceBucket": retrieval.confidence_bucket if retrieval else "none",
+        "capabilityIds": list(retrieval.selected_capability_ids) if retrieval else [],
         "primaryCapabilityId": retrieval.primary_capability_id if retrieval else None,
         "primaryToolName": retrieval.primary_tool_name if retrieval else None,
         "catalogVersion": (

@@ -198,7 +198,9 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
     "calendar",
     ["get_calendar_event"],
     "이전 Calendar 목록에서 순번이나 지시어로 하나를 선택해 상세 정보를 조회할 때",
-    ["오늘·내일·이번 주 같은 기간 일정 목록 조회, 일정 생성 또는 기존 일정 변경 요청"],
+    [
+      "어제·오늘·내일·모레·이번 주·이번 달 같은 기간 일정 목록 조회, 일정 생성 또는 기존 일정 변경 요청"
+    ],
     ["세 번째 일정 자세히 알려줘", "그 일정의 세부 정보가 뭐야"]
   ),
   capability("calendar.events.create", "calendar", ["create_calendar_event"], "새 일정을 생성할 때", ["기존 일정 변경 또는 회의록 조회 요청"]),
@@ -278,6 +280,9 @@ export function isTerminalAgentCapabilityTool(
     return false;
   }
   const chains = capabilityIds.map(getAgentCapabilityToolNames);
+  if (!chains.some((chain) => chain?.includes(toolName))) {
+    return false;
+  }
   const satisfiedToolNames = new Set([...completedToolNames, toolName]);
   return (
     chains.every((chain) => chain !== null && chain.length > 0) &&

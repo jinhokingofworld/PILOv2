@@ -759,7 +759,8 @@ function errorMessage(error) {
     confirmations: [createConfirmation()],
     latestPlannerStep: {
       output_json: {
-        toolRouting: {
+        toolRetrieval: {
+          mode: "shadow",
           capabilityIds: ["calendar.events.create"]
         }
       }
