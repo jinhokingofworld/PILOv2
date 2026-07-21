@@ -41,6 +41,8 @@ fields @timestamp, @message
 | parse @message /"tool_name":"(?<tool_name>[^"]+)"/
 | parse @message /"retrieval_mode":"(?<retrieval_mode>[^"]+)"/
 | parse @message /"failure_type":"(?<failure_type>[^"]+)"/
+| parse @message /"failure_detail":"(?<failure_detail>[^"]+)"/
+| parse @message /"http_status":(?<http_status>[0-9]+)/
 | filter latency_event = "agent_latency" and surface = "sql_erd"
 ```
 
@@ -67,6 +69,20 @@ Router/Planner token은 기존 `provider_*_tokens` 필드로 조회한다. App S
 focus resolver의 provider payload나 token 원문은 기록하지 않는다. 실패 event의
 `failure_type`은 `timeout`, `provider_error`, `validation_error`,
 `repository_error`, `domain_error`, `unknown` 중 하나만 허용한다.
+
+App Server 내부 focus resolver는 `stage=focus_resolver`에서 더 구체적인
+`failure_detail`을 기록한다.
+
+- `http_error`: provider가 2xx가 아닌 HTTP 응답을 반환했다. 이때만 허용 범위의
+  `http_status`를 함께 기록한다.
+- `network_error`: HTTP 응답을 받기 전에 연결 또는 전송이 실패했다.
+- `timeout`: 설정된 resolver 제한 시간 안에 응답이 끝나지 않았다.
+- `empty_output`: HTTP 응답은 성공했지만 읽을 수 있는 output text가 없었다.
+- `json_parse_error`: provider 응답 envelope 또는 output text를 JSON으로 해석하지 못했다.
+- `validation_error`: JSON은 해석됐지만 table ref나 필수 필드가 resolver 계약과 맞지 않았다.
+
+사용자 발화, feature query, SQL source/model, schema projection, provider 응답 본문과
+raw UUID는 이 event에 포함하지 않는다.
 
 ## 단일 요청 순서 확인
 
