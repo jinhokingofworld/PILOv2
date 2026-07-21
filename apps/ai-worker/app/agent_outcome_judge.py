@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-
 OutcomeJudgeLabel = Literal["pass", "partial", "fail", "inconclusive"]
 
 
@@ -76,7 +75,8 @@ class OpenAiOutcomeJudge:
 
 _OUTCOME_JUDGE_SYSTEM_PROMPT = (
     "Judge only the supplied evidence. Do not infer unstated facts or reward wording. "
-    "Return pass only when the user task is fulfilled, grounded in tool facts, and materially correct."
+    "Return pass only when the user task is fulfilled, grounded in tool facts, "
+    "and materially correct."
 )
 _OUTCOME_JUDGE_SCHEMA = {
     "type": "object",
