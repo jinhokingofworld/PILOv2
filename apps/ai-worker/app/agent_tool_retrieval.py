@@ -16,7 +16,7 @@ _SUPPORTED_CATALOG_VERSIONS = frozenset(
         "agent-tool-capabilities:v3",
     }
 )
-TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v4"
+TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v5"
 _KOREAN_PARTICLES = (
     "으로",
     "에서",
