@@ -433,7 +433,6 @@ export class GithubSyncRunService {
   }
 
   private async manualLimit(transaction: DatabaseTransaction, scope: "user" | "workspace", workspaceId: string, userId: string, windowSeconds: number, cooldownSeconds: number): Promise<{ total: number; windowRetryAfterSeconds: number; cooldownRetryAfterSeconds: number | null }> {
-    const userFilter = scope === "user" ? "AND job.requested_by_user_id=$2" : "";
     const row = await transaction.queryOne<{ total: string | number; window_retry_after_seconds: string | number; cooldown_retry_after_seconds: string | number | null }>(`
       SELECT COUNT(*)::int AS total,
         GREATEST(1, COALESCE(CEIL(EXTRACT(EPOCH FROM (MIN(run.created_at) + ($3 * interval '1 second') - now()))), 1))::int AS window_retry_after_seconds,
@@ -441,9 +440,10 @@ export class GithubSyncRunService {
           FILTER (WHERE run.created_at + ($4 * interval '1 second') > now()) AS cooldown_retry_after_seconds
       FROM github_sync_runs AS run
       INNER JOIN github_sync_jobs AS job ON job.sync_run_id=run.id
-      WHERE run.workspace_id=$1 AND run.trigger_source='manual' ${userFilter}
+      WHERE run.workspace_id=$1 AND run.trigger_source='manual'
+        AND ($2::uuid IS NULL OR job.requested_by_user_id=$2::uuid)
         AND run.created_at >= now() - ($3 * interval '1 second')`,
-      [workspaceId, userId, windowSeconds, cooldownSeconds]);
+      [workspaceId, scope === "user" ? userId : null, windowSeconds, cooldownSeconds]);
     return {
       total: this.toInteger(row?.total ?? 0, "Invalid manual sync count"),
       windowRetryAfterSeconds: this.toInteger(row?.window_retry_after_seconds ?? 1, "Invalid manual sync retry delay"),
