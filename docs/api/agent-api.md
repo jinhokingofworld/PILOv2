@@ -982,9 +982,11 @@ Status code: `200 OK`
   9,000자의 bounded projection을 내부 생성한다. 내부 table/column ID, raw sourceText, DDL, 전체
   modelJson은 Planner context나 provider payload에 복제하지 않는다.
 - 혼합 resolver는 먼저 table/schema 이름과 bounded comment·column·type·enum evidence의 결정적
-  일치를 검사한다. 명확한 결과가 없을 때만 bounded projection을 strict JSON schema LLM fallback에
-  전달한다. provider 결과의 ref와 중복을 서버가 다시 검증하며, primary의 직접 FK 1-hop table은
-  서버가 related로 확장한다. 기본 2-hop 확장과 가짜 relation은 만들지 않는다.
+  일치를 검사한다. 제외·부정 표현이 있거나 projection에서 이름이 잘린 table은 이름 기반 결정적
+  일치를 사용하지 않는다. projection은 잘린 이름의 compact ref를 `truncatedTableRefs`로 표시한다.
+  명확한 결과가 없을 때만 bounded projection을 strict JSON schema LLM fallback에 전달한다. provider
+  결과의 ref와 중복을 서버가 다시 검증하며, primary의 직접 FK 1-hop table은 서버가 related로
+  확장한다. 기본 2-hop 확장과 가짜 relation은 만들지 않는다.
 - 0건·모호함·provider 장애·invalid ref는 focus resource 없이 `needs_clarification` 질문으로 끝난다.
   최초 조회 또는 실행 직전 재조회에서 session이 없거나 접근 권한이 사라진 경우에도 대상의 존재나
   권한 상세를 노출하지 않는 `session_unavailable` clarification으로 끝낸다. 성공 직전 같은 session을

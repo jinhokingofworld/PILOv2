@@ -25,7 +25,10 @@ export function resolveDeterministicSqlErdTableFocus(
   projection: SqlErdAgentSchemaProjection,
   featureQuery: string
 ): SqlErdFocusResolution | null {
+  if (hasExclusionIntent(featureQuery)) return null;
+
   const queryTerms = tokenize(featureQuery);
+  const truncatedTableRefs = new Set(projection.truncatedTableRefs ?? []);
   const exactNameRefs = resolveExactTableNameRefs(projection, featureQuery);
 
   if (exactNameRefs.length > 0) {
@@ -39,7 +42,11 @@ export function resolveDeterministicSqlErdTableFocus(
   }
 
   const inflectionNameRefs = projection.tables
-    .filter((table) => tableNameMatchesInflection(table.name, queryTerms))
+    .filter(
+      (table) =>
+        !truncatedTableRefs.has(table.ref) &&
+        tableNameMatchesInflection(table.name, queryTerms)
+    )
     .map((table) => table.ref);
   if (inflectionNameRefs.length === 1) {
     return buildFocusedResolution(
@@ -145,7 +152,9 @@ function resolveExactTableNameRefs(
   featureQuery: string
 ): string[] {
   const queryTerms = exactTokens(featureQuery);
+  const truncatedTableRefs = new Set(projection.truncatedTableRefs ?? []);
   const matches = projection.tables
+    .filter((table) => !truncatedTableRefs.has(table.ref))
     .map((table) => {
       const nameTerms = exactTokens(table.name);
       return {
@@ -173,6 +182,12 @@ function resolveExactTableNameRefs(
     )
     .map((candidate) => candidate.ref)
     .slice(0, MAX_PRIMARY_TABLES);
+}
+
+function hasExclusionIntent(value: string): boolean {
+  return /(?:말고|제외|빼고|아닌|\bexcept\b|\bexcluding\b|\bexclude\b|\bwithout\b|\bbut\s+not\b)/iu.test(
+    value
+  );
 }
 
 function findPhraseRanges(

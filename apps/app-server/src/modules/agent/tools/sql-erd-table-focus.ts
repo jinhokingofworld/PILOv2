@@ -58,6 +58,7 @@ export type SqlErdAgentProjectedTable = {
 export interface SqlErdAgentSchemaProjection {
   tables: SqlErdAgentProjectedTable[];
   edges: Array<[string, string]>;
+  truncatedTableRefs: string[];
   truncated: boolean;
 }
 
@@ -119,12 +120,12 @@ export function buildSqlErdAgentSchemaProjection(
 
   let nameLimit: number = CATALOG_NAME_LIMITS[0];
   let tables = createCatalogTables(model.tables, nameLimit);
+  let truncatedTableRefs = collectTruncatedTableRefs(model.tables, nameLimit);
   let projection: SqlErdAgentSchemaProjection = {
     tables,
     edges,
-    truncated: model.tables.some(
-      (table) => unicodeLength(table.name) > nameLimit
-    )
+    truncatedTableRefs,
+    truncated: truncatedTableRefs.length > 0
   };
 
   for (const candidateLimit of CATALOG_NAME_LIMITS.slice(1)) {
@@ -133,12 +134,12 @@ export function buildSqlErdAgentSchemaProjection(
     }
     nameLimit = candidateLimit;
     tables = createCatalogTables(model.tables, nameLimit);
+    truncatedTableRefs = collectTruncatedTableRefs(model.tables, nameLimit);
     projection = {
       tables,
       edges,
-      truncated: model.tables.some(
-        (table) => unicodeLength(table.name) > nameLimit
-      )
+      truncatedTableRefs,
+      truncated: truncatedTableRefs.length > 0
     };
   }
 
@@ -439,6 +440,15 @@ function createCatalogTables(
     ref: `t${index + 1}`,
     name: boundText(table.name, nameLimit)
   }));
+}
+
+function collectTruncatedTableRefs(
+  tables: SqlErdModelTable[],
+  nameLimit: number
+): string[] {
+  return tables.flatMap((table, index) =>
+    unicodeLength(table.name) > nameLimit ? [`t${index + 1}`] : []
+  );
 }
 
 function tryAddOptionalText(

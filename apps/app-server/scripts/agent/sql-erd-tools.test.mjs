@@ -295,6 +295,14 @@ assert.deepEqual(
   ["t1", "t2"],
   "separately named tables in an explicit multi-table request must be preserved"
 );
+assert.equal(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "users 말고 orders만 보여줘"
+  ),
+  null,
+  "exclusion intent must bypass deterministic matching instead of selecting the excluded table"
+);
 assert.deepEqual(
   focusProjection.tables.map((table) => [table.ref, table.name]),
   [
@@ -404,44 +412,60 @@ for (const evidence of boundedEvidenceCases) {
   );
 }
 
-const largeProjection = buildSqlErdAgentSchemaProjection(
-  {
-    version: 1,
-    schema: {
-      tables: Array.from({ length: 100 }, (_, index) => ({
-        id: `internal-large-table-${index}`,
-        name: `table_${index}_${"x".repeat(240)}`,
-        schemaName: `schema_${"y".repeat(240)}`,
-        columns: Array.from({ length: 10 }, (_column, columnIndex) => ({
-          id: `internal-large-column-${index}-${columnIndex}`,
-          name: `column_${columnIndex}_${"z".repeat(240)}`,
-          dataType: "text",
-          nullable: true,
-          primaryKey: columnIndex === 0,
-          foreignKey: false,
-          unique: false,
-          defaultValue: null,
-          comment: "설명".repeat(1_000)
-        })),
-        constraints: [],
-        comment: "테이블 설명".repeat(1_000)
+const largeFocusModelJson = {
+  version: 1,
+  schema: {
+    tables: Array.from({ length: 100 }, (_, index) => ({
+      id: `internal-large-table-${index}`,
+      name:
+        index === 0
+          ? "organization_membership_invitations"
+          : index === 1
+            ? "organization_membership_roles"
+            : `table_${index}_${"x".repeat(240)}`,
+      schemaName: `schema_${"y".repeat(240)}`,
+      columns: Array.from({ length: 10 }, (_column, columnIndex) => ({
+        id: `internal-large-column-${index}-${columnIndex}`,
+        name: `column_${columnIndex}_${"z".repeat(240)}`,
+        dataType: "text",
+        nullable: true,
+        primaryKey: columnIndex === 0,
+        foreignKey: false,
+        unique: false,
+        defaultValue: null,
+        comment: "설명".repeat(1_000)
       })),
-      relations: Array.from({ length: 300 }, (_, index) => ({
-        id: `internal-large-relation-${index}`,
-        kind: "foreign_key",
-        fromTableId: `internal-large-table-${index % 100}`,
-        fromColumnIds: [],
-        toTableId: `internal-large-table-${(index + 1) % 100}`,
-        toColumnIds: [],
-        constraintName: null
-      }))
-    }
-  },
+      constraints: [],
+      comment: "테이블 설명".repeat(1_000)
+    })),
+    relations: Array.from({ length: 300 }, (_, index) => ({
+      id: `internal-large-relation-${index}`,
+      kind: "foreign_key",
+      fromTableId: `internal-large-table-${index % 100}`,
+      fromColumnIds: [],
+      toTableId: `internal-large-table-${(index + 1) % 100}`,
+      toColumnIds: [],
+      constraintName: null
+    }))
+  }
+};
+const largeProjection = buildSqlErdAgentSchemaProjection(
+  largeFocusModelJson,
   "대형 기능"
 );
 assert.equal(JSON.stringify(largeProjection).length <= 9_000, true);
 assert.equal(largeProjection.tables.length, 100);
 assert.equal(largeProjection.truncated, true);
+assert.equal(largeProjection.tables[0].name, largeProjection.tables[1].name);
+assert.deepEqual(largeProjection.truncatedTableRefs.slice(0, 2), ["t1", "t2"]);
+assert.equal(
+  resolveDeterministicSqlErdTableFocus(
+    largeProjection,
+    "organization_membership_invitations 테이블만 보여줘"
+  ),
+  null,
+  "truncated table names must not become deterministic exact matches"
+);
 
 const resolvedFocus = resolveSqlErdAgentTableFocus(focusModelJson(), {
   primaryTableRefs: ["t2"],
@@ -911,6 +935,30 @@ assert.equal(
   false
 );
 assert.equal(capturedResolverBody.input[1].content.includes("CREATE TYPE"), false);
+
+globalThis.fetch = async () =>
+  new Response(
+    JSON.stringify({
+      output_text: JSON.stringify({
+        status: "focused",
+        featureLabel: "orders",
+        primaryTableRefs: ["t1"],
+        confidence: "medium",
+        question: null
+      })
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+const exclusionFocused = await focusDefinition.execute(
+  focusContext,
+  focusDefinition.validateInput({
+    featureQuery: "users 말고 orders만 보여줘"
+  })
+);
+assert.deepEqual(
+  exclusionFocused.outputSummary.primaryTables.map((table) => table.name),
+  ["orders"]
+);
 
 globalThis.fetch = async () =>
   new Response(

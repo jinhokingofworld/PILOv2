@@ -270,10 +270,13 @@ type FocusSqlErdTablesInput = {
 - App Server는 현재 user/workspace membership으로 session을 조회한 뒤 modelJson과 sourceText에서
   table 선언 순서의 `t1`, `t2` compact ref를 가진 내부 projection을 만든다. projection은 JSON
   직렬화 기준 최대 9,000자이며 table/column 이름, bounded comment/type/enum과 FK edge만 포함한다.
-  내부 table/column ID, raw sourceText, DDL, layoutJson은 포함하지 않는다.
+  이름이 잘린 table의 ref는 `truncatedTableRefs`로 표시한다. 내부 table/column ID, raw sourceText,
+  DDL, layoutJson은 포함하지 않는다.
 - 혼합 resolver는 먼저 정규화한 query와 table/schema 이름 및 bounded schema evidence를 결정적으로
-  비교한다. 명확한 결과가 없을 때만 OpenAI strict JSON schema fallback을 호출한다. LLM은 bounded
-  projection과 featureQuery만 받고 primary compact ref만 제안하며, direct FK 확장은 서버가 수행한다.
+  비교한다. 제외·부정 표현이 있는 query는 결정적 경로를 사용하지 않으며, `truncatedTableRefs`에
+  포함된 잘린 이름은 exact 또는 inflection match에 사용하지 않는다. 명확한 결과가 없을 때만 OpenAI
+  strict JSON schema fallback을 호출한다. LLM은 bounded projection과 featureQuery만 받고 primary
+  compact ref만 제안하며, direct FK 확장은 서버가 수행한다.
 - provider가 반환한 ref는 현재 projection에 존재하고 중복되지 않는지 다시 검증한다. primary와 직접
   FK로 연결된 1-hop table만 related로 포함하며 기본 2-hop 확장, context 추측, 가짜 relation은 만들지
   않는다.

@@ -679,7 +679,7 @@ export class SqlErdAgentToolsService {
               {
                 role: "system",
                 content:
-                  "Select only the primary SQLtoERD table refs that directly implement the requested feature. Do not add FK neighbors; the server expands them. If the schema evidence is insufficient or ambiguous, request clarification. Return only the requested JSON schema."
+                  "Select only the primary SQLtoERD table refs that directly implement the requested feature. Respect exclusion and negation in the feature query. Refs listed in truncatedTableRefs have prefix-only names, so do not treat those names as exact identity; request clarification unless independent schema evidence resolves them. Do not add FK neighbors; the server expands them. If the schema evidence is insufficient or ambiguous, request clarification. Return only the requested JSON schema."
               },
               {
                 role: "user",
