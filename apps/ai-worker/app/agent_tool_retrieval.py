@@ -12,7 +12,7 @@ _TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣_]+")
 _SUPPORTED_CATALOG_VERSIONS = frozenset(
     {"agent-tool-capabilities:v1", "agent-tool-capabilities:v2"}
 )
-TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v3"
+TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v4"
 _KOREAN_PARTICLES = (
     "으로",
     "에서",
@@ -527,14 +527,20 @@ def _confidence_bucket(score: float) -> str:
 
 def _capability_match_score(prompt_tokens: set[str], capability: CapabilityDefinition) -> float:
     metadata_tokens = _capability_metadata_tokens(capability)
-    score = float(len(prompt_tokens & metadata_tokens))
+    overlapping_tokens = prompt_tokens & metadata_tokens
+    score = float(sum(not _is_intent_surface_token(token) for token in overlapping_tokens))
     prompt_intent_cues = prompt_tokens & _INTENT_CUE_TOKENS
+    capability_intent_cues = metadata_tokens & _INTENT_CUE_TOKENS
+    prompt_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in prompt_intent_cues}
+    capability_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in capability_intent_cues}
+    score += float(len(prompt_intent_cues & capability_intent_cues))
     if prompt_intent_cues:
-        capability_intent_cues = metadata_tokens & _INTENT_CUE_TOKENS
-        prompt_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in prompt_intent_cues}
-        capability_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in capability_intent_cues}
         score -= float(len(capability_intent_families - prompt_intent_families)) * 0.75
     return score
+
+
+def _is_intent_surface_token(token: str) -> bool:
+    return any(marker in token for _, markers in _INTENT_CUE_MARKERS for marker in markers)
 
 
 def _capability_metadata_tokens(capability: CapabilityDefinition) -> set[str]:

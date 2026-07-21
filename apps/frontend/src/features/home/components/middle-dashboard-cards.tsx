@@ -17,10 +17,10 @@ export function MiddleDashboardCards({
   pullRequestsState: HomePullRequestsState;
 }) {
   return (
-    <div className="grid min-h-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid min-h-0 grid-flow-col auto-cols-[min(20rem,calc(100vw-2rem))] gap-3 overflow-x-auto pb-1 sm:grid-flow-row sm:auto-cols-auto sm:grid-cols-2 sm:gap-4 sm:overflow-visible sm:pb-0 xl:grid-cols-3">
       <IssuesCard issuesState={issuesState} />
       <PullRequestsCard pullRequestsState={pullRequestsState} />
-      <div className="min-h-0 md:col-span-2 xl:col-span-1">
+      <div className="min-h-0 sm:col-span-2 xl:col-span-1">
         <MeetingReportsCard meetingReportsState={meetingReportsState} />
       </div>
     </div>
