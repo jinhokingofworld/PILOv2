@@ -26,6 +26,7 @@ from app.agent_processor import (
     _agent_planner_system_prompt,
     _agent_planner_user_prompt,
     _agent_router_schema,
+    _agent_router_system_prompt,
     _agent_router_user_prompt,
     normalize_agent_planner_decision,
     normalize_agent_routing_decision,
@@ -1631,6 +1632,17 @@ def test_agent_router_prompt_uses_compact_catalog_without_tool_schema() -> None:
     assert "toolNames" not in prompt["capabilities"][0]
     assert "inputSchema" not in json.dumps(prompt)
     assert schema["properties"]["domains"]["maxItems"] == 3
+
+
+def test_agent_router_prompt_distinguishes_existing_sql_erd_from_generation() -> None:
+    prompt = _agent_router_system_prompt()
+
+    assert "existing SQLtoERD session" in prompt
+    assert "sql_erd.inspect" in prompt
+    assert "new ERD, schema, or DDL" in prompt
+    assert "sql_erd.generate" in prompt
+    assert "SQL input is not required" in prompt
+    assert "Do not ask the user to choose" in prompt
 
 
 def test_agent_router_prompt_and_schema_filter_capabilities_by_context_surface() -> None:

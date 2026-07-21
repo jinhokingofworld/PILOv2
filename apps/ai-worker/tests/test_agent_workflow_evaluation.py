@@ -367,6 +367,32 @@ def test_agent_workflow_catalog_covers_required_task_categories() -> None:
     } <= categories
 
 
+def test_agent_workflow_catalog_covers_sql_erd_routing_boundaries() -> None:
+    catalog = load_workflow_catalog(Path("evals/agent_workflow_catalog_v1.json"))
+    scenarios = {scenario.scenario_id: scenario for scenario in catalog.scenarios}
+
+    assert scenarios["sql_erd_focus_meeting_tables"].prompt == (
+        "현재 ERD에서 회의 관련 테이블만 집중적으로 보여줘"
+    )
+    assert scenarios["sql_erd_focus_meeting_tables"].expected_capability_ids == ("sql_erd.inspect",)
+    assert scenarios["sql_erd_generate_hamburger_shop"].prompt == (
+        "햄버거 가게 관련 ERD를 생성해줘"
+    )
+    assert scenarios["sql_erd_generate_hamburger_shop"].expected_capability_ids == (
+        "sql_erd.generate",
+    )
+    for scenario_id in (
+        "sql_erd_focus_meeting_tables",
+        "sql_erd_schema_inspect",
+        "sql_erd_relation_explore",
+    ):
+        [focus_fixture] = scenarios[scenario_id].fixtures
+        assert "tables" not in focus_fixture.output
+        assert focus_fixture.output["primaryTables"]
+        assert isinstance(focus_fixture.output["relatedTables"], list)
+        assert focus_fixture.output["featureLabel"]
+
+
 def test_every_workflow_case_declares_outcome_assertions() -> None:
     raw = json.loads(Path("evals/agent_workflow_catalog_v1.json").read_text(encoding="utf-8"))
 
