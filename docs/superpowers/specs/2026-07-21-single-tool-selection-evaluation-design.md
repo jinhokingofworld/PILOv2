@@ -27,7 +27,7 @@ The 120 cases are stratified across:
 
 Every expected Tool must be present in the registry snapshot and reachable on the declared surface. Cases with insufficient selector information are excluded so that missing parameters cannot be confused with Tool-choice quality.
 
-The catalog is a locked holdout: it is not changed while a baseline/candidate comparison is in progress. The expected Tool mapping is listed in the review artifact so the owning domain maintainers can verify product-contract correctness before external use.
+The catalog is a locked frozen benchmark: it is not changed while a baseline/candidate comparison is in progress. The expected Tool mapping is listed in the review artifact so the owning domain maintainers can verify product-contract correctness before external use.
 
 ## Evaluation Contract
 
@@ -37,11 +37,13 @@ The evaluator serializes only the case ID, expected Tool name, selected Tool nam
 
 ## Metric and Comparison
 
-`singleTurnToolSelectionAccuracy` is the fraction of all supported holdout attempts that meet the exact-selection contract.
+`singleTurnToolSelectionAccuracy` is the fraction of all supported frozen-benchmark attempts that meet the exact-selection contract.
 
 Baseline and candidate use the same catalog SHA, registry snapshot, Agent model configuration, current date, timezone, repetition count, and pinned evaluator revision. The workflow runs each case five times and compares paired results clustered by the same 120 case IDs. Repetitions reduce model variance but do not increase the benchmark's effective case count. The report includes absolute accuracy, percentage-point delta, and a clustered paired 95% bootstrap confidence interval.
 
 An external improvement claim is allowed only when the lower bound of the confidence interval is greater than zero. The permitted claim is limited to the frozen single-turn benchmark.
+
+The committed catalog is a reproducible frozen benchmark, not a secret holdout: its case-level content must not be used to tune an Agent change. Results must identify the catalog version and state this scope. A separate access-controlled holdout is required for any claim about generalization beyond this benchmark.
 
 ## Evaluator Versioning
 
