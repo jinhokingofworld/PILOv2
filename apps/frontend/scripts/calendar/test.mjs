@@ -73,8 +73,9 @@ assert.match(calendarPanel, /DialogContent/);
 assert.match(calendarPanel, /DialogHeader/);
 assert.match(calendarPanel, /DialogTitle/);
 assert.match(calendarPanel, /DialogDescription/);
-assert.match(calendarPanel, /@\/components\/ui\/card/);
-assert.match(calendarPanel, /<Card/);
+assert.doesNotMatch(calendarPanel, /@\/components\/ui\/card/);
+assert.doesNotMatch(calendarPanel, /<Card/);
+assert.match(calendarPanel, /<section\s+id="month"/);
 assert.match(calendarPanel, /@\/components\/ui\/textarea/);
 assert.match(calendarPanel, /<Textarea/);
 assert.match(calendarPanel, /@\/components\/ui\/switch/);
@@ -91,15 +92,19 @@ assert.match(calendarPanel, /getEventsForCalendarDate/);
 assert.match(calendarPanel, /getCalendarWeekEventBars/);
 assert.match(calendarPanel, /getCalendarDateBarLayout/);
 assert.match(calendarPanel, /CalendarMonthPicker/);
-assert.match(calendarPanel, /<h1[^>]*>\s*캘린더\s*<\/h1>/);
+assert.doesNotMatch(calendarPanel, /<h1[^>]*>[\s\S]*?캘린더[\s\S]*?<\/h1>/);
 assert.ok(
   calendarPanel.includes('data-calendar-month-navigation="true"'),
   "월 이동 컨트롤을 식별할 수 있어야 한다"
 );
+const calendarHeadingStart = calendarPanel.indexOf("<h1");
+const calendarHeadingEnd = calendarPanel.indexOf("</h1>", calendarHeadingStart);
+const calendarMonthPickerIndex = calendarPanel.indexOf("<CalendarMonthPicker");
+assert.ok(calendarHeadingStart >= 0, "월 이동 컨트롤은 h1이어야 한다");
 assert.ok(
-  calendarPanel.indexOf('data-calendar-month-navigation="true"') <
-    calendarPanel.indexOf("<h1"),
-  "월 이동 컨트롤은 캘린더 제목보다 앞쪽 grid 영역에 있어야 한다"
+  calendarMonthPickerIndex > calendarHeadingStart &&
+    calendarMonthPickerIndex < calendarHeadingEnd,
+  "현재 연도와 월 선택기는 가운데 h1 안에 있어야 한다"
 );
 assert.doesNotMatch(calendarMonthPicker, /@\/components\/ui\/select/);
 assert.doesNotMatch(calendarMonthPicker, /<Select/);

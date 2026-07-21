@@ -21,7 +21,6 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogClose,
@@ -1489,13 +1488,15 @@ export function CalendarPanel() {
         onOpenEventsByDate={openWorkspaceEventsByDate}
         onSelectDate={handleWorkspaceLocationDate}
       />
-      <Card
+      <section
         id="month"
-        className="flex min-h-0 flex-1 flex-col gap-4 rounded-[15px] border-border bg-card px-4 py-4 text-card-foreground shadow-sm"
+        className="flex min-h-0 flex-1 flex-col gap-4"
       >
         <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-          <div
-            className="flex items-center gap-1"
+          <div className="hidden lg:block" aria-hidden="true" />
+
+          <h1
+            className="flex items-center gap-1 lg:justify-self-center"
             data-calendar-month-navigation="true"
           >
             <Button
@@ -1522,10 +1523,6 @@ export function CalendarPanel() {
             >
               <ChevronRight />
             </Button>
-          </div>
-
-          <h1 className="justify-self-start font-heading text-2xl font-semibold tracking-tight lg:justify-self-center">
-            캘린더
           </h1>
 
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
@@ -1721,7 +1718,7 @@ export function CalendarPanel() {
             ))}
           </div>
         </div>
-      </Card>
+      </section>
 
       <CalendarEventsDialog
         dialog={eventsDialog}
