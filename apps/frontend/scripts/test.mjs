@@ -1026,7 +1026,14 @@ assert.match(canvasRemoteOperations, /unloadedShapeIds/);
 assert.match(canvasRemoteOperations, /collectCanvasFrameDescendantShapeIds/);
 assert.match(canvasRemoteOperations, /function isShapeParentId/);
 assert.match(canvasRemoteOperations, /parentId\.startsWith\("shape:"\)/);
-assert.match(canvasRemoteOperations, /shapeDetailCache\.get\(parentId\)/);
+assert.match(
+  canvasRemoteOperations,
+  /isShapeParentId\(parentId\) && !currentShapeMap\.has\(parentId\)/,
+);
+assert.doesNotMatch(
+  canvasRemoteOperations,
+  /currentShapeMap\.get\(parentId\)\s*\?\?\s*shapeDetailCache\.get\(parentId\)/,
+);
 assert.match(canvasRemoteOperations, /parentId/);
 assert.match(canvasRuntime, /pendingRemoteFrameChildrenRequestRef/);
 assert.match(canvasRuntime, /result\.frameIdsToLoad/);
