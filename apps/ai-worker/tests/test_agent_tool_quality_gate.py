@@ -41,10 +41,10 @@ def test_quality_gate_records_reproducible_passing_baseline_without_sensitive_in
             "f7f0a523e061086f1596da6b056daff1878d28f4c12b7d002a2e230e0235bbab"
         ),
         "registryInventorySha256": (
-            "234da88da04bc0ed10487aeb7edaacd156a93299edc725250c64a9c42af268ab"
+            "e5dfff743067e2781cf96e02786ac7f9d3270726bb9f0ca8b4eeccf770b34f94"
         ),
         "registryCatalogSha256": (
-            "dffdcf9b634ce42647c8ed7156499752b2929c2c7b29c9862d3fa01e5707d460"
+            "7f1e81b23941ea9e9ac978b7c7b908352a8938fdf6fec42f35ee412aae566f76"
         ),
         "registryEligibleSnapshotSha256": (
             "f7f0a523e061086f1596da6b056daff1878d28f4c12b7d002a2e230e0235bbab"

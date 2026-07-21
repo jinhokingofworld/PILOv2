@@ -69,7 +69,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "234da88da04bc0ed10487aeb7edaacd156a93299edc725250c64a9c42af268ab";
+  "e5dfff743067e2781cf96e02786ac7f9d3270726bb9f0ca8b4eeccf770b34f94";
 
 assert.deepEqual(
   getNextAgentCapabilityToolNames(["calendar.events.update"], []),
@@ -287,6 +287,47 @@ const fullRegistry = new AgentToolRegistryService(
     fullCapabilityCatalog.descriptors
       .find((descriptor) => descriptor.toolName === "delegate_canvas_agent")
       ?.capabilityIds.includes("canvas.drive_images.import")
+  );
+  const sqlErdCapabilityCatalog = fullRegistry.listCapabilityCatalogForContext({
+    surface: "sql_erd",
+    sessionId: "77777777-7777-4777-8777-777777777777"
+  });
+  const sqlErdInspect = sqlErdCapabilityCatalog.capabilities.find(
+    (capability) => capability.id === "sql_erd.inspect"
+  );
+  const sqlErdGenerate = sqlErdCapabilityCatalog.capabilities.find(
+    (capability) => capability.id === "sql_erd.generate"
+  );
+  assert.ok(
+    sqlErdInspect?.positiveExamples.includes(
+      "현재 ERD에서 회의 관련 테이블만 보여줘"
+    )
+  );
+  assert.ok(
+    sqlErdInspect?.positiveExamples.includes(
+      "회의 관련 테이블만 집중적으로 보여줘"
+    )
+  );
+  assert.ok(
+    sqlErdInspect?.mustNotUseFor.some((boundary) =>
+      boundary.includes("새 ERD")
+    )
+  );
+  assert.ok(
+    sqlErdGenerate?.positiveExamples.includes(
+      "햄버거 가게 관련 ERD를 생성해줘"
+    )
+  );
+  assert.ok(
+    sqlErdGenerate?.positiveExamples.includes(
+      "학생, 강의, 수강 신청 ERD를 만들어줘"
+    )
+  );
+  assert.match(sqlErdGenerate?.whenToUse ?? "", /자연어/);
+  assert.ok(
+    sqlErdGenerate?.mustNotUseFor.some((boundary) =>
+      boundary.includes("집중 표시")
+    )
   );
 }
 {

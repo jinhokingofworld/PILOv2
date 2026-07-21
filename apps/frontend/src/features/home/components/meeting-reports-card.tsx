@@ -63,14 +63,14 @@ export function MeetingReportsCard({
               })}
               key={report.id}
               aria-label={`${formatMeetingReportTitle(report)} 회의록으로 이동`}
-              className="flex min-h-[54px] flex-col justify-center overflow-hidden rounded-[10px] border border-[#eceef2] bg-[#fbfbfc] px-3 py-2.5 text-left transition hover:border-[#dfe2e8] hover:bg-white hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="flex min-h-[54px] flex-col justify-center overflow-hidden rounded-[10px] border border-border bg-muted/50 px-3 py-2.5 text-left transition hover:bg-muted hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               onClick={() => router.push(buildMeetingReportHref(report.id))}
               type="button"
             >
-              <p className="min-w-0 truncate text-[17px] font-medium leading-5 text-[#202124]">
+              <p className="min-w-0 truncate text-[17px] font-medium leading-5 text-foreground">
                 {formatMeetingReportTitle(report)}
               </p>
-              <p className="mt-0.5 min-w-0 truncate text-[16px] leading-4 text-[#6b6f78]">
+              <p className="mt-0.5 min-w-0 truncate text-[16px] leading-4 text-muted-foreground">
                 {report.summary?.trim() || getMeetingReportFallbackSummary(report)}
               </p>
             </button>

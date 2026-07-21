@@ -338,6 +338,13 @@ def retrieve_tool_shortlist(
     prompt_tokens = set(_tokens(prompt))
     negated_intent_cues = _negated_intent_cues(prompt)
     excluded_domains = _excluded_domains(prompt)
+    excluded_domain_tokens = set(
+        _tokens(
+            " ".join(
+                alias for domain in excluded_domains for alias in _DOMAIN_SWITCH_ALIASES[domain]
+            )
+        )
+    )
     capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
     descriptor_by_tool_name = {
         descriptor.tool_name: descriptor for descriptor in catalog.descriptors
@@ -358,7 +365,8 @@ def retrieve_tool_shortlist(
         )
         if capability.domain in excluded_domains:
             score -= 100.0
-        score -= float(len((prompt_tokens - set(negated_intent_cues)) & negative_tokens)) * 0.75
+        negative_prompt_tokens = prompt_tokens - set(negated_intent_cues) - excluded_domain_tokens
+        score -= float(len(negative_prompt_tokens & negative_tokens)) * 0.75
         metadata_scores.append(score)
         if semantic_reranker:
             score += semantic_reranker.score(prompt, terminal_descriptor)
@@ -633,13 +641,15 @@ def _capability_match_score(
     negated_intent_cues: frozenset[str] = frozenset(),
 ) -> float:
     metadata_tokens = _capability_metadata_tokens(capability)
-    score = float(len(prompt_tokens & metadata_tokens))
+    overlapping_tokens = prompt_tokens & metadata_tokens
+    score = sum(0.25 if _is_intent_surface_token(token) else 1.0 for token in overlapping_tokens)
     score -= float(len(negated_intent_cues & metadata_tokens)) * 4.0
     prompt_intent_cues = (prompt_tokens & _INTENT_CUE_TOKENS) - negated_intent_cues
+    capability_intent_cues = metadata_tokens & _INTENT_CUE_TOKENS
+    prompt_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in prompt_intent_cues}
+    capability_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in capability_intent_cues}
+    score += float(len(prompt_intent_cues & capability_intent_cues))
     if prompt_intent_cues:
-        capability_intent_cues = metadata_tokens & _INTENT_CUE_TOKENS
-        prompt_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in prompt_intent_cues}
-        capability_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in capability_intent_cues}
         score -= float(len(capability_intent_families - prompt_intent_families)) * 0.75
     return score
 
@@ -649,7 +659,7 @@ def _negated_intent_cues(prompt: str) -> frozenset[str]:
     for cue, markers in _INTENT_CUE_MARKERS:
         if any(
             re.search(
-                rf"{re.escape(marker)}[^\s,.!?]{{0,8}}(?:지\s*마|하지\s*말|말고)",
+                rf"{re.escape(marker)}[^\s,.!?]{{0,8}}(?:지\s*말|하지\s*말|말고)",
                 prompt,
                 re.IGNORECASE,
             )
@@ -673,6 +683,10 @@ def _excluded_domains(prompt: str) -> frozenset[str]:
         ):
             excluded.add(domain)
     return frozenset(excluded)
+
+
+def _is_intent_surface_token(token: str) -> bool:
+    return any(marker in token for _, markers in _INTENT_CUE_MARKERS for marker in markers)
 
 
 def _capability_metadata_tokens(capability: CapabilityDefinition) -> set[str]:

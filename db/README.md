@@ -15,11 +15,7 @@ The database schema source of truth is the migration history in `db/migrations/`
   it by editing the old file.
 - If an existing migration was changed before release by mistake, restore its
   canonical bytes first and add a new migration for the intended schema
-  change. Do not use a checksum exception as a normal delivery path.
-- A checksum exception is allowed only for a reviewed, exact, one-time
-  historical recovery. It must name the old and new SHA-256 values, be scoped
-  to one file, and be removed immediately after the corrected file reaches
-  `main`.
+  change.
 - Keep generated diagrams or design exports in `incoming/`; do not apply them directly.
 - Validate migrations against PostgreSQL before sharing them.
 

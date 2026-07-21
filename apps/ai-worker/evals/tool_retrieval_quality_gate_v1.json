@@ -4,8 +4,8 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "234da88da04bc0ed10487aeb7edaacd156a93299edc725250c64a9c42af268ab",
-    "catalogSha256": "dffdcf9b634ce42647c8ed7156499752b2929c2c7b29c9862d3fa01e5707d460",
+    "inventorySha256": "e5dfff743067e2781cf96e02786ac7f9d3270726bb9f0ca8b4eeccf770b34f94",
+    "catalogSha256": "7f1e81b23941ea9e9ac978b7c7b908352a8938fdf6fec42f35ee412aae566f76",
     "eligibleSnapshotSha256": "f7f0a523e061086f1596da6b056daff1878d28f4c12b7d002a2e230e0235bbab"
   },
   "privacySensitiveValues": [
@@ -1439,7 +1439,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v3",
-    "sha256": "dffdcf9b634ce42647c8ed7156499752b2929c2c7b29c9862d3fa01e5707d460",
+    "sha256": "7f1e81b23941ea9e9ac978b7c7b908352a8938fdf6fec42f35ee412aae566f76",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -3668,33 +3668,33 @@
         "toolNames": [
           "focus_sql_erd_tables"
         ],
-        "whenToUse": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
+        "whenToUse": "이미 존재하는 현재 SQLtoERD session을 변경하지 않고 특정 업무 영역의 핵심 table과 직접 FK 연결 table을 조회·필터링·집중 표시할 때",
         "mustNotUseFor": [
-          "ERD 생성, SQL 실행, PR Review 또는 session 밖 schema 조회 요청"
+          "새 ERD·database schema·DDL 생성 또는 설계, 현재 schema 교체, SQL 실행, session 밖 schema 조회 요청"
         ],
         "positiveExamples": [
-          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
-          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 알려줘",
-          "현재SQLtoERDsession에서특정기능의핵심table과직접FK연결table을집중보기로살펴볼때",
-          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 부탁드려요",
+          "현재 ERD에서 회의 관련 테이블만 보여줘",
+          "회의 관련 테이블만 집중적으로 보여줘",
+          "현재ERD에서회의관련테이블만보여줘",
+          "현재 ERD에서 회의 관련 테이블만 보여줘 부탁드려요",
           "sql_erd inspect 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때"
+            "utterance": "현재 ERD에서 회의 관련 테이블만 보여줘"
           },
           {
             "kind": "paraphrase",
-            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 알려줘"
+            "utterance": "회의 관련 테이블만 집중적으로 보여줘"
           },
           {
             "kind": "typo",
-            "utterance": "현재SQLtoERDsession에서특정기능의핵심table과직접FK연결table을집중보기로살펴볼때"
+            "utterance": "현재ERD에서회의관련테이블만보여줘"
           },
           {
             "kind": "honorific",
-            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 부탁드려요"
+            "utterance": "현재 ERD에서 회의 관련 테이블만 보여줘 부탁드려요"
           },
           {
             "kind": "abbreviation",
@@ -3704,25 +3704,25 @@
         "boundaryExamples": [
           {
             "kind": "negation",
-            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때는 하지 마",
+            "utterance": "현재 ERD에서 회의 관련 테이블만 보여줘는 하지 마",
             "expectedStatus": "needs_clarification",
             "expectedCapabilityIds": []
           },
           {
             "kind": "exclusion",
-            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때는 제외하고 ERD 생성, SQL 실행, PR Review 또는 session 밖 schema 조회 요청",
+            "utterance": "현재 ERD에서 회의 관련 테이블만 보여줘는 제외하고 새 ERD·database schema·DDL 생성 또는 설계, 현재 schema 교체, SQL 실행, session 밖 schema 조회 요청",
             "expectedStatus": "needs_clarification",
             "expectedCapabilityIds": []
           },
           {
             "kind": "correction",
-            "utterance": "아니, 현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 말고 ERD 생성, SQL 실행, PR Review 또는 session 밖 schema 조회 요청",
+            "utterance": "아니, 현재 ERD에서 회의 관련 테이블만 보여줘 말고 새 ERD·database schema·DDL 생성 또는 설계, 현재 schema 교체, SQL 실행, session 밖 schema 조회 요청",
             "expectedStatus": "needs_clarification",
             "expectedCapabilityIds": []
           },
           {
             "kind": "anaphora",
-            "utterance": "그 대상으로 이어서 현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
+            "utterance": "그 대상으로 이어서 현재 ERD에서 회의 관련 테이블만 보여줘",
             "expectedStatus": "routed",
             "expectedCapabilityIds": [
               "sql_erd.inspect"
@@ -3730,7 +3730,7 @@
           },
           {
             "kind": "domain_switch",
-            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 말고 PR Review 파일을 보여줘",
+            "utterance": "현재 ERD에서 회의 관련 테이블만 보여줘 말고 PR Review 파일을 보여줘",
             "expectedStatus": "needs_clarification",
             "expectedCapabilityIds": []
           }
@@ -3753,33 +3753,33 @@
         "toolNames": [
           "generate_sql_erd"
         ],
-        "whenToUse": "검증된 SQL DDL 구조로 새 ERD를 생성할 때",
+        "whenToUse": "자연어 요구사항으로 새 ERD·database schema·DDL을 설계·생성하거나 현재 schema 교체 후보를 만들 때. 사용자가 SQL을 직접 제공할 필요는 없음",
         "mustNotUseFor": [
-          "기존 schema inspection, SQL 실행 또는 PR Review 요청"
+          "현재 SQLtoERD session의 일부 table 조회·필터링·집중 표시, SQL을 실제 database에 실행하는 요청"
         ],
         "positiveExamples": [
-          "검증된 SQL DDL 구조로 새 ERD를 생성할 때",
-          "검증된 SQL DDL 구조로 새 ERD를 생성할 때 알려줘",
-          "검증된SQLDDL구조로새ERD를생성할때",
-          "검증된 SQL DDL 구조로 새 ERD를 생성할 때 부탁드려요",
+          "햄버거 가게 관련 ERD를 생성해줘",
+          "학생, 강의, 수강 신청 ERD를 만들어줘",
+          "햄버거가게관련ERD를생성해줘",
+          "햄버거 가게 관련 ERD를 생성해줘 부탁드려요",
           "sql_erd generate 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "검증된 SQL DDL 구조로 새 ERD를 생성할 때"
+            "utterance": "햄버거 가게 관련 ERD를 생성해줘"
           },
           {
             "kind": "paraphrase",
-            "utterance": "검증된 SQL DDL 구조로 새 ERD를 생성할 때 알려줘"
+            "utterance": "학생, 강의, 수강 신청 ERD를 만들어줘"
           },
           {
             "kind": "typo",
-            "utterance": "검증된SQLDDL구조로새ERD를생성할때"
+            "utterance": "햄버거가게관련ERD를생성해줘"
           },
           {
             "kind": "honorific",
-            "utterance": "검증된 SQL DDL 구조로 새 ERD를 생성할 때 부탁드려요"
+            "utterance": "햄버거 가게 관련 ERD를 생성해줘 부탁드려요"
           },
           {
             "kind": "abbreviation",
@@ -3789,25 +3789,25 @@
         "boundaryExamples": [
           {
             "kind": "negation",
-            "utterance": "검증된 SQL DDL 구조로 새 ERD를 생성할 때는 하지 마",
+            "utterance": "햄버거 가게 관련 ERD를 생성해줘는 하지 마",
             "expectedStatus": "needs_clarification",
             "expectedCapabilityIds": []
           },
           {
             "kind": "exclusion",
-            "utterance": "검증된 SQL DDL 구조로 새 ERD를 생성할 때는 제외하고 기존 schema inspection, SQL 실행 또는 PR Review 요청",
+            "utterance": "햄버거 가게 관련 ERD를 생성해줘는 제외하고 현재 SQLtoERD session의 일부 table 조회·필터링·집중 표시, SQL을 실제 database에 실행하는 요청",
             "expectedStatus": "needs_clarification",
             "expectedCapabilityIds": []
           },
           {
             "kind": "correction",
-            "utterance": "아니, 검증된 SQL DDL 구조로 새 ERD를 생성할 때 말고 기존 schema inspection, SQL 실행 또는 PR Review 요청",
+            "utterance": "아니, 햄버거 가게 관련 ERD를 생성해줘 말고 현재 SQLtoERD session의 일부 table 조회·필터링·집중 표시, SQL을 실제 database에 실행하는 요청",
             "expectedStatus": "needs_clarification",
             "expectedCapabilityIds": []
           },
           {
             "kind": "anaphora",
-            "utterance": "그 대상으로 이어서 검증된 SQL DDL 구조로 새 ERD를 생성할 때",
+            "utterance": "그 대상으로 이어서 햄버거 가게 관련 ERD를 생성해줘",
             "expectedStatus": "routed",
             "expectedCapabilityIds": [
               "sql_erd.generate"
@@ -3815,7 +3815,7 @@
           },
           {
             "kind": "domain_switch",
-            "utterance": "검증된 SQL DDL 구조로 새 ERD를 생성할 때 말고 PR Review 파일을 보여줘",
+            "utterance": "햄버거 가게 관련 ERD를 생성해줘 말고 PR Review 파일을 보여줘",
             "expectedStatus": "needs_clarification",
             "expectedCapabilityIds": []
           }
@@ -5034,9 +5034,9 @@
         "capabilityIds": [
           "sql_erd.inspect"
         ],
-        "whenToUse": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
+        "whenToUse": "이미 존재하는 현재 SQLtoERD session을 변경하지 않고 특정 업무 영역의 핵심 table과 직접 FK 연결 table을 조회·필터링·집중 표시할 때",
         "mustNotUseFor": [
-          "ERD 생성, SQL 실행, PR Review 또는 session 밖 schema 조회 요청"
+          "새 ERD·database schema·DDL 생성 또는 설계, 현재 schema 교체, SQL 실행, session 밖 schema 조회 요청"
         ],
         "acceptedSelectorFields": [
           "featureQuery"
@@ -5061,9 +5061,9 @@
         "capabilityIds": [
           "sql_erd.generate"
         ],
-        "whenToUse": "검증된 SQL DDL 구조로 새 ERD를 생성할 때",
+        "whenToUse": "자연어 요구사항으로 새 ERD·database schema·DDL을 설계·생성하거나 현재 schema 교체 후보를 만들 때. 사용자가 SQL을 직접 제공할 필요는 없음",
         "mustNotUseFor": [
-          "기존 schema inspection, SQL 실행 또는 PR Review 요청"
+          "현재 SQLtoERD session의 일부 table 조회·필터링·집중 표시, SQL을 실제 database에 실행하는 요청"
         ],
         "acceptedSelectorFields": [
           "relations",

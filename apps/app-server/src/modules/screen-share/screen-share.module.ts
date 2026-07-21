@@ -4,6 +4,7 @@ import { DatabaseModule } from "../../database/database.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { ScreenShareController } from "./screen-share.controller";
 import { ScreenShareCleanupService } from "./screen-share-cleanup.service";
+import { ScreenShareDeadlineService } from "./screen-share-deadline.service";
 import { ScreenShareMembershipRevocationService } from "./screen-share-membership-revocation.service";
 import { ScreenShareRealtimePublisherService } from "./screen-share-realtime-publisher.service";
 import { ScreenShareRoomService } from "./screen-share-room.service";
@@ -18,6 +19,7 @@ import { ScreenShareWebhookService } from "./screen-share-webhook.service";
   providers: [
     ScreenShareService,
     ScreenShareCleanupService,
+    ScreenShareDeadlineService,
     ScreenShareStateService,
     ScreenShareTokenService,
     ScreenShareRoomService,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [workflow, runnerScript, iamModule, iamOutputs, devOutputs] =
+const [workflow, runnerScript, migrationChangeTest, iamModule, iamOutputs, devOutputs] =
   await Promise.all([
     readFile(
       new URL("../../.github/workflows/publish-db-migrations.yml", import.meta.url),
@@ -11,6 +11,7 @@ const [workflow, runnerScript, iamModule, iamOutputs, devOutputs] =
       new URL("../scripts/run-dev-db-migrations.ps1", import.meta.url),
       "utf8",
     ),
+    readFile(new URL("./db-migration-change.test.mjs", import.meta.url), "utf8"),
     readFile(new URL("../modules/iam/main.tf", import.meta.url), "utf8"),
     readFile(new URL("../modules/iam/outputs.tf", import.meta.url), "utf8"),
     readFile(new URL("../envs/dev/outputs.tf", import.meta.url), "utf8"),
@@ -29,9 +30,10 @@ assert.match(workflow, /id-token: write/);
 assert.match(workflow, /AWS_DB_MIGRATION_PUBLISH_ROLE_ARN/);
 assert.match(workflow, /pilo-db-migrations/);
 assert.match(workflow, /\$\{\{ github\.sha \}\}/);
-assert.match(workflow, /node infra\/tests\/db-migration-change-policy\.test\.mjs/);
 assert.match(workflow, /node infra\/tests\/db-migration-change\.test\.mjs/);
 assert.match(workflow, /github\.ref == 'refs\/heads\/dev'/);
+
+assert.match(migrationChangeTest, /Existing migrations are immutable/);
 
 assert.match(runnerScript, /\[string\] \$ImageTag/);
 assert.match(runnerScript, /ImageTag is required/);

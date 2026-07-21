@@ -65,19 +65,19 @@ function ReadonlyCalendar({
         label: "캘린더",
         type: "home_card"
       })}
-      className="relative h-full min-h-0 overflow-hidden rounded-[15px] border-[#e7e9ee] bg-white shadow-[0_10px_30px_rgba(32,33,36,0.05)]"
+      className="relative h-full min-h-0 overflow-hidden rounded-[15px] border-border bg-card text-card-foreground shadow-sm"
       size="sm"
     >
       <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-5 pt-5">
         <div className="mb-3 flex items-center gap-2.5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f6f7f9] text-[#6b6f78]">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] border border-border bg-muted text-muted-foreground">
             <CalendarDays className="size-4" />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-[19px] font-semibold tracking-[-0.01em] text-[#202124]">
+            <p className="truncate text-[19px] font-semibold tracking-[-0.01em] text-foreground">
               이번 주 일정
             </p>
-            <p className="truncate text-[15px] text-[#6b6f78]">{calendarTitle}</p>
+            <p className="truncate text-[15px] text-muted-foreground">{calendarTitle}</p>
           </div>
           {calendarEventsStatus === "error" ? (
             <span
@@ -122,8 +122,8 @@ function ReadonlyCalendar({
                   key={date.toISOString()}
                   aria-label={`${dateValue} 캘린더로 이동`}
                   className={[
-                    "flex min-h-[92px] min-w-0 flex-col items-stretch gap-1.5 rounded-[10px] border border-[#e7e9ee] bg-[#fbfbfc] p-2 text-left transition hover:border-[#d6d9e0] hover:bg-white hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                    isToday ? "border-[#6c75f5] bg-[#f7f7ff]" : ""
+                    "flex min-h-[92px] min-w-0 flex-col items-stretch gap-1.5 rounded-[10px] border border-border bg-muted/50 p-2 text-left transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    isToday ? "border-primary bg-accent" : ""
                   ]
                     .filter(Boolean)
                     .join(" ")}
@@ -131,14 +131,14 @@ function ReadonlyCalendar({
                   type="button"
                 >
                   <span className="flex items-center justify-between gap-1">
-                    <span className="text-[14px] font-medium leading-none text-[#6b6f78]">
+                    <span className="text-[14px] font-medium leading-none text-muted-foreground">
                       {calendarWeekdayLabels[date.getDay()]}
                     </span>
                     <span
                       className={
                         isToday
-                          ? "flex size-6 items-center justify-center rounded-full bg-[#5963e8] text-[15px] font-semibold text-white"
-                          : "flex size-6 items-center justify-center text-[15px] font-medium text-[#202124]"
+                          ? "flex size-6 items-center justify-center rounded-full bg-primary text-[15px] font-semibold text-primary-foreground"
+                          : "flex size-6 items-center justify-center text-[15px] font-medium text-foreground"
                       }
                     >
                       {date.getDate()}
@@ -162,7 +162,7 @@ function ReadonlyCalendar({
                     {hiddenEventCount > 0 ? (
                       <span
                         aria-label={`${hiddenEventCount}개 일정 더 있음`}
-                        className="self-center rounded-full bg-[#eef0f4] px-1.5 py-0.5 text-[14px] font-semibold leading-none text-[#656972]"
+                        className="self-center rounded-full bg-muted px-1.5 py-0.5 text-[14px] font-semibold leading-none text-muted-foreground"
                       >
                         +{hiddenEventCount}
                       </span>
@@ -173,14 +173,14 @@ function ReadonlyCalendar({
             })}
           </div>
         </div>
-        <section className="mt-3 grid shrink-0 gap-2 border-t border-[#eceef2] pt-3 sm:grid-cols-[112px_minmax(0,1fr)] sm:items-center">
+        <section className="mt-3 grid shrink-0 gap-2 border-t border-border pt-3 sm:grid-cols-[112px_minmax(0,1fr)] sm:items-center">
           <div>
-            <p className="text-[16px] font-semibold text-[#202124]">오늘 일정</p>
-            <p className="mt-0.5 text-[15px] text-[#6b6f78]">{todayValue}</p>
+            <p className="text-[16px] font-semibold text-foreground">오늘 일정</p>
+            <p className="mt-0.5 text-[15px] text-muted-foreground">{todayValue}</p>
           </div>
           <div className="flex min-w-0 items-center gap-2 overflow-hidden">
             {calendarEventsStatus === "loading" ? (
-              <p className="text-[15px] text-[#6b6f78]">일정을 불러오는 중입니다</p>
+              <p className="text-[15px] text-muted-foreground">일정을 불러오는 중입니다</p>
             ) : calendarEventsStatus === "error" ? (
               <p className="text-[15px] text-destructive">
                 오늘 일정을 불러오지 못했습니다
@@ -190,26 +190,26 @@ function ReadonlyCalendar({
                 {visibleTodayEvents.map((event) => (
                   <div
                     key={event.id}
-                    className="flex min-w-0 max-w-[220px] items-center gap-2 rounded-[8px] bg-[#f8f9fb] px-2.5 py-2"
+                    className="flex min-w-0 max-w-[220px] items-center gap-2 rounded-[8px] bg-muted px-2.5 py-2"
                   >
                     <span
                       aria-hidden="true"
                       className="size-2 shrink-0 rounded-full"
                       style={{ backgroundColor: event.color }}
                     />
-                    <span className="min-w-0 truncate text-[15px] text-[#202124]">
+                    <span className="min-w-0 truncate text-[15px] text-foreground">
                       {event.isAllDay ? "종일" : event.startTime} {event.title}
                     </span>
                   </div>
                 ))}
                 {todayEvents.length > visibleTodayEvents.length ? (
-                  <span className="shrink-0 text-[15px] font-medium text-[#6b6f78]">
+                  <span className="shrink-0 text-[15px] font-medium text-muted-foreground">
                     +{todayEvents.length - visibleTodayEvents.length}
                   </span>
                 ) : null}
               </>
             ) : (
-              <p className="text-[15px] text-[#6b6f78]">
+              <p className="text-[15px] text-muted-foreground">
                 오늘 예정된 일정이 없습니다
               </p>
             )}

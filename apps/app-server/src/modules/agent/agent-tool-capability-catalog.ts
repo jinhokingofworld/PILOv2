@@ -203,8 +203,32 @@ const CAPABILITY_DEFINITIONS: AgentCapabilitySeed[] = [
   capability("board.issues.move", "board", ["search_board_issues", "move_board_issue_status"], "기존 이슈 상태나 컬럼을 변경할 때", ["이슈 생성 또는 담당자 변경 요청"]),
   capability("board.issues.assign", "board", ["search_board_issues", "assign_board_issue_safely"], "기존 이슈의 담당자를 변경할 때", ["이슈 상태 변경 또는 생성 요청"]),
   capability("board.briefing", "board", ["get_board_briefing", "diagnose_board_freshness", "resolve_board_context"], "Board 현황, 동기화 상태, context를 확인할 때", ["이슈 mutation 요청"]),
-  capability("sql_erd.inspect", "sql_erd", ["focus_sql_erd_tables"], "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때", ["ERD 생성, SQL 실행, PR Review 또는 session 밖 schema 조회 요청"]),
-  capability("sql_erd.generate", "sql_erd", ["generate_sql_erd"], "검증된 SQL DDL 구조로 새 ERD를 생성할 때", ["기존 schema inspection, SQL 실행 또는 PR Review 요청"]),
+  capability(
+    "sql_erd.inspect",
+    "sql_erd",
+    ["focus_sql_erd_tables"],
+    "이미 존재하는 현재 SQLtoERD session을 변경하지 않고 특정 업무 영역의 핵심 table과 직접 FK 연결 table을 조회·필터링·집중 표시할 때",
+    [
+      "새 ERD·database schema·DDL 생성 또는 설계, 현재 schema 교체, SQL 실행, session 밖 schema 조회 요청"
+    ],
+    [
+      "현재 ERD에서 회의 관련 테이블만 보여줘",
+      "회의 관련 테이블만 집중적으로 보여줘"
+    ]
+  ),
+  capability(
+    "sql_erd.generate",
+    "sql_erd",
+    ["generate_sql_erd"],
+    "자연어 요구사항으로 새 ERD·database schema·DDL을 설계·생성하거나 현재 schema 교체 후보를 만들 때. 사용자가 SQL을 직접 제공할 필요는 없음",
+    [
+      "현재 SQLtoERD session의 일부 table 조회·필터링·집중 표시, SQL을 실제 database에 실행하는 요청"
+    ],
+    [
+      "햄버거 가게 관련 ERD를 생성해줘",
+      "학생, 강의, 수강 신청 ERD를 만들어줘"
+    ]
+  ),
   capability("canvas.delegate", "canvas", ["delegate_canvas_agent"], "Canvas 작업을 Agent에게 위임할 때", ["SQLtoERD 또는 Board 요청"]),
   capability(
     "canvas.drive_images.import",

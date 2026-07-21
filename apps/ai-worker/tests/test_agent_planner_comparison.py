@@ -4,6 +4,8 @@ import pytest
 
 from app.agent_planner_comparison import (
     build_agent_performance_snapshot,
+    build_multiturn_context_comparison,
+    build_multiturn_context_snapshot,
     build_two_stage_comparison,
 )
 from scripts.snapshot_agent_planner_evaluations import main as snapshot_main
@@ -143,6 +145,81 @@ def workflow_report(
             "safetyViolations": [],
         }
     return value
+
+
+def multiturn_report(*, evaluator_sha: str = "1" * 64) -> dict[str, object]:
+    return {
+        "multiTurnContextEvaluation": {
+            "conversationCount": 1,
+            "attempts": 1,
+            "multiTurnContextResolutionRate": 0.5,
+            "multiTurnToolSelectionAccuracy": 0.0,
+            "partialRate": 0.0,
+            "inconclusiveRate": 0.0,
+        },
+        "results": [
+            {
+                "id": "meeting_01",
+                "deterministicContextPassed": True,
+                "deterministicContinuationPassed": True,
+                "judgeVerdict": "pass",
+                "judgeContextResolved": True,
+                "judgeFollowUpDelivered": True,
+                "failureReasons": [],
+                "toolSelectionPassed": False,
+            }
+        ],
+        "metadata": {
+            "workflowCatalogSha256": "a" * 64,
+            "multiTurnJudgeModel": "judge-model",
+            "multiTurnJudgePromptVersion": "agent-outcome-judge:v1",
+            "multiTurnJudgeTemperature": 0,
+            "multiTurnJudgeVoteCount": 3,
+            "judgeCalibrationStatus": "pending",
+            "currentDate": "2026-07-20",
+            "timezone": "Asia/Seoul",
+            "repetitions": 1,
+            "evaluatorSha256": evaluator_sha,
+            "toolCapabilityCatalogFileSha256": "b" * 64,
+            "toolSchemaVersion": "agent-tools:v7",
+            "registryInventorySha256": "c" * 64,
+            "registryCatalogSha256": "d" * 64,
+            "registryEligibleSnapshotSha256": "e" * 64,
+            "model": "planner-model",
+            "routerModel": "router-model",
+            "retrieverVersion": "agent-tool-llm-router:v1",
+            "evaluationSeed": 17,
+        },
+    }
+
+
+def test_multiturn_comparison_uses_direct_tool_selection_verdict() -> None:
+    comparison = build_multiturn_context_comparison(multiturn_report(), multiturn_report())
+
+    assert comparison["metrics"]["multiTurnToolSelectionAccuracy"]["baseline"] == 0.0
+
+
+def test_multiturn_comparison_requires_a_passing_judge_verdict_for_context() -> None:
+    partial_report = multiturn_report()
+    partial_report["results"][0]["judgeVerdict"] = "partial"
+
+    comparison = build_multiturn_context_comparison(partial_report, partial_report)
+
+    assert comparison["metrics"]["multiTurnContextResolutionRate"]["baseline"] == 0.0
+
+
+def test_multiturn_snapshot_preserves_pending_calibration_status() -> None:
+    snapshot = build_multiturn_context_snapshot(multiturn_report())
+
+    assert snapshot["metadata"]["judgeCalibrationStatus"] == "pending"
+
+
+def test_multiturn_comparison_rejects_changed_evaluator_provenance() -> None:
+    with pytest.raises(ValueError, match="evaluatorSha256"):
+        build_multiturn_context_comparison(
+            multiturn_report(evaluator_sha="1" * 64),
+            multiturn_report(evaluator_sha="2" * 64),
+        )
 
 
 def test_two_stage_comparison_pairs_inputs_and_reports_funnel_delta() -> None:

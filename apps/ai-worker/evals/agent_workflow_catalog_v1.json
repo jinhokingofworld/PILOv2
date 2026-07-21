@@ -239,24 +239,42 @@
       ]
     },
     {
-      "id": "sql_erd_schema_inspect", "category": "multi_tool", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
-      "prompt": "현재 SQLtoERD schema의 핵심 테이블을 보여줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.inspect"],
-      "finalAnswerContains": ["users", "orders"],
-      "outcome": {"responseEvidence": [{"allOf": ["users", "orders"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "id": "sql_erd_generate_hamburger_shop", "category": "routing_boundary", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "prompt": "햄버거 가게 관련 ERD를 생성해줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.generate"],
+      "finalAnswerContains": ["SQLtoERD"],
+      "outcome": {"responseEvidence": [{"allOf": ["ERD"]}], "responseForbidden": ["집중할 테이블", "안전하게 확정하지 못했습니다"], "requireResponse": true},
       "stages": [
-        {"toolName": "inspect_sql_erd_schema", "inputContains": {"featureQuery": "핵심 테이블"}, "output": {"sessionId": "11111111-1111-4111-8111-111111111111", "sessionRevision": 7, "modelFingerprint": "fnv1a32:1234abcd", "projection": {"tables": [{"ref": "t1", "name": "users"}, {"ref": "t2", "name": "orders"}]}}, "requiresConfirmation": null},
-        {"toolName": "focus_sql_erd_tables", "inputContains": {"modelFingerprint": "fnv1a32:1234abcd", "featureLabel": "핵심 테이블"}, "output": {"action": "focused", "tables": ["users", "orders"]}, "requiresConfirmation": false},
+        {"toolName": "generate_sql_erd", "inputContains": {"version": 1}, "output": {"action": "created", "title": "햄버거 가게 ERD", "tableCount": 5, "relationCount": 4}, "requiresConfirmation": null},
         {"status": "completed"}
       ]
     },
     {
-      "id": "sql_erd_relation_explore", "category": "multi_tool", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "id": "sql_erd_focus_meeting_tables", "category": "routing_boundary", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "prompt": "현재 ERD에서 회의 관련 테이블만 집중적으로 보여줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.inspect"],
+      "finalAnswerContains": ["meetings", "meeting_participants"],
+      "outcome": {"responseEvidence": [{"allOf": ["meetings", "meeting_participants"]}], "responseForbidden": ["ERD를 생성", "새 ERD"], "requireResponse": true},
+      "stages": [
+        {"toolName": "focus_sql_erd_tables", "inputContains": {"featureQuery": "회의 관련 테이블"}, "output": {"action": "focused", "sessionRevision": 7, "modelFingerprint": "fnv1a32:1234abcd", "title": "업무 ERD", "featureLabel": "회의 관련 테이블", "confidence": "high", "primaryTables": [{"name": "meetings", "reason": "회의 기능의 중심 테이블"}], "relatedTables": [{"name": "meeting_participants", "reason": "meetings와 직접 FK 연결"}, {"name": "meeting_recordings", "reason": "meetings와 직접 FK 연결"}], "contextTables": [], "ignoredContextTables": [], "relationCount": 2}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "sql_erd_schema_inspect", "category": "single_tool", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "prompt": "현재 SQLtoERD schema의 핵심 테이블을 보여줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.inspect"],
+      "finalAnswerContains": ["users", "orders"],
+      "outcome": {"responseEvidence": [{"allOf": ["users", "orders"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "focus_sql_erd_tables", "inputContains": {"featureQuery": "핵심 테이블"}, "output": {"action": "focused", "sessionRevision": 7, "modelFingerprint": "fnv1a32:1234abcd", "title": "쇼핑몰 ERD", "featureLabel": "핵심 테이블", "confidence": "high", "primaryTables": [{"name": "users", "reason": "사용자 기능의 중심 테이블"}], "relatedTables": [{"name": "orders", "reason": "users와 직접 FK 연결"}], "contextTables": [], "ignoredContextTables": [], "relationCount": 1}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "sql_erd_relation_explore", "category": "single_tool", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
       "prompt": "SQLtoERD에서 결제와 주문의 관계를 탐색해줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.inspect"],
       "finalAnswerContains": ["payments", "orders"],
       "outcome": {"responseEvidence": [{"allOf": ["payments", "orders"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
       "stages": [
-        {"toolName": "inspect_sql_erd_schema", "inputContains": {"featureQuery": "결제와 주문 관계"}, "output": {"sessionId": "11111111-1111-4111-8111-111111111111", "sessionRevision": 7, "modelFingerprint": "fnv1a32:1234abcd", "projection": {"tables": [{"ref": "t1", "name": "payments"}, {"ref": "t2", "name": "orders"}]}}, "requiresConfirmation": null},
-        {"toolName": "focus_sql_erd_tables", "inputContains": {"modelFingerprint": "fnv1a32:1234abcd", "featureLabel": "결제와 주문 관계"}, "output": {"action": "focused", "tables": ["payments", "orders"], "relation": "payments.order_id -> orders.id"}, "requiresConfirmation": false},
+        {"toolName": "focus_sql_erd_tables", "inputContains": {"featureQuery": "결제와 주문 관계"}, "output": {"action": "focused", "sessionRevision": 7, "modelFingerprint": "fnv1a32:1234abcd", "title": "결제 ERD", "featureLabel": "결제와 주문 관계", "confidence": "high", "primaryTables": [{"name": "payments", "reason": "결제 기능의 중심 테이블"}], "relatedTables": [{"name": "orders", "reason": "payments와 직접 FK 연결"}], "contextTables": [], "ignoredContextTables": [], "relationCount": 1}, "requiresConfirmation": false},
         {"status": "completed"}
       ]
     },
