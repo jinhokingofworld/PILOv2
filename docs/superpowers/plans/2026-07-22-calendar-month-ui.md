@@ -4,7 +4,7 @@
 
 **Goal:** 월간 Calendar의 날짜별 일정 추가 상호작용, 월 선택, 일정 표시 밀도와 모달 디자인을 홈 화면의 shadcn 디자인 체계에 맞춘다.
 
-**Architecture:** Calendar API와 데이터 훅은 그대로 두고 `calendar-panel.tsx`의 화면 상태와 렌더링만 변경한다. 월/연도 선택은 Calendar 도메인 내부의 독립 컴포넌트로 분리하고, 기존 Calendar 계약 테스트에 사용자 상호작용과 스타일 불변 조건을 추가한다.
+**Architecture:** Calendar API 계약은 그대로 두고 `calendar-panel.tsx`의 화면 상태와 렌더링을 변경한다. 월/연도 선택은 Calendar 도메인 내부의 독립 컴포넌트로 분리하고, 날짜 범위 계산과 지원 연도 검증은 순수 유틸리티로 분리해 실제 경계 동작을 테스트한다.
 
 **Tech Stack:** Next.js, React, TypeScript, Tailwind CSS, shadcn/ui, Base UI 기반 공통 컴포넌트, Node test runner
 
@@ -40,7 +40,7 @@
 
 - [ ] **Step 3: 월 선택 컴포넌트와 날짜 추가 상호작용을 구현한다**
 
-  shadcn `Popover`, `Select`, `Input`, `Button`으로 연도와 월을 선택하고 `new Date(year, monthIndex, 1)`을 `onMonthChange`에 전달한다. 날짜 칸 배경 버튼의 단일 클릭은 선택만 하고 더블 클릭은 해당 날짜로 추가 모달을 연다. 일정 버튼은 기존 상세 모달 동작을 유지한다.
+  shadcn `Popover`, `Select`, `Input`, `Button`으로 1900~2100년 범위의 연도와 월을 선택하고 검증된 월 시작일을 `onMonthChange`에 전달한다. 날짜 칸 배경 버튼의 단일 클릭은 선택만 하고 더블 클릭은 해당 날짜로 추가 모달을 연다. 일정 버튼은 기존 상세 모달 동작을 유지한다.
 
 - [ ] **Step 4: 집중 테스트 통과를 확인한다**
 

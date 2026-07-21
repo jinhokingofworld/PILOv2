@@ -16,6 +16,11 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import {
+  CALENDAR_MAX_YEAR,
+  CALENDAR_MIN_YEAR,
+  createCalendarMonthDate
+} from "@/features/calendar/calendar-month-selection";
 
 const calendarMonths = Array.from({ length: 12 }, (_, index) => ({
   label: `${index + 1}월`,
@@ -47,18 +52,12 @@ export function CalendarMonthPicker({
 
     const nextYear = Number(year);
     const nextMonth = Number(month);
-    if (
-      !Number.isInteger(nextYear) ||
-      nextYear < 1 ||
-      nextYear > 9999 ||
-      !Number.isInteger(nextMonth) ||
-      nextMonth < 1 ||
-      nextMonth > 12
-    ) {
+    const nextMonthDate = createCalendarMonthDate(nextYear, nextMonth);
+    if (!nextMonthDate) {
       return;
     }
 
-    onMonthChange(new Date(nextYear, nextMonth - 1, 1));
+    onMonthChange(nextMonthDate);
     setIsOpen(false);
   }
 
@@ -93,8 +92,8 @@ export function CalendarMonthPicker({
               <Input
                 type="number"
                 inputMode="numeric"
-                min={1}
-                max={9999}
+                min={CALENDAR_MIN_YEAR}
+                max={CALENDAR_MAX_YEAR}
                 value={year}
                 aria-label="이동할 연도"
                 onChange={(event) => setYear(event.currentTarget.value)}

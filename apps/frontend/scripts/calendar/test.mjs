@@ -16,6 +16,13 @@ const calendarHook = await readFile(
   ),
   "utf8"
 );
+const calendarDateRange = await readFile(
+  new URL(
+    "../../src/features/calendar/calendar-date-range.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const calendarPanel = await readFile(
   new URL(
     "../../src/features/calendar/components/calendar-panel.tsx",
@@ -47,9 +54,9 @@ assert.doesNotMatch(calendarApiClient, /credentials: "include"/);
 assert.match(calendarHook, /useCalendarMonthEvents/);
 assert.match(calendarHook, /getCalendarMonthRange/);
 assert.match(calendarHook, /getCalendarMonthGridRange/);
-assert.match(calendarHook, /calendarGridWeekCount = 6/);
-assert.match(calendarHook, /calendarWeekdayCount = 7/);
-assert.match(calendarHook, /-monthStartDate\.getDay\(\)/);
+assert.match(calendarDateRange, /calendarGridWeekCount = 6/);
+assert.match(calendarDateRange, /calendarWeekdayCount = 7/);
+assert.match(calendarDateRange, /-monthStartDate\.getDay\(\)/);
 assert.match(calendarPanel, /useCalendarMonthEvents/);
 assert.doesNotMatch(calendarPanel, /@base-ui\/react\/dialog/);
 assert.doesNotMatch(calendarPanel, /DialogPrimitive\./);
@@ -77,6 +84,7 @@ assert.match(calendarPanel, /getEventsForCalendarDate/);
 assert.match(calendarPanel, /getCalendarWeekEventBars/);
 assert.match(calendarPanel, /getCalendarDateBarLayout/);
 assert.match(calendarPanel, /CalendarMonthPicker/);
+assert.match(calendarPanel, /<h1[^>]*>\s*캘린더\s*<\/h1>/);
 assert.match(
   calendarPanel,
   /onDoubleClick=\{\(\) => openCreateDialog\(date\)\}/
@@ -178,3 +186,4 @@ assert.doesNotMatch(calendarPanel, /Workspace ID/);
 assert.doesNotMatch(calendarPanel, /워크스페이스 ID/);
 
 await import("../../src/features/calendar/calendar-event-bars.test.mjs");
+await import("../../src/features/calendar/calendar-month-selection.test.mjs");

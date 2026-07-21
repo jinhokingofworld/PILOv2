@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { createCalendarApiClient } from "@/features/calendar/api/client";
+import { getCalendarMonthGridRange } from "@/features/calendar/calendar-date-range";
 import type { CalendarEvent } from "@/features/calendar/types";
+
+export {
+  formatCalendarDate,
+  getCalendarMonthGridRange,
+  getCalendarMonthRange
+} from "@/features/calendar/calendar-date-range";
 
 export type CalendarMonthEventsStatus =
   | "idle"
@@ -29,12 +36,6 @@ const idleState: CalendarMonthEventsState = {
   status: "idle",
   error: null
 };
-const calendarGridWeekCount = 6;
-const calendarWeekdayCount = 7;
-
-function padDatePart(value: number) {
-  return value.toString().padStart(2, "0");
-}
 
 function getMonthKey(date: Date) {
   return `${date.getFullYear()}-${date.getMonth()}`;
@@ -45,41 +46,6 @@ function errorFromUnknown(error: unknown) {
     ? error
     : new Error("Calendar events could not be loaded");
 }
-
-export function formatCalendarDate(date: Date) {
-  return [
-    date.getFullYear(),
-    padDatePart(date.getMonth() + 1),
-    padDatePart(date.getDate())
-  ].join("-");
-}
-
-function addCalendarDays(date: Date, dayOffset: number) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + dayOffset);
-}
-
-export function getCalendarMonthGridRange(monthDate: Date) {
-  const monthStartDate = new Date(
-    monthDate.getFullYear(),
-    monthDate.getMonth(),
-    1
-  );
-  const gridStartDate = addCalendarDays(
-    monthStartDate,
-    -monthStartDate.getDay()
-  );
-  const gridEndDate = addCalendarDays(
-    gridStartDate,
-    calendarGridWeekCount * calendarWeekdayCount - 1
-  );
-
-  return {
-    start: formatCalendarDate(gridStartDate),
-    end: formatCalendarDate(gridEndDate)
-  };
-}
-
-export const getCalendarMonthRange = getCalendarMonthGridRange;
 
 export function useCalendarMonthEvents({
   workspaceId,

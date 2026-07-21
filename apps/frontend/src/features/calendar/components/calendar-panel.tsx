@@ -40,6 +40,7 @@ import {
   getCalendarWeekEventBars,
   type CalendarEventBarSegment
 } from "@/features/calendar/calendar-event-bars";
+import { isCalendarMonthInRange } from "@/features/calendar/calendar-month-selection";
 import { CalendarWorkspaceLocationAdapter } from "@/features/calendar/calendar-workspace-location-adapter";
 import { CalendarMonthPicker } from "@/features/calendar/components/calendar-month-picker";
 import {
@@ -1247,6 +1248,10 @@ export function CalendarPanel() {
   }, []);
 
   const goToMonth = useCallback((nextMonthDate: Date) => {
+    if (!isCalendarMonthInRange(nextMonthDate)) {
+      return;
+    }
+
     const nextMonthStart = startOfCalendarMonth(nextMonthDate);
     setMonthDate(nextMonthStart);
     setSelectedDate(formatCalendarDate(nextMonthStart));
@@ -1489,13 +1494,16 @@ export function CalendarPanel() {
         className="flex min-h-0 flex-1 flex-col gap-4 rounded-[15px] border-border bg-card px-4 py-4 text-card-foreground shadow-sm"
       >
         <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-          <div className="hidden lg:block" aria-hidden="true" />
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">
+            캘린더
+          </h1>
           <div className="flex items-center gap-1 lg:justify-self-center">
               <Button
                 type="button"
                 variant="outline"
                 size="icon-sm"
                 aria-label="이전 달"
+                disabled={!isCalendarMonthInRange(shiftMonth(monthDate, -1))}
                 onClick={() => goToMonth(shiftMonth(monthDate, -1))}
               >
                 <ChevronLeft />
@@ -1509,6 +1517,7 @@ export function CalendarPanel() {
                 variant="outline"
                 size="icon-sm"
                 aria-label="다음 달"
+                disabled={!isCalendarMonthInRange(shiftMonth(monthDate, 1))}
                 onClick={() => goToMonth(shiftMonth(monthDate, 1))}
               >
                 <ChevronRight />
