@@ -151,10 +151,31 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("meeting.recording.start", "meeting", ["get_active_meeting", "start_meeting_recording"], "현재 회의의 녹음을 시작할 때", ["녹음 종료 또는 회의록 조회 요청"]),
   capability("meeting.recording.end", "meeting", ["get_active_meeting", "end_meeting_recording"], "현재 회의의 녹음을 종료하고 회의록 생성을 요청할 때", ["녹음 시작 또는 회의 퇴장 요청"]),
   capability("meeting.participants.list", "meeting", ["resolve_meeting_resource", "get_meeting_participants"], "특정 회의의 현재 또는 과거 참여자를 조회할 때", ["회의록 또는 후속 작업 조회 요청"]),
-  capability("meeting.reports.list", "meeting", ["list_meeting_reports"], "최신 N건 또는 기간별 회의록 목록을 조회할 때", ["단일 회의록 상세 또는 요약 요청"], ["최근 회의록 보여줘", "최근 3건 회의록"]),
-  capability("meeting.report.detail", "meeting", ["list_meeting_reports", "get_meeting_report"], "특정 회의록의 상태나 상세를 확인할 때", ["회의록 목록만 필요한 요청"]),
+  capability("meeting.reports.list", "meeting", ["list_meeting_reports"], "최신 N건, 기간별 또는 exact 제목 회의록 목록을 조회할 때", ["실제 발언, 결정 이유 또는 활동 근거를 찾는 요청"], ["최근 회의록 보여줘", "최근 3건 회의록"]),
+  capability("meeting.report.detail", "meeting", ["list_meeting_reports", "get_meeting_report"], "특정 회의록의 상태나 상세를 확인할 때", ["실제 발언, 결정 이유 또는 활동 근거를 찾는 요청"]),
   capability("meeting.report.summary", "meeting", ["summarize_meeting_report"], "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때", ["원문 근거 검색 요청"]),
-  capability("meeting.evidence.search", "meeting", ["search_meeting_transcript"], "회의 발언 또는 Activity 근거를 검색할 때", ["결정 item에 직접 연결된 근거만 요청할 때"]),
+  capability(
+    "meeting.report.hybrid_search",
+    "meeting",
+    ["list_meeting_reports", "search_meeting_transcript"],
+    "명시된 MeetingReport 제목을 exact 확인한 뒤 그 report의 transcript 발언, 결정 이유 또는 Activity 근거로 답할 때",
+    ["제목이 없는 전체 회의 내용 검색", "단순 회의록 목록, 상태, 상세 또는 요약 조회"],
+    [
+      "온보딩 주간회의 MeetingReport 제목 범위 실제 발언 근거",
+      "API 설계 회의 MeetingReport 제목 인증 방식 transcript 근거"
+    ]
+  ),
+  capability(
+    "meeting.evidence.search",
+    "meeting",
+    ["search_meeting_transcript"],
+    "명확한 MeetingReport 제목 후보 없이 Workspace의 회의 발언, 주제, 이유 또는 Activity 근거를 검색할 때",
+    ["명시된 회의록 제목을 먼저 exact 확인해야 하는 내용 검색", "결정 item에 직접 연결된 근거만 요청할 때"],
+    [
+      "배포 일정 지연 이유 회의 발언",
+      "API v2 언급 회의 대화"
+    ]
+  ),
   capability("meeting.decision.evidence", "meeting", ["list_meeting_reports", "get_meeting_decision_evidence"], "특정 결정사항의 직접 근거를 확인할 때", ["일반 회의 대화 검색 요청"]),
   capability("meeting.action_items.list", "meeting", ["find_action_items"], "담당자, 상태, 회의 기준으로 후속 작업을 찾을 때", ["후속 작업 변경, 승인 또는 반려 요청"]),
   capability("meeting.action_items.update", "meeting", ["find_action_items", "update_meeting_report_action_item"], "후속 작업의 담당자, 제목, 우선순위를 변경할 때", ["후속 작업 승인 또는 반려 요청"]),
@@ -418,6 +439,7 @@ function selectorKindsFor(id: string): string[] {
     return ["current_meeting", "meeting_room_name"];
   }
   if (id.includes("meeting.participants")) return ["meeting_scope"];
+  if (id === "meeting.report.hybrid_search") return ["meeting_report", "query"];
   if (id.includes("meeting.report")) return ["meeting_report"];
   if (id.includes("meeting.action_items")) return ["action_item", "workspace_member"];
   if (id.includes("meeting.evidence")) return ["meeting_report", "query"];

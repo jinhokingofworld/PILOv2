@@ -25,6 +25,13 @@ function contextRef(index) {
   return `ctx_${digest.slice(0, 24)}`;
 }
 
+function currentRunContextRef(index) {
+  const digest = createHash("sha256")
+    .update(`${threadId}:${context.runId}:${stepId}:${index}`, "utf8")
+    .digest("hex");
+  return `ctx_${digest.slice(0, 24)}`;
+}
+
 class FakeDatabase {
   constructor(rows) {
     this.rows = rows;
@@ -79,11 +86,37 @@ class FakeDatabase {
   );
   assert.match(
     database.calls[0].text,
-    /ORDER BY prior_run\.created_at DESC, prior_run\.id DESC/
+    /ORDER BY run_order ASC, created_at DESC, id DESC/
   );
   assert.match(database.calls[0].text, /recent_run\.id DESC/);
   assert.match(database.calls[0].text, /step\.id ASC/);
   assert.match(database.calls[0].text, /LIMIT \$4/);
+}
+
+{
+  const database = new FakeDatabase([
+    {
+      thread_id: threadId,
+      run_id: context.runId,
+      step_id: stepId,
+      resource_refs: [
+        {
+          domain: "meeting",
+          resourceType: "meeting_report",
+          resourceId: reportId,
+          label: "현재 run 제목 조회 결과"
+        }
+      ]
+    }
+  ]);
+  const service = new AgentThreadContextService(database);
+
+  assert.deepEqual(
+    await service.resolveMeetingReference(context, currentRunContextRef(0)),
+    { resourceType: "meeting_report", resourceId: reportId }
+  );
+  assert.match(database.calls[0].text, /SELECT current_run\.id/);
+  assert.match(database.calls[0].text, /step\.status = 'completed'/);
 }
 
 {

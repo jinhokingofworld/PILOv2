@@ -35,6 +35,16 @@ export interface GroundingContextSource {
   resourceRef: AgentResourceRef;
 }
 
+export interface GroundingRetrievalContext {
+  requestedReportTitle: string;
+  exactTitleMatchFound: false;
+}
+
+export interface MeetingReportHybridContext extends AgentJsonObject {
+  requestedReportTitle: string;
+  exactMatchCount: number;
+}
+
 @Injectable()
 export class AgentGroundedAnswerService {
   constructor(
@@ -51,6 +61,7 @@ export class AgentGroundedAnswerService {
     outputSummary: AgentJsonObject;
     resourceRefs: AgentResourceRef[];
     groundingSources?: AgentGroundingSourceCandidate[];
+    meetingReportHybridContext?: MeetingReportHybridContext;
     executionLease: AgentExecutionLease;
   }): Promise<void> {
     const candidates = input.groundingSources
@@ -66,12 +77,21 @@ export class AgentGroundedAnswerService {
       input.resourceRefs,
       registry.map((entry) => entry.resourceRef)
     );
+    const retrievalContext = input.meetingReportHybridContext?.exactMatchCount === 0
+      ? {
+          requestedReportTitle: input.meetingReportHybridContext.requestedReportTitle,
+          exactTitleMatchFound: false as const
+        }
+      : undefined;
     const outputSummary: AgentJsonObject = {
       ...input.outputSummary,
       groundingOutcome:
         registry.length === 0 ? "no_relevant_sources" : "sources_found",
       sourceCount: registry.length,
-      sourceTypes: [...new Set(registry.map((source) => source.sourceType))].sort()
+      sourceTypes: [...new Set(registry.map((source) => source.sourceType))].sort(),
+      ...(input.meetingReportHybridContext
+        ? { meetingReportHybridContext: input.meetingReportHybridContext }
+        : {})
     };
     delete outputSummary.sourceIds;
 
@@ -113,7 +133,7 @@ export class AgentGroundedAnswerService {
              execution_lease_expires_at = NULL, execution_heartbeat_at = NULL,
              updated_at = now()
            WHERE id = $1 AND status = 'running'`,
-          [input.runId, NO_RELEVANT_SOURCES_MESSAGE]
+          [input.runId, this.noRelevantSourcesMessage(retrievalContext)]
         );
         return;
       }
@@ -126,8 +146,15 @@ export class AgentGroundedAnswerService {
       await transaction.execute(
         `INSERT INTO agent_steps
            (run_id, step_order, step_type, status, input_json, output_json, resource_refs)
-         VALUES ($1, $2, 'answer', 'pending', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb)`,
-        [input.runId, Number(order?.next_order ?? 1)]
+         VALUES ($1, $2, 'answer', 'pending', $3::jsonb, '{}'::jsonb, '[]'::jsonb)`,
+        [
+          input.runId,
+          Number(order?.next_order ?? 1),
+          JSON.stringify({
+            groundingStepId: input.stepId,
+            ...(retrievalContext ? { retrievalContext } : {})
+          })
+        ]
       );
       await transaction.execute(
         `INSERT INTO agent_grounded_answer_outbox (run_id, workspace_id, source_ids)
@@ -151,28 +178,42 @@ export class AgentGroundedAnswerService {
   async getContext(runId: string): Promise<{
     prompt: string;
     sources: GroundingContextSource[];
+    retrievalContext?: GroundingRetrievalContext;
   } | null> {
     const row = await this.database.queryOne<{
       workspace_id: string;
       requested_by_user_id: string;
       prompt: string;
       source_ids: unknown;
+      retrieval_context: unknown;
     }>(
-      `SELECT run.workspace_id, run.requested_by_user_id, run.prompt, outbox.source_ids
+      `SELECT run.workspace_id, run.requested_by_user_id, run.prompt, outbox.source_ids,
+              answer_step.input_json->'retrievalContext' AS retrieval_context
        FROM agent_runs run
        JOIN agent_grounded_answer_outbox outbox ON outbox.run_id = run.id
+       JOIN LATERAL (
+         SELECT step.input_json
+         FROM agent_steps step
+         WHERE step.run_id = run.id
+           AND step.step_type = 'answer'
+           AND step.status = 'pending'
+         ORDER BY step.step_order DESC, step.id DESC
+         LIMIT 1
+       ) answer_step ON TRUE
        WHERE run.id = $1 AND run.status = 'running'`,
       [runId]
     );
     if (!row) return null;
     const registry = this.parseRegistry(row.source_ids);
+    const retrievalContext = this.readRetrievalContext(row.retrieval_context);
     return {
       prompt: row.prompt,
       sources: await this.loadAuthorizedRegistrySources(
         row.requested_by_user_id,
         row.workspace_id,
         registry
-      )
+      ),
+      ...(retrievalContext ? { retrievalContext } : {})
     };
   }
 
@@ -194,7 +235,12 @@ export class AgentGroundedAnswerService {
   }
 
   async completeWithoutSources(runId: string): Promise<void> {
-    await this.completeTerminalRun(runId, NO_RELEVANT_SOURCES_MESSAGE, "no_relevant_sources");
+    const context = await this.getContext(runId);
+    await this.completeTerminalRun(
+      runId,
+      this.noRelevantSourcesMessage(context?.retrievalContext),
+      "no_relevant_sources"
+    );
   }
 
   async completeSecurityRefusal(runId: string): Promise<void> {
@@ -420,6 +466,29 @@ export class AgentGroundedAnswerService {
       reference.resourceType,
       reference.resourceId
     ]);
+  }
+
+  private noRelevantSourcesMessage(
+    retrievalContext: GroundingRetrievalContext | undefined
+  ): string {
+    if (!retrievalContext) return NO_RELEVANT_SOURCES_MESSAGE;
+    return (
+      `제목이 정확히 ‘${retrievalContext.requestedReportTitle}’인 회의록은 없었습니다. ` +
+      "전체 회의 내용에서도 질문과 관련된 근거를 찾지 못했습니다. " +
+      "대상을 조금 더 구체적으로 입력해 주세요."
+    );
+  }
+
+  private readRetrievalContext(value: unknown): GroundingRetrievalContext | undefined {
+    if (!this.isPlainObject(value) || value.exactTitleMatchFound !== false) {
+      return undefined;
+    }
+    const title = value.requestedReportTitle;
+    if (typeof title !== "string") return undefined;
+    const normalized = title.trim().slice(0, 500);
+    return normalized
+      ? { requestedReportTitle: normalized, exactTitleMatchFound: false }
+      : undefined;
   }
 
   private isSourceType(value: unknown): value is GroundingSourceType {

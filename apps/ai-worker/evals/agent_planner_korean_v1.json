@@ -1,6 +1,6 @@
 {
   "version": "agent-planner-korean:v1",
-  "toolSchemaVersion": "agent-tools:v7",
+  "toolSchemaVersion": "agent-tools:v8",
   "tools": [
     {
       "name": "list_calendar_events",
@@ -416,7 +416,7 @@
     },
     {
       "name": "list_meeting_reports",
-      "description": "Workspace MeetingReport 목록을 createdAt 내림차순으로 조회합니다. 기간과 개수를 생략하면 최신 회의록 1개를 반환합니다.",
+      "description": "Workspace MeetingReport 목록을 createdAt 내림차순으로 조회합니다. reportTitle은 표시 제목 COALESCE(user_title, title)을 기존 정규화 규칙으로 exact 조회합니다. 기간과 개수를 생략하면 최신 회의록 1개를 반환합니다.",
       "riskLevel": "low",
       "executionMode": "auto",
       "inputSchema": {
@@ -441,6 +441,12 @@
           "to": {
             "type": "string",
             "format": "date-time"
+          },
+          "reportTitle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Agent 전용 MeetingReport 표시 제목 exact selector. 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
           },
           "roomName": {
             "type": "string",
@@ -1926,6 +1932,42 @@
         "toolName": "list_meeting_reports",
         "inputContains": {
           "status": "FAILED"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_hybrid_title_and_content",
+      "prompt": "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "list_meeting_reports",
+        "inputContains": {
+          "reportTitle": "온보딩 주간회의"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_content_search_without_title_lookup",
+      "prompt": "배포 일정이 미뤄진 이유가 나온 회의를 찾아줘.",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "search_meeting_transcript",
+        "inputContains": {
+          "query": "배포 일정이 미뤄진 이유"
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_title_detail_without_transcript_search",
+      "prompt": "‘온보딩 주간회의’ 회의록 상세 열어줘.",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "get_meeting_report",
+        "inputContains": {
+          "reportTitle": "온보딩 주간회의"
         },
         "requiresConfirmation": false
       }

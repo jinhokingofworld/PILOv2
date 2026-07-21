@@ -293,6 +293,10 @@ try {
         resourceId: REPORT_ID
       }
     ],
+    meetingReportHybridContext: {
+      requestedReportTitle: "온보딩 주간회의",
+      exactMatchCount: 0
+    },
     executionLease: {
       token: "99999999-9999-4999-8999-999999999999",
       generation: 1
@@ -306,7 +310,21 @@ try {
     status: "grounding_queued",
     groundingOutcome: "sources_found",
     sourceCount: 1,
-    sourceTypes: ["meeting_transcript"]
+    sourceTypes: ["meeting_transcript"],
+    meetingReportHybridContext: {
+      requestedReportTitle: "온보딩 주간회의",
+      exactMatchCount: 0
+    }
+  });
+  const answerInsert = executed.find((call) =>
+    call.text.includes("'answer', 'pending'")
+  );
+  assert.deepEqual(JSON.parse(answerInsert.values[2]), {
+    groundingStepId: "88888888-8888-4888-8888-888888888888",
+    retrievalContext: {
+      requestedReportTitle: "온보딩 주간회의",
+      exactTitleMatchFound: false
+    }
   });
   const outboxInsert = executed.find((call) =>
     call.text.includes("INSERT INTO agent_grounded_answer_outbox")
@@ -464,6 +482,56 @@ try {
 }
 
 {
+  const executed = [];
+  const database = {
+    async transaction(callback) { return callback(this); },
+    async queryOne(text, values) {
+      if (text.includes("FROM agent_runs") && text.includes("FOR UPDATE")) {
+        return {
+          id: values[0],
+          execution_lease_token: "99999999-9999-4999-8999-999999999999",
+          execution_lease_generation: 1
+        };
+      }
+      if (text.includes("UPDATE agent_steps") && text.includes("SET status = 'completed'")) {
+        executed.push({ text, values });
+        return { id: values[0] };
+      }
+      return null;
+    },
+    async execute(text, values) { executed.push({ text, values }); }
+  };
+  const service = new AgentGroundedAnswerService(database, {
+    normalizeSourceIds() { return []; },
+    async loadAuthorizedSources() { return []; }
+  });
+
+  await service.completeToolAndQueue({
+    runId: "77777777-7777-4777-8777-777777777779",
+    workspaceId: WORKSPACE_ID,
+    currentUserId: USER_ID,
+    stepId: "88888888-8888-4888-8888-888888888890",
+    outputSummary: { status: "grounding_queued" },
+    resourceRefs: [],
+    groundingSources: [],
+    meetingReportHybridContext: {
+      requestedReportTitle: "온보딩 주간회의",
+      exactMatchCount: 0
+    },
+    executionLease: {
+      token: "99999999-9999-4999-8999-999999999999",
+      generation: 1
+    }
+  });
+
+  const completedRun = executed.find((call) =>
+    call.text.includes("SET status = 'completed', final_answer")
+  );
+  assert.match(completedRun.values[1], /제목이 정확히 ‘온보딩 주간회의’인 회의록은 없었습니다/);
+  assert.match(completedRun.values[1], /전체 회의 내용에서도 질문과 관련된 근거를 찾지 못했습니다/);
+}
+
+{
   const sourceId = `activity:${ACTIVITY_ID}`;
   const database = {
     async queryOne() {
@@ -505,4 +573,89 @@ try {
     () => service.complete("77777777-7777-4777-8777-777777777777", "근거 답변", []),
     /citation is required/
   );
+}
+
+{
+  const sourceId = `activity:${ACTIVITY_ID}`;
+  let contextQuery = "";
+  const database = {
+    async queryOne(text) {
+      contextQuery = text;
+      return {
+        workspace_id: WORKSPACE_ID,
+        requested_by_user_id: USER_ID,
+        prompt: "'온보딩 주간회의'에서 배포 일정 찾아줘",
+        source_ids: [sourceId],
+        retrieval_context: {
+          requestedReportTitle: "온보딩 주간회의",
+          exactTitleMatchFound: false
+        }
+      };
+    }
+  };
+  const service = new AgentGroundedAnswerService(database, {
+    normalizeSourceIds(sourceIds) { return sourceIds; },
+    async loadAuthorizedSources() {
+      return [{
+        sourceId,
+        sourceType: "activity",
+        reportId: REPORT_ID,
+        content: "배포 일정을 다음 주로 정했다.",
+        directlyReferenced: false
+      }];
+    }
+  });
+
+  const context = await service.getContext(
+    "77777777-7777-4777-8777-777777777777"
+  );
+
+  assert.deepEqual(context.retrievalContext, {
+    requestedReportTitle: "온보딩 주간회의",
+    exactTitleMatchFound: false
+  });
+  assert.match(contextQuery, /step_type = 'answer'/);
+  assert.match(contextQuery, /input_json->'retrievalContext'/);
+  assert.doesNotMatch(contextQuery, /list_meeting_reports/);
+}
+
+{
+  const executed = [];
+  const database = {
+    async queryOne() {
+      return {
+        workspace_id: WORKSPACE_ID,
+        requested_by_user_id: USER_ID,
+        prompt: "'온보딩 주간회의'에서 배포 일정 찾아줘",
+        source_ids: [],
+        retrieval_context: {
+          requestedReportTitle: "온보딩 주간회의",
+          exactTitleMatchFound: false
+        }
+      };
+    },
+    async transaction(callback) {
+      return callback({
+        async queryOne() {
+          return { id: "77777777-7777-4777-8777-777777777777" };
+        },
+        async execute(text, values) {
+          executed.push({ text, values });
+          return 1;
+        }
+      });
+    }
+  };
+  const service = new AgentGroundedAnswerService(database, {
+    normalizeSourceIds(sourceIds) { return sourceIds; },
+    async loadAuthorizedSources() { return []; }
+  });
+
+  await service.completeWithoutSources("77777777-7777-4777-8777-777777777777");
+
+  const completedRun = executed.find((call) =>
+    call.text.includes("SET status = 'completed', final_answer")
+  );
+  assert.match(completedRun.values[1], /제목이 정확히 ‘온보딩 주간회의’인 회의록은 없었습니다/);
+  assert.match(completedRun.values[1], /전체 회의 내용에서도 질문과 관련된 근거를 찾지 못했습니다/);
 }

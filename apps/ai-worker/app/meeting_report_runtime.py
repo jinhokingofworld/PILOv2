@@ -186,6 +186,30 @@ def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
     return _serialize_bounded_agent_tool_output(output_json, max_size)
 
 
+def _planning_safe_agent_tool_output(tool_name: str, output_json: object) -> object:
+    if tool_name != "list_meeting_reports" or not isinstance(output_json, dict):
+        return output_json
+    reports = output_json.get("reports")
+    if not isinstance(reports, list):
+        return output_json
+    return {
+        **output_json,
+        "reports": [_strip_planning_resource_ids(report) for report in reports],
+    }
+
+
+def _strip_planning_resource_ids(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _strip_planning_resource_ids(item)
+            for key, item in value.items()
+            if key != "id" and not key.endswith(("Id", "_id"))
+        }
+    if isinstance(value, list):
+        return [_strip_planning_resource_ids(item) for item in value]
+    return value
+
+
 UUID_TEXT_PATTERN = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
     re.IGNORECASE,
@@ -348,6 +372,48 @@ def _build_bounded_agent_planning_context(lines: list[str]) -> str:
         selected_reversed.append(line)
         total_bytes += line_bytes + separator_bytes
     return "\n".join(reversed(selected_reversed))
+
+
+def _agent_step_resource_context_lines(
+    *,
+    thread_id: object,
+    run_id: object,
+    step_id: object,
+    step_order: object,
+    resource_refs: object,
+) -> list[str]:
+    if not all(isinstance(value, str) and value for value in (thread_id, run_id, step_id)):
+        return []
+    if not isinstance(step_order, int) or not isinstance(resource_refs, list):
+        return []
+
+    lines: list[str] = []
+    safe_types = {"meeting", "meeting_report", "meeting_report_action_item"}
+    for index, reference in enumerate(resource_refs[:12]):
+        if (
+            not isinstance(reference, dict)
+            or reference.get("domain") != "meeting"
+            or reference.get("resourceType") not in safe_types
+            or not isinstance(reference.get("resourceId"), str)
+            or not str(reference["resourceId"]).strip()
+        ):
+            continue
+        digest = hashlib.sha256(f"{thread_id}:{run_id}:{step_id}:{index}".encode()).hexdigest()
+        value: dict[str, object] = {
+            "turn": step_order,
+            "contextRef": f"ctx_{digest[:24]}",
+            "resourceType": reference["resourceType"],
+            "ordinal": index + 1,
+        }
+        for key, limit in (("label", 300), ("status", 100)):
+            item = reference.get(key)
+            if isinstance(item, str) and item.strip():
+                value[key] = _truncate_utf8(item.strip(), limit)
+        lines.append(
+            "previous resource: "
+            + json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        )
+    return lines
 
 
 @dataclass(frozen=True)
@@ -1661,6 +1727,7 @@ class PgAgentRunRepository:
             """
             SELECT
               run.id,
+              run.thread_id,
               run.workspace_id,
               run.requested_by_user_id,
               run.status,
@@ -1821,7 +1888,9 @@ class PgAgentRunRepository:
                 message.role,
                 message.content,
                 NULL::TEXT AS tool_name,
-                NULL::JSONB AS output_json
+                NULL::JSONB AS output_json,
+                NULL::UUID AS step_id,
+                NULL::JSONB AS resource_refs
               FROM agent_run_messages AS message
               WHERE message.run_id = %s
 
@@ -1835,7 +1904,9 @@ class PgAgentRunRepository:
                 'tool'::TEXT AS role,
                 NULL::TEXT AS content,
                 step.tool_name,
-                step.output_json
+                step.output_json,
+                step.id AS step_id,
+                step.resource_refs
               FROM agent_steps AS step
               WHERE step.run_id = %s
                 AND step.step_type = 'tool'
@@ -1846,7 +1917,8 @@ class PgAgentRunRepository:
               ORDER BY occurred_at DESC, kind_order DESC, item_order DESC
               LIMIT 17
             )
-            SELECT item_kind, role, content, tool_name, output_json
+            SELECT item_kind, role, content, tool_name, output_json,
+                   item_order, step_id, resource_refs
             FROM recent_timeline
             ORDER BY occurred_at ASC, kind_order ASC, item_order ASC
             """,
@@ -1855,12 +1927,27 @@ class PgAgentRunRepository:
         latest_user_message: str | None = None
         for item in timeline_rows:
             if item["item_kind"] == "tool_step":
-                output = _serialize_agent_tool_output(str(item["tool_name"]), item["output_json"])
-                tool_line = f"tool {item['tool_name']}: {output}"
+                tool_name = str(item["tool_name"])
+                output = _serialize_agent_tool_output(
+                    tool_name,
+                    _planning_safe_agent_tool_output(tool_name, item["output_json"]),
+                )
+                tool_line = f"tool {tool_name}: {output}"
                 memory.append(tool_line)
                 untrusted_source_lines.append(
                     (tool_line, PromptSecuritySource("tool_result", output))
                 )
+                for resource_line in _agent_step_resource_context_lines(
+                    thread_id=row["thread_id"],
+                    run_id=row["id"],
+                    step_id=item.get("step_id"),
+                    step_order=item.get("item_order"),
+                    resource_refs=item.get("resource_refs"),
+                ):
+                    memory.append(resource_line)
+                    untrusted_source_lines.append(
+                        (resource_line, PromptSecuritySource("tool_result", resource_line))
+                    )
                 continue
 
             content = str(item["content"]).strip()[:1000]

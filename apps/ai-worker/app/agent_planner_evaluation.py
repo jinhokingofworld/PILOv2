@@ -24,6 +24,7 @@ from app.agent_processor import (
     normalize_agent_routing_decision,
     parse_agent_run_job_payload,
     select_agent_planner_tools_for_routing,
+    select_pending_agent_planner_tools_for_routing,
 )
 from app.agent_tool_retrieval import (
     DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
@@ -549,6 +550,12 @@ def evaluate_case(
                 routing,
                 top_k=shadow_top_k,
             )
+            tools = select_pending_agent_planner_tools_for_routing(
+                job,
+                routing,
+                tools,
+                case.planning_context,
+            )
     elif use_shadow_retrieval:
         retrieval_started = perf_counter()
         tools, retrieval = select_shadow_planner_tools(job, case.prompt, top_k=shadow_top_k)
@@ -626,6 +633,7 @@ def evaluate_case(
                 planning_context=case.planning_context,
                 strict_tool_selection=(routing is not None or retrieval is not None),
                 completion_tool_names=completion_tool_names,
+                routed_capability_ids=(routing.capability_ids if routing is not None else ()),
             )
         except AgentPlannerOutputError as error:
             planner_output_failure = _planner_output_failure(error)

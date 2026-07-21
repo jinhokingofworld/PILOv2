@@ -1743,6 +1743,65 @@ for (const testCase of [
 }
 
 {
+  const planner = plannerOutput({
+    toolName: "search_meeting_transcript",
+    input: { query: "API 배포 일정" },
+    toolRouting: {
+      capabilityIds: ["meeting.report.hybrid_search"]
+    },
+    meetingReportHybridContext: {
+      requestedReportTitle: "온보딩 주간회의",
+      exactMatchCount: 0
+    }
+  });
+  const { service, loggingService } = createService({
+    planner,
+    completedToolNames: ["list_meeting_reports"],
+    registryState: { name: "search_meeting_transcript" }
+  });
+
+  await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  const started = loggingService.calls.find(
+    (call) => call.method === "startNextToolStepIfAbsent"
+  );
+  assert.deepEqual(started.input.inputSummary.meetingReportHybridContext, {
+    requestedReportTitle: "온보딩 주간회의",
+    exactMatchCount: 0
+  });
+  assert.deepEqual(started.input.inputSummary.input, { query: "API 배포 일정" });
+}
+
+{
+  const planner = plannerOutput({
+    toolName: "search_meeting_transcript",
+    input: { query: "API 배포 일정" },
+    toolRouting: {
+      capabilityIds: ["meeting.report.hybrid_search"]
+    },
+    meetingReportHybridContext: {
+      requestedReportTitle: " ",
+      exactMatchCount: 0
+    }
+  });
+  const { service } = createService({
+    planner,
+    registryState: { name: "search_meeting_transcript" }
+  });
+
+  await assert.rejects(
+    () => service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+      plannerOutput: planner
+    }),
+    (error) =>
+      error?.response?.error?.message ===
+      "MeetingReport hybrid context is invalid"
+  );
+}
+
+{
   const publisherError = new Error("SQS publish failed");
   const {
     service,

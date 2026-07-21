@@ -18,6 +18,8 @@ const { AgentDomainFeatureFlagService } = require(
 );
 const {
   buildAgentToolCapabilityCatalog,
+  getAgentCapabilityToolNames,
+  isTerminalAgentCapabilityTool,
   validateAgentToolCapabilityCatalog
 } = require(
   "../../dist/modules/agent/agent-tool-capability-catalog.js"
@@ -67,7 +69,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "88a574298805f5c1442c064a751ff35cdc245e6b6ab0ea7c2b06fa97be0baf26";
+  "292d3f0465b407e3dfebd0de889a45b61f3533ea86aca7f37286990a3b4dd441";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -148,6 +150,33 @@ const payload = {
       .listDefinitionsForContext(null)
       .map((definition) => definition.name)
       .sort()
+  );
+  assert.deepEqual(
+    capabilityCatalog.capabilities.find(
+      (capability) => capability.id === "meeting.report.hybrid_search"
+    )?.toolNames,
+    ["list_meeting_reports", "search_meeting_transcript"]
+  );
+  assert.deepEqual(getAgentCapabilityToolNames("meeting.report.hybrid_search"), [
+    "list_meeting_reports",
+    "search_meeting_transcript"
+  ]);
+  assert.equal(
+    isTerminalAgentCapabilityTool(
+      ["meeting.report.hybrid_search"],
+      "list_meeting_reports",
+      []
+    ),
+    false,
+    "the exact-title lookup must not complete the hybrid workflow"
+  );
+  assert.equal(
+    isTerminalAgentCapabilityTool(
+      ["meeting.report.hybrid_search"],
+      "search_meeting_transcript",
+      ["list_meeting_reports"]
+    ),
+    true
   );
   assert.equal(
     capabilityCatalog.descriptors.find(
