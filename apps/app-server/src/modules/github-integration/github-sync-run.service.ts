@@ -1,11 +1,22 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import { badRequest, conflict, notFound } from "../../common/api-error";
+import { DatabaseService, type DatabaseTransaction } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { ListGithubSyncRunsQuery, StartGithubSyncRunRequest } from "./dto";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubSyncJobService } from "./github-sync-job.service";
+import {
+  fingerprintGithubManualSyncScope,
+  hashGithubManualSyncIdempotencyKey,
+  readGithubManualSyncIdempotencyKey
+} from "./github-manual-sync-admission";
+import {
+  GithubManualSyncIdempotencyConflictError,
+  GithubManualSyncQueueSaturatedError,
+  GithubManualSyncRateLimitedError
+} from "./github-manual-sync-error";
+import { GithubSyncObservabilityService } from "./github-sync-observability.service";
 import { serializeGithubJsonb } from "./github-jsonb";
 import {
   createGithubSyncProgressCursor,
@@ -95,16 +106,22 @@ export class GithubSyncRunService {
     private readonly workspaceService: WorkspaceService,
     private readonly syncExecutorService: GithubSyncExecutorService,
     private readonly projectV2SyncTokenService: GithubProjectV2SyncTokenService,
-    private readonly syncJobService?: GithubSyncJobService
+    private readonly syncJobService?: GithubSyncJobService,
+    @Optional() private readonly observability?: GithubSyncObservabilityService
   ) {}
 
   async startGithubSyncRun(
     currentUserId: string,
     workspaceId: string,
     input: StartGithubSyncRunRequest | undefined,
-    triggerSource: Exclude<GithubSyncTriggerSource, "legacy">
+    triggerSource: Exclude<GithubSyncTriggerSource, "legacy">,
+    idempotencyKey?: unknown
   ): Promise<GithubSyncRunPayload> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    if (triggerSource === "manual") {
+      await this.workspaceService.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
+    } else {
+      await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    }
 
     const target = this.readGithubSyncTarget(input?.target, "target");
     const installationId = this.validateRequiredString(
@@ -147,14 +164,27 @@ export class GithubSyncRunService {
       throw badRequest("GitHub ProjectV2 does not belong to the installation");
     }
 
-    const syncRun = await this.createGithubSyncRun({
+    const createInput = {
       workspaceId,
       installationId,
       repositoryId,
       projectV2Id,
       target,
       triggerSource
-    });
+    };
+    const admission = triggerSource === "manual"
+      ? await this.admitManualGithubSyncRun(createInput, currentUserId, idempotencyKey)
+      : { syncRun: await this.createGithubSyncRun(createInput), reused: false, preparedJob: null };
+    const { syncRun, reused } = admission;
+
+    if (reused) {
+      return this.mapGithubSyncRun(syncRun);
+    }
+
+    if (admission.preparedJob && this.syncJobService) {
+      await this.syncJobService.publishPreparedSyncJob(admission.preparedJob);
+      return this.mapGithubSyncRun(syncRun);
+    }
 
     if (this.syncJobService) {
       await this.syncJobService.enqueueSyncJob(syncRun.id, currentUserId);
@@ -290,6 +320,137 @@ export class GithubSyncRunService {
     };
   }
 
+  private async createOrReuseManualGithubSyncRun(input: {
+    workspaceId: string;
+    installationId: string;
+    repositoryId: string | null;
+    projectV2Id: string | null;
+    target: GithubSyncTarget;
+    triggerSource: Exclude<GithubSyncTriggerSource, "legacy">;
+  }): Promise<{ syncRun: GithubSyncRunRow; reused: boolean; preparedJob: null }> {
+    const run = async (transaction: DatabaseTransaction) => {
+      await transaction.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`github-manual-sync:${input.workspaceId}`]
+      );
+      const activeRuns = await this.findActiveManualGithubSyncRuns(input.workspaceId, transaction);
+      if (activeRuns.length > 0) {
+        if (activeRuns.every((activeRun) => activeRun.installation_id === input.installationId && activeRun.repository_id === input.repositoryId && activeRun.project_v2_id === input.projectV2Id && activeRun.target === input.target)) {
+          return { syncRun: activeRuns[0], reused: true, preparedJob: null };
+        }
+        throw conflict("A different GitHub manual sync is already active");
+      }
+      return { syncRun: await this.createGithubSyncRun(input, transaction), reused: false, preparedJob: null };
+    };
+    const databaseWithTransaction = this.database as unknown as {
+      transaction?: (callback: (transaction: DatabaseTransaction) => Promise<{ syncRun: GithubSyncRunRow; reused: boolean; preparedJob: null }>) => Promise<{ syncRun: GithubSyncRunRow; reused: boolean; preparedJob: null }>;
+    };
+    if (databaseWithTransaction.transaction) {
+      return databaseWithTransaction.transaction(run);
+    }
+    return { syncRun: await this.createGithubSyncRun(input), reused: false, preparedJob: null };
+  }
+
+  private async admitManualGithubSyncRun(
+    input: {
+      workspaceId: string;
+      installationId: string;
+      repositoryId: string | null;
+      projectV2Id: string | null;
+      target: GithubSyncTarget;
+      triggerSource: Exclude<GithubSyncTriggerSource, "legacy">;
+    },
+    requestedByUserId: string,
+    idempotencyKey: unknown
+  ): Promise<{ syncRun: GithubSyncRunRow; reused: boolean; preparedJob: import("./github-sync-job.service").PreparedGithubSyncJob | null }> {
+    if (!this.syncJobService) return this.createOrReuseManualGithubSyncRun(input);
+    const syncJobService = this.syncJobService;
+    const keyHash = hashGithubManualSyncIdempotencyKey(readGithubManualSyncIdempotencyKey(idempotencyKey));
+    const scopeFingerprint = fingerprintGithubManualSyncScope(input);
+    const config = this.configService.getGithubManualSyncAdmissionConfig();
+    return this.database.transaction(async (transaction) => {
+      await transaction.execute("SELECT pg_advisory_xact_lock(hashtextextended('github-manual-sync:global-admission', 0))");
+      await transaction.execute("SELECT pg_advisory_xact_lock(hashtextextended('github-manual-sync:workspace:' || $1, 0))", [input.workspaceId]);
+
+      const replay = await transaction.queryOne<GithubSyncRunRow & { request_fingerprint: string }>(`
+        SELECT request.request_fingerprint, run.id, run.workspace_id, run.installation_id, run.repository_id,
+          run.project_v2_id, run.target, run.status, run.trigger_source, run.started_at, run.finished_at,
+          run.fetched_count, run.created_count, run.updated_count, run.skipped_count, run.error_message, run.cursor
+        FROM github_sync_manual_requests AS request
+        INNER JOIN github_sync_runs AS run ON run.id=request.sync_run_id AND run.workspace_id=request.workspace_id
+        WHERE request.workspace_id=$1 AND request.requested_by_user_id=$2 AND request.idempotency_key_hash=$3`,
+        [input.workspaceId, requestedByUserId, keyHash]);
+      if (replay) {
+        if (replay.request_fingerprint !== scopeFingerprint) throw new GithubManualSyncIdempotencyConflictError();
+        this.observability?.emitManualSyncIdempotencyReplay();
+        return { syncRun: replay, reused: true, preparedJob: null };
+      }
+
+      const activeRuns = await this.findActiveManualGithubSyncRuns(input.workspaceId, transaction);
+      if (activeRuns.length > 0) {
+        const compatible = activeRuns.every((run) => run.installation_id === input.installationId && run.repository_id === input.repositoryId && run.project_v2_id === input.projectV2Id && run.target === input.target);
+        if (!compatible) throw conflict("A different GitHub manual sync is already active");
+        const activeRun = activeRuns[0];
+        await this.insertManualRequestLedger(transaction, input.workspaceId, requestedByUserId, keyHash, scopeFingerprint, activeRun.id);
+        this.observability?.emitManualSyncActiveRunReuse();
+        return { syncRun: activeRun, reused: true, preparedJob: null };
+      }
+
+      const userLimit = await this.manualLimit(transaction, "user", input.workspaceId, requestedByUserId, config.rateWindowSeconds, config.cooldownSeconds);
+      if (userLimit.total >= config.userLimit || userLimit.cooldownRetryAfterSeconds) {
+        const retryAfterSeconds = userLimit.cooldownRetryAfterSeconds ?? userLimit.windowRetryAfterSeconds;
+        this.observability?.emitManualSyncAdmissionRejected("user", retryAfterSeconds);
+        throw new GithubManualSyncRateLimitedError("user", retryAfterSeconds);
+      }
+      const workspaceLimit = await this.manualLimit(transaction, "workspace", input.workspaceId, requestedByUserId, config.rateWindowSeconds, config.cooldownSeconds);
+      if (workspaceLimit.total >= config.workspaceLimit || workspaceLimit.cooldownRetryAfterSeconds) {
+        const retryAfterSeconds = workspaceLimit.cooldownRetryAfterSeconds ?? workspaceLimit.windowRetryAfterSeconds;
+        this.observability?.emitManualSyncAdmissionRejected("workspace", retryAfterSeconds);
+        throw new GithubManualSyncRateLimitedError("workspace", retryAfterSeconds);
+      }
+      const queued = await transaction.queryOne<{ total: string | number }>(`
+        SELECT COUNT(*)::int AS total
+        FROM github_sync_jobs AS job
+        INNER JOIN github_sync_runs AS run ON run.id=job.sync_run_id
+        WHERE run.trigger_source='manual' AND job.status='queued'`);
+      if (this.toInteger(queued?.total ?? 0, "Invalid queued job count") >= config.maxQueuedJobs) {
+        const retryAfterSeconds = config.cooldownSeconds;
+        this.observability?.emitManualSyncQueueSaturated(retryAfterSeconds);
+        throw new GithubManualSyncQueueSaturatedError(retryAfterSeconds);
+      }
+      const syncRun = await this.createGithubSyncRun(input, transaction);
+      const preparedJob = await syncJobService.prepareSyncJob(transaction, syncRun.id, requestedByUserId);
+      if (!preparedJob) throw badRequest("GitHub sync job could not be created");
+      await this.insertManualRequestLedger(transaction, input.workspaceId, requestedByUserId, keyHash, scopeFingerprint, syncRun.id);
+      return { syncRun, reused: false, preparedJob };
+    });
+  }
+
+  private async insertManualRequestLedger(transaction: DatabaseTransaction, workspaceId: string, userId: string, keyHash: string, scopeFingerprint: string, syncRunId: string): Promise<void> {
+    await transaction.execute(`INSERT INTO github_sync_manual_requests
+      (workspace_id, requested_by_user_id, idempotency_key_hash, request_fingerprint, sync_run_id)
+      VALUES ($1, $2, $3, $4, $5)`, [workspaceId, userId, keyHash, scopeFingerprint, syncRunId]);
+  }
+
+  private async manualLimit(transaction: DatabaseTransaction, scope: "user" | "workspace", workspaceId: string, userId: string, windowSeconds: number, cooldownSeconds: number): Promise<{ total: number; windowRetryAfterSeconds: number; cooldownRetryAfterSeconds: number | null }> {
+    const userFilter = scope === "user" ? "AND job.requested_by_user_id=$2" : "";
+    const row = await transaction.queryOne<{ total: string | number; window_retry_after_seconds: string | number; cooldown_retry_after_seconds: string | number | null }>(`
+      SELECT COUNT(*)::int AS total,
+        GREATEST(1, COALESCE(CEIL(EXTRACT(EPOCH FROM (MIN(run.created_at) + ($3 * interval '1 second') - now()))), 1))::int AS window_retry_after_seconds,
+        MAX(GREATEST(1, CEIL(EXTRACT(EPOCH FROM (run.created_at + ($4 * interval '1 second') - now()))))::int)
+          FILTER (WHERE run.created_at + ($4 * interval '1 second') > now()) AS cooldown_retry_after_seconds
+      FROM github_sync_runs AS run
+      INNER JOIN github_sync_jobs AS job ON job.sync_run_id=run.id
+      WHERE run.workspace_id=$1 AND run.trigger_source='manual' ${userFilter}
+        AND run.created_at >= now() - ($3 * interval '1 second')`,
+      [workspaceId, userId, windowSeconds, cooldownSeconds]);
+    return {
+      total: this.toInteger(row?.total ?? 0, "Invalid manual sync count"),
+      windowRetryAfterSeconds: this.toInteger(row?.window_retry_after_seconds ?? 1, "Invalid manual sync retry delay"),
+      cooldownRetryAfterSeconds: row?.cooldown_retry_after_seconds === null || row?.cooldown_retry_after_seconds === undefined ? null : this.toInteger(row.cooldown_retry_after_seconds, "Invalid manual sync cooldown")
+    };
+  }
+
   private async createGithubSyncRun(input: {
     workspaceId: string;
     installationId: string;
@@ -297,8 +458,8 @@ export class GithubSyncRunService {
     projectV2Id: string | null;
     target: GithubSyncTarget;
     triggerSource: Exclude<GithubSyncTriggerSource, "legacy">;
-  }): Promise<GithubSyncRunRow> {
-    const row = await this.database.queryOne<GithubSyncRunRow>(
+  }, database: Pick<DatabaseService, "queryOne"> | DatabaseTransaction = this.database): Promise<GithubSyncRunRow> {
+    const row = await database.queryOne<GithubSyncRunRow>(
       `
         INSERT INTO github_sync_runs (
           workspace_id,
@@ -343,6 +504,22 @@ export class GithubSyncRunService {
     }
 
     return row;
+  }
+
+  private async findActiveManualGithubSyncRuns(
+    workspaceId: string,
+    database: Pick<DatabaseService, "query"> | DatabaseTransaction = this.database
+  ): Promise<GithubSyncRunRow[]> {
+    return database.query<GithubSyncRunRow>(
+      `
+        ${this.githubSyncRunSelectSql()}
+        WHERE workspace_id = $1
+          AND trigger_source = 'manual'
+          AND status IN ('queued', 'running')
+        ORDER BY started_at DESC NULLS LAST, created_at DESC, id DESC
+      `,
+      [workspaceId]
+    );
   }
 
   private async updateGithubSyncRunProgress(

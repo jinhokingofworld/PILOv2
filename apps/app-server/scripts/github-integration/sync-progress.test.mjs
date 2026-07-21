@@ -534,6 +534,7 @@ function fullSyncContext(reportProgress) {
       }
     },
     {
+      async assertWorkspaceOwnerAccess() {},
       async assertWorkspaceAccess() {}
     },
     {

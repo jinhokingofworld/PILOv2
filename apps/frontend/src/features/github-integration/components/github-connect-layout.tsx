@@ -160,6 +160,7 @@ export function GithubConnectLayout({
           isDeletingInstallation={isDeletingInstallation}
           isInstallationDeleteRequested={isInstallationDeleteRequested}
           isLoading={isLoading}
+          isWorkspaceOwner={isWorkspaceOwner}
           projectOAuth={projectOAuth}
           onCancelDeleteInstallation={onCancelDeleteInstallation}
           onConfirmDeleteInstallation={onConfirmDeleteInstallation}
@@ -204,6 +205,7 @@ export function GithubConnectLayout({
           installations={installations}
           isLoading={isLoading}
           isSyncing={isSyncing}
+          isWorkspaceOwner={isWorkspaceOwner}
           onStartSync={onStartSync}
           onSyncTargetChange={onSyncTargetChange}
           selectedInstallationId={selectedInstallationId}

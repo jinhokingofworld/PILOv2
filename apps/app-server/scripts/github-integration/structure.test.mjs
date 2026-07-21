@@ -233,7 +233,7 @@ const delegatedMethods = [
   {
     methodName: "startGithubSyncRun",
     serviceName: "githubSyncRunService",
-    args: "currentUserId, workspaceId, input, \"manual\""
+    args: "currentUserId, workspaceId, input, \"manual\", manualIdempotencyKey"
   },
   {
     methodName: "listGithubSyncRuns",

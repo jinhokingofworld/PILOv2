@@ -210,6 +210,8 @@ await import("./review-submission.test.mjs");
 await import("./conflict-merge.test.mjs");
 await import("./sync-progress.test.mjs");
 await import("./sync-runs.test.mjs");
+await import("./manual-sync-admission.test.mjs");
+await import("./manual-sync-controller-facade.test.mjs");
 await import("./source-sync-repository-selection.test.mjs");
 await import("./repository-scoped-project-v2.test.mjs");
 await import("./async-sync-worker.test.mjs");
