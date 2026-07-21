@@ -102,6 +102,10 @@ assert.match(githubPanel, /project_oauth_scope_missing/);
 assert.match(githubPanel, /installation_not_accessible/);
 assert.match(
   githubPanel,
+  /workspace_access_denied:\s*"Workspace Owner만 GitHub App 설치를 관리할 수 있습니다\."/
+);
+assert.match(
+  githubPanel,
   /이미 다른 PILO 계정에 연결된 GitHub 계정입니다/
 );
 assert.match(githubPanel, /GitHub 승인이 취소되었습니다/);
@@ -189,6 +193,9 @@ assert.doesNotMatch(githubPanel, /pilo_access_token/);
 await import("../../src/features/github-integration/github-sync-progress.test.mjs");
 await import("../../src/features/github-integration/github-sync-polling.test.mjs");
 await import("../../src/features/github-integration/github-manual-sync.test.mjs");
+await import("../../src/features/github-integration/github-manual-sync-idempotency.test.mjs");
+await import("../../src/features/github-integration/utils/github-manual-sync-error.test.mjs");
+await import("../../src/features/github-integration/github-manual-sync-execution.test.mjs");
 await import("../../src/features/github-integration/github-connect-format.test.mjs");
 await import("../../src/features/github-integration/repository-scoped-sync.test.mjs");
 await import("../../src/features/github-integration/repository-pagination.test.mjs");

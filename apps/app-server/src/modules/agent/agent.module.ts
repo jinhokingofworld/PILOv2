@@ -15,6 +15,7 @@ import { AgentConfirmationService } from "./agent-confirmation.service";
 import { AgentController } from "./agent.controller";
 import { AgentExecutionService } from "./agent-execution.service";
 import { AgentExecutionHandoffGuard } from "./agent-execution-handoff.guard";
+import { AgentLatencyObserver } from "./agent-latency-observer";
 import { AgentInternalController } from "./agent-internal.controller";
 import { AgentJobService } from "./agent-job.service";
 import { AgentLoggingService } from "./agent-logging.service";
@@ -56,6 +57,7 @@ import { DriveAgentToolsService } from "./tools/drive-agent-tools.service";
     AgentConfirmationService,
     AgentExecutionService,
     AgentExecutionHandoffGuard,
+    AgentLatencyObserver,
     AgentJobService,
     AgentLoggingService,
     AgentOutboxPublisherService,

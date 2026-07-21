@@ -17,8 +17,7 @@ from app.meeting_report_processor import (
     ProviderBusinessError,
     TranscriptSegment,
     _parse_action_item,
-    _parse_activity_evidence_references,
-    _parse_evidence,
+    _parse_grounded_content,
     _require_action_item_evidence,
 )
 
@@ -119,18 +118,26 @@ def parse_generated_action_item_extraction_json(
     raw_action_items = payload.get("actionItemCandidates")
     if not isinstance(raw_action_items, list):
         raise ProviderBusinessError("Invalid action item candidates")
-    action_items = [_parse_action_item(item, allowed_assignee_ids) for item in raw_action_items]
-    evidence = _parse_evidence(payload.get("evidence"), transcript_segments, len(action_items), 0)
-    activity_references = _parse_activity_evidence_references(
-        payload.get("activityEvidenceReferences", []),
-        activity_evidence,
-        len(action_items),
-        0,
-    )
-    if any(reference.source_type != "action_item" for reference in evidence):
-        raise ProviderBusinessError("Invalid action item evidence source")
-    if any(reference.source_type != "action_item" for reference in activity_references):
-        raise ProviderBusinessError("Invalid action item Activity evidence source")
+    action_items: list[ActionItemCandidate] = []
+    evidence: list[EvidenceReference] = []
+    activity_references: list[ActivityEvidenceReference] = []
+    for source_index, raw_item in enumerate(raw_action_items):
+        if not isinstance(raw_item, dict):
+            raise ProviderBusinessError("Invalid action item")
+        action_items.append(_parse_action_item(raw_item, allowed_assignee_ids))
+        _text, item_evidence, item_activity_references = _parse_grounded_content(
+            {
+                "text": raw_item.get("title"),
+                "segmentIndexes": raw_item.get("segmentIndexes"),
+                "activityIndexes": raw_item.get("activityIndexes"),
+            },
+            "action_item",
+            source_index,
+            transcript_segments,
+            activity_evidence,
+        )
+        evidence.extend(item_evidence)
+        activity_references.extend(item_activity_references)
     _require_action_item_evidence(action_items, evidence, activity_references)
     return GeneratedActionItemExtraction(action_items, evidence, activity_references)
 

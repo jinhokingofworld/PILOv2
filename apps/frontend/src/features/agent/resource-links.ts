@@ -16,14 +16,6 @@ type AgentSqlErdRequestContext = {
   sessionId: string;
 };
 
-export type SqlErdSessionCandidate = {
-  selectionToken: string;
-  title: string;
-  updatedAt: string;
-  tableCount: number;
-  relationCount: number;
-};
-
 export type StoredAgentCandidateSelection = {
   candidateSelectionId: string;
   resourceType: string;
@@ -67,18 +59,6 @@ export function getAgentCandidateSelections(
       selection: {
         kind: "candidate",
         candidateSelectionId: candidate.candidateSelectionId
-      }
-    }));
-  }
-  if (Array.isArray(output.candidates)) {
-    return getSqlErdSessionCandidates(run).map((candidate) => ({
-      key: `sql-erd:${candidate.selectionToken}`,
-      label: candidate.title,
-      description: formatSqlErdCandidateDescription(candidate),
-      status: null,
-      selection: {
-        kind: "sql_erd_session",
-        token: candidate.selectionToken
       }
     }));
   }
@@ -132,71 +112,6 @@ export function getStoredAgentCandidateSelections(
     : (candidates as StoredAgentCandidateSelection[]);
 }
 
-export function getSqlErdSessionCandidates(
-  run: Pick<AgentRun, "status" | "steps"> | null | undefined
-): SqlErdSessionCandidate[] {
-  if (run?.status !== "waiting_user_input") return [];
-  const latestCompletedToolStep = getLatestCandidateToolStep(run);
-  if (
-    latestCompletedToolStep?.toolName !== "inspect_sql_erd_schema" ||
-    latestCompletedToolStep.outputSummary?.status !== "needs_clarification"
-  ) {
-    return [];
-  }
-  const rawCandidates = latestCompletedToolStep.outputSummary.candidates;
-  if (
-    !Array.isArray(rawCandidates) ||
-    rawCandidates.length === 0 ||
-    rawCandidates.length > MAX_AGENT_CANDIDATES
-  ) {
-    return [];
-  }
-  const tokenCounts = new Map<string, number>();
-  for (const candidate of rawCandidates) {
-    if (
-      isPlainObject(candidate) &&
-      typeof candidate.selectionToken === "string" &&
-      UUID_PATTERN.test(candidate.selectionToken)
-    ) {
-      tokenCounts.set(
-        candidate.selectionToken,
-        (tokenCounts.get(candidate.selectionToken) ?? 0) + 1
-      );
-    }
-  }
-  const candidates = rawCandidates.map((candidate) => {
-    if (!isPlainObject(candidate)) return null;
-    const title = normalizeCandidateTitle(candidate.title);
-    const updatedAt = normalizeCandidateDate(candidate.updatedAt);
-    if (
-      typeof candidate.selectionToken !== "string" ||
-      !UUID_PATTERN.test(candidate.selectionToken) ||
-      !title ||
-      !updatedAt ||
-      !isNonNegativeSafeInteger(candidate.tableCount) ||
-      !isNonNegativeSafeInteger(candidate.relationCount)
-    ) {
-      return null;
-    }
-    return {
-      selectionToken: candidate.selectionToken,
-      title,
-      updatedAt,
-      tableCount: candidate.tableCount,
-      relationCount: candidate.relationCount
-    };
-  });
-  if (
-    candidates.some(
-      (candidate) =>
-        candidate === null || tokenCounts.get(candidate.selectionToken) !== 1
-    )
-  ) {
-    return [];
-  }
-  return candidates as SqlErdSessionCandidate[];
-}
-
 function getLatestCandidateToolStep(
   run: Pick<AgentRun, "status" | "steps"> | null | undefined
 ): CandidateToolStep | null {
@@ -212,10 +127,6 @@ function getLatestCandidateToolStep(
     return null;
   }
   return latestCompletedToolStep as CandidateToolStep;
-}
-
-function formatSqlErdCandidateDescription(candidate: SqlErdSessionCandidate): string {
-  return `수정 ${candidate.updatedAt} · 테이블 ${candidate.tableCount}개 · 관계 ${candidate.relationCount}개`;
 }
 
 export function getAgentResourceLinks(
@@ -543,18 +454,6 @@ function normalizeCandidateTitle(value: unknown): string | null {
     .trim()
     .replace(/\s+/g, " ");
   return normalized && [...normalized].length <= 120 ? normalized : null;
-}
-
-function normalizeCandidateDate(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return null;
-  const normalized = new Date(timestamp).toISOString();
-  return value === normalized ? normalized : null;
-}
-
-function isNonNegativeSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && Number(value) >= 0;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

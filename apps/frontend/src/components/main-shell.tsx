@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard } from "lucide-react";
+import { Home, LayoutDashboard } from "lucide-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { HeaderNotificationDropdown } from "@/components/header-notification-dropdown";
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/sidebar";
 import { HeaderMeetingStatus } from "@/features/meeting/components/header-meeting-status";
 import { ScreenShareHeaderControl } from "@/features/screen-share/components/screen-share-header-control";
+import { SqlErdSessionHeaderTitle } from "@/features/sql-erd/session-header-title";
 import {
   featureNavigationItems,
   getFeatureNavigationItemForPathname
@@ -23,6 +25,19 @@ import {
 type MainShellProps = {
   children: ReactNode;
 };
+
+function WorkspaceHeaderActions() {
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <ScreenShareHeaderControl mode="header" />
+      <WorkspaceMemberAvatars mode="header" />
+      <div className="hidden min-[480px]:block">
+        <HeaderMeetingStatus />
+      </div>
+      <HeaderNotificationDropdown />
+    </div>
+  );
+}
 
 export function MainShell({ children }: MainShellProps) {
   const pathname = usePathname();
@@ -38,12 +53,28 @@ export function MainShell({ children }: MainShellProps) {
 
   if (isSqlErdImmersiveRoute) {
     return (
-      <main className="h-svh overflow-hidden bg-background">
-        <div className="fixed right-4 top-4 z-50 flex items-center gap-2 [&_[data-mode=floating]]:!static">
-          <ScreenShareHeaderControl mode="floating" />
-          <WorkspaceMemberAvatars mode="floating" />
-        </div>
-        {children}
+      <main className="flex h-svh min-h-0 flex-col overflow-hidden bg-background">
+        <header
+          className="z-30 flex min-h-14 shrink-0 items-center gap-2 border-b bg-background px-4"
+          data-sqltoerd-workspace-header
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <Link
+              aria-label="홈으로 이동"
+              className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              href="/home"
+            >
+              <Home className="size-4" />
+            </Link>
+            <div className="h-5 w-px shrink-0 bg-border" />
+            <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+              <LayoutDashboard className="size-4 shrink-0 text-muted-foreground" />
+              <SqlErdSessionHeaderTitle fallback={activeFeature.title} />
+            </div>
+          </div>
+          <WorkspaceHeaderActions />
+        </header>
+        <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
       </main>
     );
   }
@@ -66,14 +97,7 @@ export function MainShell({ children }: MainShellProps) {
               <span className="truncate">{activeFeature.title}</span>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <ScreenShareHeaderControl mode="header" />
-            <WorkspaceMemberAvatars mode="header" />
-            <div className="hidden min-[480px]:block">
-              <HeaderMeetingStatus />
-            </div>
-            <HeaderNotificationDropdown />
-          </div>
+          <WorkspaceHeaderActions />
         </header>
 
         <main className="flex flex-1 flex-col gap-6 p-6">{children}</main>

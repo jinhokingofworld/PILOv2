@@ -69,7 +69,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "243139fbd5227579f101010861ba03220711943ed3a439d8a17c3617cc849b22";
+  "292d3f0465b407e3dfebd0de889a45b61f3533ea86aca7f37286990a3b4dd441";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -115,8 +115,8 @@ const payload = {
   );
   assert.equal(
     sqlErdFocusEvaluation?.expected?.requiresConfirmation,
-    null,
-    "contextual SQLtoERD inspection must not require confirmation"
+    false,
+    "read-only SQLtoERD focus must not require confirmation"
   );
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService({}),
@@ -146,7 +146,10 @@ const payload = {
   assert.match(capabilityCatalog.sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(
     capabilityCatalog.descriptors.map((descriptor) => descriptor.toolName),
-    [...actualSnapshot].map((tool) => tool.name).sort()
+    registry
+      .listDefinitionsForContext(null)
+      .map((definition) => definition.name)
+      .sort()
   );
   assert.deepEqual(
     capabilityCatalog.capabilities.find(
@@ -279,6 +282,47 @@ const fullRegistry = new AgentToolRegistryService(
       .find((descriptor) => descriptor.toolName === "delegate_canvas_agent")
       ?.capabilityIds.includes("canvas.drive_images.import")
   );
+  const sqlErdCapabilityCatalog = fullRegistry.listCapabilityCatalogForContext({
+    surface: "sql_erd",
+    sessionId: "77777777-7777-4777-8777-777777777777"
+  });
+  const sqlErdInspect = sqlErdCapabilityCatalog.capabilities.find(
+    (capability) => capability.id === "sql_erd.inspect"
+  );
+  const sqlErdGenerate = sqlErdCapabilityCatalog.capabilities.find(
+    (capability) => capability.id === "sql_erd.generate"
+  );
+  assert.ok(
+    sqlErdInspect?.positiveExamples.includes(
+      "현재 ERD에서 회의 관련 테이블만 보여줘"
+    )
+  );
+  assert.ok(
+    sqlErdInspect?.positiveExamples.includes(
+      "회의 관련 테이블만 집중적으로 보여줘"
+    )
+  );
+  assert.ok(
+    sqlErdInspect?.mustNotUseFor.some((boundary) =>
+      boundary.includes("새 ERD")
+    )
+  );
+  assert.ok(
+    sqlErdGenerate?.positiveExamples.includes(
+      "햄버거 가게 관련 ERD를 생성해줘"
+    )
+  );
+  assert.ok(
+    sqlErdGenerate?.positiveExamples.includes(
+      "학생, 강의, 수강 신청 ERD를 만들어줘"
+    )
+  );
+  assert.match(sqlErdGenerate?.whenToUse ?? "", /자연어/);
+  assert.ok(
+    sqlErdGenerate?.mustNotUseFor.some((boundary) =>
+      boundary.includes("집중 표시")
+    )
+  );
 }
 {
   const sqlErdContext = {
@@ -290,13 +334,18 @@ const fullRegistry = new AgentToolRegistryService(
       .listDefinitionsForContext(sqlErdContext)
       .map((definition) => definition.name)
       .sort(),
-    ["focus_sql_erd_tables", "generate_sql_erd", "inspect_sql_erd_schema"],
+    ["focus_sql_erd_tables", "generate_sql_erd"],
     "a surface context must expose only tools owned by its domain"
   );
   assert.equal(
     fullRegistry.getDefinitionForContext("list_calendar_events", sqlErdContext),
     null,
     "execution lookup must enforce the same surface domain"
+  );
+  assert.equal(
+    fullRegistry.getDefinitionForContext("focus_sql_erd_tables", null),
+    null,
+    "SQLtoERD focus must not be shortlisted outside the current SQLtoERD screen"
   );
 }
 {
@@ -389,8 +438,8 @@ const inventory = fullRegistry.listToolInventory();
     AGENT_TOOL_INVENTORY_BASELINE_SHA256,
     "registered tool inventory drift must update the recorded legacy baseline"
   );
-  assert.equal(inventory.totalTools, 36);
-  assert.equal(inventory.tools.length, 36);
+  assert.equal(inventory.totalTools, 35);
+  assert.equal(inventory.tools.length, 35);
   assert.equal(
     inventory.tools.filter((tool) => tool.operation === "write").length,
     16

@@ -22,6 +22,11 @@ import {
   getGithubConnectSyncTargetLabel
 } from "@/features/github-integration/utils/github-connect-format";
 import { getGithubManualSyncActionMessage } from "@/features/github-integration/utils/github-manual-sync-status";
+import { createGithubManualSyncIdempotency } from "@/features/github-integration/utils/github-manual-sync-idempotency";
+import {
+  getGithubManualSyncCompletion,
+  getGithubManualSyncErrorMessage
+} from "@/features/github-integration/utils/github-manual-sync-error";
 import { hasRequiredGithubProjectOAuthScopes } from "@/features/github-integration/utils/github-project-oauth-scope";
 import { buildGithubSettingsReturnUrl } from "@/features/github-integration/utils/github-settings-entry";
 import {
@@ -106,7 +111,9 @@ const GITHUB_CALLBACK_ERROR_MESSAGES: Record<string, string> = {
   project_oauth_scope_missing:
     "GitHub ProjectV2 OAuth에는 project와 repo 권한이 모두 필요합니다. 다시 연결하세요.",
   token_exchange_failed:
-    "GitHub 인증 토큰을 발급받지 못했습니다. 다시 시도하세요."
+    "GitHub 인증 토큰을 발급받지 못했습니다. 다시 시도하세요.",
+  workspace_access_denied:
+    "Workspace Owner만 GitHub App 설치를 관리할 수 있습니다."
 };
 
 function requiresProjectOAuth(target: GithubSyncTarget) {
@@ -123,6 +130,21 @@ function getErrorMessage(error: unknown) {
   }
 
   return "GitHub 연동 정보를 불러오지 못했습니다.";
+}
+
+function getLegacyGithubManualSyncErrorMessage(error: unknown) {
+  if (error instanceof GithubIntegrationApiError) {
+    if (error.status === 429) {
+      const retryAfterSeconds = error.retryAfterSeconds ?? 30;
+      return `동기화 요청이 일시적으로 제한되었습니다. ${retryAfterSeconds}초 후 다시 시도할 수 있습니다.`;
+    }
+    if (error.status === 503) {
+      const retryAfterSeconds = error.retryAfterSeconds ?? 30;
+      return `동기화 대기열이 혼잡합니다. ${retryAfterSeconds}초 후 다시 시도해 주세요.`;
+    }
+  }
+
+  return getErrorMessage(error);
 }
 
 function getGithubCallbackErrorMessage(params: URLSearchParams) {
@@ -197,6 +219,7 @@ export function GithubPanel() {
   const snapshotRequestGateRef = useRef(createGithubSyncRequestGate());
   const syncRunsRequestGateRef = useRef(createGithubSyncRequestGate());
   const selectedRepositoryIdRef = useRef("");
+  const manualSyncIdempotencyRef = useRef(createGithubManualSyncIdempotency());
 
   const isLoading = panelStatus === "loading" || panelStatus === "idle";
   const connected = snapshot.oauth?.connected === true;
@@ -649,6 +672,11 @@ export function GithubPanel() {
       return;
     }
 
+    if (!isWorkspaceOwner) {
+      setActionError("Workspace Owner만 GitHub App 설치를 관리할 수 있습니다.");
+      return;
+    }
+
     if (!connected) {
       setActionError("GitHub OAuth 연결 후 GitHub App을 설치할 수 있습니다.");
       return;
@@ -687,6 +715,11 @@ export function GithubPanel() {
   async function handleConfirmDeleteGithubAppInstallation() {
     if (!workspaceId || !selectedInstallationId) {
       setActionError("삭제할 GitHub App 설치를 확인할 수 없습니다.");
+      return;
+    }
+
+    if (!isWorkspaceOwner) {
+      setActionError("Workspace Owner만 GitHub App 설치를 관리할 수 있습니다.");
       return;
     }
 
@@ -789,6 +822,11 @@ export function GithubPanel() {
       return;
     }
 
+    if (!isWorkspaceOwner) {
+      setActionError("Workspace Owner만 GitHub 수동 동기화를 시작할 수 있습니다.");
+      return;
+    }
+
     if (!selectedInstallationId) {
       setActionError("동기화할 GitHub App 설치를 먼저 선택해야 합니다.");
       return;
@@ -842,13 +880,19 @@ export function GithubPanel() {
     if (projectScopedSyncTargets.has(syncTarget) && selectedProjectV2Id) {
       body.projectV2Id = selectedProjectV2Id;
     }
+    const idempotencyKey = manualSyncIdempotencyRef.current.getKey(body);
 
     setIsSyncing(true);
     setActionError(null);
     setActionMessage(null);
 
     try {
-      const syncRun = await apiClient.startGithubSyncRun(workspaceId, body);
+      const syncRun = await apiClient.startGithubSyncRun(
+        workspaceId,
+        body,
+        idempotencyKey
+      );
+      manualSyncIdempotencyRef.current.complete(body, "success");
       setActionMessage(
         getGithubManualSyncActionMessage(
           getGithubConnectSyncTargetLabel(syncRun.target),
@@ -860,7 +904,9 @@ export function GithubPanel() {
         setHasRunningSyncRun(true);
       }
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      const completion = getGithubManualSyncCompletion(error);
+      manualSyncIdempotencyRef.current.complete(body, completion);
+      setActionError(getGithubManualSyncErrorMessage(error));
     } finally {
       setIsSyncing(false);
     }

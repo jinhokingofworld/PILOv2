@@ -9,12 +9,19 @@ const { AgentToolRegistryService } = require(
 const { SqlErdAgentToolsService } = require(
   "../../dist/modules/agent/tools/sql-erd-agent-tools.service.js"
 );
+const { buildAgentReadResultAnswer } = require(
+  "../../dist/modules/agent/agent-read-result-formatter.js"
+);
+const { forbidden } = require("../../dist/common/api-error.js");
 const {
   buildSqlErdAgentSchemaProjection,
   createSqlErdModelFingerprint,
   partitionSqlErdAgentContextTableRefs,
   resolveSqlErdAgentTableFocus
 } = require("../../dist/modules/agent/tools/sql-erd-table-focus.js");
+const {
+  resolveDeterministicSqlErdTableFocus
+} = require("../../dist/modules/agent/tools/sql-erd-table-focus-resolver.js");
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
@@ -230,6 +237,115 @@ const focusProjection = buildSqlErdAgentSchemaProjection(
     'meeting_report_completed'
   );`
 );
+const resolverFixture = JSON.parse(
+  await readFile(
+    new URL("./fixtures/sql-erd-focus-resolver-v1.json", import.meta.url),
+    "utf8"
+  )
+);
+assert.equal(resolverFixture.version, "sql-erd-focus-resolver:v1");
+for (const testCase of resolverFixture.cases) {
+  const resolution = resolveDeterministicSqlErdTableFocus(
+    focusProjection,
+    testCase.featureQuery
+  );
+  assert.deepEqual(
+    resolution && {
+      primaryTableRefs: resolution.primaryTableRefs,
+      relatedTableRefs: resolution.relatedTableRefs,
+      source: resolution.source
+    },
+    testCase.expected,
+    testCase.id
+  );
+}
+
+const boundaryProjection = {
+  version: 1,
+  tables: [
+    { ref: "t1", name: "user", columns: [] },
+    { ref: "t2", name: "users", columns: [] },
+    { ref: "t3", name: "log", columns: [] },
+    { ref: "t4", name: "catalog", columns: [] }
+  ],
+  edges: [],
+  truncated: false
+};
+assert.deepEqual(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "users 테이블만 보여줘"
+  )?.primaryTableRefs,
+  ["t2"],
+  "an exact plural table name must not also select its singular neighbor"
+);
+assert.deepEqual(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "catalog 테이블만 보여줘"
+  )?.primaryTableRefs,
+  ["t4"],
+  "a table name inside another word must not count as an exact match"
+);
+assert.deepEqual(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "user와 users 테이블을 함께 보여줘"
+  ),
+  null,
+  "multi-table requests must use the LLM resolver instead of assuming positive intent"
+);
+assert.equal(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "users 말고 orders만 보여줘"
+  ),
+  null,
+  "exclusion intent must bypass deterministic matching instead of selecting the excluded table"
+);
+assert.equal(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "show orders, not users"
+  ),
+  null,
+  "English negation must use the LLM resolver"
+);
+assert.equal(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "users table이 아니라 orders table만 보여줘"
+  ),
+  null,
+  "Korean contrastive negation must use the LLM resolver"
+);
+
+const schemaCollisionProjection = {
+  version: 1,
+  tables: [
+    { ref: "t1", name: "users", schemaName: "public", columns: [] },
+    { ref: "t2", name: "users", schemaName: "auth", columns: [] }
+  ],
+  edges: [],
+  truncatedTableRefs: [],
+  truncated: false
+};
+assert.equal(
+  resolveDeterministicSqlErdTableFocus(
+    schemaCollisionProjection,
+    "users 테이블만 보여줘"
+  ),
+  null,
+  "an unqualified duplicate table name must remain ambiguous"
+);
+assert.deepEqual(
+  resolveDeterministicSqlErdTableFocus(
+    schemaCollisionProjection,
+    "auth.users 테이블만 보여줘"
+  )?.primaryTableRefs,
+  ["t2"],
+  "a schema-qualified table name may be resolved deterministically"
+);
 assert.deepEqual(
   focusProjection.tables.map((table) => [table.ref, table.name]),
   [
@@ -339,44 +455,60 @@ for (const evidence of boundedEvidenceCases) {
   );
 }
 
-const largeProjection = buildSqlErdAgentSchemaProjection(
-  {
-    version: 1,
-    schema: {
-      tables: Array.from({ length: 100 }, (_, index) => ({
-        id: `internal-large-table-${index}`,
-        name: `table_${index}_${"x".repeat(240)}`,
-        schemaName: `schema_${"y".repeat(240)}`,
-        columns: Array.from({ length: 10 }, (_column, columnIndex) => ({
-          id: `internal-large-column-${index}-${columnIndex}`,
-          name: `column_${columnIndex}_${"z".repeat(240)}`,
-          dataType: "text",
-          nullable: true,
-          primaryKey: columnIndex === 0,
-          foreignKey: false,
-          unique: false,
-          defaultValue: null,
-          comment: "설명".repeat(1_000)
-        })),
-        constraints: [],
-        comment: "테이블 설명".repeat(1_000)
+const largeFocusModelJson = {
+  version: 1,
+  schema: {
+    tables: Array.from({ length: 100 }, (_, index) => ({
+      id: `internal-large-table-${index}`,
+      name:
+        index === 0
+          ? "organization_membership_invitations"
+          : index === 1
+            ? "organization_membership_roles"
+            : `table_${index}_${"x".repeat(240)}`,
+      schemaName: `schema_${"y".repeat(240)}`,
+      columns: Array.from({ length: 10 }, (_column, columnIndex) => ({
+        id: `internal-large-column-${index}-${columnIndex}`,
+        name: `column_${columnIndex}_${"z".repeat(240)}`,
+        dataType: "text",
+        nullable: true,
+        primaryKey: columnIndex === 0,
+        foreignKey: false,
+        unique: false,
+        defaultValue: null,
+        comment: "설명".repeat(1_000)
       })),
-      relations: Array.from({ length: 300 }, (_, index) => ({
-        id: `internal-large-relation-${index}`,
-        kind: "foreign_key",
-        fromTableId: `internal-large-table-${index % 100}`,
-        fromColumnIds: [],
-        toTableId: `internal-large-table-${(index + 1) % 100}`,
-        toColumnIds: [],
-        constraintName: null
-      }))
-    }
-  },
+      constraints: [],
+      comment: "테이블 설명".repeat(1_000)
+    })),
+    relations: Array.from({ length: 300 }, (_, index) => ({
+      id: `internal-large-relation-${index}`,
+      kind: "foreign_key",
+      fromTableId: `internal-large-table-${index % 100}`,
+      fromColumnIds: [],
+      toTableId: `internal-large-table-${(index + 1) % 100}`,
+      toColumnIds: [],
+      constraintName: null
+    }))
+  }
+};
+const largeProjection = buildSqlErdAgentSchemaProjection(
+  largeFocusModelJson,
   "대형 기능"
 );
 assert.equal(JSON.stringify(largeProjection).length <= 9_000, true);
 assert.equal(largeProjection.tables.length, 100);
 assert.equal(largeProjection.truncated, true);
+assert.equal(largeProjection.tables[0].name, largeProjection.tables[1].name);
+assert.deepEqual(largeProjection.truncatedTableRefs.slice(0, 2), ["t1", "t2"]);
+assert.equal(
+  resolveDeterministicSqlErdTableFocus(
+    largeProjection,
+    "organization_membership_invitations 테이블만 보여줘"
+  ),
+  null,
+  "truncated table names must not become deterministic exact matches"
+);
 
 const resolvedFocus = resolveSqlErdAgentTableFocus(focusModelJson(), {
   primaryTableRefs: ["t2"],
@@ -749,285 +881,36 @@ const focusDefinition = focusDefinitions.find(
   (candidate) => candidate.name === "focus_sql_erd_tables"
 );
 
-assert.ok(inspectDefinition);
+assert.equal(inspectDefinition, undefined);
 assert.ok(focusDefinition);
-assert.equal(inspectDefinition.riskLevel, "low");
-assert.equal(inspectDefinition.executionMode, "contextual");
 assert.equal(focusDefinition.riskLevel, "low");
 assert.equal(focusDefinition.executionMode, "auto");
-assert.deepEqual(inspectDefinition.inputSchema.required, ["featureQuery"]);
-assert.equal(inspectDefinition.inputSchema.additionalProperties, false);
-assert.deepEqual(focusDefinition.inputSchema.required, [
-  "sessionId",
-  "sessionRevision",
-  "modelFingerprint",
-  "featureLabel",
-  "primaryTableRefs",
-  "relatedTableRefs",
-  "contextTableRefs",
-  "confidence",
-  "reasons"
-]);
-const focusEvidenceSchema =
-  focusDefinition.inputSchema.properties.reasons.items.properties.evidence.items;
-assert.deepEqual(
-  focusEvidenceSchema.oneOf.map((candidate) => ({
-    kinds: candidate.properties.kind.enum,
-    required: candidate.required
-  })),
-  [
-    {
-      kinds: ["table_name", "table_comment", "column_name"],
-      required: ["kind", "value"]
-    },
-    {
-      kinds: ["column_comment", "data_type", "enum_value"],
-      required: ["kind", "columnName", "value"]
-    }
-  ]
-);
-
-const inspectInput = inspectDefinition.validateInput({
-  featureQuery: "결제 기능"
-});
-assert.deepEqual(await inspectDefinition.prepareExecution(context, inspectInput), {
-  kind: "execute"
-});
-const inspected = await inspectDefinition.execute(context, inspectInput);
-assert.equal(inspected.outputSummary.sessionId, SESSION_ID);
-assert.equal(inspected.outputSummary.sessionRevision, 7);
-assert.equal(
-  inspected.outputSummary.modelFingerprint,
-  createSqlErdModelFingerprint(focusModelJson())
-);
-assert.equal(inspected.outputSummary.title, focusSqlErdService.session.title);
-assert.equal(inspected.outputSummary.projection.tables.length, 5);
-assert.deepEqual(
-  inspected.outputSummary.projection.tables[4].columns.find(
-    (column) => column.name === "action"
-  ).enumValues,
-  [
-    "workspace_created",
-    "meeting_started",
-    "meeting_ended",
-    "meeting_report_completed"
-  ]
-);
-assert.equal(JSON.stringify(inspected.outputSummary).includes("CREATE TABLE"), false);
-assert.equal(JSON.stringify(inspected.outputSummary).includes("internal-payments-id"), false);
-assert.deepEqual(inspected.resourceRefs, []);
-
-const secondSessionId = "55555555-5555-4555-8555-555555555555";
-const multipleSqlErdService = new FakeSqlErdService();
-multipleSqlErdService.sessions = [
-  sessionPayload({
-    id: SESSION_ID,
-    title: "  주문\n\tERD\u0000 ",
-    updatedAt: "2026-07-16T00:00:00.000Z",
-    modelJson: focusModelJson(),
-    tableCount: 4,
-    relationCount: 3
-  }),
-  sessionPayload({
-    id: secondSessionId,
-    title: "결제 ERD",
-    updatedAt: "2026-07-17T00:00:00.000Z",
-    modelJson: focusModelJson(),
-    tableCount: 4,
-    relationCount: 3
-  })
-];
-const multipleAdapter = new SqlErdAgentToolsService(multipleSqlErdService);
-const multipleInspect = multipleAdapter
-  .listDefinitions()
-  .find((candidate) => candidate.name === "inspect_sql_erd_schema");
-const ambiguousPreparation = await multipleInspect.prepareExecution(
-  context,
-  multipleInspect.validateInput({ featureQuery: "결제 기능" })
-);
-assert.equal(ambiguousPreparation.kind, "needs_clarification");
-assert.equal(ambiguousPreparation.outputSummary.reason, "multiple_sessions");
-assert.match(
-  ambiguousPreparation.outputSummary.question,
-  /1\. 주문 ERD · 수정 2026-07-16T00:00:00\.000Z · 테이블 4개 · 관계 3개/
-);
-assert.match(
-  ambiguousPreparation.outputSummary.question,
-  /2\. 결제 ERD · 수정 2026-07-17T00:00:00\.000Z · 테이블 4개 · 관계 3개/
-);
-assert.deepEqual(
-  ambiguousPreparation.outputSummary.candidates.map((candidate) => ({
-    title: candidate.title,
-    updatedAt: candidate.updatedAt,
-    tableCount: candidate.tableCount
-  })),
-  [
-    {
-      title: "주문 ERD",
-      updatedAt: "2026-07-16T00:00:00.000Z",
-      tableCount: 4
-    },
-    {
-      title: "결제 ERD",
-      updatedAt: "2026-07-17T00:00:00.000Z",
-      tableCount: 4
-    }
-  ]
-);
-assert.equal(ambiguousPreparation.resourceRefs.length, 0);
-assert.deepEqual(
-  ambiguousPreparation.candidateResources.map(({ reference, candidate }) => ({
-    reference,
-    label: candidate.label
-  })),
-  [
-    {
-      reference: {
-        domain: "sqltoerd",
-        resourceType: "session",
-        resourceId: SESSION_ID
-      },
-      label: "주문 ERD"
-    },
-    {
-      reference: {
-        domain: "sqltoerd",
-        resourceType: "session",
-        resourceId: secondSessionId
-      },
-      label: "결제 ERD"
-    }
-  ]
-);
-assert.equal(
-  JSON.stringify(ambiguousPreparation.outputSummary).includes(SESSION_ID),
-  false
-);
-
-assert.deepEqual(
-  await multipleInspect.prepareExecution(
-    context,
-    multipleInspect.validateInput({
-      featureQuery: "결제 기능",
-      sessionTitle: "결제 ERD"
-    })
-  ),
-  { kind: "execute" }
-);
-const titledInspection = await multipleInspect.execute(
-  context,
-  multipleInspect.validateInput({
-    featureQuery: "결제 기능",
-    sessionTitle: "결제 ERD"
-  })
-);
-assert.equal(titledInspection.outputSummary.sessionId, secondSessionId);
-
-multipleSqlErdService.sessions = multipleSqlErdService.sessions.map((session) => ({
-  ...session,
-  title: "Untitled ERD"
-}));
-const duplicateTitlePreparation = await multipleInspect.prepareExecution(
-  context,
-  multipleInspect.validateInput({ featureQuery: "payment feature" })
-);
-assert.equal(duplicateTitlePreparation.kind, "needs_clarification");
-assert.deepEqual(
-  duplicateTitlePreparation.candidateResources.map(
-    ({ reference }) => reference.resourceId
-  ),
-  [SESSION_ID, secondSessionId]
-);
-assert.deepEqual(
-  await multipleInspect.prepareExecution(
-    context,
-    multipleInspect.validateInput({
-      featureQuery: "payment feature",
-      sessionSelectionToken: secondSessionId
-    })
-  ),
-  { kind: "execute" }
-);
-const tokenSelectedInspection = await multipleInspect.execute(
-  context,
-  multipleInspect.validateInput({
-    featureQuery: "payment feature",
-    sessionSelectionToken: secondSessionId
-  })
-);
-assert.equal(tokenSelectedInspection.outputSummary.sessionId, secondSessionId);
-
-const manySqlErdService = new FakeSqlErdService();
-manySqlErdService.sessions = Array.from({ length: 6 }, (_, index) =>
-  sessionPayload({
-    id: `55555555-5555-4555-8555-55555555555${index}`,
-    title: `ERD ${index + 1}`,
-    updatedAt: `2026-07-${String(index + 10).padStart(2, "0")}T00:00:00.000Z`,
-    modelJson: focusModelJson(),
-    tableCount: 4,
-    relationCount: 3
-  })
-);
-const manyInspect = new SqlErdAgentToolsService(manySqlErdService)
-  .listDefinitions()
-  .find((candidate) => candidate.name === "inspect_sql_erd_schema");
-const manyPreparation = await manyInspect.prepareExecution(
-  context,
-  manyInspect.validateInput({ featureQuery: "payment feature" })
-);
-assert.equal(manyPreparation.kind, "needs_clarification");
-assert.equal(manyPreparation.outputSummary.candidates.length, 5);
-assert.match(manyPreparation.outputSummary.question, /5\. ERD 5/);
-assert.doesNotMatch(manyPreparation.outputSummary.question, /6\. ERD 6/);
-
-const emptySqlErdService = new FakeSqlErdService();
-emptySqlErdService.sessions = [];
-const emptyInspect = new SqlErdAgentToolsService(emptySqlErdService)
-  .listDefinitions()
-  .find((candidate) => candidate.name === "inspect_sql_erd_schema");
-const emptyPreparation = await emptyInspect.prepareExecution(
-  context,
-  emptyInspect.validateInput({ featureQuery: "결제 기능" })
-);
-assert.equal(emptyPreparation.kind, "needs_clarification");
-assert.equal(emptyPreparation.outputSummary.reason, "no_sessions");
-
+assert.deepEqual(focusDefinition.inputSchema.required, ["featureQuery"]);
+assert.equal(focusDefinition.inputSchema.additionalProperties, false);
 const focusInput = focusDefinition.validateInput({
-  sessionId: SESSION_ID,
-  sessionRevision: 7,
-  modelFingerprint: inspected.outputSummary.modelFingerprint,
-  featureLabel: "결제 기능",
-  primaryTableRefs: ["t2"],
-  relatedTableRefs: ["t1", "t3"],
-  contextTableRefs: ["t5"],
-  confidence: "medium",
-  reasons: [
-    { tableRef: "t2", reason: "결제 정보를 저장합니다." },
-    { tableRef: "t1", reason: "결제 대상 주문입니다." },
-    { tableRef: "t3", reason: "결제 시도 이력입니다." },
-    {
-      tableRef: "t5",
-      reason: "회의 활동 이력을 기록합니다.",
-      evidence: [
-        {
-          kind: "enum_value",
-          columnName: "action",
-          value: "meeting_started"
-        }
-      ]
-    }
-  ]
+  featureQuery: "payments 테이블만 집중적으로 보여줘"
+});
+assert.deepEqual(focusInput, {
+  featureQuery: "payments 테이블만 집중적으로 보여줘"
 });
 assert.throws(
   () =>
     focusDefinition.validateInput({
-      ...focusInput,
-      modelFingerprint: "fnv1a32:not-valid"
+      featureQuery: "payments",
+      sessionId: SESSION_ID
     }),
-  (error) =>
-    /modelFingerprint is invalid/.test(error.getResponse().error.message)
+  (error) => /sessionId/i.test(error.getResponse().error.message)
 );
-const focused = await focusDefinition.execute(context, focusInput);
+await assert.rejects(
+  () => focusDefinition.execute(context, focusInput),
+  (error) => /session context/i.test(error.getResponse().error.message)
+);
+
+const focusContext = {
+  ...context,
+  requestContext: { surface: "sql_erd", sessionId: SESSION_ID }
+};
+const focused = await focusDefinition.execute(focusContext, focusInput);
 assert.equal(focused.outputSummary.action, "focused");
 assert.deepEqual(
   focused.outputSummary.primaryTables.map((table) => table.name),
@@ -1037,101 +920,245 @@ assert.deepEqual(
   focused.outputSummary.relatedTables.map((table) => table.name),
   ["orders", "payment_attempts"]
 );
-assert.deepEqual(
-  focused.outputSummary.contextTables.map((table) => table.name),
-  ["activity_logs"]
-);
+assert.deepEqual(focused.outputSummary.contextTables, []);
 assert.deepEqual(focused.outputSummary.ignoredContextTables, []);
-assert.deepEqual(focused.resourceRefs, [
-  {
-    domain: "sqltoerd",
-    resourceType: "session",
-    resourceId: SESSION_ID,
-    label: focusSqlErdService.session.title,
-    url: `/sql-erd/session?sessionId=${SESSION_ID}`,
-    status: "focused",
-    metadata: {
-      version: 1,
-      view: "table_focus",
-      sessionRevision: 7,
-      modelFingerprint: createSqlErdModelFingerprint(focusModelJson()),
-      featureLabel: "결제 기능",
-      primaryTableIds: ["internal-payments-id"],
-      relatedTableIds: ["internal-orders-id", "internal-attempts-id"],
-      contextTableIds: ["internal-activity-logs-id"],
-      relationIds: [
-        "internal-order-payment-relation",
-        "internal-payment-attempt-relation"
-      ],
-      confidence: "medium"
-    }
-  }
-]);
+assert.deepEqual(focused.resourceRefs[0].metadata, {
+  version: 1,
+  view: "table_focus",
+  sessionRevision: 7,
+  modelFingerprint: createSqlErdModelFingerprint(focusModelJson()),
+  featureLabel: "payments 테이블만 집중적으로 보여줘",
+  primaryTableIds: ["internal-payments-id"],
+  relatedTableIds: ["internal-orders-id", "internal-attempts-id"],
+  contextTableIds: [],
+  relationIds: [
+    "internal-order-payment-relation",
+    "internal-payment-attempt-relation"
+  ],
+  confidence: "high"
+});
+assert.equal(
+  focusSqlErdService.calls.filter((call) => call.method === "getSession").length,
+  2
+);
 assert.equal(JSON.stringify(focused).includes("CREATE TABLE"), false);
 assert.equal(JSON.stringify(focused).includes('"modelJson"'), false);
 
-const focusWithUnverifiedContext = await focusDefinition.execute(
-  context,
+const originalFetch = globalThis.fetch;
+const originalApiKey = process.env.OPENAI_API_KEY;
+process.env.OPENAI_API_KEY = "test-key";
+let capturedResolverBody;
+globalThis.fetch = async (_url, init) => {
+  capturedResolverBody = JSON.parse(init.body);
+  return new Response(
+    JSON.stringify({
+      output_text: JSON.stringify({
+        status: "focused",
+        featureLabel: "회의",
+        primaryTableRefs: ["t5"],
+        confidence: "medium",
+        question: null
+      })
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+};
+const llmFocused = await focusDefinition.execute(
+  focusContext,
+  focusDefinition.validateInput({ featureQuery: "회의 관련 테이블" })
+);
+assert.deepEqual(
+  llmFocused.outputSummary.primaryTables.map((table) => table.name),
+  ["activity_logs"]
+);
+assert.deepEqual(llmFocused.outputSummary.relatedTables, []);
+assert.equal(capturedResolverBody.model, "gpt-5.4-mini");
+assert.equal(capturedResolverBody.input[1].content.includes(SESSION_ID), false);
+assert.equal(
+  capturedResolverBody.input[1].content.includes("internal-payments-id"),
+  false
+);
+assert.equal(capturedResolverBody.input[1].content.includes("CREATE TYPE"), false);
+
+globalThis.fetch = async () =>
+  new Response(
+    JSON.stringify({
+      output_text: JSON.stringify({
+        status: "focused",
+        featureLabel: "orders",
+        primaryTableRefs: ["t1"],
+        confidence: "medium",
+        question: null
+      })
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+const exclusionFocused = await focusDefinition.execute(
+  focusContext,
   focusDefinition.validateInput({
-    ...focusInput,
-    reasons: focusInput.reasons.map((reason) =>
-      reason.tableRef === "t5"
-        ? {
-            ...reason,
-            evidence: [
-              {
-                kind: "enum_value",
-                columnName: "action",
-                value: "meeting_deleted"
-              }
-            ]
-          }
-        : reason
-    )
+    featureQuery: "users 말고 orders만 보여줘"
   })
 );
-assert.deepEqual(focusWithUnverifiedContext.outputSummary.contextTables, []);
-assert.deepEqual(focusWithUnverifiedContext.outputSummary.ignoredContextTables, [
-  {
-    name: "activity_logs",
-    reason: "schema_evidence_not_found"
-  }
-]);
 assert.deepEqual(
-  focusWithUnverifiedContext.resourceRefs[0].metadata.contextTableIds,
-  []
+  exclusionFocused.outputSummary.primaryTables.map((table) => table.name),
+  ["orders"]
 );
 
-focusSqlErdService.session = sessionPayload({
-  ...focusSqlErdService.session,
-  revision: 8
-});
-focusSqlErdService.sessions = [focusSqlErdService.session];
-const focusedAfterLayoutRevision = await focusDefinition.execute(
-  context,
-  focusInput
+globalThis.fetch = async () =>
+  new Response(
+    JSON.stringify({
+      output_text: JSON.stringify({
+        status: "needs_clarification",
+        featureLabel: null,
+        primaryTableRefs: [],
+        confidence: "low",
+        question: "학생 기능의 기준 테이블 이름을 알려주세요."
+      })
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+const clarification = await focusDefinition.execute(
+  focusContext,
+  focusDefinition.validateInput({ featureQuery: "학생 관련 테이블" })
 );
-assert.equal(focusedAfterLayoutRevision.outputSummary.sessionRevision, 8);
+assert.equal(clarification.outputSummary.action, "needs_clarification");
+assert.equal(clarification.outputSummary.reason, "ambiguous_schema_match");
+assert.match(clarification.outputSummary.question, /테이블 이름/);
+assert.deepEqual(clarification.resourceRefs, []);
+assert.match(
+  buildAgentReadResultAnswer({
+    toolName: "focus_sql_erd_tables",
+    outputSummary: clarification.outputSummary,
+    resourceRefs: []
+  }),
+  /학생 기능의 기준 테이블 이름/
+);
+
+globalThis.fetch = async () =>
+  new Response(
+    JSON.stringify({
+      output_text: JSON.stringify({
+        status: "focused",
+        featureLabel: "알 수 없는 기능",
+        primaryTableRefs: ["t99"],
+        confidence: "high",
+        question: null
+      })
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+const invalidProviderResult = await focusDefinition.execute(
+  focusContext,
+  focusDefinition.validateInput({ featureQuery: "알 수 없는 기능" })
+);
 assert.equal(
-  focusedAfterLayoutRevision.resourceRefs[0].metadata.modelFingerprint,
-  focusInput.modelFingerprint
+  invalidProviderResult.outputSummary.reason,
+  "invalid_resolver_result"
 );
+assert.deepEqual(invalidProviderResult.resourceRefs, []);
 
-const changedFocusModelJson = structuredClone(focusModelJson());
-changedFocusModelJson.schema.tables[0].name = "renamed_orders";
-focusSqlErdService.session = sessionPayload({
-  ...focusSqlErdService.session,
-  modelJson: changedFocusModelJson,
-  revision: 9
-});
-focusSqlErdService.sessions = [focusSqlErdService.session];
-await assert.rejects(
-  () => focusDefinition.execute(context, focusInput),
-  (error) =>
-    error.getStatus() === 409 &&
-    /model changed; inspect/i.test(error.getResponse().error.message) &&
-    !/revision/i.test(error.getResponse().error.message)
+globalThis.fetch = async () => {
+  throw new Error("provider unavailable");
+};
+const providerFailure = await focusDefinition.execute(
+  focusContext,
+  focusDefinition.validateInput({ featureQuery: "알 수 없는 업무 기능" })
 );
+assert.equal(providerFailure.outputSummary.reason, "resolver_unavailable");
+assert.deepEqual(providerFailure.resourceRefs, []);
+
+const staleService = new FakeSqlErdService();
+const stableSession = sessionPayload({
+  modelJson: focusModelJson(),
+  tableCount: 5,
+  relationCount: 3,
+  revision: 7
+});
+const changedModel = structuredClone(focusModelJson());
+changedModel.schema.tables[0].name = "renamed_orders";
+let staleReadCount = 0;
+staleService.getSession = async () => {
+  staleReadCount += 1;
+  return staleReadCount === 1
+    ? stableSession
+    : sessionPayload({
+        ...stableSession,
+        modelJson: changedModel,
+        revision: 8
+      });
+};
+const staleFocusDefinition = new SqlErdAgentToolsService(staleService)
+  .listDefinitions()
+  .find((candidate) => candidate.name === "focus_sql_erd_tables");
+const staleResult = await staleFocusDefinition.execute(
+  focusContext,
+  staleFocusDefinition.validateInput({ featureQuery: "payments" })
+);
+assert.equal(staleResult.outputSummary.action, "needs_clarification");
+assert.equal(staleResult.outputSummary.reason, "schema_changed");
+assert.deepEqual(staleResult.resourceRefs, []);
+
+const staleEvidenceService = new FakeSqlErdService();
+const evidenceSourceBefore = `CREATE TYPE activity_log_action AS ENUM (
+  'meeting_started'
+);`;
+const evidenceSourceAfter = `CREATE TYPE activity_log_action AS ENUM (
+  'meeting_cancelled'
+);`;
+let staleEvidenceReadCount = 0;
+staleEvidenceService.getSession = async () => {
+  staleEvidenceReadCount += 1;
+  return sessionPayload({
+    ...stableSession,
+    sourceText:
+      staleEvidenceReadCount === 1 ? evidenceSourceBefore : evidenceSourceAfter
+  });
+};
+const staleEvidenceFocusDefinition = new SqlErdAgentToolsService(
+  staleEvidenceService
+)
+  .listDefinitions()
+  .find((candidate) => candidate.name === "focus_sql_erd_tables");
+const staleEvidenceResult = await staleEvidenceFocusDefinition.execute(
+  focusContext,
+  staleEvidenceFocusDefinition.validateInput({ featureQuery: "payments" })
+);
+assert.equal(staleEvidenceResult.outputSummary.action, "needs_clarification");
+assert.equal(staleEvidenceResult.outputSummary.reason, "schema_changed");
+assert.deepEqual(staleEvidenceResult.resourceRefs, []);
+
+for (const revokedRead of [1, 2]) {
+  const revokedService = new FakeSqlErdService();
+  let readCount = 0;
+  revokedService.getSession = async () => {
+    readCount += 1;
+    if (readCount === revokedRead) {
+      throw forbidden("Workspace access denied");
+    }
+    return stableSession;
+  };
+  const revokedDefinition = new SqlErdAgentToolsService(revokedService)
+    .listDefinitions()
+    .find((candidate) => candidate.name === "focus_sql_erd_tables");
+  const revokedResult = await revokedDefinition.execute(
+    focusContext,
+    revokedDefinition.validateInput({ featureQuery: "payments" })
+  );
+  assert.equal(revokedResult.outputSummary.action, "needs_clarification");
+  assert.equal(revokedResult.outputSummary.reason, "session_unavailable");
+  assert.doesNotMatch(
+    revokedResult.outputSummary.question,
+    /forbidden|permission|workspace|session|403|404/i
+  );
+  assert.deepEqual(revokedResult.resourceRefs, []);
+}
+
+globalThis.fetch = originalFetch;
+if (originalApiKey === undefined) {
+  delete process.env.OPENAI_API_KEY;
+} else {
+  process.env.OPENAI_API_KEY = originalApiKey;
+}
 
 const registry = new AgentToolRegistryService(
   undefined,
@@ -1167,17 +1194,14 @@ const tableFocusImplementation = await readFile(
 assert.doesNotMatch(tableFocusImplementation, /activity_logs|meeting_started/);
 for (const contract of [agentApiContract, sqlErdApiContract]) {
   assert.match(contract, /generate_sql_erd/);
-  assert.match(contract, /inspect_sql_erd_schema/);
   assert.match(contract, /focus_sql_erd_tables/);
   assert.match(contract, /table_focus/);
   assert.match(contract, /primaryTableIds/);
   assert.match(contract, /relatedTableIds/);
-  assert.match(contract, /contextTableRefs/);
   assert.match(contract, /contextTableIds/);
-  assert.match(contract, /ignoredContextTables/);
-  assert.match(contract, /schema evidence/i);
+  assert.match(contract, /featureQuery/);
+  assert.match(contract, /혼합 resolver/);
   assert.match(contract, /sessionRevision/);
-  assert.match(contract, /sessionSelectionToken/);
   assert.match(contract, /modelFingerprint/);
   assert.match(contract, /SqlErdSchemaSpecV1/);
   assert.match(contract, /new_session/);
@@ -1189,6 +1213,8 @@ for (const contract of [agentApiContract, sqlErdApiContract]) {
   );
   assert.match(contract, /ERD 및 DDL 열기/);
 }
+assert.doesNotMatch(agentApiContract, /\| `inspect_sql_erd_schema` \|/);
+assert.match(sqlErdApiContract, /hard cutover로 제거/);
 assert.match(agentApiContract, /executionMode=contextual|`contextual`/);
 assert.match(sqlErdApiContract, /sourceText, DDL, modelJson, layoutJson/);
 

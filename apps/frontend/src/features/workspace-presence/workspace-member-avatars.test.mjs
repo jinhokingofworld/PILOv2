@@ -92,8 +92,9 @@ test("avatar UI는 tooltip, popover, button, online badge와 두 배치 mode를 
     shell.indexOf("WorkspaceMemberAvatars") <
       shell.indexOf("HeaderMeetingStatus"),
   );
-  assert.match(shell, /mode="floating"/);
+  assert.doesNotMatch(shell, /mode="floating"/);
   assert.match(shell, /mode="header"/);
+  assert.match(shell, /data-sqltoerd-workspace-header/);
   assert.match(layout, /<Toaster/);
   assert.match(sonner, /sonner/);
 });

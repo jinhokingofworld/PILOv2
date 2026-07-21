@@ -28,6 +28,16 @@ interface GithubSyncJobOperationInput {
   rateLimitRemaining: number | null;
 }
 
+type GithubManualSyncObservabilityEvent =
+  | { event: "github_manual_sync_idempotency_replay" }
+  | { event: "github_manual_sync_active_run_reused" }
+  | {
+      event: "github_manual_sync_admission_rejected";
+      limitScope: "user" | "workspace";
+      retryAfterSeconds: number;
+    }
+  | { event: "github_manual_sync_queue_saturated"; retryAfterSeconds: number };
+
 @Injectable()
 export class GithubSyncObservabilityService {
   emitRetry(input: GithubSyncJobOperationInput, retryAfterSeconds: number): void {
@@ -91,7 +101,30 @@ export class GithubSyncObservabilityService {
     });
   }
 
-  private emit(event: GithubSyncOperationEvent): void {
+  emitManualSyncIdempotencyReplay(): void {
+    this.emit({ event: "github_manual_sync_idempotency_replay" });
+  }
+
+  emitManualSyncActiveRunReuse(): void {
+    this.emit({ event: "github_manual_sync_active_run_reused" });
+  }
+
+  emitManualSyncAdmissionRejected(
+    limitScope: "user" | "workspace",
+    retryAfterSeconds: number
+  ): void {
+    this.emit({
+      event: "github_manual_sync_admission_rejected",
+      limitScope,
+      retryAfterSeconds
+    });
+  }
+
+  emitManualSyncQueueSaturated(retryAfterSeconds: number): void {
+    this.emit({ event: "github_manual_sync_queue_saturated", retryAfterSeconds });
+  }
+
+  private emit(event: GithubSyncOperationEvent | GithubManualSyncObservabilityEvent): void {
     process.stdout.write(`${JSON.stringify(event)}\n`);
   }
 }

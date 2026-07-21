@@ -28,7 +28,7 @@ def main() -> int:
         action="append",
         type=Path,
         required=True,
-        help="One compare-mode report for each Meeting evaluation variant.",
+        help="One two-stage LLM Router -> Planner report for each Meeting variant.",
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

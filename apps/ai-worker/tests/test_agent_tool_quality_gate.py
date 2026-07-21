@@ -37,19 +37,19 @@ def test_quality_gate_records_reproducible_passing_baseline_without_sensitive_in
         "catalogVersion": "agent-tool-capabilities:v2",
         "catalogSha256": fixture.catalog.sha256,
         "eligibleSnapshotSha256": (
-            "a40f6114e2fd166e2217a136dc07467b33ffa819a9faad007abd63ccfaf2290c"
+            "a8fd7058fa46e5575d58e33c631789fa584f3c8594675227bcb4b93264a0cc24"
         ),
         "registryInventorySha256": (
-            "243139fbd5227579f101010861ba03220711943ed3a439d8a17c3617cc849b22"
+            "292d3f0465b407e3dfebd0de889a45b61f3533ea86aca7f37286990a3b4dd441"
         ),
         "registryCatalogSha256": (
-            "daea7d9567bc3e8c163c041329304ed6db702ae69599441cb5e3eec97d58f329"
+            "b495d1fd2f89ed3aa85e3604eab4884c5a9147d42fad6e6dcf61a5dcfd6d3438"
         ),
         "registryEligibleSnapshotSha256": (
-            "a40f6114e2fd166e2217a136dc07467b33ffa819a9faad007abd63ccfaf2290c"
+            "a8fd7058fa46e5575d58e33c631789fa584f3c8594675227bcb4b93264a0cc24"
         ),
         "modelVersion": "deterministic:no-provider",
-        "retrieverVersion": "agent-tool-metadata-overlap:v3",
+        "retrieverVersion": "agent-tool-metadata-overlap:v4",
         "topK": 8,
         "defaultSchemaTokenBudget": 8000,
     }

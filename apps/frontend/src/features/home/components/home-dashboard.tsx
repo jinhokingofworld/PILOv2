@@ -21,6 +21,10 @@ export function HomeDashboard() {
   const authSession = useAuthSession();
   const today = useMemo(() => new Date(), []);
   const calendarDates = useMemo(() => getCalendarRangeDates(today, 14), [today]);
+  const visibleCalendarDates = useMemo(
+    () => calendarDates.slice(0, 7),
+    [calendarDates]
+  );
   const calendarRange = useMemo(
     () => ({
       end: formatCalendarDate(calendarDates[calendarDates.length - 1]),
@@ -48,25 +52,39 @@ export function HomeDashboard() {
 
   return (
     <PageCursorSurface
-      className="relative flex min-h-0 flex-1 flex-col gap-4"
+      className="relative flex min-h-0 flex-1 flex-col bg-background p-3 sm:p-5"
       enabled={Boolean(authSession?.activeWorkspaceId)}
       page="home"
       workspaceId={authSession?.activeWorkspaceId ?? ""}
     >
       <HomeWorkspaceLocationAdapter />
-      <div className="grid min-h-0 flex-1 gap-4 2xl:grid-cols-[0.9fr_1.75fr_1fr] 2xl:grid-rows-[minmax(0,330px)_minmax(272px,1fr)_128px]">
-        <MembersCard />
-        <CalendarCard
-          calendarDates={calendarDates}
-          calendarEventsState={calendarEventsState}
-          today={today}
-        />
-        <MiddleDashboardCards
-          issuesState={issuesState}
-          meetingReportsState={meetingReportsState}
-          pullRequestsState={pullRequestsState}
-        />
-        <GithubWorkspaceCards />
+      <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-6">
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,0.66fr)_minmax(0,1.34fr)]">
+          <MembersCard />
+          <CalendarCard
+            calendarDates={visibleCalendarDates}
+            calendarEventsState={calendarEventsState}
+            today={today}
+          />
+        </section>
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-[21px] font-semibold tracking-[-0.01em] text-foreground">
+              워크스페이스 현황
+            </h2>
+            <p className="mt-1 text-[16px] text-muted-foreground">
+              진행 중인 작업과 최근 기록을 한눈에 확인하세요.
+            </p>
+          </div>
+          <MiddleDashboardCards
+            issuesState={issuesState}
+            meetingReportsState={meetingReportsState}
+            pullRequestsState={pullRequestsState}
+          />
+        </section>
+        <div className="min-h-[128px] [&>div]:min-h-[128px]">
+          <GithubWorkspaceCards />
+        </div>
       </div>
     </PageCursorSurface>
   );

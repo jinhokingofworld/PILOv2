@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import { badRequest, conflict } from "../../../common/api-error";
+import { HttpException, Injectable } from "@nestjs/common";
+import { badRequest } from "../../../common/api-error";
 import type {
   SqlErdSchemaGenerationWarning,
   SqlErdSchemaSpecV1
@@ -16,14 +16,16 @@ import type {
   AgentToolExecutionResult,
   AgentToolInputSchema
 } from "../types/agent-tool.types";
-import { parseSqlErdSessionCandidates } from "../sql-erd-session-selection";
 import {
   buildSqlErdAgentSchemaProjection,
   createSqlErdModelFingerprint,
-  partitionSqlErdAgentContextTableRefs,
-  type SqlErdAgentContextEvidence,
   resolveSqlErdAgentTableFocus
 } from "./sql-erd-table-focus";
+import {
+  resolveDeterministicSqlErdTableFocus,
+  type SqlErdFocusResolution,
+  validateLlmSqlErdTableFocus
+} from "./sql-erd-table-focus-resolver";
 
 type SqlErdAgentTargetMode = "new_session" | "replace_current";
 
@@ -35,17 +37,13 @@ interface ConfirmedSqlErdAgentInput {
   expectedModelFingerprint?: string;
 }
 
-interface InspectSqlErdSchemaInput {
+interface FocusSqlErdTablesRequest {
   featureQuery: string;
-  sessionId?: string;
-  sessionSelectionToken?: string;
-  sessionTitle?: string;
 }
 
 interface FocusSqlErdReason {
   tableRef: string;
   reason: string;
-  evidence?: SqlErdAgentContextEvidence[];
 }
 
 interface FocusSqlErdTablesInput {
@@ -60,162 +58,19 @@ interface FocusSqlErdTablesInput {
   reasons: FocusSqlErdReason[];
 }
 
-type SqlErdSessionCandidate = {
-  id: string;
-  title: string;
-  updatedAt: string;
-  tableCount: number;
-  relationCount: number;
-};
-
-type SqlErdSessionResolution =
-  | { kind: "selected"; session: SqlErdSessionPayload }
-  | {
-      kind: "clarification";
-      reason: "no_sessions" | "multiple_sessions" | "session_title_not_found";
-      candidates: SqlErdSessionCandidate[];
-    };
-
 const TARGET_MODES: SqlErdAgentTargetMode[] = [
   "new_session",
   "replace_current"
 ];
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const TABLE_REF_PATTERN = /^t[1-9][0-9]*$/;
 const MODEL_FINGERPRINT_PATTERN = /^fnv1a32:[0-9a-f]{8}$/;
-const FOCUS_CONFIDENCE_VALUES = ["high", "medium", "low"] as const;
-const MAX_PRIMARY_TABLES = 20;
-const MAX_RELATED_TABLES = 30;
-const MAX_CONTEXT_TABLES = 20;
-const MAX_CONTEXT_EVIDENCE_ITEMS = 5;
-const MAX_FOCUS_REASONS =
-  MAX_PRIMARY_TABLES + MAX_RELATED_TABLES + MAX_CONTEXT_TABLES;
-const CONTEXT_EVIDENCE_KINDS = [
-  "table_name",
-  "table_comment",
-  "column_name",
-  "column_comment",
-  "data_type",
-  "enum_value"
-] as const;
-const CONTEXT_EVIDENCE_KINDS_WITHOUT_COLUMN = [
-  "table_name",
-  "table_comment",
-  "column_name"
-] as const;
-const CONTEXT_EVIDENCE_KINDS_WITH_COLUMN = [
-  "column_comment",
-  "data_type",
-  "enum_value"
-] as const;
-
-const INSPECT_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
+const FOCUS_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
   type: "object",
   required: ["featureQuery"],
   additionalProperties: false,
   properties: {
-    featureQuery: { type: "string", minLength: 1, maxLength: 200 },
-    sessionId: { type: "string", format: "uuid" },
-    sessionSelectionToken: { type: "string", format: "uuid" },
-    sessionTitle: { type: "string", minLength: 1, maxLength: 120 }
-  }
-};
-
-const FOCUS_SQL_ERD_INPUT_SCHEMA: AgentToolInputSchema = {
-  type: "object",
-  required: [
-    "sessionId",
-    "sessionRevision",
-    "modelFingerprint",
-    "featureLabel",
-    "primaryTableRefs",
-    "relatedTableRefs",
-    "contextTableRefs",
-    "confidence",
-    "reasons"
-  ],
-  additionalProperties: false,
-  properties: {
-    sessionId: { type: "string", format: "uuid" },
-    sessionRevision: { type: "integer", minimum: 1 },
-    modelFingerprint: {
-      type: "string",
-      pattern: "^fnv1a32:[0-9a-f]{8}$"
-    },
-    featureLabel: { type: "string", minLength: 1, maxLength: 100 },
-    primaryTableRefs: {
-      type: "array",
-      minItems: 1,
-      maxItems: MAX_PRIMARY_TABLES,
-      uniqueItems: true,
-      items: { type: "string", pattern: "^t[1-9][0-9]*$" }
-    },
-    relatedTableRefs: {
-      type: "array",
-      maxItems: MAX_RELATED_TABLES,
-      uniqueItems: true,
-      items: { type: "string", pattern: "^t[1-9][0-9]*$" }
-    },
-    contextTableRefs: {
-      type: "array",
-      maxItems: MAX_CONTEXT_TABLES,
-      uniqueItems: true,
-      items: { type: "string", pattern: "^t[1-9][0-9]*$" }
-    },
-    confidence: { type: "string", enum: [...FOCUS_CONFIDENCE_VALUES] },
-    reasons: {
-      type: "array",
-      minItems: 1,
-      maxItems: MAX_FOCUS_REASONS,
-      items: {
-        type: "object",
-        required: ["tableRef", "reason"],
-        additionalProperties: false,
-        properties: {
-          tableRef: { type: "string", pattern: "^t[1-9][0-9]*$" },
-          reason: { type: "string", minLength: 1, maxLength: 240 },
-          evidence: {
-            type: "array",
-            minItems: 1,
-            maxItems: MAX_CONTEXT_EVIDENCE_ITEMS,
-            items: {
-              oneOf: [
-                {
-                  type: "object",
-                  required: ["kind", "value"],
-                  additionalProperties: false,
-                  properties: {
-                    kind: {
-                      type: "string",
-                      enum: [...CONTEXT_EVIDENCE_KINDS_WITHOUT_COLUMN]
-                    },
-                    value: { type: "string", minLength: 1, maxLength: 240 }
-                  }
-                },
-                {
-                  type: "object",
-                  required: ["kind", "columnName", "value"],
-                  additionalProperties: false,
-                  properties: {
-                    kind: {
-                      type: "string",
-                      enum: [...CONTEXT_EVIDENCE_KINDS_WITH_COLUMN]
-                    },
-                    columnName: {
-                      type: "string",
-                      minLength: 1,
-                      maxLength: 80
-                    },
-                    value: { type: "string", minLength: 1, maxLength: 240 }
-                  }
-                }
-              ]
-            }
-          }
-        }
-      }
-    }
+    featureQuery: { type: "string", minLength: 1, maxLength: 200 }
   }
 };
 const SQL_ERD_SCHEMA_SPEC_INPUT_SCHEMA: AgentToolInputSchema = {
@@ -416,34 +271,18 @@ export class SqlErdAgentToolsService {
   listDefinitions(): AgentToolDefinition<unknown>[] {
     return [
       this.generateSqlErdDefinition(),
-      this.inspectSqlErdSchemaDefinition(),
       this.focusSqlErdTablesDefinition()
     ];
-  }
-
-  private inspectSqlErdSchemaDefinition(): AgentToolDefinition<unknown> {
-    return {
-      name: "inspect_sql_erd_schema",
-      description:
-        "Workspace SQLtoERD session의 테이블 이름, 주요 컬럼, data type, 제한된 enum 값과 FK 관계를 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용하며 session이 여러 개면 사용자가 선택할 후보를 반환합니다.",
-      riskLevel: "low",
-      executionMode: "contextual",
-      inputSchema: INSPECT_SQL_ERD_INPUT_SCHEMA,
-      validateInput: (input) => this.validateInspectInput(input),
-      prepareExecution: (context, input) =>
-        this.prepareInspect(context, this.validateInspectInput(input)),
-      execute: (context, input) =>
-        this.executeInspect(context, this.validateInspectInput(input))
-    };
   }
 
   private focusSqlErdTablesDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "focus_sql_erd_tables",
       description:
-        "inspect_sql_erd_schema 결과의 compact table ref와 schema evidence를 model fingerprint로 검증하고 핵심, 직접 FK 관련 및 문맥 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session과 실제 관계선은 변경하지 않습니다.",
+        "현재 SQLtoERD 화면의 schema를 서버가 안전하게 검사해 요청 기능의 핵심 테이블과 직접 FK 연결 테이블을 집중 보기로 만듭니다. featureQuery만 전달하며 session ID나 table ref를 추측하지 않습니다.",
       riskLevel: "low",
       executionMode: "auto",
+      contextRequirement: { surface: "sql_erd" },
       postExecutionDisposition: "complete_run",
       inputSchema: FOCUS_SQL_ERD_INPUT_SCHEMA,
       validateInput: (input) => this.validateFocusInput(input),
@@ -622,108 +461,92 @@ export class SqlErdAgentToolsService {
     };
   }
 
-  private async prepareInspect(
+  private async executeFocus(
     context: AgentToolContext,
-    input: InspectSqlErdSchemaInput
-  ) {
-    const resolution = await this.resolveInspectSession(context, input);
-    if (resolution.kind === "selected") {
-      return { kind: "execute" as const };
-    }
-
-    return {
-      kind: "needs_clarification" as const,
-      outputSummary: this.toAgentJsonObject({
-        status: "needs_clarification",
-        reason: resolution.reason,
-        question: this.inspectClarificationQuestion(
-          resolution.reason,
-          resolution.candidates
-        ),
-        candidates: resolution.candidates.map((candidate) => ({
-          title: candidate.title,
-          updatedAt: candidate.updatedAt,
-          tableCount: candidate.tableCount,
-          relationCount: candidate.relationCount
-        }))
-      }),
-      resourceRefs: [],
-      candidateResources: resolution.candidates.map((candidate) => ({
-        reference: {
-          domain: "sqltoerd",
-          resourceType: "session",
-          resourceId: candidate.id
-        },
-        candidate: {
-          resourceType: "session",
-          label: candidate.title,
-          description: `수정 ${candidate.updatedAt} · 테이블 ${candidate.tableCount}개 · 관계 ${candidate.relationCount}개`,
-          status: null
-        }
-      }))
-    };
-  }
-
-  private async executeInspect(
-    context: AgentToolContext,
-    input: InspectSqlErdSchemaInput
+    input: FocusSqlErdTablesRequest
   ): Promise<AgentToolExecutionResult> {
-    const resolution = await this.resolveInspectSession(context, input);
-    if (resolution.kind !== "selected") {
-      throw badRequest("SQLtoERD session selection requires clarification");
+    if (
+      context.requestContext?.surface !== "sql_erd" ||
+      !context.requestContext.sessionId
+    ) {
+      throw badRequest("focus_sql_erd_tables requires SQLtoERD session context");
     }
-    const { session } = resolution;
+    const inspectedSession = await this.readFocusSession(
+      context.currentUserId,
+      context.workspaceId,
+      context.requestContext.sessionId
+    );
+    if (!inspectedSession) {
+      return this.focusClarification(
+        "session_unavailable",
+        "현재 ERD를 확인할 수 없습니다. 화면을 새로고침한 뒤 다시 요청해주세요."
+      );
+    }
+    const inspectedFingerprint = createSqlErdModelFingerprint(
+      inspectedSession.modelJson
+    );
     const projection = buildSqlErdAgentSchemaProjection(
+      inspectedSession.modelJson,
+      input.featureQuery,
+      inspectedSession.sourceText
+    );
+    const inspectedEvidenceFingerprint = createSqlErdModelFingerprint(projection);
+    const resolution =
+      resolveDeterministicSqlErdTableFocus(projection, input.featureQuery) ??
+      (await this.resolveSqlErdTableFocusWithLlm(projection, input.featureQuery));
+    if (resolution.kind === "needs_clarification") {
+      return {
+        outputSummary: this.toAgentJsonObject({
+          action: "needs_clarification",
+          status: "needs_clarification",
+          reason: resolution.reason,
+          question: resolution.question
+        }),
+        resourceRefs: [],
+        status: "needs_clarification"
+      };
+    }
+
+    const session = await this.readFocusSession(
+      context.currentUserId,
+      context.workspaceId,
+      inspectedSession.id
+    );
+    if (!session) {
+      return this.focusClarification(
+        "session_unavailable",
+        "현재 ERD를 확인할 수 없습니다. 화면을 새로고침한 뒤 다시 요청해주세요."
+      );
+    }
+    const modelFingerprint = createSqlErdModelFingerprint(session.modelJson);
+    const currentProjection = buildSqlErdAgentSchemaProjection(
       session.modelJson,
       input.featureQuery,
       session.sourceText
     );
-    const modelFingerprint = createSqlErdModelFingerprint(session.modelJson);
-    return {
-      outputSummary: this.toAgentJsonObject({
-        sessionId: session.id,
-        sessionRevision: session.revision,
-        modelFingerprint,
-        title: session.title,
-        dialect: session.dialect,
-        tableCount: session.tableCount,
-        relationCount: session.relationCount,
-        projection
-      }),
-      resourceRefs: []
-    };
-  }
-
-  private async executeFocus(
-    context: AgentToolContext,
-    input: FocusSqlErdTablesInput
-  ): Promise<AgentToolExecutionResult> {
-    const session = await this.sqlErdService.getSession(
-      context.currentUserId,
-      context.workspaceId,
-      input.sessionId
-    );
-    const modelFingerprint = createSqlErdModelFingerprint(session.modelJson);
-    if (modelFingerprint !== input.modelFingerprint) {
-      throw conflict("SQLtoERD model changed; inspect the schema again");
+    const evidenceFingerprint = createSqlErdModelFingerprint(currentProjection);
+    if (
+      modelFingerprint !== inspectedFingerprint ||
+      evidenceFingerprint !== inspectedEvidenceFingerprint
+    ) {
+      return this.focusClarification(
+        "schema_changed",
+        "ERD가 변경되었습니다. 최신 상태에서 집중 보기를 다시 요청해주세요."
+      );
     }
+    const resolvedInput = this.toResolvedFocusInput(
+      session.id,
+      session.revision,
+      modelFingerprint,
+      resolution
+    );
     const reasonByRef = new Map(
-      input.reasons.map((item) => [item.tableRef, item.reason])
+      resolvedInput.reasons.map((item) => [item.tableRef, item.reason])
     );
-    const evidenceByRef = new Map(
-      input.reasons.map((item) => [item.tableRef, item.evidence ?? []])
-    );
-    resolveSqlErdAgentTableFocus(session.modelJson, input);
-    const contextEvidence = partitionSqlErdAgentContextTableRefs(
+    const resolved = resolveSqlErdAgentTableFocus(
       session.modelJson,
-      session.sourceText,
-      evidenceByRef,
-      input.contextTableRefs
+      resolvedInput
     );
-    const resolved = resolveSqlErdAgentTableFocus(session.modelJson, {
-      ...input,
-      contextTableRefs: contextEvidence.acceptedRefs
-    });
     const primaryTables = resolved.tables
       .filter((table) => table.role === "primary")
       .map((table) => ({
@@ -746,19 +569,15 @@ export class SqlErdAgentToolsService {
     return {
       outputSummary: this.toAgentJsonObject({
         action: "focused",
-        sessionId: session.id,
         sessionRevision: session.revision,
         modelFingerprint,
         title: session.title,
-        featureLabel: input.featureLabel,
-        confidence: input.confidence,
+        featureLabel: resolvedInput.featureLabel,
+        confidence: resolvedInput.confidence,
         primaryTables,
         relatedTables,
         contextTables,
-        ignoredContextTables: contextEvidence.ignoredTables.map((table) => ({
-          name: table.name,
-          reason: table.reason
-        })),
+        ignoredContextTables: [],
         relationCount: resolved.relationIds.length
       }),
       resourceRefs: [
@@ -774,12 +593,12 @@ export class SqlErdAgentToolsService {
             view: "table_focus",
             sessionRevision: session.revision,
             modelFingerprint,
-            featureLabel: input.featureLabel,
+            featureLabel: resolvedInput.featureLabel,
             primaryTableIds: resolved.primaryTableIds,
             relatedTableIds: resolved.relatedTableIds,
             contextTableIds: resolved.contextTableIds,
             relationIds: resolved.relationIds,
-            confidence: input.confidence
+            confidence: resolvedInput.confidence
           }
         }
       ],
@@ -787,370 +606,221 @@ export class SqlErdAgentToolsService {
     };
   }
 
-  private async resolveInspectSession(
-    context: AgentToolContext,
-    input: InspectSqlErdSchemaInput
-  ): Promise<SqlErdSessionResolution> {
-    if (input.sessionId) {
-      return {
-        kind: "selected",
-        session: await this.sqlErdService.getSession(
-          context.currentUserId,
-          context.workspaceId,
-          input.sessionId
-        )
-      };
-    }
-
-    if (input.sessionSelectionToken) {
-      return {
-        kind: "selected",
-        session: await this.sqlErdService.getSession(
-          context.currentUserId,
-          context.workspaceId,
-          input.sessionSelectionToken
-        )
-      };
-    }
-
-    const sessions = await this.sqlErdService.listSessions(
-      context.currentUserId,
-      context.workspaceId,
-      { limit: 100 }
-    );
-    if (input.sessionTitle) {
-      const matches = sessions.items.filter(
-        (session) => session.title === input.sessionTitle
-      );
-      if (matches.length === 1) {
-        return {
-          kind: "selected",
-          session: await this.sqlErdService.getSession(
-            context.currentUserId,
-            context.workspaceId,
-            matches[0].id
-          )
-        };
-      }
-      return {
-        kind: "clarification",
-        reason:
-          matches.length > 1
-            ? "multiple_sessions"
-            : "session_title_not_found",
-        candidates: this.toSessionCandidates(
-          matches.length > 1 ? matches : sessions.items
-        )
-      };
-    }
-
-    if (context.requestContext?.surface === "sql_erd") {
-      return {
-        kind: "selected",
-        session: await this.sqlErdService.getSession(
-          context.currentUserId,
-          context.workspaceId,
-          context.requestContext.sessionId
-        )
-      };
-    }
-    if (sessions.items.length === 1) {
-      return {
-        kind: "selected",
-        session: await this.sqlErdService.getSession(
-          context.currentUserId,
-          context.workspaceId,
-          sessions.items[0].id
-        )
-      };
-    }
-    return {
-      kind: "clarification",
-      reason:
-        sessions.items.length === 0 ? "no_sessions" : "multiple_sessions",
-      candidates: this.toSessionCandidates(sessions.items)
-    };
-  }
-
-  private toSessionCandidates(
-    sessions: Array<{
-      id: string;
-      title: string;
-      updatedAt: string;
-      tableCount: number;
-      relationCount: number;
-    }>
-  ): SqlErdSessionCandidate[] {
-    return parseSqlErdSessionCandidates(
-      sessions.slice(0, 5).map((session) => ({
-        selectionToken: session.id,
-        title: session.title,
-        updatedAt: session.updatedAt,
-        tableCount: session.tableCount,
-        relationCount: session.relationCount
-      }))
-    ).map((candidate) => ({
-      id: candidate.selectionToken,
-      title: candidate.title,
-      updatedAt: candidate.updatedAt,
-      tableCount: candidate.tableCount,
-      relationCount: candidate.relationCount
-    }));
-  }
-
-  private inspectClarificationQuestion(
-    reason: "no_sessions" | "multiple_sessions" | "session_title_not_found",
-    candidates: SqlErdSessionCandidate[]
-  ): string {
-    if (reason === "no_sessions") {
-      return "분석할 SQLtoERD 세션이 없습니다. 먼저 세션을 만들어 주세요.";
-    }
-    const question =
-      reason === "session_title_not_found"
-        ? "요청한 제목의 SQLtoERD 세션을 찾지 못했습니다. 사용할 세션을 선택해 주세요."
-        : "분석할 SQLtoERD 세션이 여러 개입니다. 사용할 세션을 선택해 주세요.";
-    return [
-      question,
-      ...candidates.map(
-        (candidate, index) =>
-          `${index + 1}. ${candidate.title} · 수정 ${candidate.updatedAt} · 테이블 ${candidate.tableCount}개 · 관계 ${candidate.relationCount}개`
-      )
-    ].join("\n");
-  }
-
-  private validateInspectInput(input: unknown): InspectSqlErdSchemaInput {
-    if (!this.isPlainObject(input)) {
-      throw badRequest("inspect_sql_erd_schema input must be an object");
-    }
-    this.assertAllowedFields(
-      input,
-      [
-        "featureQuery",
-        "sessionId",
-        "sessionSelectionToken",
-        "sessionTitle"
-      ],
-      "inspect_sql_erd_schema"
-    );
-    const featureQuery = this.readBoundedText(
-      input.featureQuery,
-      200,
-      "featureQuery"
-    );
-    const sessionId =
-      input.sessionId === undefined
-        ? undefined
-        : this.readUuid(input.sessionId, "sessionId");
-    const sessionTitle =
-      input.sessionTitle === undefined
-        ? undefined
-        : this.readBoundedText(input.sessionTitle, 120, "sessionTitle");
-    const sessionSelectionToken =
-      input.sessionSelectionToken === undefined
-        ? undefined
-        : this.readUuid(
-            input.sessionSelectionToken,
-            "sessionSelectionToken"
-          );
-    return { featureQuery, sessionId, sessionSelectionToken, sessionTitle };
-  }
-
-  private validateFocusInput(input: unknown): FocusSqlErdTablesInput {
+  private validateFocusInput(input: unknown): FocusSqlErdTablesRequest {
     if (!this.isPlainObject(input)) {
       throw badRequest("focus_sql_erd_tables input must be an object");
     }
     this.assertAllowedFields(
       input,
-      [
-        "sessionId",
-        "sessionRevision",
-        "modelFingerprint",
-        "featureLabel",
-        "primaryTableRefs",
-        "relatedTableRefs",
-        "contextTableRefs",
-        "confidence",
-        "reasons"
-      ],
+      ["featureQuery"],
       "focus_sql_erd_tables"
     );
-    if (
-      !Number.isSafeInteger(input.sessionRevision) ||
-      Number(input.sessionRevision) < 1
-    ) {
-      throw badRequest("sessionRevision must be a positive integer");
-    }
-    const modelFingerprint = this.readBoundedText(
-      input.modelFingerprint,
-      32,
-      "modelFingerprint"
-    );
-    if (!MODEL_FINGERPRINT_PATTERN.test(modelFingerprint)) {
-      throw badRequest("modelFingerprint is invalid");
-    }
-    const primaryTableRefs = this.readTableRefs(
-      input.primaryTableRefs,
-      MAX_PRIMARY_TABLES,
-      true,
-      "primaryTableRefs"
-    );
-    const relatedTableRefs = this.readTableRefs(
-      input.relatedTableRefs,
-      MAX_RELATED_TABLES,
-      false,
-      "relatedTableRefs"
-    );
-    const contextTableRefs = this.readTableRefs(
-      input.contextTableRefs,
-      MAX_CONTEXT_TABLES,
-      false,
-      "contextTableRefs"
-    );
-    if (
-      typeof input.confidence !== "string" ||
-      !FOCUS_CONFIDENCE_VALUES.includes(
-        input.confidence as (typeof FOCUS_CONFIDENCE_VALUES)[number]
-      )
-    ) {
-      throw badRequest("confidence is invalid");
-    }
-    if (!Array.isArray(input.reasons) || input.reasons.length === 0) {
-      throw badRequest("reasons must be a non-empty array");
-    }
-    if (input.reasons.length > MAX_FOCUS_REASONS) {
-      throw badRequest("reasons exceeds the maximum item count");
-    }
-    const reasons = input.reasons.map((value) => {
-      if (!this.isPlainObject(value)) {
-        throw badRequest("focus reason must be an object");
-      }
-      this.assertAllowedFields(
-        value,
-        ["tableRef", "reason", "evidence"],
-        "focus reason"
-      );
-      const tableRef = this.readTableRef(value.tableRef, "reason.tableRef");
-      const evidence = this.validateContextEvidence(value.evidence);
-      return {
-        tableRef,
-        reason: this.readBoundedText(value.reason, 240, "reason"),
-        ...(evidence ? { evidence } : {})
-      };
-    });
-    const selectedRefs = new Set([
-      ...primaryTableRefs,
-      ...relatedTableRefs,
-      ...contextTableRefs
-    ]);
-    const reasonRefs = new Set(reasons.map((reason) => reason.tableRef));
-    if (
-      reasonRefs.size !== reasons.length ||
-      reasonRefs.size !== selectedRefs.size ||
-      [...reasonRefs].some((ref) => !selectedRefs.has(ref))
-    ) {
-      throw badRequest("reasons must contain each selected table reference once");
-    }
-
     return {
-      sessionId: this.readUuid(input.sessionId, "sessionId"),
-      sessionRevision: Number(input.sessionRevision),
-      modelFingerprint,
-      featureLabel: this.readBoundedText(
-        input.featureLabel,
-        100,
-        "featureLabel"
-      ),
-      primaryTableRefs,
-      relatedTableRefs,
-      contextTableRefs,
-      confidence: input.confidence as FocusSqlErdTablesInput["confidence"],
-      reasons
+      featureQuery: this.readBoundedText(input.featureQuery, 200, "featureQuery")
     };
   }
 
-  private validateContextEvidence(
-    value: unknown
-  ): SqlErdAgentContextEvidence[] | undefined {
-    if (value === undefined) return undefined;
-    if (
-      !Array.isArray(value) ||
-      value.length === 0 ||
-      value.length > MAX_CONTEXT_EVIDENCE_ITEMS
-    ) {
-      throw badRequest("focus evidence is invalid");
-    }
+  private toResolvedFocusInput(
+    sessionId: string,
+    sessionRevision: number,
+    modelFingerprint: string,
+    resolution: Extract<SqlErdFocusResolution, { kind: "focused" }>
+  ): FocusSqlErdTablesInput {
+    return {
+      sessionId,
+      sessionRevision,
+      modelFingerprint,
+      featureLabel: resolution.featureLabel,
+      primaryTableRefs: resolution.primaryTableRefs,
+      relatedTableRefs: resolution.relatedTableRefs,
+      contextTableRefs: [],
+      confidence: resolution.confidence,
+      reasons: [
+        ...resolution.primaryTableRefs.map((tableRef) => ({
+          tableRef,
+          reason: "요청 기능의 핵심 schema evidence와 일치합니다."
+        })),
+        ...resolution.relatedTableRefs.map((tableRef) => ({
+          tableRef,
+          reason: "핵심 테이블과 직접 FK로 연결됩니다."
+        }))
+      ]
+    };
+  }
 
-    return value.map((item) => {
-      if (!this.isPlainObject(item)) {
-        throw badRequest("focus evidence must be an object");
-      }
-      this.assertAllowedFields(
-        item,
-        ["kind", "columnName", "value"],
-        "focus evidence"
-      );
-      if (
-        typeof item.kind !== "string" ||
-        !CONTEXT_EVIDENCE_KINDS.includes(
-          item.kind as (typeof CONTEXT_EVIDENCE_KINDS)[number]
-        )
-      ) {
-        throw badRequest("focus evidence kind is invalid");
-      }
-      const kind = item.kind as SqlErdAgentContextEvidence["kind"];
-      const requiresColumn = ![
-        "table_name",
-        "table_comment",
-        "column_name"
-      ].includes(kind);
-      if (requiresColumn !== (item.columnName !== undefined)) {
-        throw badRequest("focus evidence columnName is invalid");
-      }
+  private async resolveSqlErdTableFocusWithLlm(
+    projection: ReturnType<typeof buildSqlErdAgentSchemaProjection>,
+    featureQuery: string
+  ): Promise<SqlErdFocusResolution> {
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    if (!apiKey) {
       return {
-        kind,
-        ...(requiresColumn
-          ? {
-              columnName: this.readBoundedText(
-                item.columnName,
-                80,
-                "evidence.columnName"
-              )
-            }
-          : {}),
-        value: this.readBoundedExactText(
-          item.value,
-          240,
-          "evidence.value"
-        )
+        kind: "needs_clarification",
+        reason: "resolver_unavailable",
+        question:
+          "테이블 이름만으로 대상을 확정하지 못했습니다. 집중할 테이블 이름을 알려주세요."
       };
-    });
+    }
+
+    const controller = new AbortController();
+    const configuredTimeout = Number(
+      process.env.OPENAI_SQL_ERD_FOCUS_TIMEOUT_MS
+    );
+    const timeout = setTimeout(
+      () => controller.abort(),
+      Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? configuredTimeout
+        : 8_000
+    );
+    try {
+      const response = await fetch(
+        process.env.OPENAI_RESPONSES_API_URL ??
+          "https://api.openai.com/v1/responses",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model:
+              process.env.OPENAI_SQL_ERD_FOCUS_MODEL ?? "gpt-5.4-mini",
+            input: [
+              {
+                role: "system",
+                content:
+                  "Select only the primary SQLtoERD table refs that directly implement the requested feature. Respect exclusion and negation in the feature query. Refs listed in truncatedTableRefs have prefix-only names, so do not treat those names as exact identity; request clarification unless independent schema evidence resolves them. Do not add FK neighbors; the server expands them. If the schema evidence is insufficient or ambiguous, request clarification. Return only the requested JSON schema."
+              },
+              {
+                role: "user",
+                content: JSON.stringify({ featureQuery, projection })
+              }
+            ],
+            text: {
+              format: {
+                type: "json_schema",
+                name: "sql_erd_table_focus_resolution",
+                strict: true,
+                schema: {
+                  type: "object",
+                  required: [
+                    "status",
+                    "featureLabel",
+                    "primaryTableRefs",
+                    "confidence",
+                    "question"
+                  ],
+                  additionalProperties: false,
+                  properties: {
+                    status: {
+                      type: "string",
+                      enum: ["focused", "needs_clarification"]
+                    },
+                    featureLabel: { type: ["string", "null"], maxLength: 100 },
+                    primaryTableRefs: {
+                      type: "array",
+                      maxItems: 20,
+                      uniqueItems: true,
+                      items: { type: "string", pattern: "^t[1-9][0-9]*$" }
+                    },
+                    confidence: {
+                      type: "string",
+                      enum: ["high", "medium", "low"]
+                    },
+                    question: { type: ["string", "null"], maxLength: 240 }
+                  }
+                }
+              }
+            }
+          }),
+          signal: controller.signal
+        }
+      );
+      if (!response.ok) {
+        return this.focusResolverUnavailable();
+      }
+      const body = await response.json();
+      const outputText = this.extractOpenAiOutputText(body);
+      return outputText
+        ? validateLlmSqlErdTableFocus(
+            projection,
+            featureQuery,
+            JSON.parse(outputText)
+          )
+        : this.focusResolverUnavailable();
+    } catch {
+      return this.focusResolverUnavailable();
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
-  private readTableRefs(
-    value: unknown,
-    maxItems: number,
-    requireOne: boolean,
-    label: string
-  ): string[] {
-    if (
-      !Array.isArray(value) ||
-      (requireOne && value.length === 0) ||
-      value.length > maxItems
-    ) {
-      throw badRequest(`${label} is invalid`);
-    }
-    const refs = value.map((ref) => this.readTableRef(ref, label));
-    if (new Set(refs).size !== refs.length) {
-      throw badRequest(`${label} must be unique`);
-    }
-    return refs;
+  private focusResolverUnavailable(): SqlErdFocusResolution {
+    return {
+      kind: "needs_clarification",
+      reason: "resolver_unavailable",
+      question:
+        "관련 테이블을 안전하게 확정하지 못했습니다. 집중할 테이블 이름을 알려주세요."
+    };
   }
 
-  private readTableRef(value: unknown, label: string): string {
-    if (typeof value !== "string" || !TABLE_REF_PATTERN.test(value)) {
-      throw badRequest(`${label} contains an invalid table reference`);
+  private async readFocusSession(
+    currentUserId: string,
+    workspaceId: string,
+    sessionId: string
+  ): Promise<SqlErdSessionPayload | null> {
+    try {
+      return await this.sqlErdService.getSession(
+        currentUserId,
+        workspaceId,
+        sessionId
+      );
+    } catch (error) {
+      if (
+        error instanceof HttpException &&
+        (error.getStatus() === 403 || error.getStatus() === 404)
+      ) {
+        return null;
+      }
+      throw error;
     }
-    return value;
+  }
+
+  private focusClarification(
+    reason: "schema_changed" | "session_unavailable",
+    question: string
+  ): AgentToolExecutionResult {
+    return {
+      outputSummary: this.toAgentJsonObject({
+        action: "needs_clarification",
+        status: "needs_clarification",
+        reason,
+        question
+      }),
+      resourceRefs: [],
+      status: "needs_clarification"
+    };
+  }
+
+  private extractOpenAiOutputText(value: unknown): string | null {
+    if (!this.isPlainObject(value)) return null;
+    if (typeof value.output_text === "string") return value.output_text;
+    if (!Array.isArray(value.output)) return null;
+    for (const output of value.output) {
+      if (!this.isPlainObject(output) || !Array.isArray(output.content)) {
+        continue;
+      }
+      for (const content of output.content) {
+        if (
+          this.isPlainObject(content) &&
+          content.type === "output_text" &&
+          typeof content.text === "string"
+        ) {
+          return content.text;
+        }
+      }
+    }
+    return null;
   }
 
   private readUuid(value: unknown, label: string): string {

@@ -13,7 +13,6 @@ import {
 import { useRouter } from "next/navigation";
 import {
   Bot,
-  CalendarDays,
   FileText,
   Loader2,
   MessageCircle,
@@ -77,20 +76,8 @@ const initialMessages: AgentChatMessage[] = [
   {
     id: "assistant-welcome",
     role: "assistant",
-    content: "안녕하세요. 일정 생성과 회의록 확인을 도와드릴게요."
-  },
-  {
-    id: "assistant-example",
-    role: "assistant",
-    content: "예: 내일 오후 3시에 디자인 리뷰 일정 만들어줘"
-  }
-];
-
-const suggestionPrompts = [
-  {
-    icon: CalendarDays,
-    label: "오늘 일정 보기",
-    prompt: "오늘 일정 보여줘"
+    content:
+      "안녕하세요, PILO AI입니다.\n일정 관리, 회의록 확인 등 다양한 업무를 스마트하게 도와드릴게요.\n어떤 업무를 도와드릴까요?"
   }
 ];
 
@@ -374,6 +361,8 @@ export function AgentChatWidget() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const activeRunAbortControllerRef = useRef<AbortController | null>(null);
   const appliedSqlErdFocusActionKeysRef = useRef(new Set<string>());
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
   const canvasDelegationAdapter = useSyncExternalStore(
     subscribeCanvasAgentDelegationAdapter,
     getCanvasAgentDelegationAdapter,
@@ -425,6 +414,43 @@ export function AgentChatWidget() {
 
     return () => window.clearInterval(intervalId);
   }, [hasPendingConfirmation]);
+
+  useEffect(() => {
+    if (isOpen) {
+      shouldAutoScrollRef.current = true;
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !shouldAutoScrollRef.current) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const messageList = messageListRef.current;
+
+      messageList?.scrollTo({
+        top: messageList.scrollHeight,
+        behavior: "smooth"
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [isOpen, messages]);
+
+  function handleMessageListScroll() {
+    const messageList = messageListRef.current;
+
+    if (!messageList) {
+      return;
+    }
+
+    shouldAutoScrollRef.current =
+      messageList.scrollHeight -
+        messageList.scrollTop -
+        messageList.clientHeight <=
+      24;
+  }
 
   const updateAssistantMessage = useCallback(
     (messageId: string, content: string, run?: AgentRun | null) => {
@@ -551,6 +577,7 @@ export function AgentChatWidget() {
     const previousLatestMessageSequence = getLatestAgentRunMessageSequence(
       run.messages ?? []
     );
+    shouldAutoScrollRef.current = true;
     updateAssistantMessage(targetMessage.id, targetMessage.content, null);
     setMessages((currentMessages) => [
       ...currentMessages,
@@ -669,6 +696,7 @@ export function AgentChatWidget() {
     const assistantMessageId = createClientId("assistant");
     const clientRequestId = createClientId("agent-run");
 
+    shouldAutoScrollRef.current = true;
     setMessages((currentMessages) => [
       ...currentMessages,
       {
@@ -1005,7 +1033,11 @@ export function AgentChatWidget() {
               </Button>
           </header>
 
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-white px-4 py-4">
+          <div
+            ref={messageListRef}
+            onScroll={handleMessageListScroll}
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-white px-4 py-4"
+          >
               {messages.map((message) => {
                 const confirmation =
                   message.run?.status === "waiting_confirmation"
@@ -1098,36 +1130,6 @@ export function AgentChatWidget() {
           </div>
 
           <div className="border-t border-slate-200 bg-white px-4 py-3">
-              <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-                {suggestionPrompts.map((suggestion) => {
-                  const SuggestionIcon = suggestion.icon;
-
-                  return (
-                    <button
-                      key={suggestion.label}
-                      type="button"
-                      disabled={
-                        hasActiveAgentRequest || Boolean(waitingUserInputMessage)
-                      }
-                      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
-                      onClick={() => {
-                        if (waitingUserInputMessage) {
-                          void appendRunInput(
-                            waitingUserInputMessage,
-                            { message: suggestion.prompt }
-                          );
-                        } else {
-                          void appendPrompt(suggestion.prompt);
-                        }
-                      }}
-                    >
-                      <SuggestionIcon className="size-3.5" />
-                      {suggestion.label}
-                    </button>
-                  );
-                })}
-              </div>
-
               {waitingUserInputMessage ? (
                 <p className="mb-2 text-xs text-slate-500">
                   위 질문에 필요한 정보를 입력하면 같은 요청을 이어서 처리합니다.

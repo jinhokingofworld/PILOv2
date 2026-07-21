@@ -78,16 +78,16 @@ function CanvasShortcutCard() {
 
       <CardContent className="relative z-10 flex min-h-0 flex-1 flex-row items-end justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium leading-5">Canvas</p>
-          <p className="truncate text-xs leading-4 text-white/70">
+          <p className="truncate text-[17px] font-medium leading-5">Canvas</p>
+          <p className="truncate text-[15px] leading-4 text-white/70">
             최근 작업 보드로 바로 이동
           </p>
         </div>
         <div className="shrink-0 text-right">
-          <p className="text-[0.7rem] font-medium leading-4 text-white/60">
+          <p className="text-[calc(0.7rem+3px)] font-medium leading-4 text-white/60">
             마지막 수정
           </p>
-          <p className="text-xs font-medium leading-4 text-white">
+          <p className="text-[15px] font-medium leading-4 text-white">
             {updatedLabel}
           </p>
         </div>
@@ -172,19 +172,19 @@ function SqlErdShortcutCard() {
 
       <CardContent className="relative z-10 flex min-h-0 flex-1 flex-row items-end justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium leading-5">SQL to ERD</p>
-          <p className="truncate text-xs leading-4 text-white/70">
+          <p className="truncate text-[17px] font-medium leading-5">SQL to ERD</p>
+          <p className="truncate text-[15px] leading-4 text-white/70">
             DDL을 ERD 캔버스로 변환
           </p>
         </div>
         <div className="min-w-0 shrink-0 text-right">
-          <p className="text-[0.7rem] font-medium leading-4 text-white/60">
+          <p className="text-[calc(0.7rem+3px)] font-medium leading-4 text-white/60">
             마지막 수정
           </p>
-          <p className="max-w-28 truncate text-xs font-medium leading-4 text-white">
+          <p className="max-w-28 truncate text-[15px] font-medium leading-4 text-white">
             {updatedLabel}
           </p>
-          <p className="max-w-28 truncate text-[0.7rem] font-medium leading-4 text-white/60">
+          <p className="max-w-28 truncate text-[calc(0.7rem+3px)] font-medium leading-4 text-white/60">
             {recentErdTitle}
           </p>
         </div>

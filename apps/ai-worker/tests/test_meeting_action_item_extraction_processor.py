@@ -67,16 +67,10 @@ class FakeAiClient:
                             "description": "다음 주 배포를 준비합니다.",
                             "assigneeUserId": None,
                             "priority": "MEDIUM",
-                        }
-                    ],
-                    "evidence": [
-                        {
-                            "sourceType": "action_item",
-                            "sourceIndex": 0,
                             "segmentIndexes": [0],
+                            "activityIndexes": [],
                         }
                     ],
-                    "activityEvidenceReferences": [],
                 }
             ),
             transcript_segments,
@@ -108,6 +102,8 @@ def test_action_item_extraction_keeps_only_known_assignee_and_calendar_suggestio
                         "description": "7월 18일 14시에 배포 일정을 공유한다.",
                         "assigneeUserId": "known-user",
                         "priority": "HIGH",
+                        "segmentIndexes": [0],
+                        "activityIndexes": [],
                         "deliverySuggestion": {
                             "deliveryType": "calendar_event",
                             "calendar": {
@@ -120,10 +116,6 @@ def test_action_item_extraction_keeps_only_known_assignee_and_calendar_suggestio
                         },
                     }
                 ],
-                "evidence": [
-                    {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]}
-                ],
-                "activityEvidenceReferences": [],
             }
         ),
         [TranscriptSegment(0, 0, 1_000, "진호가 7월 18일 14시에 배포 일정을 공유한다.")],
@@ -138,6 +130,43 @@ def test_action_item_extraction_keeps_only_known_assignee_and_calendar_suggestio
     assert item.delivery_suggestion.calendar.start_time == "14:00"
 
 
+def test_action_item_extraction_assigns_evidence_source_indexes_from_item_order() -> None:
+    extraction = parse_generated_action_item_extraction_json(
+        json.dumps(
+            {
+                "actionItemCandidates": [
+                    {
+                        "title": "첫 번째 작업",
+                        "description": "첫 번째 작업을 수행한다.",
+                        "assigneeUserId": None,
+                        "priority": "MEDIUM",
+                        "segmentIndexes": [0],
+                        "activityIndexes": [],
+                    },
+                    {
+                        "title": "두 번째 작업",
+                        "description": "두 번째 작업을 수행한다.",
+                        "assigneeUserId": None,
+                        "priority": "MEDIUM",
+                        "segmentIndexes": [1],
+                        "activityIndexes": [],
+                    },
+                ]
+            }
+        ),
+        [
+            TranscriptSegment(0, 0, 1_000, "첫 번째 작업을 수행한다."),
+            TranscriptSegment(1, 1_000, 2_000, "두 번째 작업을 수행한다."),
+        ],
+        [],
+    )
+
+    assert [
+        (reference.source_type, reference.source_index, reference.segment_indexes)
+        for reference in extraction.evidence
+    ] == [("action_item", 0, [0]), ("action_item", 1, [1])]
+
+
 def test_action_item_extraction_rejects_missing_action_item_evidence() -> None:
     try:
         parse_generated_action_item_extraction_json(
@@ -149,10 +178,10 @@ def test_action_item_extraction_rejects_missing_action_item_evidence() -> None:
                             "description": "다음 주 배포를 준비합니다.",
                             "assigneeUserId": None,
                             "priority": "MEDIUM",
+                            "segmentIndexes": [],
+                            "activityIndexes": [],
                         }
                     ],
-                    "evidence": [],
-                    "activityEvidenceReferences": [],
                 }
             ),
             [TranscriptSegment(0, 0, 1_000, "다음 주에 배포한다.")],

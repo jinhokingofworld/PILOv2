@@ -4,9 +4,11 @@ import { serviceUnavailable } from "./screen-share.errors";
 import {
   parseWorkspaceScreenShareSession,
   SCREEN_SHARE_ENDED_ROOM_TOMBSTONE_TTL_SECONDS,
+  SCREEN_SHARE_HARD_LIMIT_SECONDS,
   SCREEN_SHARE_STATE_TTL_SECONDS,
   SCREEN_SHARE_VIEWER_REGISTRY_TTL_SECONDS,
   WORKSPACE_SCREEN_SHARE_CLEANUP_STREAM,
+  WORKSPACE_SCREEN_SHARE_DEADLINES,
   WORKSPACE_SCREEN_SHARE_OUTBOX_STREAM,
   WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATIONS,
   type WorkspaceScreenShareSession
@@ -72,12 +74,57 @@ export type ViewerRevocationTask = DrainViewerIdentitiesInput;
 
 const RESERVE_SESSION_SCRIPT = `
 -- RESERVE_WORKSPACE_SCREEN_SHARE
+local function validLifecycleOwner(sessionId, expectedWorkspaceId, expectedRoomName)
+  local encoded = redis.call("GET", ARGV[7] .. sessionId)
+  if not encoded then
+    return false
+  end
+  local decoded, session = pcall(cjson.decode, encoded)
+  if not decoded or type(session) ~= "table" or
+    session.sessionId ~= sessionId or
+    (session.status ~= "starting" and session.status ~= "active") or
+    type(session.workspaceId) ~= "string" or
+    type(session.sharerUserId) ~= "string" or
+    type(session.sharerDisplayName) ~= "string" or
+    (type(session.sharerAvatarUrl) ~= "string" and session.sharerAvatarUrl ~= cjson.null) or
+    type(session.sharerLiveKitIdentity) ~= "string" or
+    type(session.livekitRoomName) ~= "string" or
+    type(session.createdAt) ~= "string" or
+    (type(session.startedAt) ~= "string" and session.startedAt ~= cjson.null) then
+    return false
+  end
+  if expectedWorkspaceId ~= "" and session.workspaceId ~= expectedWorkspaceId then
+    return false
+  end
+  if expectedRoomName ~= "" and session.livekitRoomName ~= expectedRoomName then
+    return false
+  end
+  return true
+end
+
 if redis.call("EXISTS", KEYS[1]) == 1 or redis.call("EXISTS", KEYS[2]) == 1 then
   return 0
+end
+local workspaceOwner = redis.call("GET", KEYS[5])
+if workspaceOwner then
+  if validLifecycleOwner(workspaceOwner, ARGV[3], "") then
+    return 0
+  end
+  redis.call("DEL", KEYS[5])
+end
+local roomOwner = redis.call("GET", KEYS[6])
+if roomOwner then
+  if validLifecycleOwner(roomOwner, "", ARGV[6]) then
+    return 0
+  end
+  redis.call("DEL", KEYS[6])
 end
 redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
 redis.call("SET", KEYS[2], ARGV[3], "EX", ARGV[2])
 redis.call("SET", KEYS[3], ARGV[4], "EX", ARGV[2])
+redis.call("SET", KEYS[4], ARGV[1], "EX", ARGV[2])
+redis.call("SET", KEYS[5], ARGV[5], "EX", ARGV[2])
+redis.call("SET", KEYS[6], ARGV[5], "EX", ARGV[2])
 return 1
 `;
 
@@ -96,6 +143,16 @@ if workspaceId ~= session.workspaceId then
   return false
 end
 if session.status == "active" then
+  redis.call("SET", KEYS[1], encoded)
+  redis.call("PERSIST", KEYS[1])
+  redis.call("PERSIST", KEYS[2])
+  redis.call("SET", KEYS[5], encoded)
+  redis.call("SET", KEYS[6], session.sessionId)
+  redis.call("SET", KEYS[7], session.sessionId)
+  redis.call("PERSIST", KEYS[5])
+  redis.call("PERSIST", KEYS[6])
+  redis.call("PERSIST", KEYS[7])
+  redis.call("ZADD", KEYS[8], "NX", ARGV[4], session.sessionId)
   redis.call("DEL", KEYS[3])
   return {encoded, "", ""}
 end
@@ -105,8 +162,14 @@ end
 session.status = "active"
 session.startedAt = ARGV[3]
 local updated = cjson.encode(session)
-redis.call("SET", KEYS[1], updated, "EX", ARGV[4])
-redis.call("EXPIRE", KEYS[2], ARGV[4])
+redis.call("SET", KEYS[1], updated)
+redis.call("PERSIST", KEYS[1])
+redis.call("PERSIST", KEYS[2])
+redis.call("SET", KEYS[5], updated)
+redis.call("PERSIST", KEYS[5])
+redis.call("PERSIST", KEYS[6])
+redis.call("PERSIST", KEYS[7])
+redis.call("ZADD", KEYS[8], ARGV[4], session.sessionId)
 redis.call("DEL", KEYS[3])
 local event = cjson.encode({
   version = 1,
@@ -129,6 +192,16 @@ return {updated, outboxId, ""}
 const END_SESSION_SCRIPT = `
 -- END_WORKSPACE_SCREEN_SHARE
 local encoded = redis.call("GET", KEYS[1])
+local authorityRoomWorkspaceId = redis.call("GET", KEYS[2])
+local useLifecycle = not encoded or not authorityRoomWorkspaceId
+if useLifecycle then
+  local lifecycleSessionId = redis.call("GET", KEYS[9])
+  if lifecycleSessionId then
+    encoded = redis.call("GET", KEYS[8])
+  else
+    encoded = false
+  end
+end
 if not encoded then
   return false
 end
@@ -136,8 +209,15 @@ local session = cjson.decode(encoded)
 if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] then
   return false
 end
-local workspaceId = redis.call("GET", KEYS[2])
-if workspaceId ~= session.workspaceId then
+local lifecycleWorkspaceSessionId = redis.call("GET", KEYS[9])
+local lifecycleRoomSessionId = redis.call("GET", KEYS[10])
+if useLifecycle then
+  if lifecycleWorkspaceSessionId ~= session.sessionId or lifecycleRoomSessionId ~= session.sessionId then
+    return false
+  end
+elseif authorityRoomWorkspaceId ~= session.workspaceId or
+  (lifecycleWorkspaceSessionId and lifecycleWorkspaceSessionId ~= session.sessionId) or
+  (lifecycleRoomSessionId and lifecycleRoomSessionId ~= session.sessionId) then
   return false
 end
 local event = cjson.encode({
@@ -153,7 +233,8 @@ for _, viewerKey in ipairs(viewerKeys) do
   redis.call("DEL", viewerKey)
 end
 redis.call("DEL", KEYS[7])
-redis.call("DEL", KEYS[1], KEYS[2], KEYS[3])
+redis.call("DEL", KEYS[1], KEYS[2], KEYS[3], KEYS[8], KEYS[9], KEYS[10])
+redis.call("ZREM", KEYS[11], session.sessionId)
 redis.call("SET", KEYS[5], session.sessionId, "EX", ARGV[3])
 return {encoded, outboxId, cleanupId}
 `;
@@ -259,6 +340,61 @@ redis.call("ZADD", KEYS[1], ARGV[2], ARGV[1])
 return 0
 `;
 
+const CLAIM_DUE_DEADLINE_SCRIPT = `
+-- CLAIM_DUE_WORKSPACE_SCREEN_SHARE_DEADLINE
+local maxInvalidSkips = tonumber(ARGV[6])
+for _ = 1, maxInvalidSkips do
+  local sessionIds = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", ARGV[1], "LIMIT", 0, 1)
+  if #sessionIds == 0 then
+    return false
+  end
+  local sessionId = sessionIds[1]
+  local encoded = redis.call("GET", ARGV[3] .. sessionId)
+  local validSnapshot = false
+  local decoded = false
+  local session = nil
+  if encoded then
+    decoded, session = pcall(cjson.decode, encoded)
+    if decoded and type(session) == "table" and
+      session.sessionId == sessionId and
+      session.status == "active" and
+      type(session.workspaceId) == "string" and
+      type(session.sharerUserId) == "string" and
+      type(session.sharerDisplayName) == "string" and
+      (type(session.sharerAvatarUrl) == "string" or session.sharerAvatarUrl == cjson.null) and
+      type(session.sharerLiveKitIdentity) == "string" and
+      type(session.livekitRoomName) == "string" and
+      type(session.createdAt) == "string" and
+      type(session.startedAt) == "string" then
+      validSnapshot = true
+    end
+  end
+  if validSnapshot then
+    local workspaceIndexKey = ARGV[4] .. session.workspaceId
+    local roomIndexKey = ARGV[5] .. session.livekitRoomName
+    local workspaceOwner = redis.call("GET", workspaceIndexKey)
+    local roomOwner = redis.call("GET", roomIndexKey)
+    if (not workspaceOwner or workspaceOwner == sessionId) and
+      (not roomOwner or roomOwner == sessionId) then
+      if not workspaceOwner then
+        redis.call("SET", workspaceIndexKey, sessionId)
+      end
+      if not roomOwner then
+        redis.call("SET", roomIndexKey, sessionId)
+      end
+      redis.call("ZADD", KEYS[1], ARGV[2], sessionId)
+      return encoded
+    end
+    redis.call("ZADD", KEYS[1], ARGV[2], sessionId)
+  else
+    redis.call("ZREM", KEYS[1], sessionId)
+  end
+end
+return false
+`;
+
+const SCREEN_SHARE_DEADLINE_INVALID_SKIP_LIMIT = 100;
+
 const CLAIM_STARTING_SESSION_SCRIPT = `
 -- CLAIM_STARTING_WORKSPACE_SCREEN_SHARE
 local encoded = redis.call("GET", KEYS[1])
@@ -302,7 +438,7 @@ local workspaceId = redis.call("GET", KEYS[2])
 if workspaceId ~= session.workspaceId then
   return false
 end
-redis.call("DEL", KEYS[1], KEYS[2], KEYS[3])
+redis.call("DEL", KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5], KEYS[6])
 return encoded
 `;
 
@@ -330,11 +466,14 @@ local candidate = cjson.decode(ARGV[5])
 if candidate.workspaceId ~= session.workspaceId or candidate.status ~= "starting" then
   return 0
 end
-redis.call("DEL", KEYS[2], KEYS[3])
+redis.call("DEL", KEYS[2], KEYS[3], KEYS[8], KEYS[9], KEYS[10])
 redis.call("SET", KEYS[1], ARGV[5], "EX", ARGV[6])
 redis.call("SET", KEYS[4], candidate.workspaceId, "EX", ARGV[6])
 redis.call("SET", KEYS[5], ARGV[7], "EX", ARGV[6])
 redis.call("SET", KEYS[6], session.sessionId, "EX", ARGV[8])
+redis.call("SET", KEYS[11], ARGV[5], "EX", ARGV[6])
+redis.call("SET", KEYS[12], candidate.sessionId, "EX", ARGV[6])
+redis.call("SET", KEYS[13], candidate.sessionId, "EX", ARGV[6])
 redis.call("XADD", KEYS[7], "*", "session", encoded, "mode", "revocation")
 return 1
 `;
@@ -347,33 +486,59 @@ export class ScreenShareStateService {
   async getCurrent(
     workspaceId: string
   ): Promise<WorkspaceScreenShareSession | null> {
-    const value = await this.runRedisCommand(client =>
-      client.get(this.workspaceKey(workspaceId))
-    );
-    return value === null ? null : parseWorkspaceScreenShareSession(value);
+    const lookup = await this.runRedisCommand(async client => {
+      const authority = await client.get(this.workspaceKey(workspaceId));
+      if (authority !== null) return { value: authority, lifecycle: false };
+      const sessionId = await client.get(this.lifecycleWorkspaceKey(workspaceId));
+      if (sessionId === null) return null;
+      const value = await client.get(this.lifecycleSessionKey(sessionId));
+      return value === null ? null : { value, lifecycle: true };
+    });
+    if (lookup === null) return null;
+    const current = parseWorkspaceScreenShareSession(lookup.value);
+    return !lookup.lifecycle || current.workspaceId === workspaceId
+      ? current
+      : null;
   }
 
   async getByRoom(
     livekitRoomName: string
   ): Promise<WorkspaceScreenShareSession | null> {
-    const lookup = await this.runRedisCommand(async client => {
+    return this.runRedisCommand(async client => {
       const workspaceId = await client.get(this.roomKey(livekitRoomName));
-      if (workspaceId === null) return null;
-      const value = await client.get(this.workspaceKey(workspaceId));
-      return value === null ? null : { workspaceId, value };
+      if (workspaceId !== null) {
+        const value = await client.get(this.workspaceKey(workspaceId));
+        if (value !== null) {
+          try {
+            const current = parseWorkspaceScreenShareSession(value);
+            if (
+              current.workspaceId === workspaceId &&
+              current.livekitRoomName === livekitRoomName
+            ) {
+              return current;
+            }
+          } catch {
+            // Fall through to the durable lifecycle snapshot.
+          }
+        }
+      }
+      const sessionId = await client.get(this.lifecycleRoomKey(livekitRoomName));
+      if (sessionId === null) return null;
+      const value = await client.get(this.lifecycleSessionKey(sessionId));
+      if (value === null) return null;
+      try {
+        const current = parseWorkspaceScreenShareSession(value);
+        return current.livekitRoomName === livekitRoomName ? current : null;
+      } catch {
+        return null;
+      }
     });
-    if (lookup === null) return null;
-
-    const current = parseWorkspaceScreenShareSession(lookup.value);
-    return current.workspaceId === lookup.workspaceId &&
-      current.livekitRoomName === livekitRoomName
-      ? current
-      : null;
   }
 
   async isKnownScreenShareRoom(livekitRoomName: string): Promise<boolean> {
     return this.runRedisCommand(async client =>
       (await client.get(this.roomKey(livekitRoomName))) !== null ||
+      (await client.get(this.lifecycleRoomKey(livekitRoomName))) !== null ||
       (await client.get(this.endedRoomKey(livekitRoomName))) !== null
     );
   }
@@ -387,13 +552,19 @@ export class ScreenShareStateService {
         keys: [
           this.workspaceKey(session.workspaceId),
           this.roomKey(session.livekitRoomName),
-          this.rollbackKey(session.sessionId)
+          this.rollbackKey(session.sessionId),
+          this.lifecycleSessionKey(session.sessionId),
+          this.lifecycleWorkspaceKey(session.workspaceId),
+          this.lifecycleRoomKey(session.livekitRoomName)
         ],
         arguments: [
           JSON.stringify(session),
           String(SCREEN_SHARE_STATE_TTL_SECONDS),
           session.workspaceId,
-          rollbackAttemptId
+          rollbackAttemptId,
+          session.sessionId,
+          session.livekitRoomName,
+          "workspace-screen-share:lifecycle:v1:"
         ]
       })
     );
@@ -403,19 +574,34 @@ export class ScreenShareStateService {
   async activate(
     input: ActivateScreenShareInput
   ): Promise<ScreenShareStateTransition | null> {
+    const current = await this.getCurrent(input.workspaceId);
+    const deadlineStartedAt =
+      current?.sessionId === input.sessionId &&
+      current.livekitRoomName === input.livekitRoomName &&
+      current.status === "active" &&
+      current.startedAt !== null
+        ? current.startedAt
+        : input.startedAt;
     const value = await this.runRedisCommand(client =>
       client.eval(ACTIVATE_SESSION_SCRIPT, {
         keys: [
           this.workspaceKey(input.workspaceId),
           this.roomKey(input.livekitRoomName),
           this.rollbackKey(input.sessionId),
-          WORKSPACE_SCREEN_SHARE_OUTBOX_STREAM
+          WORKSPACE_SCREEN_SHARE_OUTBOX_STREAM,
+          this.lifecycleSessionKey(input.sessionId),
+          this.lifecycleWorkspaceKey(input.workspaceId),
+          this.lifecycleRoomKey(input.livekitRoomName),
+          WORKSPACE_SCREEN_SHARE_DEADLINES
         ],
         arguments: [
           input.sessionId,
           input.livekitRoomName,
           input.startedAt,
-          String(SCREEN_SHARE_STATE_TTL_SECONDS)
+          String(
+            Date.parse(deadlineStartedAt) +
+              SCREEN_SHARE_HARD_LIMIT_SECONDS * 1000
+          )
         ]
       })
     );
@@ -435,7 +621,11 @@ export class ScreenShareStateService {
           WORKSPACE_SCREEN_SHARE_OUTBOX_STREAM,
           this.endedRoomKey(input.livekitRoomName),
           WORKSPACE_SCREEN_SHARE_CLEANUP_STREAM,
-          this.viewerIndexKey(input.workspaceId, input.sessionId)
+          this.viewerIndexKey(input.workspaceId, input.sessionId),
+          this.lifecycleSessionKey(input.sessionId),
+          this.lifecycleWorkspaceKey(input.workspaceId),
+          this.lifecycleRoomKey(input.livekitRoomName),
+          WORKSPACE_SCREEN_SHARE_DEADLINES
         ],
         arguments: [
           input.sessionId,
@@ -599,6 +789,28 @@ export class ScreenShareStateService {
     };
   }
 
+  async claimDueDeadline(
+    nowMs: number,
+    leaseUntilMs: number
+  ): Promise<WorkspaceScreenShareSession | null> {
+    const value = await this.runRedisCommand(client =>
+      client.eval(CLAIM_DUE_DEADLINE_SCRIPT, {
+        keys: [WORKSPACE_SCREEN_SHARE_DEADLINES],
+        arguments: [
+          String(nowMs),
+          String(leaseUntilMs),
+          "workspace-screen-share:lifecycle:v1:",
+          "workspace-screen-share:lifecycle-workspace:v1:",
+          "workspace-screen-share:lifecycle-room:v1:",
+          String(SCREEN_SHARE_DEADLINE_INVALID_SKIP_LIMIT)
+        ]
+      })
+    );
+    return typeof value === "string"
+      ? parseWorkspaceScreenShareSession(value)
+      : null;
+  }
+
   async completeViewerRevocation(
     input: ViewerRevocationTask,
     retryAtMs: number
@@ -628,7 +840,10 @@ export class ScreenShareStateService {
         keys: [
           this.workspaceKey(input.workspaceId),
           this.roomKey(input.livekitRoomName),
-          this.rollbackKey(input.sessionId)
+          this.rollbackKey(input.sessionId),
+          this.lifecycleSessionKey(input.sessionId),
+          this.lifecycleWorkspaceKey(input.workspaceId),
+          this.lifecycleRoomKey(input.livekitRoomName)
         ],
         arguments: [
           input.sessionId,
@@ -679,7 +894,13 @@ export class ScreenShareStateService {
           this.roomKey(candidate.livekitRoomName),
           this.rollbackKey(candidate.sessionId),
           this.endedRoomKey(input.livekitRoomName),
-          WORKSPACE_SCREEN_SHARE_CLEANUP_STREAM
+          WORKSPACE_SCREEN_SHARE_CLEANUP_STREAM,
+          this.lifecycleSessionKey(input.sessionId),
+          this.lifecycleWorkspaceKey(input.workspaceId),
+          this.lifecycleRoomKey(input.livekitRoomName),
+          this.lifecycleSessionKey(candidate.sessionId),
+          this.lifecycleWorkspaceKey(candidate.workspaceId),
+          this.lifecycleRoomKey(candidate.livekitRoomName)
         ],
         arguments: [
           input.sessionId,
@@ -779,6 +1000,18 @@ export class ScreenShareStateService {
 
   private rollbackKey(sessionId: string): string {
     return `workspace-screen-share:rollback:v1:${sessionId}`;
+  }
+
+  private lifecycleSessionKey(sessionId: string): string {
+    return `workspace-screen-share:lifecycle:v1:${sessionId}`;
+  }
+
+  private lifecycleWorkspaceKey(workspaceId: string): string {
+    return `workspace-screen-share:lifecycle-workspace:v1:${workspaceId}`;
+  }
+
+  private lifecycleRoomKey(livekitRoomName: string): string {
+    return `workspace-screen-share:lifecycle-room:v1:${livekitRoomName}`;
   }
 
   private endedRoomKey(livekitRoomName: string): string {

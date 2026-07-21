@@ -7,7 +7,6 @@ const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const migrationDirectory = "db/migrations";
 const baseRef = process.env.MIGRATION_BASE_REF || "origin/dev";
 const migrationPattern = /^(\d{3})_([a-z0-9]+(?:_[a-z0-9]+)*)\.sql$/;
-
 function git(...args) {
   return execFileSync("git", args, {
     cwd: repositoryRoot,
@@ -18,9 +17,13 @@ function git(...args) {
 const migrationFiles = (await readdir(path.join(repositoryRoot, migrationDirectory)))
   .filter((file) => file.endsWith(".sql"))
   .sort();
+const migrationVersions = new Set();
 
 for (const file of migrationFiles) {
   assert.match(file, migrationPattern, `Invalid migration filename: ${file}`);
+  const version = Number(file.slice(0, 3));
+  assert.ok(!migrationVersions.has(version), `Duplicate migration version: ${version}`);
+  migrationVersions.add(version);
 }
 
 const changedEntries = git(
@@ -42,9 +45,7 @@ for (const [status, firstPath, secondPath] of changedEntries) {
     continue;
   }
 
-  throw new Error(
-    `Existing migrations are immutable. ${status} change is not allowed: ${secondPath || firstPath}`,
-  );
+  throw new Error(`Existing migrations are immutable. ${status} change is not allowed: ${secondPath || firstPath}`);
 }
 
 if (addedFiles.length > 0) {

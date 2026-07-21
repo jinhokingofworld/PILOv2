@@ -15,7 +15,12 @@ from app.agent_planner_evaluation import (
     load_meeting_regression_suite,
     select_shadow_planner_tools,
 )
-from app.agent_processor import AgentPlannerDecision, AgentRoutingDecision
+from app.agent_processor import (
+    AgentPlannerDecision,
+    AgentPlannerOutputError,
+    AgentRouterOutputError,
+    AgentRoutingDecision,
+)
 from app.agent_tool_retrieval import (
     compute_input_schema_sha256,
     compute_tool_capability_catalog_sha,
@@ -43,6 +48,23 @@ class FakeRouter:
         return next(self.decisions)
 
 
+class FailingOnceRouter:
+    def __init__(self, decision):
+        self.decision = decision
+        self.requests = []
+
+    def route(self, request):
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            raise AgentRouterOutputError("invalid router output")
+        return self.decision
+
+
+class RejectingPlanner:
+    def plan(self, request):
+        raise AgentPlannerOutputError("Agent planner selected a tool outside the shortlist")
+
+
 def test_evaluation_input_hashes_include_meeting_catalog_when_provided(tmp_path) -> None:
     suite_path = tmp_path / "suite.json"
     catalog_path = tmp_path / "meeting-catalog.json"
@@ -55,6 +77,20 @@ def test_evaluation_input_hashes_include_meeting_catalog_when_provided(tmp_path)
         "suiteSha256": hashlib.sha256(suite_path.read_bytes()).hexdigest(),
         "meetingCatalogSha256": hashlib.sha256(catalog_path.read_bytes()).hexdigest(),
     }
+
+
+def test_evaluation_input_hashes_include_workflow_catalog_when_provided(tmp_path) -> None:
+    suite_path = tmp_path / "suite.json"
+    workflow_path = tmp_path / "workflow-catalog.json"
+    suite_path.write_bytes(b'{"version":"suite:v1"}')
+    workflow_path.write_bytes(b'{"version":"workflow:v1"}')
+
+    hashes = build_evaluation_input_hashes(
+        suite_path,
+        workflow_catalog_path=workflow_path,
+    )
+
+    assert hashes["workflowCatalogSha256"] == hashlib.sha256(workflow_path.read_bytes()).hexdigest()
 
 
 def decision(**overrides):
@@ -118,6 +154,91 @@ def test_context_regression_case_forwards_safe_planning_context() -> None:
     assert planner.requests[0].planning_context == case.planning_context
     assert "previous resource:" in planner.requests[0].planning_context
     assert "00000000-0000-4000-8000-000000000001" not in planner.requests[0].planning_context
+
+
+def test_evaluation_continues_after_one_router_output_failure(tmp_path) -> None:
+    path = write_suite(
+        tmp_path,
+        [
+            {
+                "id": f"calendar-{index}",
+                "prompt": "오늘 일정 보여줘",
+                "expected": {
+                    "status": "tool_candidate",
+                    "toolName": "list_calendar_events",
+                    "domain": "calendar",
+                    "capabilityId": "calendar.list",
+                },
+            }
+            for index in (1, 2)
+        ],
+    )
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["toolCapabilityCatalog"] = {
+        "version": "agent-tool-capabilities:v1",
+        "capabilities": [
+            {
+                "id": "calendar.list",
+                "domain": "calendar",
+                "toolNames": ["list_calendar_events"],
+                "whenToUse": "일정을 조회할 때",
+                "mustNotUseFor": [],
+                "positiveExamples": ["오늘 일정"],
+            }
+        ],
+        "descriptors": [
+            {
+                "toolName": "list_calendar_events",
+                "domain": "calendar",
+                "action": "list_calendar_events",
+                "operation": "read",
+                "capabilityIds": ["calendar.list"],
+                "whenToUse": "일정을 조회할 때",
+                "mustNotUseFor": [],
+                "acceptedSelectorFields": ["start", "end"],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+                "riskLevel": "low",
+                "executionMode": "auto",
+                "contextSurface": None,
+                "inputSchemaSha256": compute_input_schema_sha256(raw["tools"][0]["inputSchema"]),
+            }
+        ],
+    }
+    catalog = raw["toolCapabilityCatalog"]
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    suite = load_evaluation_suite(path)
+    router = FailingOnceRouter(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("calendar",),
+            capability_ids=("calendar.list",),
+            intent_summary="일정을 조회한다.",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        )
+    )
+    planner = FakePlanner([decision()])
+
+    results = evaluate_suite(
+        planner,
+        suite,
+        current_date="2026-07-21",
+        router=router,
+        use_llm_routing=True,
+    )
+    report = build_evaluation_report(results)
+
+    assert len(results) == 2
+    assert results[0].runtime_failure == "router_output"
+    assert results[0].passed is False
+    assert results[1].passed is True
+    assert len(planner.requests) == 1
+    assert report["results"][0]["runtimeFailure"] == "router_output"
 
 
 def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unknown_prompt(
@@ -281,7 +402,7 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
     observation = report["retrievalEvents"][0]
     assert observation["eventVersion"] == "agent-tool-retrieval-observation:v1"
     assert observation["catalogVersion"] == "agent-tool-capabilities:v1"
-    assert observation["retrieverVersion"] == "agent-tool-metadata-overlap:v3"
+    assert observation["retrieverVersion"] == "agent-tool-metadata-overlap:v4"
     assert observation["tokenUsage"]["providerTotalTokens"] == 150
     assert "shortlistToolNames" not in observation
     assert "prompt" not in observation
@@ -382,6 +503,207 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
     assert routed_report["retrieval"]["requiredToolRecallAtK"] == 1.0
     assert routed_report["planner"]["providerTokenUsage"]["total"]["average"] == 180
     assert routed_report["retrievalEvents"][0]["mode"] == "llm_router"
+    assert routed_report["routingFunnel"] == {
+        "toolSelectionAttempts": 1,
+        "stages": {
+            "routerRouted": {"count": 1, "conditionalRate": 1.0, "overallRate": 1.0},
+            "domainExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 1.0},
+            "capabilityExact": {
+                "count": 1,
+                "conditionalRate": 1.0,
+                "overallRate": 1.0,
+            },
+            "toolExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 1.0},
+            "requiredInputExact": {
+                "count": 1,
+                "conditionalRate": 1.0,
+                "overallRate": 1.0,
+            },
+            "executionPolicyExact": {
+                "count": 1,
+                "conditionalRate": 1.0,
+                "overallRate": 1.0,
+            },
+            "endToEndExact": {
+                "count": 1,
+                "conditionalRate": 1.0,
+                "overallRate": 1.0,
+            },
+        },
+    }
+
+    rejected_router = FakeRouter(
+        [
+            AgentRoutingDecision(
+                status="routed",
+                domains=("calendar",),
+                capability_ids=("calendar.list",),
+                intent_summary="이번 주 일정을 조회한다.",
+                confidence="high",
+                clarification_question=None,
+                unsupported_reason=None,
+            )
+        ]
+    )
+    rejected_report = build_evaluation_report(
+        evaluate_suite(
+            RejectingPlanner(),
+            replace(suite, cases=(suite.cases[0],)),
+            current_date="2026-07-11",
+            router=rejected_router,
+            use_llm_routing=True,
+            shadow_top_k=1,
+        )
+    )
+
+    assert rejected_report["totalAttempts"] == 1
+    assert rejected_report["passedAttempts"] == 0
+    assert rejected_report["retrieval"]["shortlistViolations"] == 1
+    assert rejected_report["results"][0]["failureReasons"] == [
+        "planner_output",
+        "tool",
+        "shortlist_tool",
+    ]
+    assert rejected_report["results"][0]["failureCategoryCandidates"] == [
+        "wrong_tool",
+        "shortlist_violation",
+        "planner_output_error",
+    ]
+
+
+def test_llm_routing_funnel_attributes_domain_loss_before_tool_loss(tmp_path) -> None:
+    path = write_suite(
+        tmp_path,
+        [
+            {
+                "id": "calendar",
+                "prompt": "이번 주 일정 보여줘",
+                "expected": {
+                    "status": "tool_candidate",
+                    "toolName": "list_calendar_events",
+                    "domain": "calendar",
+                    "capabilityId": "calendar.list",
+                    "requiredToolNames": ["list_calendar_events"],
+                    "supported": True,
+                },
+            }
+        ],
+    )
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["tools"].append(
+        {
+            "name": "list_meeting_reports",
+            "description": "회의록 목록을 조회합니다.",
+            "riskLevel": "low",
+            "executionMode": "auto",
+            "inputSchema": {"type": "object"},
+        }
+    )
+    raw["toolCapabilityCatalog"] = {
+        "version": "agent-tool-capabilities:v1",
+        "capabilities": [
+            {
+                "id": "calendar.list",
+                "domain": "calendar",
+                "toolNames": ["list_calendar_events"],
+                "whenToUse": "일정을 조회할 때",
+                "mustNotUseFor": ["회의록 요청"],
+                "positiveExamples": ["이번 주 일정"],
+            },
+            {
+                "id": "meeting.reports.list",
+                "domain": "meeting",
+                "toolNames": ["list_meeting_reports"],
+                "whenToUse": "회의록을 조회할 때",
+                "mustNotUseFor": ["일정 요청"],
+                "positiveExamples": ["최근 회의록"],
+            },
+        ],
+        "descriptors": [],
+    }
+    schemas = {tool["name"]: tool["inputSchema"] for tool in raw["tools"]}
+    for name, domain, capability_id in (
+        ("list_calendar_events", "calendar", "calendar.list"),
+        ("list_meeting_reports", "meeting", "meeting.reports.list"),
+    ):
+        raw["toolCapabilityCatalog"]["descriptors"].append(
+            {
+                "toolName": name,
+                "domain": domain,
+                "action": name,
+                "operation": "read",
+                "capabilityIds": [capability_id],
+                "whenToUse": "평가용 도구입니다.",
+                "mustNotUseFor": [],
+                "acceptedSelectorFields": [],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+                "riskLevel": "low",
+                "executionMode": "auto",
+                "contextSurface": None,
+                "inputSchemaSha256": compute_input_schema_sha256(schemas[name]),
+            }
+        )
+    catalog = raw["toolCapabilityCatalog"]
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    suite = load_evaluation_suite(path)
+    router = FakeRouter(
+        [
+            AgentRoutingDecision(
+                status="routed",
+                domains=("calendar",),
+                capability_ids=("calendar.list",),
+                intent_summary="일정 조회",
+                confidence="high",
+                clarification_question=None,
+                unsupported_reason=None,
+            ),
+            AgentRoutingDecision(
+                status="routed",
+                domains=("meeting",),
+                capability_ids=("meeting.reports.list",),
+                intent_summary="회의록 조회",
+                confidence="high",
+                clarification_question=None,
+                unsupported_reason=None,
+            ),
+        ]
+    )
+    planner = FakePlanner(
+        [
+            decision(),
+            decision(tool_name="list_meeting_reports", tool_input={}),
+        ]
+    )
+
+    report = build_evaluation_report(
+        evaluate_suite(
+            planner,
+            suite,
+            current_date="2026-07-11",
+            repetitions=2,
+            router=router,
+            use_llm_routing=True,
+        )
+    )
+
+    assert report["routingFunnel"]["toolSelectionAttempts"] == 2
+    assert report["routingFunnel"]["stages"] == {
+        "routerRouted": {"count": 2, "conditionalRate": 1.0, "overallRate": 1.0},
+        "domainExact": {"count": 1, "conditionalRate": 0.5, "overallRate": 0.5},
+        "capabilityExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 0.5},
+        "toolExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 0.5},
+        "requiredInputExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 0.5},
+        "executionPolicyExact": {
+            "count": 1,
+            "conditionalRate": 1.0,
+            "overallRate": 0.5,
+        },
+        "endToEndExact": {"count": 1, "conditionalRate": 1.0, "overallRate": 0.5},
+    }
 
 
 def test_legacy_shadow_comparison_requires_paired_inputs_and_reports_deltas(tmp_path) -> None:
@@ -601,7 +923,7 @@ def test_fixed_korean_suite_loads() -> None:
     suite = load_evaluation_suite(suite_path)
 
     assert suite.version == "agent-planner-korean:v1"
-    assert len(suite.cases) == 56
+    assert len(suite.cases) == 55
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
         "create_calendar_event",
@@ -634,7 +956,6 @@ def test_fixed_korean_suite_loads() -> None:
         "assign_board_issue_safely",
         "diagnose_board_freshness",
         "generate_sql_erd",
-        "inspect_sql_erd_schema",
         "focus_sql_erd_tables",
         "search_workspace_documents",
     }
@@ -682,16 +1003,10 @@ def test_fixed_korean_suite_loads() -> None:
     assert expectations["meeting_recording_missing_id"].requires_confirmation is True
     assert expectations["sql_erd_generate"].tool_name == "generate_sql_erd"
     assert expectations["sql_erd_generate"].requires_confirmation is None
-    assert expectations["sql_erd_focus_payment_tables"].tool_name == "inspect_sql_erd_schema"
-    assert expectations["sql_erd_focus_payment_tables"].requires_confirmation is None
+    assert expectations["sql_erd_focus_payment_tables"].tool_name == "focus_sql_erd_tables"
+    assert expectations["sql_erd_focus_payment_tables"].requires_confirmation is False
     assert expectations["sql_erd_focus_payment_tables"].input_contains == {
         "featureQuery": "결제 기능"
-    }
-    assert expectations["sql_erd_select_session_token"].tool_name == "inspect_sql_erd_schema"
-    assert expectations["sql_erd_select_session_token"].requires_confirmation is None
-    assert expectations["sql_erd_select_session_token"].input_contains == {
-        "featureQuery": "결제 기능",
-        "sessionSelectionToken": "88888888-8888-4888-8888-888888888888",
     }
     assert expectations["sql_erd_missing_entities"].status == "needs_clarification"
     assert expectations["sql_erd_database_execution"].status == "unsupported"

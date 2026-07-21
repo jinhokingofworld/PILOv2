@@ -6,7 +6,10 @@ export const WORKSPACE_SCREEN_SHARE_CLEANUP_STREAM =
   "workspace-screen-share:cleanup:v1";
 export const WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATIONS =
   "workspace-screen-share:viewer-revocations:v1";
-export const SCREEN_SHARE_STATE_TTL_SECONDS = 12 * 60 * 60;
+export const WORKSPACE_SCREEN_SHARE_DEADLINES =
+  "workspace-screen-share:deadlines:v1";
+export const SCREEN_SHARE_HARD_LIMIT_SECONDS = 12 * 60 * 60;
+export const SCREEN_SHARE_STATE_TTL_SECONDS = SCREEN_SHARE_HARD_LIMIT_SECONDS;
 export const SCREEN_SHARE_STARTING_LEASE_MS = 60 * 1000;
 export const SCREEN_SHARE_ENDED_ROOM_TOMBSTONE_TTL_SECONDS = 5 * 60;
 export const SCREEN_SHARE_JOIN_TOKEN_TTL_SECONDS = 45;

@@ -53,6 +53,14 @@ assert.match(devSource, /module "db_migrations"/);
 assert.match(publisherScript, /Commit db\/migrations and infra\/db-migrations/);
 assert.match(operatorScript, /ValidateSet\("apply", "baseline"\)/);
 assert.match(operatorScript, /\$awsCommand ecs wait tasks-stopped/);
+assert.match(
+  operatorScript,
+  /ConvertTo-Json -InputObject @\(\$definition\.containerDefinitions\) -Depth 32 -Compress/,
+);
+assert.doesNotMatch(
+  operatorScript,
+  /\$definition\.containerDefinitions\s*\|\s*ConvertTo-Json/,
+);
 assert.match(migration100, /public\.digest\(/);
 assert.doesNotMatch(migration100, /extensions\.digest\(/);
 

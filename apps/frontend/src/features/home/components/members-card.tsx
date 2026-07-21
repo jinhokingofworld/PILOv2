@@ -264,7 +264,7 @@ export function MembersCard() {
   return (
     <>
       <DashboardCard
-        className="overflow-hidden border-[#1E1F22] bg-[#2B2D31] text-[#F2F3F5] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_10px_24px_rgba(15,23,42,0.12)] 2xl:row-start-1 [&_[data-slot=card-action]_button]:border-[#3F4147] [&_[data-slot=card-action]_button]:bg-[#313338] [&_[data-slot=card-action]_button]:text-[#F2F3F5] [&_[data-slot=card-action]_button:hover]:bg-[#404249] [&_[data-slot=card-title]>span]:border-[#3F4147] [&_[data-slot=card-title]>span]:bg-[#313338] [&_[data-slot=card-title]>span]:text-[#B5BAC1] [&_[data-slot=card-title]]:text-[#F2F3F5]"
+        className="h-[390px] min-h-0"
         cursorTarget={{ id: "members", label: "멤버", type: "home_card" }}
         action={
           canManageWorkspace ? (
@@ -281,7 +281,12 @@ export function MembersCard() {
             >
               <PopoverTrigger
                 render={
-                  <Button aria-label="멤버 초대 열기" size="sm" variant="outline" />
+                  <Button
+                    aria-label="멤버 초대 열기"
+                    className="text-[17px]"
+                    size="sm"
+                    variant="outline"
+                  />
                 }
               >
                 <UserPlus />
@@ -289,7 +294,7 @@ export function MembersCard() {
               </PopoverTrigger>
               <PopoverContent
                 align="center"
-                className="z-[100] w-64 border-[#3F4147] bg-[#313338] p-2.5 text-[#F2F3F5] shadow-xl shadow-slate-950/25"
+                className="z-[100] w-72 rounded-[12px] border-border bg-popover p-3 text-popover-foreground shadow-xl shadow-black/20"
                 side="right"
                 sideOffset={10}
               >
@@ -297,7 +302,7 @@ export function MembersCard() {
                   <div className="flex items-center gap-1.5">
                     <Input
                       aria-label="초대 이메일"
-                      className="h-7 rounded-lg border-[#3F4147] bg-[#1E1F22] text-xs text-[#F2F3F5] placeholder:text-[#80848E] focus-visible:border-[#5865F2] focus-visible:ring-[#5865F2]/35"
+                      className="h-8 rounded-[9px] border-border bg-muted text-[13px] text-foreground placeholder:text-muted-foreground"
                       disabled={isInviteSubmitting}
                       inputMode="email"
                       onChange={(event) => setInviteEmail(event.target.value)}
@@ -306,7 +311,6 @@ export function MembersCard() {
                       value={inviteEmail}
                     />
                     <Button
-                      className="bg-[#5865F2] text-white hover:bg-[#4752C4]"
                       disabled={isInviteSubmitting || inviteEmail.trim() === ""}
                       size="sm"
                       type="submit"
@@ -316,13 +320,13 @@ export function MembersCard() {
                     </Button>
                   </div>
                   {inviteError ? (
-                    <p className="text-xs text-[#F23F42]">{inviteError}</p>
+                    <p className="text-[12px] text-destructive">{inviteError}</p>
                   ) : null}
                   {inviteStatus ? (
-                    <p className="text-xs text-[#B5BAC1]">{inviteStatus}</p>
+                    <p className="text-[12px] text-muted-foreground">{inviteStatus}</p>
                   ) : null}
                   {inviteUrl ? (
-                    <p className="break-all rounded-lg border border-[#3F4147] bg-[#1E1F22] p-2 text-xs text-[#B5BAC1]">
+                    <p className="break-all rounded-[9px] border border-border bg-muted p-2 text-[12px] text-muted-foreground">
                       {inviteUrl}
                     </p>
                   ) : null}
@@ -332,6 +336,7 @@ export function MembersCard() {
           ) : (
             <Button
               aria-label="워크스페이스 나가기"
+              className="text-[17px]"
               disabled={!canLeaveWorkspace}
               onClick={() => {
                 setLeaveWorkspaceError(null);
@@ -347,9 +352,9 @@ export function MembersCard() {
         }
         description={null}
         icon={<Users className="size-4" />}
-        title="멤버"
+        title="팀 현황"
       >
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
           {membersStatus === "loading" ? (
             <MemberCardMessage>멤버 불러오는 중</MemberCardMessage>
           ) : membersStatus === "error" ? (
@@ -370,18 +375,18 @@ export function MembersCard() {
             .map((invitation) => (
               <div
                 key={invitation.id}
-                className="flex w-full items-center gap-3 rounded-md border border-[#3F4147] bg-[#313338] px-1.5 py-1 shadow-sm"
+                className="flex w-full items-center gap-3 rounded-[10px] border border-border bg-muted px-2.5 py-2"
               >
                 <Avatar size="sm">
-                  <AvatarFallback className="bg-[#5865F2] text-white">
+                  <AvatarFallback className="bg-accent text-[15px] text-accent-foreground group-data-[size=sm]/avatar:text-[15px]">
                     {getInitial(invitation.email)}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
+                  <p className="truncate text-[16px] font-medium text-foreground">
                     {invitation.email}
                   </p>
-                  <p className="truncate text-xs text-[#B5BAC1]">
+                  <p className="truncate text-[15px] text-muted-foreground">
                     대기중
                   </p>
                 </div>
@@ -409,7 +414,7 @@ export function MembersCard() {
           }
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className="w-[calc(100vw-2rem)] sm:w-full">
           <AlertDialogHeader>
             <AlertDialogTitle>워크스페이스에서 나갈까요?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -447,8 +452,8 @@ function MemberCardMessage({
 }) {
   return (
     <div
-      className={`flex min-h-0 flex-1 items-center justify-center rounded-md border border-[#3F4147] bg-[#313338] p-3 text-center text-xs font-medium ${
-        tone === "danger" ? "text-[#F23F42]" : "text-[#B5BAC1]"
+      className={`flex min-h-0 flex-1 items-center justify-center rounded-[10px] border border-border bg-muted p-3 text-center text-[15px] font-medium ${
+        tone === "danger" ? "text-destructive" : "text-muted-foreground"
       }`}
     >
       {children}
@@ -487,7 +492,7 @@ function MemberPresencePanel({
   );
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <section className="flex shrink-0 flex-col">
       {onlineHeader}
       <MemberPresenceList
         expanded={selectedView === "online"}
@@ -516,16 +521,16 @@ function MemberPresenceHeader({
   type: "offline" | "online";
 }) {
   const isOnline = type === "online";
-  const title = isOnline ? "워크스페이스 접속중" : "오프라인";
+  const title = isOnline ? "워크스페이스 접속 중" : "오프라인";
   const presenceClassName = isOnline
-    ? "bg-[#23A55A] ring-4 ring-[#23A55A]/20"
-    : "bg-[#80848E] ring-4 ring-[#80848E]/18";
+    ? "bg-emerald-500 ring-4 ring-emerald-500/10"
+    : "bg-muted-foreground ring-4 ring-muted-foreground/10";
 
   return (
     <button
       className={[
-        "flex w-full shrink-0 items-center justify-between gap-3 rounded-md px-1.5 py-1.5 text-left transition hover:bg-[#35373C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5865F2]/60",
-        active ? "text-[#F2F3F5]" : "text-[#B5BAC1]"
+        "flex w-full shrink-0 items-center justify-between gap-3 rounded-[9px] px-2 py-2 text-left transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        active ? "text-foreground" : "text-muted-foreground"
       ]
         .filter(Boolean)
         .join(" ")}
@@ -534,14 +539,14 @@ function MemberPresenceHeader({
     >
       <span className="flex min-w-0 items-center gap-2">
         <span className={`size-2.5 shrink-0 rounded-full ${presenceClassName}`} />
-        <span className="truncate text-xs font-medium">
+        <span className="truncate text-[15px] font-medium">
           {title} - {count}
         </span>
       </span>
       <ChevronRight
         className={[
           "size-4 shrink-0 transition-transform",
-          active ? "rotate-90 text-[#F2F3F5]" : "text-[#80848E]"
+          active ? "rotate-90 text-foreground" : "text-muted-foreground"
         ]
           .filter(Boolean)
           .join(" ")}
@@ -564,22 +569,22 @@ function MemberPresenceList({
       className={[
         "grid min-h-0 overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out",
         expanded
-          ? "flex-1 grid-rows-[1fr] opacity-100"
-          : "shrink-0 grid-rows-[0fr] opacity-0"
+          ? "grid-rows-[1fr] opacity-100"
+          : "grid-rows-[0fr] opacity-0"
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <div className="grid min-h-0 content-start gap-1.5 overflow-y-auto py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="grid min-h-0 content-start gap-1 py-1.5">
         {members.length === 0 ? (
-          <div className="rounded-md border border-[#3F4147] bg-[#313338] px-2 py-3 text-center text-xs text-[#B5BAC1]">
+          <div className="rounded-[9px] border border-border bg-muted px-2 py-3 text-center text-[15px] text-muted-foreground">
             표시할 멤버가 없습니다
           </div>
         ) : null}
         {members.map((member) => (
           <button
             key={member.id}
-            className="flex min-w-0 items-center gap-3 rounded-md px-1.5 py-1.5 text-left transition hover:bg-[#35373C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5865F2]/60"
+            className="flex min-w-0 items-center gap-3 rounded-[9px] px-2 py-2 text-left transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             onClick={() => onSelectMember(member)}
             tabIndex={expanded ? 0 : -1}
             type="button"
@@ -591,15 +596,15 @@ function MemberPresenceList({
                   src={member.user.avatarUrl}
                 />
               ) : null}
-              <AvatarFallback className="bg-[#5865F2] text-white">
+              <AvatarFallback className="bg-accent text-[15px] text-accent-foreground group-data-[size=sm]/avatar:text-[15px]">
                 {getInitial(member.user.name)}
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-[#F2F3F5]">
+              <p className="truncate text-[16px] font-medium text-foreground">
                 {member.user.name ?? "이름 없음"}
               </p>
-              <p className="truncate text-xs text-[#B5BAC1]">
+              <p className="truncate text-[15px] text-muted-foreground">
                 {formatWorkspaceRole(member.role)}
               </p>
             </div>

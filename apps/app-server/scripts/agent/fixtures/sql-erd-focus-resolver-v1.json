@@ -1,0 +1,37 @@
+{
+  "version": "sql-erd-focus-resolver:v1",
+  "cases": [
+    {
+      "id": "canonical_exact_payment",
+      "kind": "canonical",
+      "featureQuery": "payments 테이블만 집중적으로 보여줘",
+      "expected": {
+        "primaryTableRefs": ["t2"],
+        "relatedTableRefs": ["t1", "t3"],
+        "source": "deterministic"
+      }
+    },
+    {
+      "id": "held_out_exact_orders",
+      "kind": "held_out",
+      "featureQuery": "orders table에 집중해줘",
+      "expected": {
+        "primaryTableRefs": ["t1"],
+        "relatedTableRefs": ["t2", "t4"],
+        "source": "deterministic"
+      }
+    },
+    {
+      "id": "negative_unknown_feature",
+      "kind": "negative",
+      "featureQuery": "학생 상담 기능",
+      "expected": null
+    },
+    {
+      "id": "ambiguous_generic_request",
+      "kind": "ambiguous",
+      "featureQuery": "업무 관련 테이블",
+      "expected": null
+    }
+  ]
+}

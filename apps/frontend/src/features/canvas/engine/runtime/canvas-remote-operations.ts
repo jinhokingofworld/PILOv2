@@ -206,19 +206,18 @@ export function applyCanvasRemoteOperation({
     typeof nextShape.parentId === "string" ? nextShape.parentId : null;
   shapeDetailCache.set(shapeId, nextShape);
 
-  if (isShapeParentId(parentId)) {
-    const parentShape =
-      currentShapeMap.get(parentId) ?? shapeDetailCache.get(parentId);
+  if (isShapeParentId(parentId) && !currentShapeMap.has(parentId)) {
+    const nextShapes = currentShape
+      ? currentShapes.filter((shape) => getFreeformShapeId(shape) !== shapeId)
+      : currentShapes;
 
-    if (!parentShape) {
-      return {
-        changed: false,
-        frameIdsToLoad: [],
-        loadedShapeIds: [],
-        nextShapes: currentShapes,
-        unloadedShapeIds: [shapeId],
-      };
-    }
+    return {
+      changed: nextShapes.length !== currentShapes.length,
+      frameIdsToLoad: [],
+      loadedShapeIds: [],
+      nextShapes,
+      unloadedShapeIds: [shapeId],
+    };
   }
 
   if (!currentShape && !intersectsViewport(nextShape, viewportBounds)) {

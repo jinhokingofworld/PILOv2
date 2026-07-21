@@ -9,8 +9,13 @@ The database schema source of truth is the migration history in `db/migrations/`
 
 ## Rules
 
-- Do not edit a migration after it has been applied to a shared database.
-- Add a new migration for every later schema change.
+- A migration is immutable once it is merged to `main` or applied to a shared
+  database. Do not amend its SQL, filename, or number.
+- Correct a released migration with the next numbered migration; never repair
+  it by editing the old file.
+- If an existing migration was changed before release by mistake, restore its
+  canonical bytes first and add a new migration for the intended schema
+  change.
 - Keep generated diagrams or design exports in `incoming/`; do not apply them directly.
 - Validate migrations against PostgreSQL before sharing them.
 
