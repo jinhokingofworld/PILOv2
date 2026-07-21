@@ -253,7 +253,11 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     });
 
     shapeCache.forEach(({ shape }, shapeId) => {
-      if (!tombstones.has(shapeId) && intersectsViewport(shape, bounds)) {
+      if (
+        !tombstones.has(shapeId) &&
+        !isShapeParentId(shape.parentId) &&
+        intersectsViewport(shape, bounds)
+      ) {
         includedShapeIds.add(shapeId);
       }
     });
