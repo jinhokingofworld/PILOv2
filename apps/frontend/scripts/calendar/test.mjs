@@ -30,6 +30,13 @@ const calendarPanel = await readFile(
   ),
   "utf8"
 );
+const calendarMonthPicker = await readFile(
+  new URL(
+    "../../src/features/calendar/components/calendar-month-picker.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 assert.match(calendarTypes, /export type CalendarEvent/);
 assert.match(calendarTypes, /googleSync/);
@@ -94,6 +101,11 @@ assert.ok(
     calendarPanel.indexOf("<h1"),
   "월 이동 컨트롤은 캘린더 제목보다 앞쪽 grid 영역에 있어야 한다"
 );
+assert.doesNotMatch(calendarMonthPicker, /@\/components\/ui\/select/);
+assert.doesNotMatch(calendarMonthPicker, /<Select/);
+assert.match(calendarMonthPicker, /grid-cols-4/);
+assert.match(calendarMonthPicker, /aria-pressed=\{month === option\.value\}/);
+assert.match(calendarMonthPicker, /onClick=\{\(\) => setMonth\(option\.value\)\}/);
 assert.match(
   calendarPanel,
   /일정 수정[\s\S]*?className="border-t p-4 space-y-3"[\s\S]*?onRequestDelete/
