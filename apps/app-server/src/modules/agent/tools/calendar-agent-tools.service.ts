@@ -235,6 +235,7 @@ export class CalendarAgentToolsService {
         "Calendar 일정을 이전 조회의 opaque contextRef 또는 제목과 명시적 대상 날짜로 정확히 찾아 변경값으로 수정합니다. eventId를 입력하거나 노출하지 않습니다. 후보가 정확히 하나일 때만 현재값을 확인해 confirmation을 만들며, 후보가 없거나 여러 개면 수정하지 않고 더 구체적인 정보를 요청합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
+      postExecutionDisposition: "complete_run",
       inputSchema: {
         type: "object",
         required: ["target", "changes"],

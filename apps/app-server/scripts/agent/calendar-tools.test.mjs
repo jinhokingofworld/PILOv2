@@ -172,6 +172,11 @@ function errorCode(error) {
   );
   assert.equal(detailDefinition.executionMode, "contextual");
   assert.equal(detailDefinition.postExecutionDisposition, "complete_run");
+  const updateDefinition = definitions.find(
+    (definition) => definition.name === "update_calendar_event"
+  );
+  assert.equal(updateDefinition.executionMode, "confirmation_required");
+  assert.equal(updateDefinition.postExecutionDisposition, "complete_run");
 }
 
 {

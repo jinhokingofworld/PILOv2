@@ -1979,6 +1979,18 @@ def _normalize_calendar_thread_context_reference(
     ):
         return decision
 
+    if "update_calendar_event" in _planning_tool_result_names(planning_context):
+        return AgentPlannerDecision(
+            status="completed",
+            message="Calendar 일정 변경을 완료했습니다.",
+            final_answer_draft="일정 변경을 완료했습니다.",
+            tool_name=None,
+            tool_input={},
+            requires_confirmation=False,
+            missing_fields=(),
+            unsupported_reason=None,
+        )
+
     references = [
         reference
         for line in planning_context.splitlines()

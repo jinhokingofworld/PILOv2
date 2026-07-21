@@ -3565,6 +3565,54 @@ def test_normalizer_repairs_calendar_update_ordinal_and_relative_weekday() -> No
     }
 
 
+def test_normalizer_does_not_recreate_completed_calendar_update_candidate() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="update_calendar_event",
+                    description="Calendar 일정 수정",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["target", "changes"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "target": {"type": "object"},
+                            "changes": {"type": "object"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="needs_clarification",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("target event ordinal", "target date"),
+        ),
+        job,
+        prompt="두번째 일정 토요일로 바꿔줘",
+        current_date="2026-07-22",
+        planning_context=(
+            'previous resource: {"turn":2,"contextRef":'
+            '"ctx_0123456789abcdef01234567","resourceType":"event","ordinal":1}\n'
+            'previous resource: {"turn":2,"contextRef":'
+            '"ctx_89abcdef0123456701234567","resourceType":"event","ordinal":2}\n'
+            "user: 두번째 일정 토요일로 바꿔줘\n"
+            'tool update_calendar_event: {"status":"updated","event":'
+            '{"title":"하하하","startDate":"2026-07-25","endDate":"2026-07-25"}}'
+        ),
+    )
+
+    assert normalized.status == "completed"
+    assert "toolName" not in normalized.output_summary
+    assert normalized.final_answer == "일정 변경을 완료했습니다."
+
+
 def test_normalizer_routes_calendar_detail_ordinal_to_calendar_context_reference() -> None:
     job = parse_agent_run_job_payload(
         agent_payload(
