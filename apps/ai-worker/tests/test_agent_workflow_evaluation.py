@@ -13,7 +13,9 @@ from app.agent_tool_retrieval import (
     ToolCapabilityDescriptor,
 )
 from app.agent_workflow_evaluation import (
+    OutcomeInputAssertion,
     WorkflowScenario,
+    WorkflowOutcomeAssertions,
     WorkflowToolFixture,
     build_workflow_evaluation_report,
     evaluate_workflow_suite,
@@ -98,6 +100,45 @@ def test_workflow_rejects_wrong_tool_output_or_terminal_state() -> None:
 
     assert result.task_success is False
     assert result.failure_reasons == ("final_answer_grounding",)
+
+
+def test_workflow_hides_fixture_result_when_task_critical_input_is_wrong() -> None:
+    scenario = replace(
+        _scenario(),
+        fixtures=(
+            replace(
+                _scenario().fixtures[0],
+                outcome_input_assertions=(
+                    OutcomeInputAssertion(path=("limit",), contains_all=("1",)),
+                ),
+            ),
+            _scenario().fixtures[1],
+        ),
+        outcome_assertions=WorkflowOutcomeAssertions(
+            response_evidence=(("주간", "회의록"), ("제품", "회의")),
+            require_response=True,
+        ),
+    )
+    mismatched_decisions = _successful_decisions()
+    mismatched_decisions[0] = replace(mismatched_decisions[0], tool_input={"limit": 2})
+
+    matched = evaluate_workflow_suite(
+        ScriptedPlanner(_successful_decisions()),
+        ScriptedRouter(),
+        _job(),
+        (scenario,),
+        current_date="2026-07-21",
+    )[0]
+    mismatched = evaluate_workflow_suite(
+        ScriptedPlanner(mismatched_decisions),
+        ScriptedRouter(),
+        _job(),
+        (scenario,),
+        current_date="2026-07-21",
+    )[0]
+
+    assert matched.task_success is True
+    assert "task_critical_input" in mismatched.failure_reasons
 
 
 def test_workflow_separates_user_task_outcome_from_strict_execution_contract() -> None:

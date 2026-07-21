@@ -16,11 +16,25 @@ from app.agent_processor import (
 
 
 @dataclass(frozen=True)
+class OutcomeInputAssertion:
+    path: tuple[str, ...]
+    contains_all: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WorkflowOutcomeAssertions:
+    response_evidence: tuple[tuple[str, ...], ...] = ()
+    response_forbidden: tuple[str, ...] = ()
+    require_response: bool = False
+
+
+@dataclass(frozen=True)
 class WorkflowToolFixture:
     tool_name: str
     input_contains: dict[str, object]
     output: dict[str, object]
     requires_confirmation: bool | None = False
+    outcome_input_assertions: tuple[OutcomeInputAssertion, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -30,6 +44,7 @@ class WorkflowScenario:
     fixtures: tuple[WorkflowToolFixture, ...]
     category: str = "workflow"
     expected_answer_contains: tuple[str, ...] = ()
+    outcome_assertions: WorkflowOutcomeAssertions | None = None
     expected_domains: tuple[str, ...] = ()
     expected_capability_ids: tuple[str, ...] = ()
     context_surface: str | None = None
@@ -53,6 +68,7 @@ class WorkflowEvaluationResult:
     failure_reasons: tuple[str, ...]
     execution_contract_passed: bool
     execution_contract_failure_reasons: tuple[str, ...]
+    outcome_assertion_results: dict[str, bool]
     executed_tool_names: tuple[str, ...]
     latency_ms: float
     provider_total_tokens: int | None
@@ -115,6 +131,7 @@ def load_workflow_catalog(catalog_path: Path) -> WorkflowCatalog:
                     input_contains=dict(input_contains),
                     output=dict(output),
                     requires_confirmation=requires_confirmation,
+                    outcome_input_assertions=_optional_outcome_input_assertions(stage),
                 )
             )
         expected_domains = _optional_string_tuple(workflow, "expectedDomains")
@@ -149,6 +166,7 @@ def load_workflow_catalog(catalog_path: Path) -> WorkflowCatalog:
                     or ("multi_tool" if is_legacy_multi_tool_catalog else "workflow")
                 ),
                 expected_answer_contains=_optional_string_tuple(workflow, "finalAnswerContains"),
+                outcome_assertions=_optional_outcome_assertions(workflow),
                 expected_domains=expected_domains,
                 expected_capability_ids=_optional_string_tuple(
                     workflow,
@@ -273,7 +291,9 @@ def build_workflow_evaluation_report(
                 },
                 "workflow": {
                     "taskSuccess": result.task_success,
+                    "taskOutcomeSuccess": result.task_success,
                     "executionContractPassed": result.execution_contract_passed,
+                    "outcomeAssertions": result.outcome_assertion_results,
                     "latencyMs": round(result.latency_ms, 3),
                     "providerTotalTokens": result.provider_total_tokens,
                     "safetyViolations": list(result.safety_violations),
@@ -326,17 +346,27 @@ def _evaluate_workflow(
         runtime_failure = _runtime_failure(error)
     latency_ms = max(0.0, (perf_counter() - started) * 1000)
 
-    outcome_failures = list(repository.validation_failures)
+    has_outcome_assertions = scenario.outcome_assertions is not None
+    outcome_failures = (
+        list(repository.outcome_failures)
+        if has_outcome_assertions
+        else list(repository.validation_failures)
+    )
     if runtime_failure is not None:
         outcome_failures.append(runtime_failure)
     if repository.status != scenario.expected_terminal_status:
         outcome_failures.append("terminal_state")
     planner_status = (repository.latest_output_summary or {}).get("status")
     expected_tools = tuple(fixture.tool_name for fixture in scenario.fixtures)
-    if tuple(repository.executed_tool_names) != expected_tools:
-        outcome_failures.append("tool_sequence")
-    if not _contains_normalized_text(repository.final_answer, scenario.expected_answer_contains):
-        outcome_failures.append("final_answer_grounding")
+    if has_outcome_assertions:
+        outcome_failures.extend(
+            _response_outcome_failures(repository.final_answer, scenario.outcome_assertions)
+        )
+    else:
+        if tuple(repository.executed_tool_names) != expected_tools:
+            outcome_failures.append("tool_sequence")
+        if not _contains_normalized_text(repository.final_answer, scenario.expected_answer_contains):
+            outcome_failures.append("final_answer_grounding")
     routing_decisions = router_recorder.decisions
     router_routed = bool(routing_decisions) and all(
         getattr(decision, "status", None) == scenario.expected_router_status
@@ -356,18 +386,31 @@ def _evaluate_workflow(
             for decision in routing_decisions
         )
     )
-    if not router_routed:
-        outcome_failures.append("router_status")
-    if not domain_exact:
-        outcome_failures.append("domain")
-    if not capability_exact:
-        outcome_failures.append("capability")
+    if not has_outcome_assertions:
+        if not router_routed:
+            outcome_failures.append("router_status")
+        if not domain_exact:
+            outcome_failures.append("domain")
+        if not capability_exact:
+            outcome_failures.append("capability")
     failure_reasons = tuple(dict.fromkeys(outcome_failures))
-    contract_failures = list(failure_reasons)
+    contract_failures = list(repository.validation_failures)
+    if runtime_failure is not None:
+        contract_failures.append(runtime_failure)
+    if repository.status != scenario.expected_terminal_status:
+        contract_failures.append("terminal_state")
+    if tuple(repository.executed_tool_names) != expected_tools:
+        contract_failures.append("tool_sequence")
     if planner_status != scenario.expected_planner_status:
         contract_failures.append("planner_status")
     if any(item not in repository.final_answer for item in scenario.expected_answer_contains):
         contract_failures.append("final_answer_grounding")
+    if not router_routed:
+        contract_failures.append("router_status")
+    if not domain_exact:
+        contract_failures.append("domain")
+    if not capability_exact:
+        contract_failures.append("capability")
     execution_contract_failure_reasons = tuple(dict.fromkeys(contract_failures))
     return WorkflowEvaluationResult(
         scenario_id=scenario.scenario_id,
@@ -378,6 +421,12 @@ def _evaluate_workflow(
             not execution_contract_failure_reasons and not repository.safety_violations
         ),
         execution_contract_failure_reasons=execution_contract_failure_reasons,
+        outcome_assertion_results={
+            "taskCriticalInput": "task_critical_input" not in failure_reasons,
+            "responseEvidence": "response_evidence" not in failure_reasons,
+            "responseForbidden": "response_forbidden" not in failure_reasons,
+            "responsePresent": "response_missing" not in failure_reasons,
+        },
         executed_tool_names=tuple(repository.executed_tool_names),
         latency_ms=latency_ms,
         provider_total_tokens=_sum_optional(
@@ -411,6 +460,7 @@ class _ReplayRepository:
         self.final_answer = ""
         self.executed_tool_names: list[str] = []
         self.validation_failures: list[str] = []
+        self.outcome_failures: list[str] = []
         self.safety_violations: list[str] = []
 
     def try_acquire_run_lock(self, _run_id: str) -> bool:
@@ -494,8 +544,14 @@ class _ReplayHandoff:
         fixture = self.scenario.fixtures[index]
         if tool_name != fixture.tool_name:
             self.repository.validation_failures.append("tool_sequence")
+            self.repository.outcome_failures.append("task_critical_tool")
         if not isinstance(tool_input, dict) or not _contains(tool_input, fixture.input_contains):
             self.repository.validation_failures.append("tool_input")
+        outcome_input_matches = isinstance(tool_input, dict) and _matches_outcome_input(
+            tool_input, fixture
+        )
+        if not outcome_input_matches:
+            self.repository.outcome_failures.append("task_critical_input")
         if summary.get("requiresConfirmation") != fixture.requires_confirmation:
             self.repository.safety_violations.append("confirmation_policy")
         self.repository.executed_tool_names.append(tool_name)
@@ -503,7 +559,11 @@ class _ReplayHandoff:
             self.repository.status = "waiting_user_input"
             return
         output = json.dumps(
-            fixture.output,
+            (
+                fixture.output
+                if tool_name == fixture.tool_name and outcome_input_matches
+                else {"error": "fixture task-critical input did not match"}
+            ),
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
@@ -540,6 +600,50 @@ class _TokenRecorder:
 
 def _contains(actual: dict[str, object], expected: dict[str, object]) -> bool:
     return all(key in actual and actual[key] == value for key, value in expected.items())
+
+
+def _matches_outcome_input(
+    tool_input: dict[str, object], fixture: WorkflowToolFixture
+) -> bool:
+    if not fixture.outcome_input_assertions:
+        return _contains(tool_input, fixture.input_contains)
+    return all(
+        _contains_all_normalized_terms(_value_at_path(tool_input, assertion.path), assertion.contains_all)
+        for assertion in fixture.outcome_input_assertions
+    )
+
+
+def _value_at_path(value: dict[str, object], path: tuple[str, ...]) -> object | None:
+    current: object = value
+    for part in path:
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _contains_all_normalized_terms(value: object | None, expected: tuple[str, ...]) -> bool:
+    if value is None:
+        return False
+    normalized_value = _normalize_text(value if isinstance(value, str) else str(value))
+    return all(_normalize_text(item) in normalized_value for item in expected)
+
+
+def _response_outcome_failures(
+    final_answer: str, assertions: WorkflowOutcomeAssertions
+) -> list[str]:
+    normalized_answer = _normalize_text(final_answer)
+    failures: list[str] = []
+    if assertions.require_response and not normalized_answer:
+        failures.append("response_missing")
+    if any(
+        not all(_normalize_text(item) in normalized_answer for item in evidence)
+        for evidence in assertions.response_evidence
+    ):
+        failures.append("response_evidence")
+    if any(_normalize_text(item) in normalized_answer for item in assertions.response_forbidden):
+        failures.append("response_forbidden")
+    return failures
 
 
 def _contains_normalized_text(actual: str, expected: tuple[str, ...]) -> bool:
@@ -622,6 +726,75 @@ def _optional_string_tuple(value: dict[str, object], key: str) -> tuple[str, ...
     ):
         raise ValueError(f"Workflow {key} must be a string array")
     return tuple(item.strip() for item in items)
+
+
+def _optional_outcome_input_assertions(
+    value: dict[str, object],
+) -> tuple[OutcomeInputAssertion, ...]:
+    assertions = value.get("outcomeInputAssertions")
+    if assertions is None:
+        return ()
+    if not isinstance(assertions, list):
+        raise ValueError("Workflow outcomeInputAssertions must be an array")
+    result: list[OutcomeInputAssertion] = []
+    for assertion in assertions:
+        if not isinstance(assertion, dict):
+            raise ValueError("Workflow outcomeInputAssertions must contain objects")
+        path = assertion.get("path")
+        contains_all = assertion.get("containsAll")
+        if (
+            not isinstance(path, list)
+            or not path
+            or not all(isinstance(item, str) and item.strip() for item in path)
+            or not isinstance(contains_all, list)
+            or not contains_all
+            or not all(isinstance(item, str) and item.strip() for item in contains_all)
+        ):
+            raise ValueError("Workflow outcomeInputAssertions entries are invalid")
+        result.append(
+            OutcomeInputAssertion(
+                path=tuple(item.strip() for item in path),
+                contains_all=tuple(item.strip() for item in contains_all),
+            )
+        )
+    return tuple(result)
+
+
+def _optional_outcome_assertions(
+    value: dict[str, object],
+) -> WorkflowOutcomeAssertions | None:
+    outcome = value.get("outcome")
+    if outcome is None:
+        return None
+    if not isinstance(outcome, dict):
+        raise ValueError("Workflow outcome must be an object")
+    response_evidence = outcome.get("responseEvidence", [])
+    response_forbidden = outcome.get("responseForbidden", [])
+    require_response = outcome.get("requireResponse")
+    if (
+        not isinstance(response_evidence, list)
+        or not isinstance(response_forbidden, list)
+        or not isinstance(require_response, bool)
+        or not all(isinstance(item, str) and item.strip() for item in response_forbidden)
+    ):
+        raise ValueError("Workflow outcome assertions are invalid")
+    evidence_groups: list[tuple[str, ...]] = []
+    for evidence in response_evidence:
+        if (
+            not isinstance(evidence, dict)
+            or not isinstance(evidence.get("allOf"), list)
+            or not evidence["allOf"]
+            or not all(
+                isinstance(item, str) and item.strip() for item in evidence["allOf"]
+            )
+        ):
+            raise ValueError("Workflow outcome responseEvidence is invalid")
+        evidence_groups.append(tuple(item.strip() for item in evidence["allOf"]))
+    return WorkflowOutcomeAssertions(
+        response_evidence=tuple(evidence_groups),
+        response_forbidden=tuple(item.strip() for item in response_forbidden),
+        require_response=require_response,
+    )
 
 
 def _optional_string(value: dict[str, object], key: str) -> str | None:
