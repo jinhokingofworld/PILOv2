@@ -5,6 +5,7 @@ import {
   didAgentRunAcceptInput,
   getLatestAgentRunMessageSequence
 } from "./run-input-recovery.ts";
+import { shouldFallbackToLegacyMessageApiCode } from "./message-routing-policy.ts";
 import {
   presentCanvasAgentDelegationRunOnce,
   registerCanvasAgentDelegationAdapter
@@ -54,6 +55,11 @@ assert.match(agentTypes, /"completed"/);
 assert.match(agentTypes, /export type AgentRun/);
 assert.match(agentTypes, /export type CreateAgentRunInput/);
 assert.match(agentTypes, /export type SubmitAgentRunInput/);
+assert.match(agentTypes, /export type RouteAgentMessageInput/);
+assert.match(agentTypes, /export type AgentMessagePayload/);
+assert.match(agentTypes, /"continue_previous"/);
+assert.match(agentTypes, /"start_new"/);
+assert.match(agentTypes, /"needs_choice"/);
 assert.doesNotMatch(agentTypes, /kind: "sql_erd_session"/);
 assert.match(agentTypes, /kind: "candidate"/);
 assert.match(agentTypes, /selection\?: AgentRunInputSelection/);
@@ -79,6 +85,9 @@ assert.match(agentApiClient, /cache: "no-store"/);
 assert.match(agentApiClient, /success === true/);
 assert.match(agentApiClient, /createRun/);
 assert.match(agentApiClient, /getRun/);
+assert.match(agentApiClient, /routeMessage/);
+assert.match(agentApiClient, /agentMessagesPath/);
+assert.match(agentApiClient, /\/agent\/messages/);
 
 assert.doesNotMatch(agentChatWidget, /thread-run-recovery/);
 assert.doesNotMatch(agentChatWidget, /sessionStorage/);
@@ -183,6 +192,7 @@ assert.doesNotMatch(
 );
 assert.match(agentChatWidget, /waiting_confirmation/);
 assert.match(agentChatWidget, /waiting_user_input/);
+assert.match(agentChatWidget, /activeWaitingMessage/);
 assert.match(agentChatWidget, /isRunAwaitingClarification/);
 assert.match(
   agentChatWidget,
@@ -190,10 +200,53 @@ assert.match(
 );
 assert.match(agentChatWidget, /submitRunInput/);
 assert.match(agentChatWidget, /appendRunInput/);
+assert.match(agentChatWidget, /routeMessage/);
+assert.match(agentChatWidget, /applyRoutedMessagePayload/);
+assert.match(agentChatWidget, /payload\.previousRun/);
+assert.match(agentChatWidget, /pollAgentRunUntilStop\(payload\.run/);
+assert.match(agentChatWidget, /handleRoutingChoice/);
+assert.match(
+  agentChatWidget,
+  /routingInput\.activeRunId \?\? payload\.run\?\.id \?\? null/
+);
+assert.match(agentChatWidget, /"continue_previous"/);
+assert.match(agentChatWidget, /"start_new"/);
+assert.match(agentChatWidget, /기존 작업 계속/);
+assert.match(agentChatWidget, /새 요청 시작/);
+assert.match(agentChatWidget, /일반 메시지는 승인으로 처리되지 않습니다/);
+assert.match(agentChatWidget, /shouldFallbackToLegacyMessageApiCode/);
+assert.equal(
+  shouldFallbackToLegacyMessageApiCode("AGENT_MESSAGE_ROUTING_DISABLED"),
+  true
+);
+assert.equal(
+  shouldFallbackToLegacyMessageApiCode("AGENT_MESSAGE_ROUTING_UNAVAILABLE"),
+  false
+);
+assert.equal(shouldFallbackToLegacyMessageApiCode(undefined), false);
+assert.match(agentChatWidget, /AGENT_MESSAGE_ROUTING_STALE/);
+assert.match(agentChatWidget, /refreshRoutingTargetAfterStale/);
+assert.match(agentChatWidget, /agentApiClient\.getRun\(workspaceId, activeRunId/);
+assert.match(agentChatWidget, /최신 상태를 확인한 뒤 다시 요청해주세요/);
+assert.match(agentChatWidget, /previousLatestMessageSequence/);
+assert.match(agentChatWidget, /didAgentRunAcceptInput/);
+assert.match(
+  agentChatWidget,
+  /inputWasAccepted \|\|\s+refreshRun\.status !== "waiting_user_input"/
+);
+assert.match(
+  agentChatWidget,
+  /submitRunInput[\s\S]*catch \(legacyError\)[\s\S]*getRun[\s\S]*pollAgentRunUntilStop/
+);
+assert.match(
+  agentChatWidget,
+  /if \(error instanceof AgentApiError \|\| isAbortError\(error\)\) throw error;[\s\S]*routeMessage/,
+  "only unknown network failures may retry the idempotent message endpoint"
+);
 assert.match(agentChatWidget, /displayMessage/);
-assert.match(agentChatWidget, /\{ \.\.\.input, message: displayMessage \}/);
+assert.match(agentChatWidget, /message: displayMessage/);
 assert.match(agentChatWidget, /latestAssistantMessage/);
-assert.match(agentChatWidget, /같은 요청을 이어서 처리합니다/);
+assert.match(agentChatWidget, /기존 작업을 이어서 처리하고 있습니다/);
 assert.match(agentChatWidget, /enqueueMeetingConnectionAction/);
 assert.match(agentChatWidget, /applyAgentSqlErdTableFocus/);
 assert.match(agentChatWidget, /appliedSqlErdFocusActionKeysRef/);
@@ -202,10 +255,8 @@ assert.match(agentChatWidget, /connect_meeting/);
 assert.match(agentChatWidget, /router\.push\("\/meeting"\)/);
 assert.match(agentChatWidget, /workspaceId: run\.workspaceId/);
 assert.match(agentChatWidget, /currentRun\.workspaceId/);
-assert.match(agentChatWidget, /submitRunInput\(\s*run\.workspaceId/);
+assert.match(agentChatWidget, /routeMessage\(\s*run\.workspaceId/);
 assert.match(agentChatWidget, /getRun\(\s*run\.workspaceId/);
-assert.match(agentChatWidget, /inputWasAccepted/);
-assert.match(agentChatWidget, /refreshRun\.status !== "waiting_user_input"/);
 assert.match(agentChatWidget, /completed/);
 assert.match(agentChatWidget, /failed/);
 assert.match(agentChatWidget, /cancelled/);

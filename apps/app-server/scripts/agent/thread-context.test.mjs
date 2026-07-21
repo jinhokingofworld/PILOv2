@@ -81,6 +81,11 @@ class FakeDatabase {
   assert.match(database.calls[0].text, /prior_run\.requested_by_user_id = \$3/);
   assert.match(
     database.calls[0].text,
+    /prior_run\.status = 'completed'/,
+    "cancelled and other incomplete runs must not become thread memory"
+  );
+  assert.match(
+    database.calls[0].text,
     /ORDER BY run_order ASC, created_at DESC, id DESC/
   );
   assert.match(database.calls[0].text, /recent_run\.id DESC/);

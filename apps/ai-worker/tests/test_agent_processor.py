@@ -293,6 +293,38 @@ def meeting_hybrid_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
     return catalog
 
 
+def meeting_hybrid_and_list_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
+    catalog = meeting_hybrid_catalog(tools)
+    examples = [
+        {"kind": "canonical", "utterance": "최근 회의록 보여줘"},
+        {"kind": "paraphrase", "utterance": "최신 회의록 목록 알려줘"},
+        {"kind": "typo", "utterance": "최근 회의록 보어줘"},
+        {"kind": "honorific", "utterance": "최근 회의록을 보여주세요"},
+        {"kind": "abbreviation", "utterance": "회의록 목록"},
+    ]
+    catalog["capabilities"].append(
+        {
+            "id": "meeting.reports.list",
+            "domain": "meeting",
+            "toolNames": ["list_meeting_reports"],
+            "whenToUse": "회의록 목록을 조회할 때",
+            "mustNotUseFor": ["회의록 실제 내용 검색"],
+            "positiveExamples": [example["utterance"] for example in examples],
+            "examples": examples,
+            "selectorKinds": ["meeting_report"],
+            "requiresConfirmation": False,
+            "availability": "supported",
+        }
+    )
+    for descriptor in catalog["descriptors"]:
+        if descriptor["toolName"] == "list_meeting_reports":
+            descriptor["capabilityIds"].append("meeting.reports.list")
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
 def calendar_and_meeting_read_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
     catalog = tool_capability_catalog(tools)
     meeting_capability = catalog["capabilities"][1]
@@ -1527,6 +1559,63 @@ def test_llm_router_preserves_compound_domain_tool_chains() -> None:
     assert [tool.name for tool in planner_client.requests[0].tools] == [
         "list_calendar_events",
         "list_meeting_reports",
+    ]
+
+
+def test_llm_router_clarifies_hybrid_search_combined_with_report_list() -> None:
+    tools = [
+        tool_snapshot(
+            name="list_meeting_reports",
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "reportTitle": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+            },
+        ),
+        tool_snapshot(
+            name="search_meeting_transcript",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["query"],
+                "additionalProperties": False,
+                "properties": {"query": {"type": "string"}},
+            },
+        ),
+    ]
+    catalog = meeting_hybrid_and_list_catalog(tools)
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient()
+    processor = create_processor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        FakeRouterClient(
+            decision=routing_decision(
+                domains=("meeting",),
+                capability_ids=(
+                    "meeting.reports.list",
+                    "meeting.report.hybrid_search",
+                ),
+                intent_summary="최근 회의록과 특정 제목의 실제 발언을 함께 찾는다.",
+            )
+        ),
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(agent_payload(tools=tools, toolCapabilityCatalog=catalog))
+
+    assert result.reason == "agent_router_needs_clarification"
+    assert planner_client.requests == []
+    assert repository.waiting_user_input_updates == [
+        (
+            RUN_ID,
+            "특정 제목의 회의록 내용 검색과 다른 회의록 조회를 한 번에 처리하면 "
+            "대상을 안전하게 구분할 수 없습니다. 두 작업 중 먼저 처리할 요청을 알려주세요.",
+        )
     ]
 
 
@@ -3056,16 +3145,21 @@ def test_processor_deletes_invalid_agent_payload_without_repository_calls() -> N
 def test_processor_deletes_missing_or_terminal_runs() -> None:
     missing_repository = FakeAgentRunRepository(context=None)
     terminal_repository = FakeAgentRunRepository(context=run_context(status="completed"))
+    cancelled_repository = FakeAgentRunRepository(context=run_context(status="cancelled"))
 
     missing = create_processor(missing_repository).process_payload(agent_payload())
     terminal = create_processor(terminal_repository).process_payload(agent_payload())
+    cancelled = create_processor(cancelled_repository).process_payload(agent_payload())
 
     assert missing.delete_message is True
     assert missing.reason == "agent_run_not_found"
     assert terminal.delete_message is True
     assert terminal.reason == "terminal_agent_run"
+    assert cancelled.delete_message is True
+    assert cancelled.reason == "terminal_agent_run"
     assert missing_repository.release_calls == [RUN_ID]
     assert terminal_repository.release_calls == [RUN_ID]
+    assert cancelled_repository.release_calls == [RUN_ID]
 
 
 def test_processor_deletes_waiting_confirmation_and_retries_running_handoff() -> None:
@@ -3901,7 +3995,7 @@ def test_hybrid_title_lookup_ignores_model_limit_to_detect_duplicate_titles() ->
     assert normalized.output_summary["input"] == {"reportTitle": "온보딩 주간회의"}
 
 
-def test_direct_report_list_keeps_explicit_limit_when_hybrid_is_not_the_only_goal() -> None:
+def test_hybrid_title_lookup_drops_model_limit_even_when_other_goal_is_selected() -> None:
     job = parse_agent_run_job_payload(
         agent_payload(
             tools=[
@@ -3938,12 +4032,13 @@ def test_direct_report_list_keeps_explicit_limit_when_hybrid_is_not_the_only_goa
         job,
         prompt="온보딩 주간회의 회의록 한 건만 보여줘",
         completion_tool_names=("list_meeting_reports", "search_meeting_transcript"),
+        routed_capability_ids=(
+            "meeting.reports.list",
+            "meeting.report.hybrid_search",
+        ),
     )
 
-    assert normalized.output_summary["input"] == {
-        "reportTitle": "온보딩 주간회의",
-        "limit": 1,
-    }
+    assert normalized.output_summary["input"] == {"reportTitle": "온보딩 주간회의"}
 
 
 def test_hybrid_search_exact_one_uses_current_run_opaque_context_ref() -> None:

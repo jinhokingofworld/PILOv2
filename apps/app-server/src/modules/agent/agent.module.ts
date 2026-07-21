@@ -19,6 +19,8 @@ import { AgentLatencyObserver } from "./agent-latency-observer";
 import { AgentInternalController } from "./agent-internal.controller";
 import { AgentJobService } from "./agent-job.service";
 import { AgentLoggingService } from "./agent-logging.service";
+import { AgentInputRelationshipService } from "./agent-input-relationship.service";
+import { AgentMessageService } from "./agent-message.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
 import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
@@ -59,7 +61,9 @@ import { DriveAgentToolsService } from "./tools/drive-agent-tools.service";
     AgentExecutionHandoffGuard,
     AgentLatencyObserver,
     AgentJobService,
+    AgentInputRelationshipService,
     AgentLoggingService,
+    AgentMessageService,
     AgentOutboxPublisherService,
     AgentGroundedAnswerService,
     AgentGroundedAnswerOutboxPublisherService,

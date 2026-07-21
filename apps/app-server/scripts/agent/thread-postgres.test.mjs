@@ -54,7 +54,10 @@ async function insertThread(lastActivityAt) {
 }
 
 async function threadIdFor(runId) {
-  const result = await client.query("SELECT thread_id FROM agent_runs WHERE id = $1", [runId]);
+  const result = await client.query(
+    "SELECT thread_id FROM agent_runs WHERE id = $1",
+    [runId]
+  );
   return result.rows[0]?.thread_id ?? null;
 }
 
@@ -126,14 +129,20 @@ try {
   await resetTables();
   const recentThreadId = await insertThread(new Date());
   const recentResult = await service.createRun(userId, workspaceId, { prompt: "독립 요청" });
-  assert.notEqual(await threadIdFor(recentResult.run.id), recentThreadId);
+  assert.equal(await threadIdFor(recentResult.run.id), recentThreadId);
 
   await resetTables();
-  const pendingThreadId = await insertThread(new Date());
+  const pendingThreadId = await insertThread(
+    new Date(Date.now() - 2 * 60 * 60 * 1000)
+  );
   const pendingRunId = randomUUID();
   await client.query(
-    `INSERT INTO agent_runs (id, workspace_id, requested_by_user_id, thread_id, prompt, timezone)
-     VALUES ($1, $2, $3, $4, '승인 대기 요청', 'Asia/Seoul')`,
+    `INSERT INTO agent_runs (
+       id, workspace_id, requested_by_user_id, thread_id, status, prompt, timezone
+     )
+     VALUES (
+       $1, $2, $3, $4, 'waiting_confirmation', '승인 대기 요청', 'Asia/Seoul'
+     )`,
     [pendingRunId, workspaceId, userId, pendingThreadId]
   );
   await client.query(
@@ -142,7 +151,7 @@ try {
     [pendingRunId]
   );
   const pendingResult = await service.createRun(userId, workspaceId, { prompt: "승인 전 후속 요청" });
-  assert.notEqual(await threadIdFor(pendingResult.run.id), pendingThreadId);
+  assert.equal(await threadIdFor(pendingResult.run.id), pendingThreadId);
 
   await client.query("ROLLBACK");
   console.log("Agent thread PostgreSQL policy test passed");

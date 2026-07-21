@@ -172,15 +172,25 @@ test("Calendar date cells use tokenized grid separators", async () => {
   assert.match(source, /rounded-none border-0 bg-card/);
 });
 
+test("CalendarCard??전체 ?쇱젙 ?붾뱶???뚮쭏 ?좏겙 ?뚮몢由ъ쓣 ?좎??쒕떎", async () => {
+  const source = await readHomeSource("./components/calendar-card.tsx");
+
+  assert.match(source, /rounded-\[15px\].*border-2 border-border/);
+});
+
 test("워크스페이스 현황은 반응형 3개 feed로 구성된다", async () => {
   const source = await readHomeSource(
     "./components/middle-dashboard-cards.tsx"
   );
 
-  assert.match(source, /grid-flow-col/);
-  assert.match(source, /auto-cols-\[min\(20rem,calc\(100vw-2rem\)\)\]/);
-  assert.match(source, /overflow-x-auto/);
-  assert.match(source, /sm:grid-flow-row/);
+  assert.match(source, /useState/);
+  assert.match(source, /activeCardIndex/);
+  assert.match(source, /ChevronLeft/);
+  assert.match(source, /ChevronRight/);
+  assert.equal((source.match(/aria-label=/g) ?? []).length, 2);
+  assert.match(source, /activeCardIndex > 0/);
+  assert.match(source, /activeCardIndex < dashboardCards\.length - 1/);
+  assert.doesNotMatch(source, /overflow-x-auto/);
   assert.match(source, /sm:grid-cols-2/);
   assert.match(source, /xl:grid-cols-3/);
   assert.match(source, /sm:col-span-2 xl:col-span-1/);

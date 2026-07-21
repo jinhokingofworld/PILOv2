@@ -872,7 +872,19 @@ focusSqlErdService.session = sessionPayload({
   revision: 7
 });
 focusSqlErdService.sessions = [focusSqlErdService.session];
-const focusAdapter = new SqlErdAgentToolsService(focusSqlErdService);
+const focusResolverObservations = [];
+const focusLatencyObserver = {
+  start() {
+    return performance.now();
+  },
+  observe(input) {
+    focusResolverObservations.push(input);
+  }
+};
+const focusAdapter = new SqlErdAgentToolsService(
+  focusSqlErdService,
+  focusLatencyObserver
+);
 const focusDefinitions = focusAdapter.listDefinitions();
 const inspectDefinition = focusDefinitions.find(
   (candidate) => candidate.name === "inspect_sql_erd_schema"
@@ -946,6 +958,15 @@ assert.equal(JSON.stringify(focused).includes('"modelJson"'), false);
 
 const originalFetch = globalThis.fetch;
 const originalApiKey = process.env.OPENAI_API_KEY;
+const originalFocusTimeout = process.env.OPENAI_SQL_ERD_FOCUS_TIMEOUT_MS;
+delete process.env.OPENAI_API_KEY;
+const observationsBeforeMissingKey = focusResolverObservations.length;
+const missingKeyResult = await focusDefinition.execute(
+  focusContext,
+  focusDefinition.validateInput({ featureQuery: "회의 관련 테이블" })
+);
+assert.equal(missingKeyResult.outputSummary.reason, "resolver_unavailable");
+assert.equal(focusResolverObservations.length, observationsBeforeMissingKey);
 process.env.OPENAI_API_KEY = "test-key";
 let capturedResolverBody;
 globalThis.fetch = async (_url, init) => {
@@ -979,6 +1000,8 @@ assert.equal(
   false
 );
 assert.equal(capturedResolverBody.input[1].content.includes("CREATE TYPE"), false);
+assert.equal(focusResolverObservations.at(-1).stage, "focus_resolver");
+assert.equal(focusResolverObservations.at(-1).outcome, "success");
 
 globalThis.fetch = async () =>
   new Response(
@@ -1056,6 +1079,58 @@ assert.equal(
   "invalid_resolver_result"
 );
 assert.deepEqual(invalidProviderResult.resourceRefs, []);
+assert.equal(
+  focusResolverObservations.at(-1).failureDetail,
+  "validation_error"
+);
+
+globalThis.fetch = async () => new Response("rate limited", { status: 429 });
+const httpFailure = await focusDefinition.execute(
+  focusContext,
+  focusDefinition.validateInput({ featureQuery: "결제 운영 기능" })
+);
+assert.equal(httpFailure.outputSummary.reason, "resolver_unavailable");
+assert.equal(focusResolverObservations.at(-1).failureDetail, "http_error");
+assert.equal(focusResolverObservations.at(-1).httpStatus, 429);
+
+globalThis.fetch = async () =>
+  new Response(JSON.stringify({}), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
+  });
+const emptyOutputFailure = await focusDefinition.execute(
+  focusContext,
+  focusDefinition.validateInput({ featureQuery: "결제 분석 기능" })
+);
+assert.equal(emptyOutputFailure.outputSummary.reason, "resolver_unavailable");
+assert.equal(focusResolverObservations.at(-1).failureDetail, "empty_output");
+
+globalThis.fetch = async () =>
+  new Response(JSON.stringify({ output_text: "not-json" }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
+  });
+const jsonFailure = await focusDefinition.execute(
+  focusContext,
+  focusDefinition.validateInput({ featureQuery: "결제 정산 기능" })
+);
+assert.equal(jsonFailure.outputSummary.reason, "resolver_unavailable");
+assert.equal(focusResolverObservations.at(-1).failureDetail, "json_parse_error");
+
+process.env.OPENAI_SQL_ERD_FOCUS_TIMEOUT_MS = "1";
+globalThis.fetch = async (_url, init) =>
+  new Promise((_resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(init.signal.reason), {
+      once: true
+    });
+  });
+const timeoutFailure = await focusDefinition.execute(
+  focusContext,
+  focusDefinition.validateInput({ featureQuery: "결제 승인 기능" })
+);
+assert.equal(timeoutFailure.outputSummary.reason, "resolver_unavailable");
+assert.equal(focusResolverObservations.at(-1).failureDetail, "timeout");
+delete process.env.OPENAI_SQL_ERD_FOCUS_TIMEOUT_MS;
 
 globalThis.fetch = async () => {
   throw new Error("provider unavailable");
@@ -1066,6 +1141,7 @@ const providerFailure = await focusDefinition.execute(
 );
 assert.equal(providerFailure.outputSummary.reason, "resolver_unavailable");
 assert.deepEqual(providerFailure.resourceRefs, []);
+assert.equal(focusResolverObservations.at(-1).failureDetail, "network_error");
 
 const staleService = new FakeSqlErdService();
 const stableSession = sessionPayload({
@@ -1158,6 +1234,11 @@ if (originalApiKey === undefined) {
   delete process.env.OPENAI_API_KEY;
 } else {
   process.env.OPENAI_API_KEY = originalApiKey;
+}
+if (originalFocusTimeout === undefined) {
+  delete process.env.OPENAI_SQL_ERD_FOCUS_TIMEOUT_MS;
+} else {
+  process.env.OPENAI_SQL_ERD_FOCUS_TIMEOUT_MS = originalFocusTimeout;
 }
 
 const registry = new AgentToolRegistryService(

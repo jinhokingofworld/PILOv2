@@ -280,6 +280,23 @@ export class AgentLoggingService {
   ): Promise<CreateAgentRunResult> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
+    return this.database.transaction((transaction) =>
+      this.createRunInTransaction(
+        transaction,
+        currentUserId,
+        workspaceId,
+        input
+      )
+    );
+  }
+
+  async createRunInTransaction(
+    transaction: DatabaseTransaction,
+    currentUserId: string,
+    workspaceId: string,
+    input: CreateAgentRunInput,
+    forcedThreadId?: string
+  ): Promise<CreateAgentRunResult> {
     const prompt = this.normalizeRequiredText(input.prompt, "prompt");
     const timezone = this.normalizeRequiredText(
       input.timezone ?? DEFAULT_TIMEZONE,
@@ -289,7 +306,65 @@ export class AgentLoggingService {
     const requestContext = input.requestContext ?? null;
     const message = input.message ?? DEFAULT_RUN_MESSAGE;
 
-    return this.database.transaction(async (transaction) => {
+    if (clientRequestId) {
+      const existing = await this.findRunByClientRequest(
+        transaction,
+        workspaceId,
+        currentUserId,
+        clientRequestId
+      );
+
+      if (existing) {
+        return this.mapIdempotentRun(existing, prompt, timezone, requestContext);
+      }
+    }
+
+    const threadId = forcedThreadId
+      ? await this.lockOwnedThread(
+          transaction,
+          workspaceId,
+          currentUserId,
+          forcedThreadId
+        )
+      : await this.selectOrCreateThread(
+          transaction,
+          workspaceId,
+          currentUserId
+        );
+
+    const run = await transaction.queryOne<AgentRunRow>(
+      `
+          INSERT INTO agent_runs (
+            workspace_id,
+            requested_by_user_id,
+            thread_id,
+            client_request_id,
+            request_context_json,
+            status,
+            prompt,
+            timezone,
+            message
+          )
+          VALUES ($1, $2, $3, $4, $5, 'planning', $6, $7, $8)
+          ON CONFLICT (workspace_id, requested_by_user_id, client_request_id)
+          WHERE client_request_id IS NOT NULL
+            AND requested_by_user_id IS NOT NULL
+          DO NOTHING
+          RETURNING *
+      `,
+      [
+        workspaceId,
+        currentUserId,
+        threadId,
+        clientRequestId,
+        requestContext,
+        prompt,
+        timezone,
+        message
+      ]
+    );
+
+    if (!run) {
       if (clientRequestId) {
         const existing = await this.findRunByClientRequest(
           transaction,
@@ -308,95 +383,115 @@ export class AgentLoggingService {
         }
       }
 
-      const threadId = await this.createThread(
-        transaction,
-        workspaceId,
-        currentUserId
-      );
+      throw new Error("Agent run could not be created");
+    }
 
-      const run = await transaction.queryOne<AgentRunRow>(
-        `
-          INSERT INTO agent_runs (
-            workspace_id,
-            requested_by_user_id,
-            thread_id,
-            client_request_id,
-            request_context_json,
-            status,
-            prompt,
-            timezone,
-            message
-          )
-          VALUES ($1, $2, $3, $4, $5, 'planning', $6, $7, $8)
-          ON CONFLICT (workspace_id, requested_by_user_id, client_request_id)
-          WHERE client_request_id IS NOT NULL
-            AND requested_by_user_id IS NOT NULL
-          DO NOTHING
-          RETURNING *
-        `,
-        [
-          workspaceId,
-          currentUserId,
-          threadId,
-          clientRequestId,
-          requestContext,
-          prompt,
-          timezone,
-          message
-        ]
-      );
-
-      if (!run) {
-        if (clientRequestId) {
-          const existing = await this.findRunByClientRequest(
-            transaction,
-            workspaceId,
-            currentUserId,
-            clientRequestId
-          );
-
-          if (existing) {
-            return this.mapIdempotentRun(
-              existing,
-              prompt,
-              timezone,
-              requestContext
-            );
-          }
-        }
-
-        throw new Error("Agent run could not be created");
-      }
-
-      await this.insertLog(transaction, {
-        workspaceId,
-        runId: run.id,
-        actorType: "user",
-        actorUserId: currentUserId,
-        level: "info",
-        eventType: "run_created",
-        message: "Agent run created",
-        metadata: {
-          promptLength: prompt.length,
-          timezone,
-          hasClientRequestId: Boolean(clientRequestId)
-        },
-        resourceRefs: []
-      });
-
-      await transaction.execute(
-        `
-          INSERT INTO agent_run_outbox (run_id, workspace_id)
-          VALUES ($1, $2)
-        `,
-        [run.id, workspaceId]
-      );
-
-      return {
-        run: this.mapRun(run),
-        created: true
-      };
+    await this.insertLog(transaction, {
+      workspaceId,
+      runId: run.id,
+      actorType: "user",
+      actorUserId: currentUserId,
+      level: "info",
+      eventType: "run_created",
+      message: "Agent run created",
+      metadata: {
+        promptLength: prompt.length,
+        timezone,
+        hasClientRequestId: Boolean(clientRequestId)
+      },
+      resourceRefs: []
     });
+
+    await transaction.execute(
+      `
+        INSERT INTO agent_run_outbox (run_id, workspace_id)
+        VALUES ($1, $2)
+      `,
+      [run.id, workspaceId]
+    );
+
+    return {
+      run: this.mapRun(run),
+      created: true
+    };
+  }
+
+  private async selectOrCreateThread(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    currentUserId: string
+  ): Promise<string> {
+    await transaction.execute(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+      [`agent-thread:${workspaceId}:${currentUserId}`]
+    );
+
+    const existing = await transaction.queryOne<{ id: string }>(
+      `
+        SELECT thread.id
+        FROM agent_threads AS thread
+        WHERE thread.workspace_id = $1
+          AND thread.requested_by_user_id = $2
+          AND thread.expires_at > now()
+          AND (
+            thread.last_activity_at > now() - INTERVAL '1 hour'
+            OR EXISTS (
+              SELECT 1
+              FROM agent_runs AS run
+              JOIN agent_confirmations AS confirmation
+                ON confirmation.run_id = run.id
+              WHERE run.thread_id = thread.id
+                AND run.workspace_id = $1
+                AND run.requested_by_user_id = $2
+                AND run.status = 'waiting_confirmation'
+                AND confirmation.status = 'pending'
+                AND confirmation.expires_at > now()
+            )
+          )
+        ORDER BY
+          EXISTS (
+            SELECT 1
+            FROM agent_runs AS run
+            JOIN agent_confirmations AS confirmation
+              ON confirmation.run_id = run.id
+            WHERE run.thread_id = thread.id
+              AND run.status = 'waiting_confirmation'
+              AND confirmation.status = 'pending'
+              AND confirmation.expires_at > now()
+          ) DESC,
+          thread.last_activity_at DESC,
+          thread.id DESC
+        LIMIT 1
+        FOR UPDATE OF thread
+      `,
+      [workspaceId, currentUserId]
+    );
+
+    return (
+      existing?.id ?? this.createThread(transaction, workspaceId, currentUserId)
+    );
+  }
+
+  private async lockOwnedThread(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    currentUserId: string,
+    threadId: string
+  ): Promise<string> {
+    const thread = await transaction.queryOne<{ id: string }>(
+      `
+        SELECT id
+        FROM agent_threads
+        WHERE id = $1
+          AND workspace_id = $2
+          AND requested_by_user_id = $3
+          AND expires_at > now()
+        FOR UPDATE
+      `,
+      [threadId, workspaceId, currentUserId]
+    );
+    if (!thread) throw new Error("Agent thread is unavailable");
+    return thread.id;
   }
 
   private async createThread(

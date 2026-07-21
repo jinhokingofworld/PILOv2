@@ -174,6 +174,35 @@ export type SubmitAgentRunInput = {
   selection?: AgentRunInputSelection;
 };
 
+export type AgentMessageDisposition =
+  | "auto"
+  | "continue_previous"
+  | "start_new";
+
+export type RouteAgentMessageInput = {
+  message: string;
+  timezone?: string;
+  clientRequestId: string;
+  activeRunId: string | null;
+  requestContext?: AgentRunRequestContext;
+  disposition?: AgentMessageDisposition;
+  selection?: AgentRunInputSelection;
+};
+
+export type AgentMessagePayload = {
+  outcome: "continued" | "started_new" | "needs_choice" | "cancelled";
+  relationship: "continuation" | "new_intent" | "cancel" | "ambiguous";
+  run: AgentRun | null;
+  previousRun: AgentRun | null;
+  clarification: {
+    question: string;
+    choices: Array<{
+      disposition: "continue_previous" | "start_new";
+      label: string;
+    }>;
+  } | null;
+};
+
 export type AgentRunDetailPayload = {
   run: AgentRun;
 };

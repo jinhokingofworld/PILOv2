@@ -7,7 +7,9 @@ const { AgentLoggingService } = require(
 );
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
+const OTHER_USER_ID = "99999999-9999-4999-8999-999999999997";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
+const OTHER_WORKSPACE_ID = "99999999-9999-4999-8999-999999999996";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
 const PR_REVIEW_SESSION_ID = "88888888-8888-4888-8888-888888888888";
@@ -469,7 +471,7 @@ class FakeTransaction {
   await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "한 시간 뒤의 새 요청" });
   assert.equal(state.threads.length, 2);
   assert.equal(state.runs[0].thread_id, "new-thread-id");
-  assert.equal(state.threadLookupQuery, undefined);
+  assert.match(state.threadLookupQuery, /last_activity_at/);
 }
 
 {
@@ -479,9 +481,36 @@ class FakeTransaction {
   };
   const { service } = createService(state);
   await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "confirmation 대기 중인 요청" });
-  assert.equal(state.threads.length, 2);
+  assert.equal(state.threads.length, 1);
+  assert.equal(state.runs[0].thread_id, THREAD_ID);
+  assert.match(state.threadLookupQuery, /confirmation\.status = 'pending'/);
+}
+
+{
+  const state = {
+    runs: [],
+    steps: [],
+    logs: [],
+    activeThread: true,
+    threads: [
+      {
+        id: THREAD_ID,
+        workspace_id: OTHER_WORKSPACE_ID,
+        requested_by_user_id: USER_ID
+      },
+      {
+        id: "66666666-6666-4666-8666-666666666666",
+        workspace_id: WORKSPACE_ID,
+        requested_by_user_id: OTHER_USER_ID
+      }
+    ]
+  };
+  const { service } = createService(state);
+  await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "scope 격리 요청" });
+  assert.equal(state.threads.length, 3);
   assert.equal(state.runs[0].thread_id, "new-thread-id");
-  assert.equal(state.threadLookupQuery, undefined);
+  assert.match(state.threadLookupQuery, /thread\.workspace_id = \$1/);
+  assert.match(state.threadLookupQuery, /thread\.requested_by_user_id = \$2/);
 }
 
 function createService(state) {
@@ -541,6 +570,7 @@ function errorMessage(error) {
     runs: [],
     steps: [],
     logs: [],
+    activeThread: false,
     threads: [
       {
         id: THREAD_ID,

@@ -43,6 +43,10 @@ AGENT_PROMPT_INJECTION_CLARIFICATION_MESSAGE = (
     "안전하게 진행할 수 없습니다. "
     "원하는 작업과 대상만 다시 알려주세요."
 )
+MEETING_REPORT_HYBRID_COMPOUND_CLARIFICATION_MESSAGE = (
+    "특정 제목의 회의록 내용 검색과 다른 회의록 조회를 한 번에 처리하면 "
+    "대상을 안전하게 구분할 수 없습니다. 두 작업 중 먼저 처리할 요청을 알려주세요."
+)
 AGENT_GROUNDED_ANSWER_SECURITY_MESSAGE = (
     "회의 근거에 외부 지시로 보이는 내용이 포함되어 있어 답변을 안전하게 생성하지 않았습니다."
 )
@@ -1670,6 +1674,7 @@ def normalize_agent_planner_decision(
     decision = _normalize_meeting_report_hybrid_title_lookup(
         decision,
         completion_tool_names=completion_tool_names,
+        routed_capability_ids=routed_capability_ids,
     )
     decision = _normalize_calendar_relative_date_query(
         decision,
@@ -2320,11 +2325,15 @@ def _normalize_meeting_report_hybrid_title_lookup(
     decision: AgentPlannerDecision,
     *,
     completion_tool_names: tuple[str, ...],
+    routed_capability_ids: tuple[str, ...],
 ) -> AgentPlannerDecision:
+    hybrid_lookup_required = MEETING_REPORT_HYBRID_CAPABILITY_ID in routed_capability_ids or set(
+        completion_tool_names
+    ) == {"search_meeting_transcript"}
     if (
         decision.status != "tool_candidate"
         or decision.tool_name != "list_meeting_reports"
-        or set(completion_tool_names) != {"search_meeting_transcript"}
+        or not hybrid_lookup_required
         or not isinstance(decision.tool_input.get("reportTitle"), str)
     ):
         return decision
@@ -3233,6 +3242,19 @@ def normalize_agent_routing_decision(
         if decision.unsupported_reason
         else None
     )
+    if decision.status == "routed" and _meeting_report_hybrid_has_shared_lookup(
+        selected_capabilities
+    ):
+        return replace(
+            decision,
+            status="needs_clarification",
+            domains=domains,
+            capability_ids=capability_ids,
+            intent_summary=intent_summary,
+            confidence="low",
+            clarification_question=MEETING_REPORT_HYBRID_COMPOUND_CLARIFICATION_MESSAGE,
+            unsupported_reason=None,
+        )
     if decision.status == "routed" and decision.confidence == "low":
         return replace(
             decision,
@@ -3265,6 +3287,21 @@ def normalize_agent_routing_decision(
     )
 
 
+def _meeting_report_hybrid_has_shared_lookup(
+    capabilities: list[CapabilityDefinition],
+) -> bool:
+    if not any(
+        capability.capability_id == MEETING_REPORT_HYBRID_CAPABILITY_ID
+        for capability in capabilities
+    ):
+        return False
+    return any(
+        capability.capability_id != MEETING_REPORT_HYBRID_CAPABILITY_ID
+        and "list_meeting_reports" in capability.tool_names
+        for capability in capabilities
+    )
+
+
 def _agent_router_system_prompt() -> str:
     return (
         "You are the PILO Workspace Agent intent and domain router. "
@@ -3277,7 +3314,9 @@ def _agent_router_system_prompt() -> str:
         "combined with a question about actual speech, a decision reason, or activity evidence "
         "must use the catalog's hybrid title-and-evidence capability; a content-only Meeting "
         "search must use the direct evidence capability, and a title-only detail request must "
-        "not use hybrid search. Use unsupported only when the "
+        "not use hybrid search. Do not combine the hybrid capability with another capability "
+        "whose chain uses list_meeting_reports; ask which request to handle first so separate "
+        "list inputs cannot be confused. Use unsupported only when the "
         "catalog explicitly cannot satisfy the request. Write intentSummary and "
         "clarificationQuestion in Korean. For contextSurface sql_erd, classify requests to "
         "view, filter, or focus an existing SQLtoERD session as sql_erd.inspect. Classify "
