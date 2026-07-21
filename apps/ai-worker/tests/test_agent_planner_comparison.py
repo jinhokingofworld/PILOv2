@@ -5,6 +5,7 @@ import pytest
 from app.agent_planner_comparison import (
     build_agent_performance_snapshot,
     build_multiturn_context_comparison,
+    build_multiturn_context_snapshot,
     build_two_stage_comparison,
 )
 from scripts.snapshot_agent_planner_evaluations import main as snapshot_main
@@ -149,6 +150,8 @@ def workflow_report(
 def multiturn_report(*, evaluator_sha: str = "1" * 64) -> dict[str, object]:
     return {
         "multiTurnContextEvaluation": {
+            "conversationCount": 1,
+            "attempts": 1,
             "multiTurnContextResolutionRate": 0.5,
             "multiTurnToolSelectionAccuracy": 0.0,
             "partialRate": 0.0,
@@ -172,6 +175,7 @@ def multiturn_report(*, evaluator_sha: str = "1" * 64) -> dict[str, object]:
             "multiTurnJudgePromptVersion": "agent-outcome-judge:v1",
             "multiTurnJudgeTemperature": 0,
             "multiTurnJudgeVoteCount": 3,
+            "judgeCalibrationStatus": "pending",
             "currentDate": "2026-07-20",
             "timezone": "Asia/Seoul",
             "repetitions": 1,
@@ -193,6 +197,12 @@ def test_multiturn_comparison_uses_direct_tool_selection_verdict() -> None:
     comparison = build_multiturn_context_comparison(multiturn_report(), multiturn_report())
 
     assert comparison["metrics"]["multiTurnToolSelectionAccuracy"]["baseline"] == 0.0
+
+
+def test_multiturn_snapshot_preserves_pending_calibration_status() -> None:
+    snapshot = build_multiturn_context_snapshot(multiturn_report())
+
+    assert snapshot["metadata"]["judgeCalibrationStatus"] == "pending"
 
 
 def test_multiturn_comparison_rejects_changed_evaluator_provenance() -> None:

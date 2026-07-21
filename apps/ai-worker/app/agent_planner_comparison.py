@@ -53,6 +53,7 @@ def build_multiturn_context_comparison(
         "multiTurnJudgePromptVersion",
         "multiTurnJudgeTemperature",
         "multiTurnJudgeVoteCount",
+        "judgeCalibrationStatus",
         "currentDate",
         "timezone",
         "repetitions",
@@ -118,6 +119,7 @@ def build_multiturn_context_snapshot(report: dict[str, object]) -> dict[str, obj
                 "multiTurnJudgePromptVersion",
                 "multiTurnJudgeTemperature",
                 "multiTurnJudgeVoteCount",
+                "judgeCalibrationStatus",
                 "currentDate",
                 "timezone",
                 "repetitions",
@@ -159,6 +161,8 @@ def _validate_multiturn_report(report: dict[str, object]) -> None:
         raise ValueError("Multi-turn Judge temperature must be zero")
     if metadata.get("multiTurnJudgeVoteCount") != 3:
         raise ValueError("Multi-turn Judge vote count must be three")
+    if metadata.get("judgeCalibrationStatus") not in {"pending", "passed"}:
+        raise ValueError("Multi-turn report has invalid Judge calibration status")
 
 
 def _multiturn_conversation_scores(
