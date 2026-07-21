@@ -160,6 +160,12 @@ same run must not insert duplicates. The AI Worker and App Server never write
 these Canvas records directly, no Canvas draft is created, and generated HTML
 does not include JavaScript behavior.
 
+HTML generation uses a dedicated `OPENAI_CANVAS_HTML_TIMEOUT_MS` budget instead
+of the shorter shared planner timeout. Dev configures it to 180 seconds and caps
+the provider response at 32000 output tokens. A provider timeout terminally
+fails the run with a bounded retry message instead of leaving it in `planning`
+for the SQS visibility retry interval.
+
 For HTML generation, `styleMode: faithful` means structural fidelity rather
 than literal Canvas pixel reproduction. The generator preserves hierarchy,
 section order, relative proportions, meaningful overlap, and user-authored
