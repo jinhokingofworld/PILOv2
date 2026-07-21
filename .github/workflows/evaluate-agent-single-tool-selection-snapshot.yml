@@ -133,7 +133,7 @@ jobs:
             candidate_inventory = candidate.get("inventory", {})
             if any(baseline_inventory.get(key) != candidate_inventory.get(key) for key in keys):
                 raise SystemExit("Registry changed; this is not a comparable selection experiment")
-            PY
+          PY
           fi
       - uses: actions/upload-artifact@v4
         with:
