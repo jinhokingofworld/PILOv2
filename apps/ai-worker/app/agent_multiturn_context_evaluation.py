@@ -7,6 +7,11 @@ from datetime import date
 from pathlib import Path
 from types import MappingProxyType
 
+from app.agent_outcome_judge import (
+    MultiTurnJudgeClient,
+    MultiTurnJudgeEvidence,
+    judge_multiturn_context,
+)
 from app.agent_processor import (
     AgentPlannerClient,
     AgentRouterClient,
@@ -74,6 +79,8 @@ class MultiTurnEvaluationResult:
     deterministic_context_passed: bool
     deterministic_continuation_passed: bool
     failure_reasons: tuple[str, ...]
+    judge_verdict: str | None = None
+    judge_failure_codes: tuple[str, ...] = ()
 
 
 def load_multiturn_catalog(catalog_path: Path) -> MultiTurnCatalog:
@@ -184,6 +191,7 @@ def evaluate_multiturn_conversation(
     *,
     current_date: str,
     router: AgentRouterClient | None = None,
+    judge: MultiTurnJudgeClient | None = None,
     timezone: str = "Asia/Seoul",
     attempt: int = 1,
 ) -> MultiTurnEvaluationResult:
@@ -227,7 +235,7 @@ def evaluate_multiturn_conversation(
         attempt=attempt,
     )
     if not runtime_failure:
-        return result
+        return _with_multiturn_judge(result, conversation, repository, judge)
     failure_reasons = tuple(
         dict.fromkeys(
             (*result.failure_reasons, "runtime_failure", repository.last_process_reason)
@@ -239,6 +247,8 @@ def evaluate_multiturn_conversation(
         deterministic_context_passed=result.deterministic_context_passed,
         deterministic_continuation_passed=False,
         failure_reasons=failure_reasons,
+        judge_verdict=None,
+        judge_failure_codes=(),
     )
 
 
@@ -486,3 +496,35 @@ def _thaw_json(value: FrozenJson) -> object:
     if isinstance(value, tuple):
         return [_thaw_json(item) for item in value]
     return value
+
+
+def _with_multiturn_judge(
+    result: MultiTurnEvaluationResult,
+    conversation: MultiTurnConversation,
+    repository: _MultiTurnReplayRepository,
+    judge: MultiTurnJudgeClient | None,
+) -> MultiTurnEvaluationResult:
+    if judge is None:
+        return result
+    final_turn = conversation.turns[-1]
+    verdict = judge_multiturn_context(
+        MultiTurnJudgeEvidence(
+            conversation_history=tuple(turn.user for turn in conversation.turns),
+            tool_trace=tuple(call.tool_name for call in repository.tool_calls),
+            expected_context_transition=(
+                final_turn.expected_context.context_ref or "no prior context required"
+            ),
+            final_answer=repository.final_answers[-1] if repository.final_answers else "",
+            deterministic_context_passed=result.deterministic_context_passed,
+        ),
+        judge,
+    )
+    return MultiTurnEvaluationResult(
+        conversation_id=result.conversation_id,
+        attempt=result.attempt,
+        deterministic_context_passed=result.deterministic_context_passed,
+        deterministic_continuation_passed=result.deterministic_continuation_passed,
+        failure_reasons=result.failure_reasons,
+        judge_verdict=verdict.verdict,
+        judge_failure_codes=verdict.failure_codes,
+    )

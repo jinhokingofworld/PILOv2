@@ -1,8 +1,83 @@
 from app.agent_outcome_judge import (
+    MultiTurnJudgeEvidence,
     OutcomeJudgeEvidence,
+    judge_multiturn_context,
     judge_outcome,
     parse_outcome_judge_verdict,
 )
+
+
+def test_multiturn_judge_requires_a_pass_majority_and_deterministic_context_gate() -> None:
+    class ScriptedJudge:
+        def __init__(self) -> None:
+            self.outputs = iter(("pass", "partial", "pass"))
+
+        def judge(self, _evidence: MultiTurnJudgeEvidence) -> str:
+            label = next(self.outputs)
+            return (
+                "{"
+                f'"contextResolved":{str(label == "pass").lower()},'
+                f'"followUpDelivered":{str(label == "pass").lower()},'
+                '"containsMaterialError":false,'
+                f'"verdict":"{label}","failureCodes":[]'
+                "}"
+            )
+
+    evidence = MultiTurnJudgeEvidence(
+        conversation_history=("Show the meeting report.", "What actions came from it?"),
+        tool_trace=("list_meeting_reports", "find_action_items"),
+        expected_context_transition="Use the prior report contextRef.",
+        final_answer="The follow-up action is to write the proposal.",
+        deterministic_context_passed=True,
+    )
+
+    verdict = judge_multiturn_context(evidence, ScriptedJudge())
+
+    assert verdict.verdict == "pass"
+    assert verdict.context_resolved is True
+    assert verdict.follow_up_delivered is True
+
+    blocked = judge_multiturn_context(
+        MultiTurnJudgeEvidence(
+            conversation_history=evidence.conversation_history,
+            tool_trace=evidence.tool_trace,
+            expected_context_transition=evidence.expected_context_transition,
+            final_answer=evidence.final_answer,
+            deterministic_context_passed=False,
+        ),
+        ScriptedJudge(),
+    )
+    assert blocked.verdict == "fail"
+    assert blocked.failure_codes == ("deterministic_context_gate",)
+
+
+def test_multiturn_judge_marks_provider_error_or_vote_split_inconclusive() -> None:
+    class FlakyJudge:
+        def __init__(self, outputs: tuple[str, ...]) -> None:
+            self.outputs = iter(outputs)
+
+        def judge(self, _evidence: MultiTurnJudgeEvidence) -> str:
+            label = next(self.outputs)
+            if label == "error":
+                raise RuntimeError("provider unavailable")
+            return (
+                "{"
+                f'"contextResolved":{str(label == "pass").lower()},'
+                f'"followUpDelivered":{str(label == "pass").lower()},'
+                '"containsMaterialError":false,'
+                f'"verdict":"{label}","failureCodes":[]'
+                "}"
+            )
+
+    evidence = MultiTurnJudgeEvidence(("a", "b"), (), "reference", "answer", True)
+
+    provider_error = judge_multiturn_context(evidence, FlakyJudge(("pass", "error", "pass")))
+    split = judge_multiturn_context(evidence, FlakyJudge(("pass", "partial", "fail")))
+
+    assert provider_error.verdict == "inconclusive"
+    assert "judge_unavailable" in provider_error.failure_codes
+    assert split.verdict == "inconclusive"
+    assert "judge_vote_split" in split.failure_codes
 
 
 def test_parses_a_valid_pass_verdict() -> None:

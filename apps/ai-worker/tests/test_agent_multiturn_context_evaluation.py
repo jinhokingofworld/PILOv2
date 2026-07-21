@@ -15,6 +15,7 @@ from app.agent_multiturn_context_evaluation import (
     evaluate_multiturn_conversation,
     load_multiturn_catalog,
 )
+from app.agent_outcome_judge import MultiTurnJudgeEvidence
 from app.agent_planner_evaluation import load_evaluation_suite
 from app.agent_processor import AgentPlannerDecision, AgentRoutingDecision
 from app.agent_tool_retrieval import (
@@ -305,11 +306,21 @@ def test_replay_preserves_prior_tool_result_across_user_turns() -> None:
         conversation,
         current_date="2026-07-21",
         router=MeetingRouter(),
+        judge=PassingJudge(),
     )
 
     assert result.deterministic_continuation_passed
+    assert result.judge_verdict == "pass"
     assert "tool list_meeting_reports:" in planner.requests[2].planning_context
     assert "user: Does it contain action items?" in planner.requests[2].planning_context
+
+
+class PassingJudge:
+    def judge(self, _evidence: MultiTurnJudgeEvidence) -> str:
+        return (
+            '{"contextResolved":true,"followUpDelivered":true,'
+            '"containsMaterialError":false,"verdict":"pass","failureCodes":[]}'
+        )
 
 
 def _planner_decision(tool_name: str, tool_input: dict[str, object]) -> AgentPlannerDecision:
