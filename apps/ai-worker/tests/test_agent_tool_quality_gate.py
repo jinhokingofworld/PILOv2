@@ -40,16 +40,16 @@ def test_quality_gate_records_reproducible_passing_baseline_without_sensitive_in
             "f7f0a523e061086f1596da6b056daff1878d28f4c12b7d002a2e230e0235bbab"
         ),
         "registryInventorySha256": (
-            "ce2deb6bc059fc89a09655ddc7afd0234ca39c35b6f344aa74c63d09ad79a63c"
+            "88a574298805f5c1442c064a751ff35cdc245e6b6ab0ea7c2b06fa97be0baf26"
         ),
         "registryCatalogSha256": (
-            "81b0fa0bc6d08c464f212a8ec7e4d107e6ebc187eed2aae068208f7d0892278c"
+            "23c2871766ce1c64ea0baee5843bda2acd5e8174cf707cb86087a8240be654ca"
         ),
         "registryEligibleSnapshotSha256": (
             "f7f0a523e061086f1596da6b056daff1878d28f4c12b7d002a2e230e0235bbab"
         ),
         "modelVersion": "deterministic:no-provider",
-        "retrieverVersion": "agent-tool-metadata-overlap:v3",
+        "retrieverVersion": "agent-tool-metadata-overlap:v4",
         "topK": 8,
         "defaultSchemaTokenBudget": 8000,
     }
