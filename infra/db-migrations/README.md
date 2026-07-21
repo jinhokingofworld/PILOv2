@@ -41,12 +41,18 @@ before executing baseline mode.
 
 ## Applying later migrations
 
-### Temporary migration-104 recovery
+### Immutable migration policy
 
-Issue #1637 permits only the exact migration-104 checksum transition while
-the corrected file is promoted from dev to main. The exception must be removed
-in a follow-up change after that promotion; it is not a permanent repair
-mechanism and does not authorize a new RDS migration execution.
+Treat a migration as immutable as soon as it is merged to `main` or recorded
+by a shared database. A later schema or permission correction must be a new,
+next-numbered migration. Do not edit an old file to repair it, even when the
+old migration has not yet been executed by the current RDS environment: the
+same file can already be the canonical version for another environment or
+release branch.
+
+If an existing migration is changed accidentally before release, restore the
+canonical file and create a new migration for the intended change. The CI
+checksum check is deliberately designed to reject the old-file edit.
 
 The `Publish DB Migration Runner` workflow validates migration filenames and
 immutability on pull requests. When a matching change is merged to `dev`, it

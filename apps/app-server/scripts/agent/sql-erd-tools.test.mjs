@@ -972,6 +972,7 @@ assert.deepEqual(
   ["activity_logs"]
 );
 assert.deepEqual(llmFocused.outputSummary.relatedTables, []);
+assert.equal(capturedResolverBody.model, "gpt-5.4-mini");
 assert.equal(capturedResolverBody.input[1].content.includes(SESSION_ID), false);
 assert.equal(
   capturedResolverBody.input[1].content.includes("internal-payments-id"),

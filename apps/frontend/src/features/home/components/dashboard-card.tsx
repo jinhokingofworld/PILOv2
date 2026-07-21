@@ -54,7 +54,7 @@ export function DashboardCard({
         </div>
       ) : null}
       <CardHeader className="relative z-10 gap-1.5 px-5 pt-5">
-        <CardTitle className="flex items-center gap-2.5 text-[16px] font-semibold tracking-[-0.01em] text-[#202124]">
+        <CardTitle className="flex items-center gap-2.5 text-[19px] font-semibold tracking-[-0.01em] text-[#202124] group-data-[size=sm]/card:text-[19px]">
           <span className="flex size-8 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f6f7f9] text-[#6b6f78]">
             {icon}
           </span>
@@ -62,7 +62,7 @@ export function DashboardCard({
           {titleAdornment}
         </CardTitle>
         {description ? (
-          <CardDescription className="text-[12px] leading-5 text-[#6b6f78]">
+          <CardDescription className="text-[15px] leading-5 text-[#6b6f78]">
             {description}
           </CardDescription>
         ) : null}
@@ -116,7 +116,7 @@ export function DashboardCardMessage({
 }) {
   return (
     <div
-      className={`${rowSpanClassName} flex min-h-0 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f8f9fb] p-3 text-center text-[12px] font-medium ${
+      className={`${rowSpanClassName} flex min-h-0 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f8f9fb] p-3 text-center text-[15px] font-medium ${
         tone === "danger" ? "text-destructive" : "text-muted-foreground"
       }`}
     >
@@ -145,7 +145,7 @@ export function StatusPill({
 
   return (
     <span
-      className={`inline-flex h-6 shrink-0 items-center rounded-md px-2 text-xs font-medium ${toneClassName} ${className}`}
+      className={`inline-flex h-6 shrink-0 items-center rounded-md px-2 text-[15px] font-medium ${toneClassName} ${className}`}
     >
       {label}
     </span>

@@ -684,7 +684,7 @@ export class SqlErdAgentToolsService {
           },
           body: JSON.stringify({
             model:
-              process.env.OPENAI_SQL_ERD_FOCUS_MODEL ?? "gpt-5.1-mini",
+              process.env.OPENAI_SQL_ERD_FOCUS_MODEL ?? "gpt-5.4-mini",
             input: [
               {
                 role: "system",

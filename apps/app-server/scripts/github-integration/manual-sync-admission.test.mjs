@@ -175,10 +175,11 @@ async function admitManual({ replay = null, active = [], userTotal = 0, workspac
         const value = await callback({
           async execute(text) { events.push(/global-admission/.test(text) ? "global-lock" : /workspace:/.test(text) ? "workspace-lock" : "ledger"); },
           async query(text) { assert.match(text, /trigger_source = 'manual'/); return active; },
-          async queryOne(text) {
+          async queryOne(text, values) {
             if (/github_sync_manual_requests/.test(text)) return replay;
             if (/FROM github_sync_runs AS run/.test(text)) {
               if (assertManualLimitSql) {
+                const isWorkspaceLimit = events.includes("user-limit");
                 assert.match(
                   text,
                   /MAX\(GREATEST\(1, CEIL\(EXTRACT\(EPOCH FROM \(run\.created_at \+ \(\$4 \* interval '1 second'\) - now\(\)\)\)/
@@ -187,6 +188,22 @@ async function admitManual({ replay = null, active = [], userTotal = 0, workspac
                   text,
                   /FILTER \(WHERE run\.created_at \+ \(\$4 \* interval '1 second'\) > now\(\)\) AS cooldown_retry_after_seconds/
                 );
+                assert.deepEqual(
+                  [...new Set([...text.matchAll(/\$(\d+)/g)].map((match) => Number(match[1])))].sort((left, right) => left - right),
+                  [1, 2, 3, 4]
+                );
+                assert.deepEqual(
+                  values,
+                  ["workspace-1", isWorkspaceLimit ? null : "user-1", 600, 30]
+                );
+                if (isWorkspaceLimit) {
+                  assert.match(
+                    text,
+                    /\(\$2::uuid IS NULL OR job\.requested_by_user_id=\$2::uuid\)/
+                  );
+                } else {
+                  assert.match(text, /job\.requested_by_user_id=\$2/);
+                }
               }
               const total = events.includes("user-limit") ? workspaceTotal : userTotal;
               events.push(events.includes("user-limit") ? "workspace-limit" : "user-limit");
