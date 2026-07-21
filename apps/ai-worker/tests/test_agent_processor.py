@@ -2268,6 +2268,85 @@ def test_processor_completes_planning_run_with_tool_candidate() -> None:
     assert planner_client.requests[0].timezone == "Asia/Seoul"
 
 
+def test_shadow_retrieval_does_not_repeat_completed_read_when_primary_is_wrong() -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="create_calendar_event",
+            description="Calendar 일정을 생성합니다.",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+            inputSchema={
+                "type": "object",
+                "required": ["title", "startDate"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "startDate": {"type": "string", "format": "date"},
+                },
+            },
+        ),
+    ]
+    catalog = tool_capability_catalog(tools)
+    create_capability = next(
+        capability
+        for capability in catalog["capabilities"]
+        if capability["id"] == "calendar.events.create"
+    )
+    create_capability["whenToUse"] = "어제 일정이 뭐야"
+    create_capability["mustNotUseFor"] = []
+    create_capability["examples"] = [
+        {"kind": kind, "utterance": "어제 일정이 뭐야"}
+        for kind in ("canonical", "paraphrase", "typo", "honorific", "abbreviation")
+    ]
+    create_capability["positiveExamples"] = [
+        example["utterance"] for example in create_capability["examples"]
+    ]
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            prompt="어제 일정이 뭐야",
+            planning_context=(
+                "user: 어제 일정이 뭐야\n"
+                'tool list_calendar_events: {"start":"2026-07-21",'
+                '"end":"2026-07-21","count":0,"events":[],"status":"completed"}'
+            ),
+        )
+    )
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            status="completed",
+            message="Calendar 일정 조회를 완료했습니다.",
+            final_answer_draft="어제 일정은 없습니다.",
+            tool_name=None,
+            tool_input={},
+        )
+    )
+    handoff_client = FakeExecutionHandoffClient()
+    processor = AgentRunProcessor(
+        repository,
+        planner_client,
+        handoff_client,
+        current_date_provider=lambda _timezone: date(2026, 7, 22),
+        tool_retrieval_mode=TOOL_RETRIEVAL_MODE_SHADOW,
+    )
+
+    result = processor.process_payload(agent_payload(tools=tools, toolCapabilityCatalog=catalog))
+
+    assert planner_client.requests[0].completion_tool_names == ()
+    assert result.reason == "agent_planning_completed"
+    assert repository.completed_runs == [
+        (
+            RUN_ID,
+            "어제 일정은 없습니다.",
+            "Calendar 일정 조회를 완료했습니다.",
+            None,
+        )
+    ]
+    assert handoff_client.calls == []
+
+
 @pytest.mark.parametrize(
     "mode",
     [TOOL_RETRIEVAL_MODE_SHADOW, TOOL_RETRIEVAL_MODE_SHORTLIST],

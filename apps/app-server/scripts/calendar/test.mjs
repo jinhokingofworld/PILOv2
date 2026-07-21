@@ -226,6 +226,40 @@ async function assertBadRequest(action, messagePattern) {
 }
 
 {
+  const originalTimezone = process.env.TZ;
+  process.env.TZ = "Asia/Seoul";
+  try {
+    const localCalendarDate = new Date(2026, 6, 22);
+    const database = new FakeDatabase({
+      queryRows: [
+        [
+          calendarRow({
+            id: 8,
+            start_date: localCalendarDate,
+            end_date: localCalendarDate
+          })
+        ]
+      ]
+    });
+    const { service } = createSubject(database);
+
+    const [event] = await service.listEvents(currentUserId, workspaceId, {
+      start: "2026-07-22",
+      end: "2026-07-22"
+    });
+
+    assert.equal(event.startDate, "2026-07-22");
+    assert.equal(event.endDate, "2026-07-22");
+  } finally {
+    if (originalTimezone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTimezone;
+    }
+  }
+}
+
+{
   const database = new FakeDatabase({
     queryOneRows: [
       (text, values) => {

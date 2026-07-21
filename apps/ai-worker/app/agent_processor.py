@@ -1092,9 +1092,10 @@ class AgentRunProcessor:
                     schema_token_budget=self.tool_retrieval_schema_token_budget,
                 )
                 planner_tools = planner_selection.tools
-                completion_tool_names = _retrieval_terminal_tool_names(
+                completion_tool_names = _retrieval_completion_tool_names(
                     selection_job.tool_capability_catalog,
                     planner_selection.retrieval,
+                    context.planning_context,
                 )
             routed_workflow_completed = (
                 routing is not None
@@ -4076,6 +4077,38 @@ def _retrieval_terminal_tool_names(
     if not capability_ids:
         return (UNTRUSTED_COMPLETION_EVIDENCE_TOOL_NAME,)
     return _capability_terminal_tool_names(catalog, capability_ids)
+
+
+def _retrieval_completion_tool_names(
+    catalog: ToolCapabilityCatalog | None,
+    retrieval: ToolRetrievalResult | None,
+    planning_context: str,
+) -> tuple[str, ...]:
+    terminal_names = _retrieval_terminal_tool_names(catalog, retrieval)
+    if catalog is None or retrieval is None:
+        return terminal_names
+
+    capability_ids = retrieval.selected_capability_ids
+    if not capability_ids and retrieval.primary_capability_id:
+        capability_ids = (retrieval.primary_capability_id,)
+    if not capability_ids:
+        return terminal_names
+
+    selected_capability_ids = set(capability_ids)
+    selected_tool_names = {
+        tool_name
+        for capability in catalog.capabilities
+        if capability.capability_id in selected_capability_ids
+        for tool_name in capability.tool_names
+    }
+    completed_tool_names = _planning_tool_result_names(planning_context)
+    if (
+        selected_tool_names
+        and completed_tool_names
+        and selected_tool_names.isdisjoint(completed_tool_names)
+    ):
+        return ()
+    return terminal_names
 
 
 def _safe_text(value: str | None, fallback: str) -> str:
