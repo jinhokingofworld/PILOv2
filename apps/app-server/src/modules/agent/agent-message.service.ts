@@ -32,6 +32,16 @@ import type { AgentRunRequestContext } from "./types/agent-tool.types";
 const DEFAULT_TIMEZONE = "Asia/Seoul";
 const MAX_MESSAGE_BYTES = 4000;
 const MAX_CLIENT_REQUEST_ID_BYTES = 128;
+const BUDGET_EXHAUSTION_MESSAGE_MARKERS = [
+  "한 요청에서 실행할 수 있는 작업은 최대",
+  "한 요청에서 계획할 수 있는 작업은 최대"
+] as const;
+const EXPLICIT_CONTINUATION_PATTERN =
+  /(계속(?:해|해서|\s*진행)|이어서|이어\s*서|마저|남은\s*(?:내용|작업)|나머지|하던\s*(?:작업|요청)|다음\s*(?:단계|작업))/;
+const EXPLICIT_CANCELLATION_PATTERN =
+  /(취소|그만|중단|멈춰|필요\s*없|하지\s*마|됐어|됐습니다)/;
+const ACTIONABLE_REQUEST_PATTERN =
+  /(알려|보여|조회|찾|만들|추가|생성|변경|바꾸|바꿔|수정|옮기|이동|삭제|지우|요약|승인|반려|실행|시작|종료|열어|작성|보내|뭐야|뭔지|무엇|언제|어디|누구|몇)/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UUID_IN_TEXT_PATTERN =
@@ -303,6 +313,14 @@ export class AgentMessageService {
         reason: "서버가 검증한 후보 선택 입력입니다.",
         clarificationQuestion: null
       };
+    }
+
+    const budgetExhaustionDecision = this.decideBudgetExhaustionRelationship(
+      snapshot,
+      input.message
+    );
+    if (budgetExhaustionDecision) {
+      return budgetExhaustionDecision;
     }
 
     try {
@@ -1051,6 +1069,47 @@ export class AgentMessageService {
     };
   }
 
+  private decideBudgetExhaustionRelationship(
+    snapshot: ActiveRunSnapshot,
+    message: string
+  ): AgentInputRelationshipDecision | null {
+    if (
+      snapshot.status !== "waiting_user_input" ||
+      !this.isBudgetExhaustionMessage(snapshot.message)
+    ) {
+      return null;
+    }
+    if (EXPLICIT_CONTINUATION_PATTERN.test(message)) {
+      return {
+        relationship: "continuation",
+        confidence: "high",
+        reason: "사용자가 budget 소진 후 기존 작업 계속을 명시했습니다.",
+        clarificationQuestion: null
+      };
+    }
+    if (EXPLICIT_CANCELLATION_PATTERN.test(message)) {
+      return null;
+    }
+    if (!ACTIONABLE_REQUEST_PATTERN.test(message)) {
+      return null;
+    }
+    return {
+      relationship: "new_intent",
+      confidence: "high",
+      reason: "budget 소진 대기 중 구체적인 새 작업 요청이 입력되었습니다.",
+      clarificationQuestion: null
+    };
+  }
+
+  private isBudgetExhaustionMessage(message: string | null): boolean {
+    return Boolean(
+      message &&
+        BUDGET_EXHAUSTION_MESSAGE_MARKERS.some((marker) =>
+          message.includes(marker)
+        )
+    );
+  }
+
   private assertSnapshotCanReceiveMessage(snapshot: ActiveRunSnapshot): void {
     if (
       snapshot.status !== "waiting_user_input" &&
@@ -1149,6 +1208,10 @@ export class AgentMessageService {
           ? "confirmation"
           : candidates.length > 0
             ? "candidate"
+            : this.isBudgetExhaustionMessage(
+                  latestAssistantQuestion ?? snapshot.message
+                )
+              ? "budget_exhausted"
             : latestAssistantQuestion
               ? "clarification"
               : "other",

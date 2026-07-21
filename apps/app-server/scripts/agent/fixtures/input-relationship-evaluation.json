@@ -30,5 +30,6 @@
   { "name": "confirmation_new_calendar", "question": "Board 이슈를 생성할까요?", "message": "이번 주 일정부터 보여줘", "relationship": "new_intent", "runStatus": "waiting_confirmation", "waitingInputKind": "confirmation" },
   { "name": "confirmation_cancel", "question": "일정을 생성할까요?", "message": "생성하지 마", "relationship": "cancel", "runStatus": "waiting_confirmation", "waitingInputKind": "confirmation" },
   { "name": "sql_erd_continuation", "question": "어느 테이블을 중심으로 볼까요?", "message": "users 테이블", "relationship": "continuation", "requestSurface": "sql_erd" },
-  { "name": "sql_erd_to_calendar", "question": "어느 테이블을 중심으로 볼까요?", "message": "오늘 일정 보여줘", "relationship": "new_intent", "requestSurface": "sql_erd" }
+  { "name": "sql_erd_to_calendar", "question": "어느 테이블을 중심으로 볼까요?", "message": "오늘 일정 보여줘", "relationship": "new_intent", "requestSurface": "sql_erd" },
+  { "name": "budget_exhausted_to_calendar_update", "question": "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.", "message": "하하하 일정의 날짜를 오늘로 바꿔줘", "relationship": "new_intent", "waitingInputKind": "budget_exhausted" }
 ]

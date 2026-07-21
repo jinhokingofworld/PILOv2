@@ -575,6 +575,114 @@ function request(message, overrides = {}) {
 }
 
 {
+  const budgetMessage =
+    "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.";
+  const state = createState(
+    waitingRun({
+      prompt: "내일 일정 알려줘",
+      message: budgetMessage,
+      messages: [{ role: "assistant", content: budgetMessage }]
+    })
+  );
+  const relationshipService = {
+    calls: [],
+    async classify(context) {
+      this.calls.push(context);
+      return {
+        relationship: "continuation",
+        confidence: "high",
+        reason: "provider가 일반 입력을 잘못 continuation으로 분류",
+        clarificationQuestion: null
+      };
+    }
+  };
+  const { service, publisher } = createService(state, relationshipService);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request("하하하 일정의 날짜를 오늘로 바꿔줘", {
+      clientRequestId: "budget-exhausted-calendar-update"
+    })
+  );
+
+  assert.equal(result.outcome, "started_new");
+  assert.equal(result.relationship, "new_intent");
+  assert.equal(result.previousRun.status, "cancelled");
+  assert.equal(result.run.prompt, "하하하 일정의 날짜를 오늘로 바꿔줘");
+  assert.equal(result.run.conversationId, THREAD_ID);
+  assert.deepEqual(publisher.published, [result.run.id]);
+  assert.deepEqual(relationshipService.calls, []);
+}
+
+{
+  const budgetMessage =
+    "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.";
+  const state = createState(
+    waitingRun({
+      prompt: "긴 작업을 처리해줘",
+      message: budgetMessage,
+      messages: [{ role: "assistant", content: budgetMessage }]
+    })
+  );
+  const { service, agentService, relationshipService } = createService(state);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request("남은 작업을 이어서 처리해줘", {
+      clientRequestId: "budget-exhausted-explicit-continuation"
+    })
+  );
+
+  assert.equal(result.outcome, "continued");
+  assert.equal(result.relationship, "continuation");
+  assert.equal(result.run.id, RUN_ID);
+  assert.equal(agentService.resumeCount, 1);
+  assert.deepEqual(relationshipService.calls, []);
+}
+
+{
+  const budgetMessage =
+    "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.";
+  const state = createState(
+    waitingRun({
+      prompt: "내일 일정 알려줘",
+      message: budgetMessage,
+      messages: [{ role: "assistant", content: budgetMessage }]
+    })
+  );
+  const relationshipService = {
+    calls: [],
+    async classify(context) {
+      this.calls.push(context);
+      return {
+        relationship: "ambiguous",
+        confidence: "low",
+        reason: "참조 대상이 모호합니다.",
+        clarificationQuestion:
+          "기존 작업을 이어갈까요, 아니면 새 요청을 시작할까요?"
+      };
+    }
+  };
+  const { service } = createService(state, relationshipService);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request("그거", {
+      clientRequestId: "budget-exhausted-ambiguous-reference"
+    })
+  );
+
+  assert.equal(result.outcome, "needs_choice");
+  assert.equal(result.relationship, "ambiguous");
+  assert.equal(state.runs[0].status, "waiting_user_input");
+  assert.equal(relationshipService.calls.length, 1);
+  assert.equal(
+    relationshipService.calls[0].waitingInputKind,
+    "budget_exhausted"
+  );
+}
+
+{
   const state = createState(
     waitingRun({
       prompt: `회의록 ${THREAD_ID} token=internal-provider-token을 선택해 주세요.`,

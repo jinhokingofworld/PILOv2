@@ -73,6 +73,13 @@ try {
     );
     const providerContext = JSON.parse(requestBody.input[1].content);
     assert.equal(providerContext.newMessage, fixture.message);
+    assert.equal(
+      providerContext.waitingInputKind,
+      fixture.waitingInputKind ??
+        (fixture.runStatus === "waiting_confirmation"
+          ? "confirmation"
+          : "clarification")
+    );
     assert.equal("resourceId" in providerContext, false);
     assert.equal("toolOutput" in providerContext, false);
     assert.equal("providerPayload" in providerContext, false);
