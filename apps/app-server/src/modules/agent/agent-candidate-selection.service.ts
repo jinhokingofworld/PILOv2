@@ -1,5 +1,4 @@
 import { HttpException, Injectable } from "@nestjs/common";
-import { createHash } from "node:crypto";
 import type { QueryResultRow } from "pg";
 import { badRequest } from "../../common/api-error";
 import {
@@ -39,11 +38,7 @@ interface CandidateRow extends QueryResultRow {
 
 export interface AgentCandidateSelection {
   candidateSelectionId: string;
-  domain: string;
   resourceType: string;
-  contextRef: string;
-  ordinal: number;
-  generation: number;
   label: string;
   description: string | null;
   status: string | null;
@@ -273,29 +268,11 @@ export class AgentCandidateSelectionService {
   private toPublicCandidate(row: CandidateRow): AgentCandidateSelection {
     return {
       candidateSelectionId: row.id,
-      domain: row.domain,
       resourceType: row.resource_type,
-      contextRef: this.candidateContextRef(row.id),
-      ordinal: Number(row.candidate_ordinal),
-      generation: this.candidateGeneration(row.tool_step_id),
       label: row.label,
       description: row.description,
       status: row.status
     };
-  }
-
-  private candidateContextRef(candidateSelectionId: string): string {
-    return `ctx_${createHash("sha256")
-      .update(`candidate:${candidateSelectionId}`, "utf8")
-      .digest("hex")
-      .slice(0, 24)}`;
-  }
-
-  private candidateGeneration(toolStepId: string): number {
-    return Number.parseInt(
-      createHash("sha256").update(toolStepId, "utf8").digest("hex").slice(0, 8),
-      16
-    );
   }
 
   private async revalidateReference(

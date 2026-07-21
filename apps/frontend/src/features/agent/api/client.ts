@@ -1,5 +1,4 @@
 import type {
-  AgentContextNavigationPayload,
   AgentConfirmationActionPayload,
   AgentConfirmationApproveInput,
   AgentRunDetailPayload,
@@ -219,16 +218,6 @@ function agentRunInputsPath(workspaceId: string, runId: string) {
   return `${agentRunPath(workspaceId, runId)}/inputs` as const;
 }
 
-function agentContextNavigationPath(
-  workspaceId: string,
-  runId: string,
-  contextRef: string
-) {
-  return `${agentRunPath(workspaceId, runId)}/context-references/${encodeURIComponent(
-    contextRef
-  )}/navigation` as const;
-}
-
 function agentConfirmationPath(
   workspaceId: string,
   runId: string,
@@ -274,22 +263,6 @@ export function createAgentApiClient({
     ) {
       return requestAgentData<AgentRunDetailPayload>(
         agentRunPath(workspaceId, runId),
-        {
-          method: "GET",
-          signal: options.signal
-        },
-        requestOptions
-      );
-    },
-
-    async resolveContextNavigation(
-      workspaceId: string,
-      runId: string,
-      contextRef: string,
-      options: AgentRequestOptions = {}
-    ) {
-      return requestAgentData<AgentContextNavigationPayload>(
-        agentContextNavigationPath(workspaceId, runId, contextRef),
         {
           method: "GET",
           signal: options.signal

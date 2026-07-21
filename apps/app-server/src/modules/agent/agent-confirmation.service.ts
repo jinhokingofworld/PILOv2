@@ -1,4 +1,4 @@
-import { HttpException, Injectable, Logger } from "@nestjs/common";
+import { HttpException, Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import {
@@ -18,15 +18,7 @@ import {
 } from "./agent-logging.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
-import {
-  AgentThreadContextService,
-  type AgentContextState,
-  type AgentSelectedContextTarget
-} from "./agent-thread-context.service";
-import {
-  isNextAgentCapabilityTool,
-  isTerminalAgentCapabilityTool
-} from "./agent-tool-capability-catalog";
+import { isTerminalAgentCapabilityTool } from "./agent-tool-capability-catalog";
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
@@ -161,15 +153,12 @@ function positiveIntegerEnvironment(name: string, fallback: number): number {
 
 @Injectable()
 export class AgentConfirmationService {
-  private readonly logger = new Logger(AgentConfirmationService.name);
-
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
     private readonly agentLoggingService: AgentLoggingService,
     private readonly agentToolRegistryService: AgentToolRegistryService,
-    private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
-    private readonly agentThreadContextService?: AgentThreadContextService
+    private readonly agentOutboxPublisherService: AgentOutboxPublisherService
   ) {}
 
   async createConfirmation(
@@ -795,21 +784,6 @@ export class AgentConfirmationService {
   ): Promise<AgentConfirmationActionPayload> {
     const { step, lease } = claim;
     try {
-      const capabilityIds = await this.findLatestPlannerCapabilityIds(runId);
-      const completedToolNames =
-        capabilityIds.length > 0
-          ? await this.findCompletedToolNames(runId)
-          : [];
-      if (
-        capabilityIds.length > 0 &&
-        !isNextAgentCapabilityTool(
-          capabilityIds,
-          toolExecution.definition.name,
-          completedToolNames
-        )
-      ) {
-        throw badRequest("Agent tool is not the next allowed capability step");
-      }
       const result = await this.executeWithLeaseHeartbeat(
         runId,
         lease,
@@ -824,35 +798,13 @@ export class AgentConfirmationService {
             toolExecution.toolInput
           )
       );
+      const outputSummary = this.buildOutputSummary(result);
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
-      let contextState: AgentContextState | null | undefined = null;
-      try {
-        if (this.agentThreadContextService) {
-          const selectedTarget = await this.findLatestPlannerContextTarget(runId);
-          contextState = await this.agentThreadContextService.buildContextState(
-            {
-              currentUserId,
-              workspaceId,
-              runId,
-              requestContext: confirmation.run_request_context_json ?? null
-            },
-            step.id,
-            toolExecution.definition.name,
-            resourceRefs,
-            [],
-            "completed",
-            selectedTarget
-          );
-        }
-      } catch {
-        this.logger.warn(
-          `Agent context projection failed after confirmed ${toolExecution.definition.name} completed`
-        );
-      }
-      const outputSummary = this.sanitizeJsonObject({
-        ...this.buildOutputSummary(result),
-        ...(contextState ? { agentContextState: contextState } : {})
-      });
+      const capabilityIds = await this.findLatestPlannerCapabilityIds(runId);
+      const completedToolNames =
+        capabilityIds.length > 0
+          ? await this.findCompletedToolNames(runId)
+          : [];
       const postExecutionDisposition: AgentToolPostExecutionDisposition =
         capabilityIds.length > 0
           ? isTerminalAgentCapabilityTool(
@@ -1081,35 +1033,6 @@ export class AgentConfirmationService {
     );
   }
 
-  private async findLatestPlannerContextTarget(
-    runId: string
-  ): Promise<AgentSelectedContextTarget | null> {
-    const row = await this.database.queryOne<{ output_json: AgentJsonObject }>(
-      `
-        SELECT output_json
-        FROM agent_steps
-        WHERE run_id = $1
-          AND step_type = 'planner'
-          AND status = 'completed'
-        ORDER BY step_order DESC
-        LIMIT 1
-      `,
-      [runId]
-    );
-    const resolution = row?.output_json?.contextResolution;
-    if (!this.isPlainObject(resolution) || !this.isPlainObject(resolution.target)) {
-      return null;
-    }
-    const contextRef = resolution.target.contextRef;
-    const generation = resolution.target.generation;
-    return typeof contextRef === "string" &&
-      /^ctx_[0-9a-f]{24}$/.test(contextRef) &&
-      typeof generation === "number" &&
-      Number.isSafeInteger(generation)
-      ? { contextRef, generation }
-      : null;
-  }
-
   private async findCompletedToolNames(runId: string): Promise<string[]> {
     const rows = await this.database.query<{ tool_name: string }>(
       `
@@ -1119,15 +1042,6 @@ export class AgentConfirmationService {
           AND step_type = 'tool'
           AND status = 'completed'
           AND tool_name IS NOT NULL
-          AND created_at >= COALESCE(
-            (
-              SELECT MAX(message.created_at)
-              FROM agent_run_messages AS message
-              WHERE message.run_id = $1
-                AND message.role = 'user'
-            ),
-            '-infinity'::timestamptz
-          )
       `,
       [runId]
     );

@@ -19,10 +19,6 @@ import {
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
 import {
-  AgentThreadContextService,
-  type AgentPublicResourceReference
-} from "./agent-thread-context.service";
-import {
   buildStoredMeetingCandidateSelectionMessage,
   MEETING_CANDIDATE_SELECTION_KIND,
   toPublicMeetingCandidateSelectionMessage
@@ -34,7 +30,6 @@ import {
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
-  AgentJsonValue,
   AgentResourceRef,
   AgentRiskLevel,
   AgentRunRequestContext
@@ -98,7 +93,7 @@ export interface AgentStepApiPayload {
   riskLevel: AgentRiskLevel | null;
   inputSummary: AgentJsonObject;
   outputSummary: AgentJsonObject;
-  resourceRefs: Array<AgentPublicResourceReference | AgentResourceRef>;
+  resourceRefs: AgentResourceRef[];
   errorMessage: string | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -172,7 +167,6 @@ interface AgentRunRow extends QueryResultRow {
   id: string;
   workspace_id: string;
   requested_by_user_id: string | null;
-  thread_id: string | null;
   client_request_id: string | null;
   request_context_json: AgentRunRequestContext;
   status: AgentRunStatus;
@@ -300,8 +294,7 @@ export class AgentService {
     private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
     private readonly canvasDelegationCompletionService:
       AgentCanvasDelegationCompletionService,
-    private readonly agentCandidateSelectionService: AgentCandidateSelectionService,
-    private readonly agentThreadContextService?: AgentThreadContextService
+    private readonly agentCandidateSelectionService: AgentCandidateSelectionService
   ) {}
 
   async createRun(
@@ -683,7 +676,7 @@ export class AgentService {
     return {
       run: {
         ...this.mapRun(run),
-        steps: steps.map((step) => this.mapStep(step, run.thread_id)),
+        steps: steps.map((step) => this.mapStep(step)),
         messages: messages.map((message) => this.mapMessage(message)),
         confirmation: confirmation
           ? this.mapConfirmation(confirmation)
@@ -1230,20 +1223,7 @@ export class AgentService {
     };
   }
 
-  private mapStep(
-    row: AgentStepRow,
-    threadId: string | null
-  ): AgentStepApiPayload {
-    const internalResourceRefs = this.sanitizeResourceRefs(row.resource_refs);
-    const publicResourceRefs = this.agentThreadContextService?.toPublicResourceRefs(
-      threadId,
-      row.run_id,
-      row.id,
-      internalResourceRefs
-    ) ?? [];
-    const excludedCanvasResourceRefs = internalResourceRefs.filter(
-      (reference) => reference.domain === "canvas"
-    );
+  private mapStep(row: AgentStepRow): AgentStepApiPayload {
     return {
       id: row.id,
       runId: row.run_id,
@@ -1252,81 +1232,13 @@ export class AgentService {
       status: row.status,
       toolName: row.tool_name,
       riskLevel: row.risk_level,
-      inputSummary: this.sanitizePublicAgentObject(row.input_json),
-      outputSummary: this.sanitizePublicAgentObject(row.output_json),
-      resourceRefs: [...publicResourceRefs, ...excludedCanvasResourceRefs],
+      inputSummary: this.sanitizeJsonObject(row.input_json),
+      outputSummary: this.sanitizeJsonObject(row.output_json),
+      resourceRefs: this.sanitizeResourceRefs(row.resource_refs),
       errorMessage: row.error_message ? PUBLIC_AGENT_FAILURE_MESSAGE : null,
       startedAt: this.toIsoOrNull(row.started_at),
       completedAt: this.toIsoOrNull(row.completed_at)
     };
-  }
-
-  private sanitizePublicAgentObject(value: unknown): AgentJsonObject {
-    const sanitized = this.sanitizePublicAgentValue(value);
-    return this.isPlainObject(sanitized) ? sanitized : {};
-  }
-
-  private sanitizePublicAgentValue(
-    value: unknown,
-    path: string[] = []
-  ): AgentJsonValue {
-    if (Array.isArray(value)) {
-      return value
-        .slice(0, 100)
-        .map((item) => this.sanitizePublicAgentValue(item, path));
-    }
-    if (this.isPlainObject(value)) {
-      const result: AgentJsonObject = {};
-      for (const [key, item] of Object.entries(value)) {
-        const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-        const safeOpaqueKey =
-          [
-            "candidateSelectionId",
-            "capabilityIds",
-            "contextRef",
-            "correlationId",
-            "citationId",
-            "excludedContextRefs",
-            "selectionToken"
-          ].includes(key) ||
-          (key === "id" && path.at(-1) === "choices");
-        if (!safeOpaqueKey && this.isForbiddenJsonKey(key)) {
-          continue;
-        }
-        if (
-          !safeOpaqueKey &&
-          (normalized === "url" ||
-            normalized.endsWith("id") ||
-            normalized.endsWith("ids") ||
-            normalized.endsWith("ref") ||
-            normalized.endsWith("refs"))
-        ) {
-          continue;
-        }
-        if (safeOpaqueKey && typeof item === "string") {
-          result[key] = item.slice(0, 2000);
-          continue;
-        }
-        if (safeOpaqueKey && Array.isArray(item)) {
-          result[key] = item
-            .filter((entry): entry is string => typeof entry === "string")
-            .slice(0, 100)
-            .map((entry) => entry.slice(0, 200));
-          continue;
-        }
-        result[key] = this.sanitizePublicAgentValue(item, [...path, key]);
-      }
-      return result;
-    }
-    if (typeof value === "string") {
-      return value
-        .replace(new RegExp(UUID_PATTERN.source, "gi"), "[resource]")
-        .slice(0, 2000);
-    }
-    if (typeof value === "number" || typeof value === "boolean" || value === null) {
-      return value;
-    }
-    return null;
   }
 
   private mapMessage(row: AgentRunMessageRow): AgentRunMessageApiPayload {
@@ -1349,9 +1261,7 @@ export class AgentService {
       runId: row.run_id,
       status: row.status,
       riskLevel: row.risk_level,
-      plan: this.sanitizePublicAgentObject(
-        row.plan_json
-      ) as unknown as AgentConfirmationPlan,
+      plan: this.sanitizeJsonValue(row.plan_json) as AgentConfirmationPlan,
       expiresAt: this.toIso(row.expires_at),
       approvedAt: this.toIsoOrNull(row.approved_at),
       rejectedAt: this.toIsoOrNull(row.rejected_at),
