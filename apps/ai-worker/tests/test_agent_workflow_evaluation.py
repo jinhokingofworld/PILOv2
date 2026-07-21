@@ -298,12 +298,16 @@ def test_agent_workflow_catalog_covers_supported_domains_except_canvas() -> None
     represented_domains = {
         domain for scenario in catalog.scenarios for domain in scenario.evaluation_domains
     }
+    product_domains = represented_domains - {"routing_boundary"}
     domain_counts = Counter(
-        domain for scenario in catalog.scenarios for domain in scenario.evaluation_domains
+        domain
+        for scenario in catalog.scenarios
+        for domain in scenario.evaluation_domains
+        if domain != "routing_boundary"
     )
 
-    assert catalog.version == "agent-workflow-regression:v2"
-    assert represented_domains == {
+    assert catalog.version == "agent-workflow-regression:v3"
+    assert product_domains == {
         "board",
         "calendar",
         "drive",
@@ -311,6 +315,7 @@ def test_agent_workflow_catalog_covers_supported_domains_except_canvas() -> None
         "pr_review",
         "sql_erd",
     }
+    assert "routing_boundary" in represented_domains
     assert len(catalog.scenarios) >= 30
     assert min(domain_counts.values()) >= 5
     assert all("canvas" not in scenario.evaluation_domains for scenario in catalog.scenarios)
@@ -333,6 +338,14 @@ def test_agent_workflow_catalog_covers_required_task_categories() -> None:
         "confirmation",
         "grounded_answer",
     } <= categories
+
+
+def test_every_workflow_case_declares_outcome_assertions() -> None:
+    raw = json.loads(Path("evals/agent_workflow_catalog_v1.json").read_text(encoding="utf-8"))
+
+    for case in raw["workflowCases"]:
+        assert "outcome" in case, case["id"]
+        assert "requireResponse" in case["outcome"], case["id"]
 
 
 def test_agent_workflow_catalog_includes_terminal_tools_for_routed_capabilities() -> None:
