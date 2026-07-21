@@ -28,28 +28,29 @@ def test_quality_gate_records_reproducible_passing_baseline_without_sensitive_in
         "canonicalRequiredToolRecallAt8": 1.0,
         "heldOutDomainRecallAt8": 1.0,
         "heldOutCapabilityRecallAt8": 1.0,
+        "dangerousWriteFalsePositiveCount": 0,
     }
     assert report["failureTaxonomy"] == {}
     assert report["privacy"] == {"violationCount": 0}
     assert report["metadata"] == {
         "suiteVersion": "tool-retrieval-quality-suite:v1",
         "suiteSha256": fixture_sha256(FIXTURE_PATH),
-        "catalogVersion": "agent-tool-capabilities:v2",
+        "catalogVersion": "agent-tool-capabilities:v3",
         "catalogSha256": fixture.catalog.sha256,
         "eligibleSnapshotSha256": (
             "f7f0a523e061086f1596da6b056daff1878d28f4c12b7d002a2e230e0235bbab"
         ),
         "registryInventorySha256": (
-            "ce2deb6bc059fc89a09655ddc7afd0234ca39c35b6f344aa74c63d09ad79a63c"
+            "234da88da04bc0ed10487aeb7edaacd156a93299edc725250c64a9c42af268ab"
         ),
         "registryCatalogSha256": (
-            "81b0fa0bc6d08c464f212a8ec7e4d107e6ebc187eed2aae068208f7d0892278c"
+            "dffdcf9b634ce42647c8ed7156499752b2929c2c7b29c9862d3fa01e5707d460"
         ),
         "registryEligibleSnapshotSha256": (
             "f7f0a523e061086f1596da6b056daff1878d28f4c12b7d002a2e230e0235bbab"
         ),
         "modelVersion": "deterministic:no-provider",
-        "retrieverVersion": "agent-tool-metadata-overlap:v3",
+        "retrieverVersion": "agent-tool-metadata-overlap:v4",
         "topK": 8,
         "defaultSchemaTokenBudget": 8000,
     }

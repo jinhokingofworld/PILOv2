@@ -3294,7 +3294,20 @@ def _agent_router_user_prompt(request: AgentRoutingRequest) -> str:
             "whenToUse": capability.when_to_use,
             "mustNotUseFor": list(capability.must_not_use_for),
             "positiveExamples": list(capability.positive_examples[:5]),
+            "boundaryExamples": [
+                {
+                    "kind": example.kind,
+                    "utterance": example.utterance,
+                    "expectedStatus": example.expected_status,
+                    "expectedCapabilityIds": list(example.expected_capability_ids),
+                }
+                for example in capability.boundary_examples[:5]
+            ],
             "selectorKinds": list(capability.selector_kinds),
+            "terminalToolNames": list(capability.terminal_tool_names),
+            "operation": capability.operation,
+            "executionMode": capability.execution_mode,
+            "requiresConfirmation": capability.requires_confirmation,
             "availability": capability.availability,
         }
         for capability in _router_capabilities_for_surface(

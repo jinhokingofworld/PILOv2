@@ -19,6 +19,8 @@
 - catalog SHA 불일치 또는 eligible schema와 catalog digest 불일치는 planner를 호출하지 않고
   clarification으로 종료한다.
 - Router가 낮은 confidence를 반환하면 Tool을 선택하지 않고 clarification으로 종료한다.
+- deterministic retrieval에서 같은 점수의 상충 capability가 남거나 negation 대상 write intent만
+  일치하면 Tool을 선택하지 않고 `conflicting_capabilities` clarification으로 종료한다.
 - Router가 선택하지 않은 domain/capability의 Tool 또는 허용되지 않은 field를 Planner가 반환하면 거부한다.
 - Router mode와 무관하게 App Server의 input validator, Workspace 권한, confirmation, 멱등성,
   실행 직전 상태·권한 재검증은 실행 권위 경계로 유지된다.
@@ -32,6 +34,11 @@ Worker step의 `outputSummary.toolRouting`에는 mode, Router status, domains, c
 catalog version/SHA와 selected Tool count만 기록한다. raw 발화, tool input, resource ID, token은 기록하지 않는다.
 catalog integrity failure에서도 형식이 유효한 수신 catalog version/SHA는 trace에 남긴다. 형식 자체가
 유효하지 않은 값은 trace에 기록하지 않는다.
+
+App Server가 새로 발행하는 catalog는 `agent-tool-capabilities:v3`이다. full registry baseline은
+inventory `234da88d…68ab`, catalog `dffdcf9b…d460`이며, 배포 전 registry snapshot과 deterministic
+quality fixture가 이 전체 SHA에 일치해야 한다. v3 gate는 6개 non-Canvas domain의 negation/domain-switch
+반례와 dangerous write false-positive 0건을 추가로 확인한다.
 
 `outputSummary.promptSecurity`에는 detector version, `clear|blocked`, bounded reason, source kind,
 signal taxonomy와 signal 수만 기록한다. 공격 문자열이나 탐지된 원문은 저장하지 않는다. grounded Meeting
