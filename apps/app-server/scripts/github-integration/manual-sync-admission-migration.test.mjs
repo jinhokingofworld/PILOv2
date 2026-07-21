@@ -9,6 +9,11 @@ const migration = await readFile(
   "utf8"
 );
 
+const outsideProceduralBodies = migration.replace(
+  /\$pilo_roles\$[\s\S]*?\$pilo_roles\$/g,
+  ""
+);
+
 assert.match(
   migration,
   /ADD CONSTRAINT github_sync_runs_id_workspace_unique[\s\S]*UNIQUE \(id, workspace_id\)/i
@@ -47,12 +52,25 @@ assert.match(
   migration,
   /REVOKE ALL ON TABLE public\.github_sync_manual_requests FROM PUBLIC/i
 );
+assert.match(migration, /DO \$pilo_roles\$/i);
 assert.match(
+  migration,
+  /FOREACH target_role IN ARRAY ARRAY\['anon', 'authenticated', 'service_role'\]/i
+);
+assert.match(
+  migration,
+  /FROM pg_catalog\.pg_roles[\s\S]*WHERE rolname = target_role/i
+);
+assert.match(
+  migration,
+  /EXECUTE pg_catalog\.format\([\s\S]*REVOKE ALL ON TABLE public\.github_sync_manual_requests FROM %I[\s\S]*target_role/i
+);
+assert.doesNotMatch(
   migration,
   /REVOKE ALL ON TABLE public\.github_sync_manual_requests\s+FROM anon, authenticated, service_role/i
 );
 assert.doesNotMatch(
-  migration,
+  outsideProceduralBodies,
   /^\s*(?:BEGIN|COMMIT|END|ROLLBACK|START\s+TRANSACTION|SET\s+TRANSACTION|SAVEPOINT|RELEASE)\b/im
 );
 assert.doesNotMatch(migration, /^\s*\\/m);

@@ -41,6 +41,13 @@ before executing baseline mode.
 
 ## Applying later migrations
 
+### Temporary migration-104 recovery
+
+Issue #1637 permits only the exact migration-104 checksum transition. Operators
+must use the resulting dev merge commit SHA when running the recovery. Issue
+#1638 removes this exception after a successful apply and idempotent rerun; it
+is not a permanent repair mechanism.
+
 The `Publish DB Migration Runner` workflow validates migration filenames and
 immutability on pull requests. When a matching change is merged to `dev`, it
 publishes a runner image with the full merge commit SHA and `latest` tags.

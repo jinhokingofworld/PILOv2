@@ -29,6 +29,7 @@ assert.match(workflow, /id-token: write/);
 assert.match(workflow, /AWS_DB_MIGRATION_PUBLISH_ROLE_ARN/);
 assert.match(workflow, /pilo-db-migrations/);
 assert.match(workflow, /\$\{\{ github\.sha \}\}/);
+assert.match(workflow, /node infra\/tests\/db-migration-change-policy\.test\.mjs/);
 assert.match(workflow, /node infra\/tests\/db-migration-change\.test\.mjs/);
 assert.match(workflow, /github\.ref == 'refs\/heads\/dev'/);
 
