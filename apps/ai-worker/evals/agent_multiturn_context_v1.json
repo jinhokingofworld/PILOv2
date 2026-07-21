@@ -1,0 +1,4903 @@
+{
+  "version": "agent-multiturn-context:v1",
+  "conversationCount": 72,
+  "conversations": [
+    {
+      "id": "meeting_01",
+      "turns": [
+        {
+          "user": "Show the release review meeting.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-01",
+                "results": [
+                  {
+                    "id": "meeting-01",
+                    "title": "release review"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "release review"
+            ]
+          }
+        },
+        {
+          "user": "What action items came from it?",
+          "expectedTools": [
+            "find_action_items"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-01",
+            "constraints": {
+              "contextRef": "ctx-meeting-01"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "find_action_items",
+              "output": {
+                "contextRef": "ctx-meeting-01",
+                "results": [
+                  {
+                    "id": "meeting-01-follow-up",
+                    "title": "release review follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "release review follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_02",
+      "turns": [
+        {
+          "user": "Find the design sync report.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-02",
+                "results": [
+                  {
+                    "id": "meeting-02",
+                    "title": "design sync"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "design sync"
+            ]
+          }
+        },
+        {
+          "user": "Summarize the decisions from that meeting.",
+          "expectedTools": [
+            "summarize_meeting_report"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-02",
+            "constraints": {
+              "contextRef": "ctx-meeting-02"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "summarize_meeting_report",
+              "output": {
+                "contextRef": "ctx-meeting-02",
+                "results": [
+                  {
+                    "id": "meeting-02-follow-up",
+                    "title": "design sync follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "design sync follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_03",
+      "turns": [
+        {
+          "user": "Show last weekly planning meeting.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-03",
+                "results": [
+                  {
+                    "id": "meeting-03",
+                    "title": "weekly planning"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "weekly planning"
+            ]
+          }
+        },
+        {
+          "user": "Show the evidence for the first decision there.",
+          "expectedTools": [
+            "get_meeting_decision_evidence"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-03",
+            "constraints": {
+              "contextRef": "ctx-meeting-03"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_meeting_decision_evidence",
+              "output": {
+                "contextRef": "ctx-meeting-03",
+                "results": [
+                  {
+                    "id": "meeting-03-follow-up",
+                    "title": "weekly planning follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "weekly planning follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_04",
+      "turns": [
+        {
+          "user": "Open the customer feedback meeting.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-04",
+                "results": [
+                  {
+                    "id": "meeting-04",
+                    "title": "customer feedback"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "customer feedback"
+            ]
+          }
+        },
+        {
+          "user": "Are there any follow-up tasks from it?",
+          "expectedTools": [
+            "find_action_items"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-04",
+            "constraints": {
+              "contextRef": "ctx-meeting-04"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "find_action_items",
+              "output": {
+                "contextRef": "ctx-meeting-04",
+                "results": [
+                  {
+                    "id": "meeting-04-follow-up",
+                    "title": "customer feedback follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "customer feedback follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_05",
+      "turns": [
+        {
+          "user": "Find the incident review report.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-05",
+                "results": [
+                  {
+                    "id": "meeting-05",
+                    "title": "incident review"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "incident review"
+            ]
+          }
+        },
+        {
+          "user": "Give me its key decisions.",
+          "expectedTools": [
+            "summarize_meeting_report"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-05",
+            "constraints": {
+              "contextRef": "ctx-meeting-05"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "summarize_meeting_report",
+              "output": {
+                "contextRef": "ctx-meeting-05",
+                "results": [
+                  {
+                    "id": "meeting-05-follow-up",
+                    "title": "incident review follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "incident review follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_06",
+      "turns": [
+        {
+          "user": "Show the roadmap review meeting.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-06",
+                "results": [
+                  {
+                    "id": "meeting-06",
+                    "title": "roadmap review"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "roadmap review"
+            ]
+          }
+        },
+        {
+          "user": "What supports the first decision in it?",
+          "expectedTools": [
+            "get_meeting_decision_evidence"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-06",
+            "constraints": {
+              "contextRef": "ctx-meeting-06"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_meeting_decision_evidence",
+              "output": {
+                "contextRef": "ctx-meeting-06",
+                "results": [
+                  {
+                    "id": "meeting-06-follow-up",
+                    "title": "roadmap review follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "roadmap review follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_07",
+      "turns": [
+        {
+          "user": "Show available meeting rooms.",
+          "expectedTools": [
+            "list_meeting_rooms"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_rooms",
+              "output": {
+                "contextRef": "ctx-meeting-07",
+                "results": [
+                  {
+                    "id": "meeting-07",
+                    "title": "Room A planning"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "Room A planning"
+            ]
+          }
+        },
+        {
+          "user": "Show the report for the selected room meeting.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-07",
+            "constraints": {
+              "contextRef": "ctx-meeting-07"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-07",
+                "results": [
+                  {
+                    "id": "meeting-07-follow-up",
+                    "title": "Room A planning follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "Room A planning follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_08",
+      "turns": [
+        {
+          "user": "Find the migration discussion.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-08",
+                "results": [
+                  {
+                    "id": "meeting-08",
+                    "title": "migration discussion"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "migration discussion"
+            ]
+          }
+        },
+        {
+          "user": "What follow-up actions came from that discussion?",
+          "expectedTools": [
+            "find_action_items"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-08",
+            "constraints": {
+              "contextRef": "ctx-meeting-08"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "find_action_items",
+              "output": {
+                "contextRef": "ctx-meeting-08",
+                "results": [
+                  {
+                    "id": "meeting-08-follow-up",
+                    "title": "migration discussion follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "migration discussion follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_09",
+      "turns": [
+        {
+          "user": "Open the onboarding sync.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-09",
+                "results": [
+                  {
+                    "id": "meeting-09",
+                    "title": "onboarding sync"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "onboarding sync"
+            ]
+          }
+        },
+        {
+          "user": "Summarize that meeting.",
+          "expectedTools": [
+            "summarize_meeting_report"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-09",
+            "constraints": {
+              "contextRef": "ctx-meeting-09"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "summarize_meeting_report",
+              "output": {
+                "contextRef": "ctx-meeting-09",
+                "results": [
+                  {
+                    "id": "meeting-09-follow-up",
+                    "title": "onboarding sync follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "onboarding sync follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_10",
+      "turns": [
+        {
+          "user": "Show the security review meeting.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-10",
+                "results": [
+                  {
+                    "id": "meeting-10",
+                    "title": "security review"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "security review"
+            ]
+          }
+        },
+        {
+          "user": "Show evidence for its first decision.",
+          "expectedTools": [
+            "get_meeting_decision_evidence"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-10",
+            "constraints": {
+              "contextRef": "ctx-meeting-10"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_meeting_decision_evidence",
+              "output": {
+                "contextRef": "ctx-meeting-10",
+                "results": [
+                  {
+                    "id": "meeting-10-follow-up",
+                    "title": "security review follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "security review follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_11",
+      "turns": [
+        {
+          "user": "Find the quality review.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-11",
+                "results": [
+                  {
+                    "id": "meeting-11",
+                    "title": "quality review"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "quality review"
+            ]
+          }
+        },
+        {
+          "user": "List the actions from it.",
+          "expectedTools": [
+            "find_action_items"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-11",
+            "constraints": {
+              "contextRef": "ctx-meeting-11"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "find_action_items",
+              "output": {
+                "contextRef": "ctx-meeting-11",
+                "results": [
+                  {
+                    "id": "meeting-11-follow-up",
+                    "title": "quality review follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "quality review follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "meeting_12",
+      "turns": [
+        {
+          "user": "Open the partner meeting.",
+          "expectedTools": [
+            "list_meeting_reports"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_meeting_reports",
+              "output": {
+                "contextRef": "ctx-meeting-12",
+                "results": [
+                  {
+                    "id": "meeting-12",
+                    "title": "partner meeting"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "partner meeting"
+            ]
+          }
+        },
+        {
+          "user": "Summarize the decisions from it.",
+          "expectedTools": [
+            "summarize_meeting_report"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-meeting-12",
+            "constraints": {
+              "contextRef": "ctx-meeting-12"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "summarize_meeting_report",
+              "output": {
+                "contextRef": "ctx-meeting-12",
+                "results": [
+                  {
+                    "id": "meeting-12-follow-up",
+                    "title": "partner meeting follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "partner meeting follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_01",
+      "turns": [
+        {
+          "user": "Show my July 16 schedule.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-01",
+                "results": [
+                  {
+                    "id": "calendar-01",
+                    "title": "July 16 schedule"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "July 16 schedule"
+            ]
+          }
+        },
+        {
+          "user": "What time is that event?",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-01",
+            "constraints": {
+              "contextRef": "ctx-calendar-01"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-01",
+                "results": [
+                  {
+                    "id": "calendar-01-follow-up",
+                    "title": "July 16 schedule follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "July 16 schedule follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_02",
+      "turns": [
+        {
+          "user": "Show the sprint planning event.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-02",
+                "results": [
+                  {
+                    "id": "calendar-02",
+                    "title": "sprint planning"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "sprint planning"
+            ]
+          }
+        },
+        {
+          "user": "Show only the event I just mentioned.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-02",
+            "constraints": {
+              "contextRef": "ctx-calendar-02"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-02",
+                "results": [
+                  {
+                    "id": "calendar-02-follow-up",
+                    "title": "sprint planning follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "sprint planning follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_03",
+      "turns": [
+        {
+          "user": "Find the design review on my calendar.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-03",
+                "results": [
+                  {
+                    "id": "calendar-03",
+                    "title": "design review"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "design review"
+            ]
+          }
+        },
+        {
+          "user": "Who is invited to that one?",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-03",
+            "constraints": {
+              "contextRef": "ctx-calendar-03"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-03",
+                "results": [
+                  {
+                    "id": "calendar-03-follow-up",
+                    "title": "design review follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "design review follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_04",
+      "turns": [
+        {
+          "user": "Show the customer demo event.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-04",
+                "results": [
+                  {
+                    "id": "calendar-04",
+                    "title": "customer demo"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "customer demo"
+            ]
+          }
+        },
+        {
+          "user": "What is its current time?",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-04",
+            "constraints": {
+              "contextRef": "ctx-calendar-04"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-04",
+                "results": [
+                  {
+                    "id": "calendar-04-follow-up",
+                    "title": "customer demo follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "customer demo follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_05",
+      "turns": [
+        {
+          "user": "Find the team lunch.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-05",
+                "results": [
+                  {
+                    "id": "calendar-05",
+                    "title": "team lunch"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "team lunch"
+            ]
+          }
+        },
+        {
+          "user": "Show the details for that event.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-05",
+            "constraints": {
+              "contextRef": "ctx-calendar-05"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-05",
+                "results": [
+                  {
+                    "id": "calendar-05-follow-up",
+                    "title": "team lunch follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "team lunch follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_06",
+      "turns": [
+        {
+          "user": "Show the release freeze event.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-06",
+                "results": [
+                  {
+                    "id": "calendar-06",
+                    "title": "release freeze"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "release freeze"
+            ]
+          }
+        },
+        {
+          "user": "Which calendar does it belong to?",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-06",
+            "constraints": {
+              "contextRef": "ctx-calendar-06"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-06",
+                "results": [
+                  {
+                    "id": "calendar-06-follow-up",
+                    "title": "release freeze follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "release freeze follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_07",
+      "turns": [
+        {
+          "user": "Show the retrospective.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-07",
+                "results": [
+                  {
+                    "id": "calendar-07",
+                    "title": "retrospective"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "retrospective"
+            ]
+          }
+        },
+        {
+          "user": "Show the location for that event.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-07",
+            "constraints": {
+              "contextRef": "ctx-calendar-07"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-07",
+                "results": [
+                  {
+                    "id": "calendar-07-follow-up",
+                    "title": "retrospective follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "retrospective follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_08",
+      "turns": [
+        {
+          "user": "Find the hiring interview.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-08",
+                "results": [
+                  {
+                    "id": "calendar-08",
+                    "title": "hiring interview"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "hiring interview"
+            ]
+          }
+        },
+        {
+          "user": "When does that interview start?",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-08",
+            "constraints": {
+              "contextRef": "ctx-calendar-08"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-08",
+                "results": [
+                  {
+                    "id": "calendar-08-follow-up",
+                    "title": "hiring interview follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "hiring interview follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_09",
+      "turns": [
+        {
+          "user": "Show the budget review.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-09",
+                "results": [
+                  {
+                    "id": "calendar-09",
+                    "title": "budget review"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "budget review"
+            ]
+          }
+        },
+        {
+          "user": "Show that event's attendees.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-09",
+            "constraints": {
+              "contextRef": "ctx-calendar-09"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-09",
+                "results": [
+                  {
+                    "id": "calendar-09-follow-up",
+                    "title": "budget review follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "budget review follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_10",
+      "turns": [
+        {
+          "user": "Find the security workshop.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-10",
+                "results": [
+                  {
+                    "id": "calendar-10",
+                    "title": "security workshop"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "security workshop"
+            ]
+          }
+        },
+        {
+          "user": "What time is the workshop?",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-10",
+            "constraints": {
+              "contextRef": "ctx-calendar-10"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-10",
+                "results": [
+                  {
+                    "id": "calendar-10-follow-up",
+                    "title": "security workshop follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "security workshop follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_11",
+      "turns": [
+        {
+          "user": "Show the on-call handoff.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-11",
+                "results": [
+                  {
+                    "id": "calendar-11",
+                    "title": "on-call handoff"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "on-call handoff"
+            ]
+          }
+        },
+        {
+          "user": "Show the event details.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-11",
+            "constraints": {
+              "contextRef": "ctx-calendar-11"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-11",
+                "results": [
+                  {
+                    "id": "calendar-11-follow-up",
+                    "title": "on-call handoff follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "on-call handoff follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "calendar_12",
+      "turns": [
+        {
+          "user": "Show the product sync.",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-12",
+                "results": [
+                  {
+                    "id": "calendar-12",
+                    "title": "product sync"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "product sync"
+            ]
+          }
+        },
+        {
+          "user": "Where is that sync?",
+          "expectedTools": [
+            "list_calendar_events"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-calendar-12",
+            "constraints": {
+              "contextRef": "ctx-calendar-12"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "list_calendar_events",
+              "output": {
+                "contextRef": "ctx-calendar-12",
+                "results": [
+                  {
+                    "id": "calendar-12-follow-up",
+                    "title": "product sync follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "product sync follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_01",
+      "turns": [
+        {
+          "user": "Find the login redirect bug in Board.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-01",
+                "results": [
+                  {
+                    "id": "board-01",
+                    "title": "login redirect bug"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "login redirect bug"
+            ]
+          }
+        },
+        {
+          "user": "Show the details of that issue.",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-01",
+            "constraints": {
+              "contextRef": "ctx-board-01"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-01",
+                "results": [
+                  {
+                    "id": "board-01-follow-up",
+                    "title": "login redirect bug follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "login redirect bug follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_02",
+      "turns": [
+        {
+          "user": "Search Board for the agent context regression.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-02",
+                "results": [
+                  {
+                    "id": "board-02",
+                    "title": "agent context regression"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "agent context regression"
+            ]
+          }
+        },
+        {
+          "user": "Who owns the issue you found?",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-02",
+            "constraints": {
+              "contextRef": "ctx-board-02"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-02",
+                "results": [
+                  {
+                    "id": "board-02-follow-up",
+                    "title": "agent context regression follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "agent context regression follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_03",
+      "turns": [
+        {
+          "user": "Find the release checklist issue.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-03",
+                "results": [
+                  {
+                    "id": "board-03",
+                    "title": "release checklist"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "release checklist"
+            ]
+          }
+        },
+        {
+          "user": "What is the status of that issue?",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-03",
+            "constraints": {
+              "contextRef": "ctx-board-03"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-03",
+                "results": [
+                  {
+                    "id": "board-03-follow-up",
+                    "title": "release checklist follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "release checklist follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_04",
+      "turns": [
+        {
+          "user": "Search for the rate limit alert.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-04",
+                "results": [
+                  {
+                    "id": "board-04",
+                    "title": "rate limit alert"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "rate limit alert"
+            ]
+          }
+        },
+        {
+          "user": "Show the context for it.",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-04",
+            "constraints": {
+              "contextRef": "ctx-board-04"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-04",
+                "results": [
+                  {
+                    "id": "board-04-follow-up",
+                    "title": "rate limit alert follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "rate limit alert follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_05",
+      "turns": [
+        {
+          "user": "Find the database migration issue.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-05",
+                "results": [
+                  {
+                    "id": "board-05",
+                    "title": "database migration"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "database migration"
+            ]
+          }
+        },
+        {
+          "user": "What related PRs does it have?",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-05",
+            "constraints": {
+              "contextRef": "ctx-board-05"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-05",
+                "results": [
+                  {
+                    "id": "board-05-follow-up",
+                    "title": "database migration follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "database migration follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_06",
+      "turns": [
+        {
+          "user": "Search Board for the meeting sync issue.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-06",
+                "results": [
+                  {
+                    "id": "board-06",
+                    "title": "meeting sync issue"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "meeting sync issue"
+            ]
+          }
+        },
+        {
+          "user": "Show its full issue context.",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-06",
+            "constraints": {
+              "contextRef": "ctx-board-06"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-06",
+                "results": [
+                  {
+                    "id": "board-06-follow-up",
+                    "title": "meeting sync issue follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "meeting sync issue follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_07",
+      "turns": [
+        {
+          "user": "Find the calendar timezone bug.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-07",
+                "results": [
+                  {
+                    "id": "board-07",
+                    "title": "calendar timezone bug"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "calendar timezone bug"
+            ]
+          }
+        },
+        {
+          "user": "What column is it in?",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-07",
+            "constraints": {
+              "contextRef": "ctx-board-07"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-07",
+                "results": [
+                  {
+                    "id": "board-07-follow-up",
+                    "title": "calendar timezone bug follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "calendar timezone bug follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_08",
+      "turns": [
+        {
+          "user": "Search for drive search ranking.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-08",
+                "results": [
+                  {
+                    "id": "board-08",
+                    "title": "drive search ranking"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "drive search ranking"
+            ]
+          }
+        },
+        {
+          "user": "Show the issue details.",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-08",
+            "constraints": {
+              "contextRef": "ctx-board-08"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-08",
+                "results": [
+                  {
+                    "id": "board-08-follow-up",
+                    "title": "drive search ranking follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "drive search ranking follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_09",
+      "turns": [
+        {
+          "user": "Find the SQL ERD relation issue.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-09",
+                "results": [
+                  {
+                    "id": "board-09",
+                    "title": "SQL ERD relation"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "SQL ERD relation"
+            ]
+          }
+        },
+        {
+          "user": "Who is assigned to it?",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-09",
+            "constraints": {
+              "contextRef": "ctx-board-09"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-09",
+                "results": [
+                  {
+                    "id": "board-09-follow-up",
+                    "title": "SQL ERD relation follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "SQL ERD relation follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_10",
+      "turns": [
+        {
+          "user": "Search for PR review latency.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-10",
+                "results": [
+                  {
+                    "id": "board-10",
+                    "title": "PR review latency"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "PR review latency"
+            ]
+          }
+        },
+        {
+          "user": "Show the details for that Board issue.",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-10",
+            "constraints": {
+              "contextRef": "ctx-board-10"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-10",
+                "results": [
+                  {
+                    "id": "board-10-follow-up",
+                    "title": "PR review latency follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "PR review latency follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_11",
+      "turns": [
+        {
+          "user": "Find the workspace invite bug.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-11",
+                "results": [
+                  {
+                    "id": "board-11",
+                    "title": "workspace invite bug"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "workspace invite bug"
+            ]
+          }
+        },
+        {
+          "user": "What is its current state?",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-11",
+            "constraints": {
+              "contextRef": "ctx-board-11"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-11",
+                "results": [
+                  {
+                    "id": "board-11-follow-up",
+                    "title": "workspace invite bug follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "workspace invite bug follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "board_12",
+      "turns": [
+        {
+          "user": "Search for notification retry.",
+          "expectedTools": [
+            "search_board_issues"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_board_issues",
+              "output": {
+                "contextRef": "ctx-board-12",
+                "results": [
+                  {
+                    "id": "board-12",
+                    "title": "notification retry"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "notification retry"
+            ]
+          }
+        },
+        {
+          "user": "Show its complete context.",
+          "expectedTools": [
+            "get_board_issue_context"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-board-12",
+            "constraints": {
+              "contextRef": "ctx-board-12"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "get_board_issue_context",
+              "output": {
+                "contextRef": "ctx-board-12",
+                "results": [
+                  {
+                    "id": "board-12-follow-up",
+                    "title": "notification retry follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "notification retry follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_01",
+      "turns": [
+        {
+          "user": "Find the login troubleshooting guide in Drive.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-01",
+                "results": [
+                  {
+                    "id": "drive-01",
+                    "title": "login troubleshooting guide"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "login troubleshooting guide"
+            ]
+          }
+        },
+        {
+          "user": "Show the section about the item you found.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-01",
+            "constraints": {
+              "contextRef": "ctx-drive-01"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-01",
+                "results": [
+                  {
+                    "id": "drive-01-follow-up",
+                    "title": "login troubleshooting guide follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "login troubleshooting guide follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_02",
+      "turns": [
+        {
+          "user": "Find the agent benchmark design document.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-02",
+                "results": [
+                  {
+                    "id": "drive-02",
+                    "title": "agent benchmark design"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "agent benchmark design"
+            ]
+          }
+        },
+        {
+          "user": "What does that document say about evaluation?",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-02",
+            "constraints": {
+              "contextRef": "ctx-drive-02"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-02",
+                "results": [
+                  {
+                    "id": "drive-02-follow-up",
+                    "title": "agent benchmark design follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "agent benchmark design follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_03",
+      "turns": [
+        {
+          "user": "Search Drive for the release runbook.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-03",
+                "results": [
+                  {
+                    "id": "drive-03",
+                    "title": "release runbook"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "release runbook"
+            ]
+          }
+        },
+        {
+          "user": "Find the rollback section in that document.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-03",
+            "constraints": {
+              "contextRef": "ctx-drive-03"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-03",
+                "results": [
+                  {
+                    "id": "drive-03-follow-up",
+                    "title": "release runbook follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "release runbook follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_04",
+      "turns": [
+        {
+          "user": "Find the rate limit playbook.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-04",
+                "results": [
+                  {
+                    "id": "drive-04",
+                    "title": "rate limit playbook"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "rate limit playbook"
+            ]
+          }
+        },
+        {
+          "user": "What mitigation does it describe?",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-04",
+            "constraints": {
+              "contextRef": "ctx-drive-04"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-04",
+                "results": [
+                  {
+                    "id": "drive-04-follow-up",
+                    "title": "rate limit playbook follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "rate limit playbook follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_05",
+      "turns": [
+        {
+          "user": "Search for the migration plan.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-05",
+                "results": [
+                  {
+                    "id": "drive-05",
+                    "title": "migration plan"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "migration plan"
+            ]
+          }
+        },
+        {
+          "user": "Show the timeline from that plan.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-05",
+            "constraints": {
+              "contextRef": "ctx-drive-05"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-05",
+                "results": [
+                  {
+                    "id": "drive-05-follow-up",
+                    "title": "migration plan follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "migration plan follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_06",
+      "turns": [
+        {
+          "user": "Find the meeting policy document.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-06",
+                "results": [
+                  {
+                    "id": "drive-06",
+                    "title": "meeting policy"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "meeting policy"
+            ]
+          }
+        },
+        {
+          "user": "What does it say about action items?",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-06",
+            "constraints": {
+              "contextRef": "ctx-drive-06"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-06",
+                "results": [
+                  {
+                    "id": "drive-06-follow-up",
+                    "title": "meeting policy follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "meeting policy follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_07",
+      "turns": [
+        {
+          "user": "Find calendar conventions.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-07",
+                "results": [
+                  {
+                    "id": "drive-07",
+                    "title": "calendar conventions"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "calendar conventions"
+            ]
+          }
+        },
+        {
+          "user": "Show the timezone rule from it.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-07",
+            "constraints": {
+              "contextRef": "ctx-drive-07"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-07",
+                "results": [
+                  {
+                    "id": "drive-07-follow-up",
+                    "title": "calendar conventions follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "calendar conventions follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_08",
+      "turns": [
+        {
+          "user": "Search for drive retrieval design.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-08",
+                "results": [
+                  {
+                    "id": "drive-08",
+                    "title": "drive retrieval design"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "drive retrieval design"
+            ]
+          }
+        },
+        {
+          "user": "What ranking rule is described there?",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-08",
+            "constraints": {
+              "contextRef": "ctx-drive-08"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-08",
+                "results": [
+                  {
+                    "id": "drive-08-follow-up",
+                    "title": "drive retrieval design follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "drive retrieval design follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_09",
+      "turns": [
+        {
+          "user": "Find the SQL ERD specification.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-09",
+                "results": [
+                  {
+                    "id": "drive-09",
+                    "title": "SQL ERD specification"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "SQL ERD specification"
+            ]
+          }
+        },
+        {
+          "user": "Show the relationship section from it.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-09",
+            "constraints": {
+              "contextRef": "ctx-drive-09"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-09",
+                "results": [
+                  {
+                    "id": "drive-09-follow-up",
+                    "title": "SQL ERD specification follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "SQL ERD specification follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_10",
+      "turns": [
+        {
+          "user": "Find the PR review policy.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-10",
+                "results": [
+                  {
+                    "id": "drive-10",
+                    "title": "PR review policy"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "PR review policy"
+            ]
+          }
+        },
+        {
+          "user": "What does it say about review scope?",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-10",
+            "constraints": {
+              "contextRef": "ctx-drive-10"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-10",
+                "results": [
+                  {
+                    "id": "drive-10-follow-up",
+                    "title": "PR review policy follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "PR review policy follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_11",
+      "turns": [
+        {
+          "user": "Find workspace onboarding.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-11",
+                "results": [
+                  {
+                    "id": "drive-11",
+                    "title": "workspace onboarding"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "workspace onboarding"
+            ]
+          }
+        },
+        {
+          "user": "Show the access section from that document.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-11",
+            "constraints": {
+              "contextRef": "ctx-drive-11"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-11",
+                "results": [
+                  {
+                    "id": "drive-11-follow-up",
+                    "title": "workspace onboarding follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "workspace onboarding follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "drive_12",
+      "turns": [
+        {
+          "user": "Search for the notification incident guide.",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-12",
+                "results": [
+                  {
+                    "id": "drive-12",
+                    "title": "notification incident guide"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "notification incident guide"
+            ]
+          }
+        },
+        {
+          "user": "What retry rule does it specify?",
+          "expectedTools": [
+            "search_workspace_documents"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-drive-12",
+            "constraints": {
+              "contextRef": "ctx-drive-12"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "search_workspace_documents",
+              "output": {
+                "contextRef": "ctx-drive-12",
+                "results": [
+                  {
+                    "id": "drive-12-follow-up",
+                    "title": "notification incident guide follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "notification incident guide follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_01",
+      "turns": [
+        {
+          "user": "Inspect users and orders in SQLtoERD.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-01",
+                "results": [
+                  {
+                    "id": "sqltoerd-01",
+                    "title": "users and orders"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "users and orders"
+            ]
+          }
+        },
+        {
+          "user": "Focus on those tables.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-01",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-01"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-01",
+                "results": [
+                  {
+                    "id": "sqltoerd-01-follow-up",
+                    "title": "users and orders follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "users and orders follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_02",
+      "turns": [
+        {
+          "user": "Show orders and payments in SQLtoERD.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-02",
+                "results": [
+                  {
+                    "id": "sqltoerd-02",
+                    "title": "orders and payments"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "orders and payments"
+            ]
+          }
+        },
+        {
+          "user": "Highlight the relationship between those tables.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-02",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-02"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-02",
+                "results": [
+                  {
+                    "id": "sqltoerd-02-follow-up",
+                    "title": "orders and payments follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "orders and payments follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_03",
+      "turns": [
+        {
+          "user": "Inspect projects and tasks.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-03",
+                "results": [
+                  {
+                    "id": "sqltoerd-03",
+                    "title": "projects and tasks"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "projects and tasks"
+            ]
+          }
+        },
+        {
+          "user": "Show only the tables from that result.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-03",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-03"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-03",
+                "results": [
+                  {
+                    "id": "sqltoerd-03-follow-up",
+                    "title": "projects and tasks follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "projects and tasks follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_04",
+      "turns": [
+        {
+          "user": "Show teams and members.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-04",
+                "results": [
+                  {
+                    "id": "sqltoerd-04",
+                    "title": "teams and members"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "teams and members"
+            ]
+          }
+        },
+        {
+          "user": "Focus the ERD on that pair.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-04",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-04"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-04",
+                "results": [
+                  {
+                    "id": "sqltoerd-04-follow-up",
+                    "title": "teams and members follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "teams and members follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_05",
+      "turns": [
+        {
+          "user": "Inspect documents and versions.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-05",
+                "results": [
+                  {
+                    "id": "sqltoerd-05",
+                    "title": "documents and versions"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "documents and versions"
+            ]
+          }
+        },
+        {
+          "user": "Highlight their relation.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-05",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-05"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-05",
+                "results": [
+                  {
+                    "id": "sqltoerd-05-follow-up",
+                    "title": "documents and versions follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "documents and versions follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_06",
+      "turns": [
+        {
+          "user": "Show meetings and action items.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-06",
+                "results": [
+                  {
+                    "id": "sqltoerd-06",
+                    "title": "meetings and action items"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "meetings and action items"
+            ]
+          }
+        },
+        {
+          "user": "Focus on the entities I just asked about.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-06",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-06"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-06",
+                "results": [
+                  {
+                    "id": "sqltoerd-06-follow-up",
+                    "title": "meetings and action items follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "meetings and action items follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_07",
+      "turns": [
+        {
+          "user": "Inspect events and attendees.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-07",
+                "results": [
+                  {
+                    "id": "sqltoerd-07",
+                    "title": "events and attendees"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "events and attendees"
+            ]
+          }
+        },
+        {
+          "user": "Show the relationship for those entities.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-07",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-07"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-07",
+                "results": [
+                  {
+                    "id": "sqltoerd-07-follow-up",
+                    "title": "events and attendees follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "events and attendees follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_08",
+      "turns": [
+        {
+          "user": "Show issues and comments.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-08",
+                "results": [
+                  {
+                    "id": "sqltoerd-08",
+                    "title": "issues and comments"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "issues and comments"
+            ]
+          }
+        },
+        {
+          "user": "Focus the previous result.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-08",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-08"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-08",
+                "results": [
+                  {
+                    "id": "sqltoerd-08-follow-up",
+                    "title": "issues and comments follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "issues and comments follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_09",
+      "turns": [
+        {
+          "user": "Inspect repositories and pull requests.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-09",
+                "results": [
+                  {
+                    "id": "sqltoerd-09",
+                    "title": "repositories and pull requests"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "repositories and pull requests"
+            ]
+          }
+        },
+        {
+          "user": "Highlight that pair in the ERD.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-09",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-09"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-09",
+                "results": [
+                  {
+                    "id": "sqltoerd-09-follow-up",
+                    "title": "repositories and pull requests follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "repositories and pull requests follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_10",
+      "turns": [
+        {
+          "user": "Show customers and invoices.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-10",
+                "results": [
+                  {
+                    "id": "sqltoerd-10",
+                    "title": "customers and invoices"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "customers and invoices"
+            ]
+          }
+        },
+        {
+          "user": "Show only those tables.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-10",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-10"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-10",
+                "results": [
+                  {
+                    "id": "sqltoerd-10-follow-up",
+                    "title": "customers and invoices follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "customers and invoices follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_11",
+      "turns": [
+        {
+          "user": "Inspect products and inventory.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-11",
+                "results": [
+                  {
+                    "id": "sqltoerd-11",
+                    "title": "products and inventory"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "products and inventory"
+            ]
+          }
+        },
+        {
+          "user": "Focus on the previous tables.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-11",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-11"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-11",
+                "results": [
+                  {
+                    "id": "sqltoerd-11-follow-up",
+                    "title": "products and inventory follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "products and inventory follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_12",
+      "turns": [
+        {
+          "user": "Show notifications and deliveries.",
+          "expectedTools": [
+            "inspect_sql_erd_schema"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "inspect_sql_erd_schema",
+              "output": {
+                "contextRef": "ctx-sqltoerd-12",
+                "results": [
+                  {
+                    "id": "sqltoerd-12",
+                    "title": "notifications and deliveries"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "notifications and deliveries"
+            ]
+          }
+        },
+        {
+          "user": "Highlight the relation from the result.",
+          "expectedTools": [
+            "focus_sql_erd_tables"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-sqltoerd-12",
+            "constraints": {
+              "contextRef": "ctx-sqltoerd-12"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "focus_sql_erd_tables",
+              "output": {
+                "contextRef": "ctx-sqltoerd-12",
+                "results": [
+                  {
+                    "id": "sqltoerd-12-follow-up",
+                    "title": "notifications and deliveries follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "notifications and deliveries follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_01",
+      "turns": [
+        {
+          "user": "Recommend review focus for backend changes.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-01",
+                "results": [
+                  {
+                    "id": "prreview-01",
+                    "title": "backend changes"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "backend changes"
+            ]
+          }
+        },
+        {
+          "user": "From that result, which files are highest priority?",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-01",
+            "constraints": {
+              "contextRef": "ctx-prreview-01"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-01",
+                "results": [
+                  {
+                    "id": "prreview-01-follow-up",
+                    "title": "backend changes follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "backend changes follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_02",
+      "turns": [
+        {
+          "user": "Recommend review focus for frontend changes.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-02",
+                "results": [
+                  {
+                    "id": "prreview-02",
+                    "title": "frontend changes"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "frontend changes"
+            ]
+          }
+        },
+        {
+          "user": "Narrow the previous recommendation to the riskiest files.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-02",
+            "constraints": {
+              "contextRef": "ctx-prreview-02"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-02",
+                "results": [
+                  {
+                    "id": "prreview-02-follow-up",
+                    "title": "frontend changes follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "frontend changes follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_03",
+      "turns": [
+        {
+          "user": "Recommend review focus for the API contract.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-03",
+                "results": [
+                  {
+                    "id": "prreview-03",
+                    "title": "API contract"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "API contract"
+            ]
+          }
+        },
+        {
+          "user": "Which files from that focus should be reviewed first?",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-03",
+            "constraints": {
+              "contextRef": "ctx-prreview-03"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-03",
+                "results": [
+                  {
+                    "id": "prreview-03-follow-up",
+                    "title": "API contract follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "API contract follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_04",
+      "turns": [
+        {
+          "user": "Recommend review focus for test coverage.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-04",
+                "results": [
+                  {
+                    "id": "prreview-04",
+                    "title": "test coverage"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "test coverage"
+            ]
+          }
+        },
+        {
+          "user": "From that result, show the test files to inspect.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-04",
+            "constraints": {
+              "contextRef": "ctx-prreview-04"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-04",
+                "results": [
+                  {
+                    "id": "prreview-04-follow-up",
+                    "title": "test coverage follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "test coverage follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_05",
+      "turns": [
+        {
+          "user": "Recommend review focus for database changes.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-05",
+                "results": [
+                  {
+                    "id": "prreview-05",
+                    "title": "database changes"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "database changes"
+            ]
+          }
+        },
+        {
+          "user": "Narrow that recommendation to schema-risk files.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-05",
+            "constraints": {
+              "contextRef": "ctx-prreview-05"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-05",
+                "results": [
+                  {
+                    "id": "prreview-05-follow-up",
+                    "title": "database changes follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "database changes follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_06",
+      "turns": [
+        {
+          "user": "Recommend review focus for authentication changes.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-06",
+                "results": [
+                  {
+                    "id": "prreview-06",
+                    "title": "authentication changes"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "authentication changes"
+            ]
+          }
+        },
+        {
+          "user": "Which files from that result are security-sensitive?",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-06",
+            "constraints": {
+              "contextRef": "ctx-prreview-06"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-06",
+                "results": [
+                  {
+                    "id": "prreview-06-follow-up",
+                    "title": "authentication changes follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "authentication changes follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_07",
+      "turns": [
+        {
+          "user": "Recommend review focus for the agent workflow.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-07",
+                "results": [
+                  {
+                    "id": "prreview-07",
+                    "title": "agent workflow"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "agent workflow"
+            ]
+          }
+        },
+        {
+          "user": "Show the highest-priority files from that focus.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-07",
+            "constraints": {
+              "contextRef": "ctx-prreview-07"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-07",
+                "results": [
+                  {
+                    "id": "prreview-07-follow-up",
+                    "title": "agent workflow follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "agent workflow follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_08",
+      "turns": [
+        {
+          "user": "Recommend review focus for calendar integration.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-08",
+                "results": [
+                  {
+                    "id": "prreview-08",
+                    "title": "calendar integration"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "calendar integration"
+            ]
+          }
+        },
+        {
+          "user": "Which calendar files from that recommendation matter most?",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-08",
+            "constraints": {
+              "contextRef": "ctx-prreview-08"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-08",
+                "results": [
+                  {
+                    "id": "prreview-08-follow-up",
+                    "title": "calendar integration follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "calendar integration follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_09",
+      "turns": [
+        {
+          "user": "Recommend review focus for Board integration.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-09",
+                "results": [
+                  {
+                    "id": "prreview-09",
+                    "title": "Board integration"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "Board integration"
+            ]
+          }
+        },
+        {
+          "user": "Narrow that focus to the most risky Board files.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-09",
+            "constraints": {
+              "contextRef": "ctx-prreview-09"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-09",
+                "results": [
+                  {
+                    "id": "prreview-09-follow-up",
+                    "title": "Board integration follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "Board integration follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_10",
+      "turns": [
+        {
+          "user": "Recommend review focus for Drive integration.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-10",
+                "results": [
+                  {
+                    "id": "prreview-10",
+                    "title": "Drive integration"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "Drive integration"
+            ]
+          }
+        },
+        {
+          "user": "Which Drive files should be reviewed first from it?",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-10",
+            "constraints": {
+              "contextRef": "ctx-prreview-10"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-10",
+                "results": [
+                  {
+                    "id": "prreview-10-follow-up",
+                    "title": "Drive integration follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "Drive integration follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_11",
+      "turns": [
+        {
+          "user": "Recommend review focus for SQLtoERD changes.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-11",
+                "results": [
+                  {
+                    "id": "prreview-11",
+                    "title": "SQLtoERD changes"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "SQLtoERD changes"
+            ]
+          }
+        },
+        {
+          "user": "Show the highest-risk SQLtoERD files from that focus.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-11",
+            "constraints": {
+              "contextRef": "ctx-prreview-11"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-11",
+                "results": [
+                  {
+                    "id": "prreview-11-follow-up",
+                    "title": "SQLtoERD changes follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "SQLtoERD changes follow-up"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prreview_12",
+      "turns": [
+        {
+          "user": "Recommend review focus for deployment changes.",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "none",
+            "constraints": {}
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-12",
+                "results": [
+                  {
+                    "id": "prreview-12",
+                    "title": "deployment changes"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "deployment changes"
+            ]
+          }
+        },
+        {
+          "user": "Which deployment files from that recommendation are most important?",
+          "expectedTools": [
+            "recommend_pr_review_focus"
+          ],
+          "expectedContext": {
+            "referenceKind": "prior_tool_result",
+            "contextRef": "ctx-prreview-12",
+            "constraints": {
+              "contextRef": "ctx-prreview-12"
+            }
+          },
+          "fixtures": [
+            {
+              "tool": "recommend_pr_review_focus",
+              "output": {
+                "contextRef": "ctx-prreview-12",
+                "results": [
+                  {
+                    "id": "prreview-12-follow-up",
+                    "title": "deployment changes follow-up"
+                  }
+                ]
+              }
+            }
+          ],
+          "expectedOutcome": {
+            "deliveryRequired": true,
+            "expectedFacts": [
+              "deployment changes follow-up"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
+
