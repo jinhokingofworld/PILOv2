@@ -26,6 +26,7 @@ interface MeetingSectionDefinition {
 const DEFAULT_TIMEZONE = "Asia/Seoul";
 const MAX_LIST_ITEMS = 5;
 const MAX_CALENDAR_TITLE_LENGTH = 120;
+const MAX_CALENDAR_DESCRIPTION_LENGTH = 1000;
 const MAX_MEETING_LIST_TEXT_LENGTH = 240;
 const MAX_MEETING_DETAIL_TEXT_LENGTH = 800;
 const MAX_ACTION_ITEMS = 5;
@@ -72,6 +73,8 @@ export function buildAgentReadResultAnswer(
   switch (input.toolName) {
     case "list_calendar_events":
       return formatCalendarEvents(input) ?? buildGenericAnswer(input);
+    case "get_calendar_event":
+      return formatCalendarEventDetail(input) ?? buildGenericAnswer(input);
     case "update_calendar_event":
       return formatCalendarUpdateClarification(input) ?? buildGenericAnswer(input);
     case "list_meeting_rooms":
@@ -778,6 +781,42 @@ function formatCalendarEvents(
   appendOmittedCount(answer, total, lines.length, "일정");
 
   return answer.join("\n");
+}
+
+function formatCalendarEventDetail(
+  input: AgentReadResultFormatterInput
+): string | null {
+  if (readString(input.outputSummary.status) === "needs_clarification") {
+    return (
+      boundText(input.outputSummary.message, 240) ??
+      "자세히 볼 Calendar 일정을 다시 선택해주세요."
+    );
+  }
+  if (!isPlainObject(input.outputSummary.event)) {
+    return null;
+  }
+  const event = input.outputSummary.event;
+  const schedule = formatCalendarEvent(event);
+  if (!schedule) {
+    return null;
+  }
+  const description = boundText(
+    event.description,
+    MAX_CALENDAR_DESCRIPTION_LENGTH
+  );
+  const color = boundText(event.color, 20);
+  const createdByName = boundText(event.createdByName, 120);
+  const createdAt = boundText(event.createdAt, 40);
+  const updatedAt = boundText(event.updatedAt, 40);
+
+  return [
+    schedule,
+    `설명: ${description ?? "없음"}`,
+    ...(color ? [`색상: ${color}`] : []),
+    ...(createdByName ? [`등록자: ${createdByName}`] : []),
+    ...(createdAt ? [`생성: ${createdAt}`] : []),
+    ...(updatedAt ? [`마지막 수정: ${updatedAt}`] : [])
+  ].join("\n");
 }
 
 function formatCalendarEvent(event: AgentJsonObject): string | null {

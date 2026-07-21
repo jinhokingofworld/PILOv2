@@ -74,6 +74,7 @@ const TOOL_DOMAIN_BY_NAME: Readonly<Record<string, string>> = {
   get_active_meeting: "meeting",
   get_board_briefing: "board",
   get_board_issue_context: "board",
+  get_calendar_event: "calendar",
   get_meeting_decision_evidence: "meeting",
   get_meeting_participants: "meeting",
   get_meeting_report: "meeting",
@@ -112,6 +113,7 @@ const TOOL_OPERATION_BY_NAME: Readonly<Record<string, AgentToolOperation>> = {
   get_active_meeting: "read",
   get_board_briefing: "read",
   get_board_issue_context: "read",
+  get_calendar_event: "read",
   get_meeting_decision_evidence: "read",
   get_meeting_participants: "read",
   get_meeting_report: "read",
@@ -190,6 +192,14 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
     "기간의 일정 목록을 조회할 때",
     ["새 일정 생성 또는 기존 일정 변경 요청"],
     ["일정 보여줘", "이번 주 일정 알려줘"]
+  ),
+  capability(
+    "calendar.events.get",
+    "calendar",
+    ["get_calendar_event"],
+    "이전 Calendar 목록에서 순번이나 지시어로 하나를 선택해 상세 정보를 조회할 때",
+    ["오늘·내일·이번 주 같은 기간 일정 목록 조회, 일정 생성 또는 기존 일정 변경 요청"],
+    ["세 번째 일정 자세히 알려줘", "그 일정의 세부 정보가 뭐야"]
   ),
   capability("calendar.events.create", "calendar", ["create_calendar_event"], "새 일정을 생성할 때", ["기존 일정 변경 또는 회의록 조회 요청"]),
   capability("calendar.events.update", "calendar", ["list_calendar_events", "update_calendar_event"], "기존 일정의 시간이나 내용을 변경할 때", ["새 일정 생성 요청"]),

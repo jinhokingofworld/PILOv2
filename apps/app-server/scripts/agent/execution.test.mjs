@@ -2210,6 +2210,7 @@ for (const testCase of [
 
   assert.deepEqual(registeredToolNames, [
     "list_calendar_events",
+    "get_calendar_event",
     "create_calendar_event",
     "update_calendar_event",
     "list_meeting_rooms",

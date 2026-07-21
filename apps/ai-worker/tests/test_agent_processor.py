@@ -3451,6 +3451,94 @@ def test_normalizer_uses_single_opaque_calendar_event_context_reference() -> Non
     }
 
 
+def test_normalizer_routes_calendar_detail_ordinal_to_calendar_context_reference() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="get_calendar_event",
+                    description="Calendar 일정 상세 조회",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["contextRef"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "contextRef": {
+                                "type": "string",
+                                "pattern": "^ctx_[0-9a-f]{24}$",
+                            }
+                        },
+                    },
+                ),
+                tool_snapshot(
+                    name="get_meeting_report",
+                    description="MeetingReport 상세 조회",
+                    executionMode="contextual",
+                    inputSchema={"type": "object", "properties": {}},
+                ),
+            ]
+        )
+    )
+    third_context_ref = "ctx_abcdef0123456789abcdef01"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="get_meeting_report",
+            tool_input={"contextRef": third_context_ref},
+        ),
+        job,
+        prompt="세 번째 일정에 대해서 자세히 알려줘",
+        planning_context=(
+            'previous resource: {"turn":2,"contextRef":"ctx_0123456789abcdef01234567",'
+            '"resourceType":"event","ordinal":1}\n'
+            'previous resource: {"turn":2,"contextRef":"ctx_89abcdef0123456701234567",'
+            '"resourceType":"event","ordinal":2}\n'
+            'previous resource: {"turn":2,"contextRef":"'
+            + third_context_ref
+            + '","resourceType":"event","ordinal":3}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "get_calendar_event"
+    assert normalized.output_summary["input"] == {"contextRef": third_context_ref}
+    assert normalized.output_summary["requiresConfirmation"] is None
+
+
+def test_normalizer_rejects_calendar_detail_ordinal_outside_latest_result_set() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="get_calendar_event",
+                    description="Calendar 일정 상세 조회",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["contextRef"],
+                        "additionalProperties": False,
+                        "properties": {"contextRef": {"type": "string"}},
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(tool_name="get_calendar_event", tool_input={}),
+        job,
+        prompt="세 번째 일정 자세히 알려줘",
+        planning_context=(
+            'previous resource: {"turn":2,"contextRef":"ctx_0123456789abcdef01234567",'
+            '"resourceType":"event","ordinal":1}\n'
+            'previous resource: {"turn":2,"contextRef":"ctx_89abcdef0123456701234567",'
+            '"resourceType":"event","ordinal":2}'
+        ),
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["calendar_event_context"]
+
+
 def test_normalizer_asks_for_calendar_time_when_end_time_is_not_after_start_time() -> None:
     job = parse_agent_run_job_payload(
         agent_payload(

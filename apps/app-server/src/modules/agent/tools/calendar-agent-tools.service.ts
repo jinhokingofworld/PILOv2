@@ -12,13 +12,18 @@ import type {
   AgentToolClarificationResult,
   AgentToolContext,
   AgentToolDefinition,
-  AgentToolExecutionResult
+  AgentToolExecutionResult,
+  AgentToolPreparationResult
 } from "../types/agent-tool.types";
 import { AgentThreadContextService } from "../agent-thread-context.service";
 
 interface ListCalendarEventsInput {
   start: string;
   end: string;
+}
+
+interface GetCalendarEventInput {
+  contextRef: string;
 }
 
 interface CreateCalendarEventInput {
@@ -69,6 +74,7 @@ const FORBIDDEN_CALENDAR_BODY_FIELDS = [
   "requestedByUserId"
 ];
 const LIST_INPUT_FIELDS = ["start", "end"];
+const GET_INPUT_FIELDS = ["contextRef"];
 const CREATE_INPUT_FIELDS = [
   "title",
   "description",
@@ -105,9 +111,39 @@ export class CalendarAgentToolsService {
   listDefinitions(): AgentToolDefinition<unknown>[] {
     return [
       this.listCalendarEventsDefinition(),
+      this.getCalendarEventDefinition(),
       this.createCalendarEventDefinition(),
       this.updateCalendarEventDefinition()
     ];
+  }
+
+  private getCalendarEventDefinition(): AgentToolDefinition<unknown> {
+    return {
+      name: "get_calendar_event",
+      description:
+        "이전 Calendar 목록에서 하나로 선택된 일정의 상세 정보를 opaque contextRef로 조회합니다. 목록 조회나 일정 변경에는 사용하지 않습니다.",
+      riskLevel: "low",
+      executionMode: "contextual",
+      postExecutionDisposition: "complete_run",
+      inputSchema: {
+        type: "object",
+        required: ["contextRef"],
+        additionalProperties: false,
+        properties: {
+          contextRef: {
+            type: "string",
+            pattern: "^ctx_[0-9a-f]{24}$",
+            description:
+              "같은 Agent thread의 이전 Calendar 목록 결과에 저장된 opaque reference"
+          }
+        }
+      },
+      validateInput: (input) => this.validateGetInput(input),
+      prepareExecution: (context, input) =>
+        this.prepareGetCalendarEvent(context, this.validateGetInput(input)),
+      execute: (context, input) =>
+        this.executeGetCalendarEvent(context, this.validateGetInput(input))
+    };
   }
 
   private listCalendarEventsDefinition(): AgentToolDefinition<unknown> {
@@ -291,6 +327,48 @@ export class CalendarAgentToolsService {
         events: events.map((event) => this.summarizeEvent(event))
       },
       resourceRefs: events.map((event) => this.toResourceRef(event)),
+      status: "completed"
+    };
+  }
+
+  private async prepareGetCalendarEvent(
+    context: AgentToolContext,
+    input: GetCalendarEventInput
+  ): Promise<AgentToolPreparationResult> {
+    const reference =
+      await this.agentThreadContextService.resolveCalendarEventReference(
+        context,
+        input.contextRef
+      );
+    if (!reference) {
+      return this.buildContextDetailClarification();
+    }
+    return { kind: "execute" };
+  }
+
+  private async executeGetCalendarEvent(
+    context: AgentToolContext,
+    input: GetCalendarEventInput
+  ): Promise<AgentToolExecutionResult> {
+    const reference =
+      await this.agentThreadContextService.resolveCalendarEventReference(
+        context,
+        input.contextRef
+      );
+    if (!reference) {
+      throw badRequest("Calendar event context is no longer available");
+    }
+    const event = await this.calendarService.getEvent(
+      context.currentUserId,
+      context.workspaceId,
+      reference.resourceId
+    );
+
+    return {
+      outputSummary: {
+        event: this.summarizeEventDetail(event)
+      },
+      resourceRefs: [this.toResourceRef(event)],
       status: "completed"
     };
   }
@@ -481,6 +559,23 @@ export class CalendarAgentToolsService {
     };
   }
 
+  private validateGetInput(input: unknown): GetCalendarEventInput {
+    const draft = this.requirePlainObject(input, "Calendar detail input");
+    this.rejectForbiddenCalendarBodyFields(draft);
+    this.assertOnlyAllowedFields(
+      draft,
+      GET_INPUT_FIELDS,
+      "Calendar detail input"
+    );
+    if (
+      typeof draft.contextRef !== "string" ||
+      !CONTEXT_REF_PATTERN.test(draft.contextRef)
+    ) {
+      throw badRequest("Calendar detail contextRef is invalid");
+    }
+    return { contextRef: draft.contextRef };
+  }
+
   private validateCreateInput(input: unknown): CreateCalendarEventInput {
     const draft = this.requirePlainObject(input, "Calendar create input");
     this.rejectForbiddenCalendarBodyFields(draft);
@@ -652,6 +747,18 @@ export class CalendarAgentToolsService {
     };
   }
 
+  private buildContextDetailClarification(): AgentToolClarificationResult {
+    return {
+      kind: "needs_clarification",
+      outputSummary: {
+        status: "needs_clarification",
+        selection: "none",
+        message: "상세히 볼 Calendar 일정을 다시 선택해주세요."
+      },
+      resourceRefs: []
+    };
+  }
+
   private isContextTarget(
     target: CalendarEventTarget | CalendarEventContextTarget
   ): target is CalendarEventContextTarget {
@@ -766,6 +873,27 @@ export class CalendarAgentToolsService {
       endDate: event.endDate,
       startTime: event.startTime,
       endTime: event.endTime,
+      status: "available"
+    };
+  }
+
+  private summarizeEventDetail(event: CalendarEventPayload): AgentJsonObject {
+    return {
+      title: event.title,
+      description:
+        event.description === null ? null : event.description.slice(0, 1000),
+      color: event.color,
+      isAllDay: event.isAllDay,
+      startDate: event.startDate,
+      endDate: event.endDate,
+      startTime: event.startTime,
+      endTime: event.endTime,
+      createdByName:
+        event.createdByUser.name === null
+          ? null
+          : event.createdByUser.name.slice(0, 120),
+      createdAt: event.createdAt,
+      updatedAt: event.updatedAt,
       status: "available"
     };
   }

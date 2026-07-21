@@ -14,6 +14,7 @@ from app.agent_tool_retrieval import (
 
 TOOL_SCHEMAS = {
     "list_calendar_events": {"type": "object", "required": ["start", "end"]},
+    "get_calendar_event": {"type": "object", "required": ["contextRef"]},
     "list_meeting_reports": {"type": "object", "properties": {"status": {"type": "string"}}},
 }
 QUALITY_FIXTURE_PATH = (
@@ -44,6 +45,24 @@ def catalog_payload() -> dict[str, object]:
                 "positiveExamples": [example["utterance"] for example in examples("이번 주 일정")],
                 "examples": examples("이번 주 일정"),
                 "selectorKinds": ["date_range"],
+                "requiresConfirmation": False,
+                "availability": "supported",
+            },
+            {
+                "id": "calendar.get",
+                "domain": "calendar",
+                "toolNames": ["get_calendar_event"],
+                "whenToUse": "이전 목록에서 선택한 일정의 상세를 조회할 때",
+                "mustNotUseFor": [
+                    "오늘·내일·이번 주 같은 기간 일정 목록 조회",
+                    "일정 변경 요청",
+                    "회의록 요청",
+                ],
+                "positiveExamples": [
+                    example["utterance"] for example in examples("세 번째 일정 자세히")
+                ],
+                "examples": examples("세 번째 일정 자세히"),
+                "selectorKinds": ["context_ref"],
                 "requiresConfirmation": False,
                 "availability": "supported",
             },
@@ -79,6 +98,26 @@ def catalog_payload() -> dict[str, object]:
                 "contextSurface": None,
                 "inputSchemaSha256": compute_input_schema_sha256(
                     TOOL_SCHEMAS["list_calendar_events"]
+                ),
+            },
+            {
+                "toolName": "get_calendar_event",
+                "domain": "calendar",
+                "action": "get_calendar_event",
+                "operation": "read",
+                "capabilityIds": ["calendar.get"],
+                "whenToUse": "이전 목록에서 선택한 Calendar event 상세를 조회합니다.",
+                "mustNotUseFor": ["일정 변경 요청", "회의록 요청"],
+                "acceptedSelectorFields": ["contextRef"],
+                "selectorKinds": ["context_ref"],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+                "riskLevel": "low",
+                "executionMode": "contextual",
+                "requiresConfirmation": False,
+                "contextSurface": None,
+                "inputSchemaSha256": compute_input_schema_sha256(
+                    TOOL_SCHEMAS["get_calendar_event"]
                 ),
             },
             {
@@ -177,8 +216,15 @@ def test_metadata_retrieval_prefers_matching_domain_and_returns_low_confidence_f
     assert calendar.candidate_count > 0
     assert calendar.confidence_bucket in {"low", "medium", "high"}
 
+    today = retrieve_tool_shortlist("오늘 일정 보여줘", catalog)
+    assert today.tool_names == ("list_calendar_events",)
+
     meeting = retrieve_tool_shortlist("최근 회의록 보여줘", catalog, top_k=1)
     assert meeting.tool_names == ("list_meeting_reports",)
+
+    detail = retrieve_tool_shortlist("세 번째 일정에 대해서 자세히 알려줘", catalog, top_k=1)
+    assert detail.tool_names == ("get_calendar_event",)
+    assert detail.selected_capability_ids == ("calendar.get",)
 
     unknown = retrieve_tool_shortlist("점심 메뉴 추천해줘", catalog)
     assert unknown.tool_names == ()
@@ -367,14 +413,14 @@ def test_catalog_rejects_descriptor_digest_that_does_not_match_the_tool_schema()
 
 def test_retrieval_expands_required_chain_within_the_schema_budget() -> None:
     payload = catalog_payload()
-    payload["capabilities"][1]["domain"] = "calendar"
-    payload["descriptors"][1]["domain"] = "calendar"
+    payload["capabilities"][2]["domain"] = "calendar"
+    payload["descriptors"][2]["domain"] = "calendar"
     payload["capabilities"][0]["toolNames"] = [
         "list_calendar_events",
         "list_meeting_reports",
     ]
-    payload["descriptors"][1]["capabilityIds"].append("calendar.list")
-    payload["descriptors"][1]["selectorKinds"].append("date_range")
+    payload["descriptors"][2]["capabilityIds"].append("calendar.list")
+    payload["descriptors"][2]["selectorKinds"].append("date_range")
     payload["sha256"] = compute_tool_capability_catalog_sha(
         payload["version"], payload["capabilities"], payload["descriptors"]
     )

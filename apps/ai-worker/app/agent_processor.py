@@ -1712,6 +1712,12 @@ def normalize_agent_planner_decision(
         prompt=prompt,
         current_date=current_date,
     )
+    decision = _normalize_calendar_detail_thread_context_reference(
+        decision,
+        job,
+        prompt=prompt,
+        planning_context=planning_context,
+    )
     decision = _normalize_calendar_thread_context_reference(
         decision,
         job,
@@ -1998,6 +2004,54 @@ def _normalize_calendar_thread_context_reference(
         tool_name="update_calendar_event",
         tool_input=tool_input,
         requires_confirmation=True,
+        missing_fields=(),
+        unsupported_reason=None,
+    )
+
+
+def _normalize_calendar_detail_thread_context_reference(
+    decision: AgentPlannerDecision,
+    job: AgentRunJob,
+    *,
+    prompt: str,
+    planning_context: str,
+) -> AgentPlannerDecision:
+    normalized_prompt = re.sub(r"\s+", " ", prompt).strip().lower()
+    ordinal = _calendar_event_ordinal(normalized_prompt)
+    is_detail_request = bool(
+        "일정" in normalized_prompt
+        and (
+            ordinal is not None
+            or re.search(r"자세히|상세|정보|내용", normalized_prompt)
+            or re.search(
+                r"(?:그|이|저|선택한)\s*일정|방금\s*(?:본|보여준|선택한)?\s*일정",
+                normalized_prompt,
+            )
+        )
+        and not re.search(r"변경|수정|바꿔|옮겨|만들|생성|추가|등록|삭제|지워", normalized_prompt)
+    )
+    available_tool_names = {tool.name for tool in job.tools}
+    if not is_detail_request or "get_calendar_event" not in available_tool_names:
+        return decision
+
+    references = [
+        reference
+        for line in planning_context.splitlines()
+        if (reference := _calendar_context_reference_line(line)) is not None
+    ]
+    references = _latest_thread_context_references(references, "event")
+    if ordinal is not None:
+        references = [reference for reference in references if reference.get("ordinal") == ordinal]
+    if len(references) != 1:
+        return _calendar_context_clarification()
+
+    return AgentPlannerDecision(
+        status="tool_candidate",
+        message="이전 대화에서 선택한 Calendar 일정의 상세를 조회합니다.",
+        final_answer_draft="선택한 일정의 상세 정보를 확인합니다.",
+        tool_name="get_calendar_event",
+        tool_input={"contextRef": references[0]["contextRef"]},
+        requires_confirmation=False,
         missing_fields=(),
         unsupported_reason=None,
     )
@@ -2654,6 +2708,25 @@ def _calendar_context_reference_line(line: str) -> dict[str, object] | None:
     ):
         return value
     return None
+
+
+def _calendar_event_ordinal(prompt: str) -> int | None:
+    if "일정" not in prompt:
+        return None
+    return _meeting_action_item_ordinal(prompt)
+
+
+def _calendar_context_clarification() -> AgentPlannerDecision:
+    return AgentPlannerDecision(
+        status="needs_clarification",
+        message="이전 대화에서 Calendar 일정을 하나로 정할 수 없습니다.",
+        final_answer_draft="자세히 볼 일정의 목록 순번이나 제목을 알려주세요.",
+        tool_name=None,
+        tool_input={},
+        requires_confirmation=False,
+        missing_fields=("calendar_event_context",),
+        unsupported_reason=None,
+    )
 
 
 def _latest_thread_context_references(
@@ -3803,6 +3876,9 @@ def _agent_planner_system_prompt() -> str:
         "and changes. For exactly one matching prior Calendar event, target must contain only its "
         "opaque contextRef; otherwise use the explicit title, startDate, and endDate selector. "
         "The server loads the current values for confirmation. "
+        "For a Calendar detail request that selects one event from a prior list, use "
+        "get_calendar_event with only that event's opaque contextRef. Never use a Meeting tool "
+        "for a Calendar event reference. "
         "For MeetingReport list requests, omit limit unless the user specifies a count; the "
         "App Server defaults it to the latest one by createdAt descending. For a MeetingReport "
         "detail or summary request, use get_meeting_report or summarize_meeting_report with "

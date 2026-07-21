@@ -8,6 +8,9 @@ const { AgentToolRegistryService } = require(
 const { CalendarAgentToolsService } = require(
   "../../dist/modules/agent/tools/calendar-agent-tools.service.js"
 );
+const { buildAgentReadResultAnswer } = require(
+  "../../dist/modules/agent/agent-read-result-formatter.js"
+);
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
@@ -155,6 +158,7 @@ function errorCode(error) {
 
   assert.deepEqual(names, [
     "list_calendar_events",
+    "get_calendar_event",
     "create_calendar_event",
     "update_calendar_event"
   ]);
@@ -163,6 +167,11 @@ function errorCode(error) {
       .description,
     /반복 일정은 지원하지 않습니다/
   );
+  const detailDefinition = definitions.find(
+    (definition) => definition.name === "get_calendar_event"
+  );
+  assert.equal(detailDefinition.executionMode, "contextual");
+  assert.equal(detailDefinition.postExecutionDisposition, "complete_run");
 }
 
 {
@@ -186,6 +195,89 @@ function errorCode(error) {
       end: "2026-07-15"
     }
   });
+}
+
+{
+  const { calendarService, registry, threadContextService } = createRegistry();
+  calendarService.events = [
+    createEvent({
+      id: 3,
+      title: "쿄쿄쿄",
+      description: "세 번째 일정의 상세 설명",
+      color: "#22C55E",
+      startDate: "2026-07-23",
+      endDate: "2026-07-23",
+      startTime: "10:00",
+      endTime: "11:00"
+    })
+  ];
+  const detailReference = { resourceType: "event", resourceId: "3" };
+  threadContextService.resolveCalendarEventReference = async function (
+    contextValue,
+    contextRef
+  ) {
+    this.calls.push({ context: contextValue, contextRef });
+    return detailReference;
+  };
+  const tool = registry.getDefinition("get_calendar_event");
+  const input = tool.validateInput({
+    contextRef: "ctx_0123456789abcdef01234567"
+  });
+  const preparation = await tool.prepareExecution(context, input);
+  const result = await tool.execute(context, input);
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_calendar_event",
+    outputSummary: result.outputSummary,
+    resourceRefs: result.resourceRefs
+  });
+
+  assert.deepEqual(preparation, { kind: "execute" });
+  assert.equal(result.outputSummary.event.title, "쿄쿄쿄");
+  assert.equal(result.outputSummary.event.description, "세 번째 일정의 상세 설명");
+  assert.equal(result.outputSummary.event.id, undefined);
+  assert.equal(result.resourceRefs[0].resourceId, "3");
+  assert.match(answer, /쿄쿄쿄/);
+  assert.match(answer, /2026-07-23 10:00-11:00/);
+  assert.match(answer, /세 번째 일정의 상세 설명/);
+  assert.equal(threadContextService.calls.length, 2);
+  assert.deepEqual(calendarService.calls[0], {
+    method: "getEvent",
+    currentUserId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    eventId: "3"
+  });
+}
+
+{
+  const { registry } = createRegistry(null);
+  const tool = registry.getDefinition("get_calendar_event");
+  const preparation = await tool.prepareExecution(
+    context,
+    tool.validateInput({ contextRef: "ctx_0123456789abcdef01234567" })
+  );
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_calendar_event",
+    outputSummary: preparation.outputSummary,
+    resourceRefs: preparation.resourceRefs
+  });
+
+  assert.equal(preparation.kind, "needs_clarification");
+  assert.equal(preparation.outputSummary.status, "needs_clarification");
+  assert.equal(answer, "상세히 볼 Calendar 일정을 다시 선택해주세요.");
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("get_calendar_event");
+
+  assert.throws(
+    () => tool.validateInput({ eventId: "3" }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.match(error.getResponse().error.message, /eventId.*not supported/);
+      return true;
+    }
+  );
 }
 
 {

@@ -1153,6 +1153,7 @@ Status code: `200 OK`
 | Tool | 위험도 | 자동 실행 | 기존 도메인 계약 |
 | --- | --- | --- | --- |
 | `list_calendar_events` | `low` | 가능 | `GET /workspaces/{workspaceId}/calendar/events` |
+| `get_calendar_event` | `low` | 가능 | 이전 목록의 opaque `contextRef`를 검증한 뒤 `GET /workspaces/{workspaceId}/calendar/events/{eventId}` |
 | `create_calendar_event` | `medium` | 불가 | `POST /workspaces/{workspaceId}/calendar/events` |
 | `update_calendar_event` | `medium` | 불가 | `PATCH /workspaces/{workspaceId}/calendar/events/{eventId}` |
 | `list_meeting_rooms` | `low` | 가능 | Workspace 회의방과 방별 현재 Meeting·녹음 상태를 조회한다. |
@@ -1306,6 +1307,10 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
 
 - Agent는 Calendar event 생성/수정 시 `workspaceId`, `createdBy`를 body로 보내지 않는다.
 - `workspaceId`는 path에서 오고, `createdBy`는 현재 로그인 사용자에서 온다.
+- `get_calendar_event`는 같은 thread의 이전 Calendar 목록에서 하나로 선택된 event의 opaque
+  `contextRef`만 받는다. App Server는 `domain=calendar`, `resourceType=event`, Workspace와 요청 사용자를
+  다시 검증한 뒤 기존 Calendar 상세 조회 service를 호출한다. raw `eventId`는 planner input이나 최종
+  답변에 노출하지 않으며, 상세 조회가 성공하면 같은 도구를 반복하지 않고 run을 완료한다.
 - `update_calendar_event` planner input은 `target`과 `changes`만 받는다. 직전 Calendar 조회에서
   정확히 하나로 특정된 event를 가리킬 때 `target`은 해당 server-owned opaque `contextRef`만 받는다.
   그 외에는 제목과 명시적 대상 날짜 범위가 필요하며, 시간·종일 여부는 선택적 exact filter다.

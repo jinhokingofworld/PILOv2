@@ -29,6 +29,26 @@
       }
     },
     {
+      "name": "get_calendar_event",
+      "description": "이전 Calendar 목록에서 하나로 선택된 일정의 상세 정보를 opaque contextRef로 조회합니다. 목록 조회나 일정 변경에는 사용하지 않습니다.",
+      "riskLevel": "low",
+      "executionMode": "contextual",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "contextRef"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "contextRef": {
+            "type": "string",
+            "pattern": "^ctx_[0-9a-f]{24}$",
+            "description": "같은 Agent thread의 이전 Calendar 목록 결과에 저장된 opaque reference"
+          }
+        }
+      }
+    },
+    {
       "name": "create_calendar_event",
       "description": "Calendar 일정을 생성합니다. 실행 전 confirmation이 필요합니다. 종료 날짜가 없으면 시작 날짜와 같게, 시간 일정의 종료 시각이 없으면 시작 시각 1시간 뒤로 정규화합니다. 종일 일정에는 시간을 넣지 않습니다. 반복 일정은 지원하지 않습니다.",
       "riskLevel": "medium",
