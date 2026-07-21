@@ -17,6 +17,7 @@ from app.agent_multiturn_context_evaluation import (
     evaluate_deterministic_continuation,
     evaluate_multiturn_conversation,
     load_multiturn_catalog,
+    validate_multiturn_catalog_against_job,
 )
 from app.agent_outcome_judge import MultiTurnJudgeEvidence
 from app.agent_planner_evaluation import load_evaluation_suite
@@ -185,7 +186,20 @@ def test_catalog_follow_up_constraints_use_registered_tool_fields() -> None:
 def test_multiturn_report_emits_only_primary_rates_and_non_raw_diagnostics() -> None:
     report = build_multiturn_context_report(
         (
-            MultiTurnEvaluationResult("meeting_01", 1, True, True, (), "pass", (), True, True),
+            MultiTurnEvaluationResult(
+                "meeting_01",
+                1,
+                True,
+                True,
+                (),
+                "pass",
+                (),
+                True,
+                True,
+                True,
+                ("list_meeting_reports",),
+                ("list_meeting_reports",),
+            ),
             MultiTurnEvaluationResult(
                 "drive_01",
                 1,
@@ -196,16 +210,268 @@ def test_multiturn_report_emits_only_primary_rates_and_non_raw_diagnostics() -> 
                 ("judge_vote_split",),
                 True,
                 False,
+                False,
+                ("search_drive_files",),
+                (),
             ),
         )
     )
 
     summary = report["multiTurnContextEvaluation"]
-    assert summary["multiTurnContextResolutionRate"] == 1.0
+    assert summary["multiTurnContextResolutionRate"] == 0.5
     assert summary["multiTurnToolSelectionAccuracy"] == 0.5
     assert summary["inconclusiveRate"] == 0.5
     assert "conversationHistory" not in str(report)
     assert "toolInput" not in str(report)
+
+
+def test_report_counts_missing_tool_as_tool_selection_failure() -> None:
+    report = build_multiturn_context_report(
+        (
+            MultiTurnEvaluationResult(
+                "drive_missing_tool",
+                1,
+                False,
+                False,
+                ("tool_sequence", "runtime_failure"),
+                tool_selection_passed=False,
+                expected_tool_sequence=("search_drive_files",),
+                executed_tool_sequence=(),
+            ),
+        )
+    )
+
+    result = report["results"][0]
+    assert report["multiTurnContextEvaluation"]["multiTurnToolSelectionAccuracy"] == 0.0
+    assert result["toolSelectionPassed"] is False
+    assert result["expectedToolSequence"] == ["search_drive_files"]
+    assert result["executedToolSequence"] == []
+
+
+def test_context_report_requires_a_passing_judge_verdict() -> None:
+    report = build_multiturn_context_report(
+        (
+            MultiTurnEvaluationResult(
+                "meeting_partial_judge",
+                1,
+                True,
+                True,
+                (),
+                "partial",
+                (),
+                True,
+                True,
+                True,
+                ("list_meeting_reports", "find_action_items"),
+                ("list_meeting_reports", "find_action_items"),
+            ),
+        )
+    )
+
+    assert report["multiTurnContextEvaluation"]["multiTurnContextResolutionRate"] == 0.0
+
+
+def test_missing_tool_call_is_not_a_tool_selection_success() -> None:
+    conversation = MultiTurnConversation(
+        conversation_id="meeting_missing_tool",
+        turns=(
+            MultiTurnTurn(
+                user="Show the meeting report.",
+                expected_tools=("list_meeting_reports",),
+                expected_context=ExpectedContext("none", None, {}),
+                fixtures=(
+                    MultiTurnToolFixture(
+                        "list_meeting_reports",
+                        {"contextRef": "ctx_111111111111111111111111"},
+                    ),
+                ),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+            MultiTurnTurn(
+                user="Show its action items.",
+                expected_tools=("find_action_items",),
+                expected_context=ExpectedContext(
+                    "prior_context_ref", "ctx_111111111111111111111111", {}
+                ),
+                fixtures=(MultiTurnToolFixture("find_action_items", {"items": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+        ),
+    )
+
+    result = evaluate_deterministic_continuation(conversation, ())
+
+    assert result.tool_selection_passed is False
+    assert result.executed_tool_sequence == ()
+
+
+def test_tool_selection_fails_when_the_right_tools_are_called_in_the_wrong_turn() -> None:
+    conversation = MultiTurnConversation(
+        conversation_id="meeting_wrong_turn",
+        turns=(
+            MultiTurnTurn(
+                user="Show the meeting report.",
+                expected_tools=("list_meeting_reports",),
+                expected_context=ExpectedContext("none", None, {}),
+                fixtures=(MultiTurnToolFixture("list_meeting_reports", {"reports": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+            MultiTurnTurn(
+                user="Show its action items.",
+                expected_tools=("find_action_items",),
+                expected_context=ExpectedContext(
+                    "prior_context_ref", "ctx_111111111111111111111111", {}
+                ),
+                fixtures=(MultiTurnToolFixture("find_action_items", {"items": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+        ),
+    )
+
+    result = evaluate_deterministic_continuation(
+        conversation,
+        (
+            MultiTurnEvaluationToolCall(0, "list_meeting_reports", {}),
+            MultiTurnEvaluationToolCall(0, "find_action_items", {}),
+        ),
+    )
+
+    assert result.expected_tool_sequence == result.executed_tool_sequence
+    assert result.tool_selection_passed is False
+
+
+def test_preflight_rejects_a_selector_not_in_the_registered_tool_schema() -> None:
+    conversation = MultiTurnConversation(
+        conversation_id="meeting_invalid_selector",
+        turns=(
+            MultiTurnTurn(
+                user="Show the meeting report.",
+                expected_tools=("list_meeting_reports",),
+                expected_context=ExpectedContext("none", None, {}),
+                fixtures=(MultiTurnToolFixture("list_meeting_reports", {"reports": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+            MultiTurnTurn(
+                user="Show its action items.",
+                expected_tools=("find_action_items",),
+                expected_context=ExpectedContext(
+                    "prior_context_ref",
+                    "ctx_111111111111111111111111",
+                    {"unknownSelector": "value"},
+                ),
+                fixtures=(MultiTurnToolFixture("find_action_items", {"items": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+        ),
+    )
+    suite = load_evaluation_suite(Path("evals/agent_planner_korean_v1.json"))
+
+    with pytest.raises(ValueError, match="selector"):
+        validate_multiturn_catalog_against_job((conversation,), suite.job)
+
+
+def test_preflight_rejects_a_context_surface_without_a_registry_catalog() -> None:
+    conversation = MultiTurnConversation(
+        conversation_id="sqltoerd_missing_context_surface",
+        context_surface="sql_erd",
+        turns=(
+            MultiTurnTurn(
+                user="Create an ERD.",
+                expected_tools=("generate_sql_erd",),
+                expected_context=ExpectedContext("none", None, {}),
+                fixtures=(MultiTurnToolFixture("generate_sql_erd", {"tables": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+            MultiTurnTurn(
+                user="Show the payment tables.",
+                expected_tools=("focus_sql_erd_tables",),
+                expected_context=ExpectedContext(
+                    "prior_result_selector", "sql_erd_1", {"featureQuery": "payment"}
+                ),
+                fixtures=(MultiTurnToolFixture("focus_sql_erd_tables", {"tables": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+        ),
+    )
+    suite = load_evaluation_suite(Path("evals/agent_planner_korean_v1.json"))
+
+    with pytest.raises(ValueError, match="context surface"):
+        validate_multiturn_catalog_against_job((conversation,), suite.job)
+
+
+def test_preflight_rejects_a_prior_context_reference_missing_from_fixture() -> None:
+    conversation = MultiTurnConversation(
+        conversation_id="meeting_missing_fixture_context",
+        turns=(
+            MultiTurnTurn(
+                user="Show the meeting report.",
+                expected_tools=("list_meeting_reports",),
+                expected_context=ExpectedContext("none", None, {}),
+                fixtures=(MultiTurnToolFixture("list_meeting_reports", {"reports": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+            MultiTurnTurn(
+                user="Show its action items.",
+                expected_tools=("find_action_items",),
+                expected_context=ExpectedContext(
+                    "prior_context_ref",
+                    "ctx_111111111111111111111111",
+                    {"contextRef": "ctx_111111111111111111111111"},
+                ),
+                fixtures=(MultiTurnToolFixture("find_action_items", {"items": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+        ),
+    )
+    suite = load_evaluation_suite(Path("evals/agent_planner_korean_v1.json"))
+
+    with pytest.raises(ValueError, match="context reference"):
+        validate_multiturn_catalog_against_job((conversation,), suite.job)
+
+
+def test_preflight_rejects_a_final_expected_fact_missing_from_fixture() -> None:
+    conversation = MultiTurnConversation(
+        conversation_id="meeting_missing_fixture_fact",
+        turns=(
+            MultiTurnTurn(
+                user="Show the meeting report.",
+                expected_tools=("list_meeting_reports",),
+                expected_context=ExpectedContext("none", None, {}),
+                fixtures=(
+                    MultiTurnToolFixture(
+                        "list_meeting_reports",
+                        {"contextRef": "ctx_111111111111111111111111"},
+                    ),
+                ),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+            MultiTurnTurn(
+                user="Show its action items.",
+                expected_tools=("find_action_items",),
+                expected_context=ExpectedContext(
+                    "prior_context_ref", "ctx_111111111111111111111111", {}
+                ),
+                fixtures=(MultiTurnToolFixture("find_action_items", {"items": []}),),
+                expected_outcome=ExpectedOutcome(True, ("unavailable expected fact",)),
+            ),
+        ),
+    )
+    suite = load_evaluation_suite(Path("evals/agent_planner_korean_v1.json"))
+
+    with pytest.raises(ValueError, match="expected fact"):
+        validate_multiturn_catalog_against_job((conversation,), suite.job)
+
+
+def test_preflight_accepts_a_selector_embedded_in_a_fixture_timestamp() -> None:
+    catalog = load_multiturn_catalog(Path("evals/agent_multiturn_context_v1.json"))
+    calendar_conversation = next(
+        conversation
+        for conversation in catalog.conversations
+        if conversation.conversation_id == "calendar_01"
+    )
+    suite = load_evaluation_suite(Path("evals/agent_planner_korean_v1.json"))
+
+    validate_multiturn_catalog_against_job((calendar_conversation,), suite.job)
 
 
 def test_continuation_fails_when_right_tool_uses_context_from_a_different_turn() -> None:

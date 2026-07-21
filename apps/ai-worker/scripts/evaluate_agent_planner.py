@@ -317,6 +317,7 @@ def main() -> None:
         "multiTurnJudgePromptVersion": args.judge_prompt_version if multiturn_judge else None,
         "multiTurnJudgeTemperature": 0 if multiturn_judge else None,
         "multiTurnJudgeVoteCount": 3 if multiturn_judge else None,
+        "judgeCalibrationStatus": "pending" if multiturn_mode else None,
         "retrievalTopK": args.retrieval_top_k,
         "retrieverVersion": TOOL_RETRIEVER_VERSION,
         "evaluationSeed": args.seed,
