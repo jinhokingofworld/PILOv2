@@ -78,9 +78,7 @@ def test_rejects_expected_tool_not_in_the_registry(tmp_path: Path) -> None:
 
 
 def test_frozen_catalog_has_120_cases_with_twenty_per_non_canvas_domain() -> None:
-    catalog_path = (
-        Path(__file__).parents[1] / "evals" / "agent_single_tool_selection_v1.json"
-    )
+    catalog_path = Path(__file__).parents[1] / "evals" / "agent_single_tool_selection_v1.json"
 
     catalog = load_single_tool_selection_catalog(catalog_path)
 
@@ -88,7 +86,4 @@ def test_frozen_catalog_has_120_cases_with_twenty_per_non_canvas_domain() -> Non
     assert Counter(case.domain for case in catalog.cases) == {
         domain: 20 for domain in ALLOWED_DOMAINS
     }
-    assert all(
-        case.prompt and case.expected_tool_name not in case.prompt
-        for case in catalog.cases
-    )
+    assert all(case.prompt and case.expected_tool_name not in case.prompt for case in catalog.cases)

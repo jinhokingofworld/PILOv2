@@ -13,9 +13,7 @@ from evaluation_harness.single_tool_selection_report import (
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Compare frozen single Tool-selection reports."
-    )
+    parser = argparse.ArgumentParser(description="Compare frozen single Tool-selection reports.")
     parser.add_argument("--baseline-report", type=Path, required=True)
     parser.add_argument("--candidate-report", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)

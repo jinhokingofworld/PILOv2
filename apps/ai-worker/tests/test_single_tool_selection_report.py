@@ -41,9 +41,7 @@ def _results(passed: bool) -> tuple[SingleToolSelectionResult, ...]:
     )
 
 
-def test_report_calculates_exact_accuracy_and_serializes_attempts_in_case_order() -> (
-    None
-):
+def test_report_calculates_exact_accuracy_and_serializes_attempts_in_case_order() -> None:
     results = _results(True)
 
     report = build_single_tool_selection_report(results, _metadata())
@@ -63,9 +61,7 @@ def test_report_rejects_duplicate_or_incomplete_case_attempts() -> None:
         build_single_tool_selection_report(duplicate, _metadata())
 
 
-def test_comparison_clusters_repeated_attempts_by_case_and_allows_different_sources() -> (
-    None
-):
+def test_comparison_clusters_repeated_attempts_by_case_and_allows_different_sources() -> None:
     baseline = build_single_tool_selection_report(
         _results(False), _metadata(sourceRevision="a" * 40)
     )

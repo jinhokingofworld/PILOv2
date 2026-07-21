@@ -11,9 +11,7 @@ from pathlib import Path
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Evaluate only the first Agent Tool selection."
-    )
+    parser = argparse.ArgumentParser(description="Evaluate only the first Agent Tool selection.")
     parser.add_argument("--target-root", type=Path, required=True)
     parser.add_argument("--suite", type=Path, required=True)
     parser.add_argument("--tool-capability-catalog", type=Path, required=True)
@@ -63,9 +61,7 @@ def main() -> None:
         load_evaluation_suite(args.suite), args.tool_capability_catalog
     )
     if {tool.name for tool in suite.job.tools} != registry_tool_names:
-        raise SystemExit(
-            "Target suite and registry snapshot do not describe the same Tool set"
-        )
+        raise SystemExit("Target suite and registry snapshot do not describe the same Tool set")
 
     planner = OpenAiAgentPlannerClient(api_key, args.model, args.timeout_seconds)
     router = OpenAiAgentRouterClient(api_key, args.router_model, args.timeout_seconds)
@@ -105,9 +101,7 @@ def _registry_binding(path: Path) -> tuple[set[str], dict[str, str]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     schemas = payload.get("eligibleToolSchemas")
     registry = payload.get("inventory")
-    if not isinstance(schemas, dict) or not all(
-        isinstance(name, str) for name in schemas
-    ):
+    if not isinstance(schemas, dict) or not all(isinstance(name, str) for name in schemas):
         raise SystemExit("Registry snapshot is missing eligible Tool schemas")
     if not isinstance(registry, dict):
         raise SystemExit("Registry snapshot metadata is required")
