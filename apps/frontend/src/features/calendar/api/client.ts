@@ -212,10 +212,6 @@ function calendarEventPath(workspaceId: string, eventId: string | number) {
   return `${calendarEventsPath(workspaceId)}/${encodeURIComponent(String(eventId))}` as const;
 }
 
-function googleCalendarPath(path: string) {
-  return `/calendar/google${path}` as const;
-}
-
 export function createCalendarApiClient({
   accessToken = null,
   baseUrl = defaultCalendarApiBaseUrl(),
@@ -276,41 +272,6 @@ export function createCalendarApiClient({
         calendarEventPath(workspaceId, eventId),
         { method: "DELETE" },
         requestOptions
-      );
-    },
-
-    async getGoogleConnection() {
-      return requestCalendarData<{
-        connected: boolean;
-        targetCalendarId: string | null;
-        targetCalendarSummary: string | null;
-      }>(googleCalendarPath("/connection"), undefined, requestOptions);
-    },
-
-    async startGoogleConnection(returnPath: string) {
-      return requestCalendarData<{ authorizeUrl: string }>(
-        googleCalendarPath("/connection/start"),
-        withJsonBody({ returnPath }, { method: "POST" }),
-        requestOptions
-      );
-    },
-
-    async listGoogleCalendars() {
-      return requestCalendarData<Array<{ id: string; summary: string; primary: boolean }>>(
-        googleCalendarPath("/calendars"), undefined, requestOptions
-      );
-    },
-
-    async selectGoogleCalendar(calendarId: string) {
-      return requestCalendarData<{ connected: boolean; targetCalendarId: string | null; targetCalendarSummary: string | null }>(
-        googleCalendarPath("/target"), withJsonBody({ calendarId }, { method: "PUT" }), requestOptions
-      );
-    },
-
-    async enableGoogleSync(workspaceId: string, eventId: string | number) {
-      return requestCalendarData<{ queued: true }>(
-        `${calendarEventPath(workspaceId, eventId)}/google-sync` as const,
-        { method: "POST" }, requestOptions
       );
     },
 

@@ -1,13 +1,11 @@
 # Calendar API
 
-> Google Calendar outbound sync (implemented): PILO is the source of truth. Google
-> changes are not imported. The create dialog always shows an unchecked `Google
-> Calendar에 추가` checkbox. PILO saves first; when it is selected, a missing Google
-> connection is completed afterward and then the user selects one destination calendar.
-> Cancellation or failure leaves the PILO event unchanged and unsynced. Synced event
-> updates/deletes are appended to a durable outbox in the same database transaction,
-> with exponential-backoff retry up to five attempts. Disconnecting keeps existing
-> Google events.
+> Google Calendar outbound sync remains active for events that are already connected.
+> PILO is the source of truth and Google changes are not imported. The Calendar create
+> dialog no longer offers new Google Calendar opt-in. Existing synced event updates and
+> deletes are appended to a durable outbox in the same database transaction, with
+> exponential-backoff retry up to five attempts. Disconnecting keeps existing Google
+> events.
 
 ## Google Calendar endpoints
 
