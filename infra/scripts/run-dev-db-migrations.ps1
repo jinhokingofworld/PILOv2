@@ -126,7 +126,7 @@ $volumesFile = $null
 $placementConstraintsFile = $null
 
 try {
-  $definition.containerDefinitions | ConvertTo-Json -Depth 32 -Compress |
+  ConvertTo-Json -InputObject @($definition.containerDefinitions) -Depth 32 -Compress |
     Set-Content -LiteralPath $containerDefinitionsFile -Encoding ascii
 
   $registerArguments = @(
