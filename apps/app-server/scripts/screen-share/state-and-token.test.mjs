@@ -219,6 +219,48 @@ class FakeRedisClient {
       return 0;
     }
 
+    if (script.includes("CLAIM_DUE_WORKSPACE_SCREEN_SHARE_DEADLINE")) {
+      const nowMs = Number(options.arguments[0]);
+      const maxInvalidSkips = Number(options.arguments[5]);
+      for (let skipped = 0; skipped < maxInvalidSkips; skipped += 1) {
+        const due = [...this.deadlines.entries()]
+          .filter(([, score]) => score <= nowMs)
+          .sort((left, right) => left[1] - right[1]);
+        if (due.length === 0) return null;
+        const sessionId = due[0][0];
+        const encoded = this.values.get(`${options.arguments[2]}${sessionId}`);
+        let session = null;
+        try {
+          session = encoded ? JSON.parse(encoded) : null;
+        } catch {
+          session = null;
+        }
+        const valid =
+          session !== null &&
+          session.sessionId === sessionId &&
+          session.status === "active" &&
+          typeof session.workspaceId === "string" &&
+          typeof session.sharerUserId === "string" &&
+          typeof session.sharerDisplayName === "string" &&
+          (typeof session.sharerAvatarUrl === "string" ||
+            session.sharerAvatarUrl === null) &&
+          typeof session.sharerLiveKitIdentity === "string" &&
+          typeof session.livekitRoomName === "string" &&
+          typeof session.createdAt === "string" &&
+          typeof session.startedAt === "string" &&
+          this.values.get(`${options.arguments[3]}${session.workspaceId}`) ===
+            sessionId &&
+          this.values.get(`${options.arguments[4]}${session.livekitRoomName}`) ===
+            sessionId;
+        if (valid) {
+          this.deadlines.set(sessionId, Number(options.arguments[1]));
+          return encoded;
+        }
+        this.deadlines.delete(sessionId);
+      }
+      return null;
+    }
+
     if (script.includes("REMOVE_WORKSPACE_SCREEN_SHARE_VIEWER_IDENTITY")) {
       const [workspaceKey, viewerKey, viewerIndexKey] = options.keys;
       const value = await this.get(workspaceKey);
@@ -488,6 +530,131 @@ try {
     createdAt: "2026-07-18T00:00:00.000Z",
     startedAt: null
   };
+
+  {
+    const crossWorkspaceRedis = new FakeRedisClient();
+    const crossWorkspaceState = new TestScreenShareStateService(
+      crossWorkspaceRedis
+    );
+    const otherWorkspaceSession = {
+      ...session,
+      sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      workspaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      livekitRoomName:
+        "pilo-screen-share-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    };
+    crossWorkspaceRedis.values.set(
+      `workspace-screen-share:lifecycle-workspace:v1:${session.workspaceId}`,
+      otherWorkspaceSession.sessionId
+    );
+    crossWorkspaceRedis.values.set(
+      `workspace-screen-share:lifecycle:v1:${otherWorkspaceSession.sessionId}`,
+      JSON.stringify(otherWorkspaceSession)
+    );
+    assert.equal(
+      await crossWorkspaceState.getCurrent(session.workspaceId),
+      null,
+      "a stale lifecycle workspace index must not expose another workspace session"
+    );
+  }
+
+  {
+    const deadlineRedis = new FakeRedisClient();
+    const deadlineState = new TestScreenShareStateService(deadlineRedis);
+    const dueSession = {
+      ...session,
+      sessionId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      workspaceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      livekitRoomName:
+        "pilo-screen-share-cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      status: "active",
+      startedAt: "2026-07-18T00:00:01.000Z"
+    };
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle:v1:${dueSession.sessionId}`,
+      JSON.stringify(dueSession)
+    );
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle-workspace:v1:${dueSession.workspaceId}`,
+      dueSession.sessionId
+    );
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle-room:v1:${dueSession.livekitRoomName}`,
+      dueSession.sessionId
+    );
+    deadlineRedis.deadlines.set(dueSession.sessionId, 100);
+
+    assert.deepEqual(await deadlineState.claimDueDeadline(100, 1_000), dueSession);
+    assert.equal(deadlineRedis.deadlines.get(dueSession.sessionId), 1_000);
+    assert.equal(await deadlineState.claimDueDeadline(999, 2_000), null);
+    assert.deepEqual(
+      await deadlineState.claimDueDeadline(1_000, 2_000),
+      dueSession,
+      "a deadline must become retryable after its lease expires"
+    );
+
+    const poisonedMissingId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const poisonedMalformedId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const poisonedIndexSession = {
+      ...dueSession,
+      sessionId: "12121212-1212-4212-8212-121212121212",
+      workspaceId: "13131313-1313-4313-8313-131313131313",
+      livekitRoomName:
+        "pilo-screen-share-12121212-1212-4212-8212-121212121212"
+    };
+    const validAfterPoison = {
+      ...dueSession,
+      sessionId: "14141414-1414-4414-8414-141414141414",
+      workspaceId: "15151515-1515-4515-8515-151515151515",
+      livekitRoomName:
+        "pilo-screen-share-14141414-1414-4414-8414-141414141414"
+    };
+    deadlineRedis.deadlines.delete(dueSession.sessionId);
+    deadlineRedis.deadlines.set(poisonedMissingId, 1);
+    deadlineRedis.deadlines.set(poisonedMalformedId, 2);
+    deadlineRedis.deadlines.set(poisonedIndexSession.sessionId, 3);
+    deadlineRedis.deadlines.set(validAfterPoison.sessionId, 4);
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle:v1:${poisonedMalformedId}`,
+      "{not-json"
+    );
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle:v1:${poisonedIndexSession.sessionId}`,
+      JSON.stringify(poisonedIndexSession)
+    );
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle-workspace:v1:${poisonedIndexSession.workspaceId}`,
+      "wrong-session"
+    );
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle-room:v1:${poisonedIndexSession.livekitRoomName}`,
+      poisonedIndexSession.sessionId
+    );
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle:v1:${validAfterPoison.sessionId}`,
+      JSON.stringify(validAfterPoison)
+    );
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle-workspace:v1:${validAfterPoison.workspaceId}`,
+      validAfterPoison.sessionId
+    );
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle-room:v1:${validAfterPoison.livekitRoomName}`,
+      validAfterPoison.sessionId
+    );
+
+    assert.deepEqual(
+      await deadlineState.claimDueDeadline(10, 1_000),
+      validAfterPoison,
+      "invalid deadline members must be removed so a later valid task can be leased"
+    );
+    assert.equal(deadlineRedis.deadlines.has(poisonedMissingId), false);
+    assert.equal(deadlineRedis.deadlines.has(poisonedMalformedId), false);
+    assert.equal(
+      deadlineRedis.deadlines.has(poisonedIndexSession.sessionId),
+      false
+    );
+  }
 
   assert.equal(await state.reserve(session, "attempt-1"), true);
   const recoveredSession = { ...session, createdAt: "2026-07-18T00:00:00.500Z" };

@@ -300,19 +300,43 @@ return 0
 
 const CLAIM_DUE_DEADLINE_SCRIPT = `
 -- CLAIM_DUE_WORKSPACE_SCREEN_SHARE_DEADLINE
-local sessionIds = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", ARGV[1], "LIMIT", 0, 1)
-if #sessionIds == 0 then
-  return false
-end
-local sessionId = sessionIds[1]
-local encoded = redis.call("GET", ARGV[3] .. sessionId)
-if not encoded then
+local maxInvalidSkips = tonumber(ARGV[6])
+for _ = 1, maxInvalidSkips do
+  local sessionIds = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", ARGV[1], "LIMIT", 0, 1)
+  if #sessionIds == 0 then
+    return false
+  end
+  local sessionId = sessionIds[1]
+  local encoded = redis.call("GET", ARGV[3] .. sessionId)
+  local valid = false
+  if encoded then
+    local decoded, session = pcall(cjson.decode, encoded)
+    if decoded and type(session) == "table" and
+      session.sessionId == sessionId and
+      session.status == "active" and
+      type(session.workspaceId) == "string" and
+      type(session.sharerUserId) == "string" and
+      type(session.sharerDisplayName) == "string" and
+      (type(session.sharerAvatarUrl) == "string" or session.sharerAvatarUrl == cjson.null) and
+      type(session.sharerLiveKitIdentity) == "string" and
+      type(session.livekitRoomName) == "string" and
+      type(session.createdAt) == "string" and
+      type(session.startedAt) == "string" and
+      redis.call("GET", ARGV[4] .. session.workspaceId) == sessionId and
+      redis.call("GET", ARGV[5] .. session.livekitRoomName) == sessionId then
+      valid = true
+    end
+  end
+  if valid then
+    redis.call("ZADD", KEYS[1], ARGV[2], sessionId)
+    return encoded
+  end
   redis.call("ZREM", KEYS[1], sessionId)
-  return false
 end
-redis.call("ZADD", KEYS[1], ARGV[2], sessionId)
-return encoded
+return false
 `;
+
+const SCREEN_SHARE_DEADLINE_INVALID_SKIP_LIMIT = 100;
 
 const CLAIM_STARTING_SESSION_SCRIPT = `
 -- CLAIM_STARTING_WORKSPACE_SCREEN_SHARE
@@ -405,15 +429,19 @@ export class ScreenShareStateService {
   async getCurrent(
     workspaceId: string
   ): Promise<WorkspaceScreenShareSession | null> {
-    const value = await this.runRedisCommand(async client => {
+    const lookup = await this.runRedisCommand(async client => {
       const authority = await client.get(this.workspaceKey(workspaceId));
-      if (authority !== null) return authority;
+      if (authority !== null) return { value: authority, lifecycle: false };
       const sessionId = await client.get(this.lifecycleWorkspaceKey(workspaceId));
-      return sessionId === null
-        ? null
-        : client.get(this.lifecycleSessionKey(sessionId));
+      if (sessionId === null) return null;
+      const value = await client.get(this.lifecycleSessionKey(sessionId));
+      return value === null ? null : { value, lifecycle: true };
     });
-    return value === null ? null : parseWorkspaceScreenShareSession(value);
+    if (lookup === null) return null;
+    const current = parseWorkspaceScreenShareSession(lookup.value);
+    return !lookup.lifecycle || current.workspaceId === workspaceId
+      ? current
+      : null;
   }
 
   async getByRoom(
@@ -712,7 +740,10 @@ export class ScreenShareStateService {
         arguments: [
           String(nowMs),
           String(leaseUntilMs),
-          "workspace-screen-share:lifecycle:v1:"
+          "workspace-screen-share:lifecycle:v1:",
+          "workspace-screen-share:lifecycle-workspace:v1:",
+          "workspace-screen-share:lifecycle-room:v1:",
+          String(SCREEN_SHARE_DEADLINE_INVALID_SKIP_LIMIT)
         ]
       })
     );
