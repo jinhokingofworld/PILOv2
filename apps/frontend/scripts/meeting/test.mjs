@@ -536,6 +536,18 @@ assert.match(meetingReportSection, /DialogPrimitive/);
 assert.match(meetingReportSection, /MeetingReportDetailModal/);
 assert.match(meetingReportSection, /EditableReportTextBlock/);
 assert.match(meetingReportSection, /DecisionItemsBlock/);
+assert.match(
+  meetingReportSection,
+  /min-h-24 whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-base leading-6/
+);
+assert.match(
+  meetingReportSection,
+  /min-h-24 rounded-md border bg-background px-3 py-2 text-base leading-6/
+);
+assert.match(
+  meetingReportSection,
+  /report\.transcriptText[\s\S]*?p-4 text-base leading-7/
+);
 assert.match(meetingReportSection, /contentVersion/);
 assert.match(meetingReportSection, /다른 사용자가 먼저 수정했습니다/);
 assert.match(meetingReportSection, /회의록 상세 닫기/);

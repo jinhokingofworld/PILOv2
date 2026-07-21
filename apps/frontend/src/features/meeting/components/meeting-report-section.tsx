@@ -444,7 +444,7 @@ function ReportTextBlock({
   return (
     <section className="grid gap-2">
       <h3 className="font-heading text-xl font-semibold">{title}</h3>
-      <div className="min-h-24 whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-sm leading-6">
+      <div className="min-h-24 whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-base leading-6">
         {asList && listItems.length ? (
           <ul className="list-disc space-y-2 pl-5">
             {listItems.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
@@ -541,7 +541,7 @@ function EditableReportTextBlock({
           ) : (
             <textarea
               aria-label={`${title} 수정`}
-              className="min-h-32 rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="min-h-32 rounded-md border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring"
               disabled={saving}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
@@ -561,7 +561,7 @@ function EditableReportTextBlock({
           </div>
         </div>
       ) : (
-        <div className="min-h-24 whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-sm leading-6">
+        <div className="min-h-24 whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-base leading-6">
           {asList && listItems.length ? (
             <ul className="list-disc space-y-2 pl-5">
               {listItems.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
@@ -620,7 +620,7 @@ function DecisionItemsBlock({
           {items.map((item) => {
             const editing = editingId === item.id;
             return (
-              <li key={item.id} className="grid gap-2 rounded-lg border bg-background p-3 text-sm leading-6">
+              <li key={item.id} className="grid gap-2 rounded-lg border bg-background p-3 text-base leading-6">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-muted-foreground">결정 {item.sourceIndex + 1}</span>
                   {editable && !editing ? (
@@ -636,7 +636,7 @@ function DecisionItemsBlock({
                   <>
                     <textarea
                       aria-label={`결정 ${item.sourceIndex + 1} 수정`}
-                      className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="min-h-24 rounded-md border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       disabled={saving}
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
@@ -666,7 +666,7 @@ function DecisionItemsBlock({
           })}
         </ul>
       ) : (
-        <div className="min-h-24 rounded-lg border bg-background p-3 text-sm leading-6 text-muted-foreground">
+        <div className="min-h-24 rounded-lg border bg-background p-3 text-base leading-6 text-muted-foreground">
           {emptyLabel}
         </div>
       )}
@@ -705,7 +705,7 @@ function DecisionTextItemsBlock({
           {items.map((item, sourceIndex) => (
             <li
               key={`${item}-${sourceIndex}`}
-              className="grid gap-2 rounded-lg border bg-background p-3 text-sm leading-6"
+              className="grid gap-2 rounded-lg border bg-background p-3 text-base leading-6"
             >
               <span className="text-xs font-medium text-muted-foreground">
                 결정 {sourceIndex + 1}
@@ -724,7 +724,7 @@ function DecisionTextItemsBlock({
           ))}
         </ul>
       ) : (
-        <div className="min-h-24 rounded-lg border bg-background p-3 text-sm leading-6 text-muted-foreground">
+        <div className="min-h-24 rounded-lg border bg-background p-3 text-base leading-6 text-muted-foreground">
           {emptyLabel}
         </div>
       )}
@@ -958,7 +958,7 @@ function ActionItemReviewCard({
   }
 
   return (
-    <li className="grid gap-3 rounded-lg border bg-background p-3 text-sm">
+    <li className="grid gap-3 rounded-lg border bg-background p-3 text-base">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
@@ -988,8 +988,8 @@ function ActionItemReviewCard({
 
       {editing && pending ? (
         <div className="grid gap-2">
-          <Input aria-label="후속 작업 제목" disabled={busy} value={title} onChange={(event) => setTitle(event.target.value)} />
-          <textarea aria-label="후속 작업 설명" className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={busy} value={description} onChange={(event) => setDescription(event.target.value)} />
+          <Input className="text-base" aria-label="후속 작업 제목" disabled={busy} value={title} onChange={(event) => setTitle(event.target.value)} />
+          <textarea aria-label="후속 작업 설명" className="min-h-20 rounded-md border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={busy} value={description} onChange={(event) => setDescription(event.target.value)} />
           <div className="grid gap-2 sm:grid-cols-2">
             <select aria-label="우선순위 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy} value={priority} onChange={(event) => setPriority(event.target.value as MeetingReportActionItem["priority"])}>
               <option value="LOW">낮음</option><option value="MEDIUM">보통</option><option value="HIGH">높음</option>
@@ -1352,7 +1352,7 @@ function MeetingReportDetailModal({
                 <div className="grid gap-2">
                   <h2 className="font-heading text-lg font-semibold">Transcript 전문</h2>
                   {report.transcriptText?.trim() ? (
-                    <p className="whitespace-pre-wrap break-words rounded-lg border bg-muted/20 p-4 text-sm leading-7">
+                    <p className="whitespace-pre-wrap break-words rounded-lg border bg-muted/20 p-4 text-base leading-7">
                       {report.transcriptText}
                     </p>
                   ) : (
@@ -1663,7 +1663,7 @@ function MeetingReportDetailModal({
                         <p className="text-xs font-semibold text-muted-foreground">
                           {formatTranscriptTimestamp(selectedEvidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(selectedEvidenceSegment.endedAtMs)}
                         </p>
-                        <p className="whitespace-pre-wrap break-words text-sm leading-6">
+                        <p className="whitespace-pre-wrap break-words text-base leading-6">
                           {selectedEvidenceSegment.text}
                         </p>
                       </>
@@ -1676,7 +1676,7 @@ function MeetingReportDetailModal({
                           {selectedActivityEvidence.map((activity) => (
                             <li
                               key={activity.id}
-                              className="rounded-md border bg-background p-3 text-sm"
+                              className="rounded-md border bg-background p-3 text-base"
                             >
                               <p className="text-xs font-semibold text-muted-foreground">
                                 {formatReportDateTime(activity.occurredAt)} · {activity.action}
