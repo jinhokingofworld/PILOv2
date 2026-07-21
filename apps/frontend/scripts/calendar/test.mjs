@@ -87,6 +87,10 @@ assert.match(calendarPanel, /CalendarMonthPicker/);
 assert.match(calendarPanel, /<h1[^>]*>\s*캘린더\s*<\/h1>/);
 assert.match(
   calendarPanel,
+  /일정 수정[\s\S]*?className="border-t p-4 space-y-3"[\s\S]*?onRequestDelete/
+);
+assert.match(
+  calendarPanel,
   /onDoubleClick=\{\(\) => openCreateDialog\(date\)\}/
 );
 assert.match(

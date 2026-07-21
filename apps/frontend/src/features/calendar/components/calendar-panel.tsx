@@ -764,7 +764,7 @@ function CalendarEventDialog({
                 onFormChange={onFormChange}
               />
 
-              <div className="border-t p-4">
+              <div className="border-t p-4 space-y-3">
                 <Button
                   type="button"
                   variant="destructive"
