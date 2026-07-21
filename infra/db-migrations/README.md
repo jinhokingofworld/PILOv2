@@ -41,6 +41,13 @@ before executing baseline mode.
 
 ## Applying later migrations
 
+### Temporary migration-104 recovery
+
+Issue #1637 permits only the exact migration-104 checksum transition while
+the corrected file is promoted from dev to main. The exception must be removed
+in a follow-up change after that promotion; it is not a permanent repair
+mechanism and does not authorize a new RDS migration execution.
+
 The `Publish DB Migration Runner` workflow validates migration filenames and
 immutability on pull requests. When a matching change is merged to `dev`, it
 publishes a runner image with the full merge commit SHA and `latest` tags.

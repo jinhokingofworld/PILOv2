@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { verifyExistingMigrationRepair } from "../db-migrations/migration-change-policy.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const migrationDirectory = "db/migrations";
 const baseRef = process.env.MIGRATION_BASE_REF || "origin/dev";
 const migrationPattern = /^(\d{3})_([a-z0-9]+(?:_[a-z0-9]+)*)\.sql$/;
+const approvedRepairs = JSON.parse(
+  await readFile(
+    new URL("../db-migrations/approved-existing-migration-repairs.json", import.meta.url),
+    "utf8",
+  ),
+).approvedRepairs;
 function git(...args) {
   return execFileSync("git", args, {
     cwd: repositoryRoot,
@@ -38,6 +45,19 @@ const addedFiles = [];
 for (const [status, firstPath, secondPath] of changedEntries) {
   if (status === "A") {
     addedFiles.push(firstPath);
+    continue;
+  }
+
+  if (status === "M") {
+    verifyExistingMigrationRepair({
+      status,
+      path: firstPath,
+      baseContents: execFileSync("git", ["show", `${baseRef}:${firstPath}`], {
+        cwd: repositoryRoot,
+      }),
+      headContents: await readFile(path.join(repositoryRoot, firstPath)),
+      approvedRepairs,
+    });
     continue;
   }
 

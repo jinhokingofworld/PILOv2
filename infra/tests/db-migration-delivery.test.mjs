@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 
-const [workflow, migrationValidator, migrationDirectoryEntries, testDirectoryEntries, runnerScript, iamModule, iamOutputs, devOutputs] =
+const [workflow, runnerScript, iamModule, iamOutputs, devOutputs] =
   await Promise.all([
     readFile(
       new URL("../../.github/workflows/publish-db-migrations.yml", import.meta.url),
       "utf8",
     ),
-    readFile(new URL("db-migration-change.test.mjs", import.meta.url), "utf8"),
-    readdir(new URL("../db-migrations/", import.meta.url)),
-    readdir(new URL("./", import.meta.url)),
     readFile(
       new URL("../scripts/run-dev-db-migrations.ps1", import.meta.url),
       "utf8",
@@ -32,20 +29,9 @@ assert.match(workflow, /id-token: write/);
 assert.match(workflow, /AWS_DB_MIGRATION_PUBLISH_ROLE_ARN/);
 assert.match(workflow, /pilo-db-migrations/);
 assert.match(workflow, /\$\{\{ github\.sha \}\}/);
-assert.doesNotMatch(workflow, /node infra\/tests\/db-migration-change-policy\.test\.mjs/);
+assert.match(workflow, /node infra\/tests\/db-migration-change-policy\.test\.mjs/);
 assert.match(workflow, /node infra\/tests\/db-migration-change\.test\.mjs/);
 assert.match(workflow, /github\.ref == 'refs\/heads\/dev'/);
-
-assert.doesNotMatch(migrationValidator, /verifyExistingMigrationRepair/);
-assert.doesNotMatch(migrationValidator, /approved-existing-migration-repairs/);
-assert.doesNotMatch(migrationValidator, /migration-change-policy/);
-assert.ok(!migrationDirectoryEntries.includes("approved-existing-migration-repairs.json"));
-assert.ok(!migrationDirectoryEntries.includes("migration-change-policy.mjs"));
-assert.ok(!testDirectoryEntries.includes("db-migration-change-policy.test.mjs"));
-assert.match(
-  migrationValidator,
-  /Existing migrations are immutable\. \$\{status\} change is not allowed: \$\{secondPath \|\| firstPath\}/,
-);
 
 assert.match(runnerScript, /\[string\] \$ImageTag/);
 assert.match(runnerScript, /ImageTag is required/);
