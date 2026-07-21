@@ -726,18 +726,16 @@ export class SqlErdAgentToolsService {
                       type: "string",
                       enum: ["focused", "needs_clarification"]
                     },
-                    featureLabel: { type: ["string", "null"], maxLength: 100 },
+                    featureLabel: { type: ["string", "null"] },
                     primaryTableRefs: {
                       type: "array",
-                      maxItems: 20,
-                      uniqueItems: true,
-                      items: { type: "string", pattern: "^t[1-9][0-9]*$" }
+                      items: { type: "string" }
                     },
                     confidence: {
                       type: "string",
                       enum: ["high", "medium", "low"]
                     },
-                    question: { type: ["string", "null"], maxLength: 240 }
+                    question: { type: ["string", "null"] }
                   }
                 }
               }

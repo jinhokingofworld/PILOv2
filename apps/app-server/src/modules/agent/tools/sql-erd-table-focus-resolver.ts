@@ -1,6 +1,6 @@
 import type { SqlErdAgentSchemaProjection } from "./sql-erd-table-focus";
 
-const MAX_PRIMARY_TABLES = 20;
+const MAX_PRIMARY_TABLES = 30;
 const DIRECT_FOCUS_TERMS = new Set([
   "focus",
   "focused",
@@ -91,12 +91,17 @@ export function validateLlmSqlErdTableFocus(
     return invalidResult();
   }
 
-  const knownRefs = new Set(projection.tables.map((table) => table.ref));
-  const primaryTableRefs = value.primaryTableRefs
-    .filter((ref): ref is string => typeof ref === "string")
-    .slice(0, MAX_PRIMARY_TABLES);
   if (
-    primaryTableRefs.length === 0 ||
+    value.primaryTableRefs.length === 0 ||
+    value.primaryTableRefs.length > MAX_PRIMARY_TABLES ||
+    value.primaryTableRefs.some((ref) => typeof ref !== "string")
+  ) {
+    return invalidResult();
+  }
+
+  const knownRefs = new Set(projection.tables.map((table) => table.ref));
+  const primaryTableRefs = value.primaryTableRefs as string[];
+  if (
     new Set(primaryTableRefs).size !== primaryTableRefs.length ||
     primaryTableRefs.some((ref) => !knownRefs.has(ref))
   ) {
