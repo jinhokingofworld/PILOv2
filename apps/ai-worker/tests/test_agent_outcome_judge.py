@@ -72,3 +72,39 @@ def test_judge_outcome_uses_three_votes_and_returns_the_majority() -> None:
 
     assert verdict.verdict == "pass"
     assert judge.calls == 3
+
+
+def test_judge_error_makes_the_outcome_inconclusive() -> None:
+    class FlakyJudge:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def judge(self, _evidence: OutcomeJudgeEvidence) -> str:
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("provider unavailable")
+            return (
+                '{"taskFulfilled":true,"groundedInToolEvidence":true,'
+                '"containsMaterialError":false,"verdict":"pass","failureCodes":[]}'
+            )
+
+    verdict = judge_outcome(
+        OutcomeJudgeEvidence("task", "outcome", (), "answer", "completed", True), FlakyJudge()
+    )
+
+    assert verdict.verdict == "inconclusive"
+    assert "judge_unavailable" in verdict.failure_codes
+
+
+def test_rejects_a_contradictory_pass_verdict() -> None:
+    raw = (
+        '{"taskFulfilled":false,"groundedInToolEvidence":false,'
+        '"containsMaterialError":true,"verdict":"pass","failureCodes":[]}'
+    )
+
+    try:
+        parse_outcome_judge_verdict(raw)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("contradictory pass verdict must be rejected")

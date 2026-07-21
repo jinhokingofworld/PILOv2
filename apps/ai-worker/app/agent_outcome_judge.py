@@ -103,6 +103,16 @@ def judge_outcome(
     judge: OutcomeJudgeClient,
 ) -> OutcomeJudgeVerdict:
     votes = tuple(_judge_once(evidence, judge) for _ in range(3))
+    if any("judge_unavailable" in vote.failure_codes for vote in votes):
+        return OutcomeJudgeVerdict(
+            task_fulfilled=False,
+            grounded_in_tool_evidence=False,
+            contains_material_error=False,
+            verdict="inconclusive",
+            failure_codes=tuple(
+                dict.fromkeys(code for vote in votes for code in vote.failure_codes)
+            ),
+        )
     for label in ("pass", "partial", "fail", "inconclusive"):
         matching = tuple(vote for vote in votes if vote.verdict == label)
         if len(matching) >= 2:
@@ -160,6 +170,10 @@ def parse_outcome_judge_verdict(raw: str) -> OutcomeJudgeVerdict:
         isinstance(code, str) and code.strip() for code in failure_codes
     ):
         raise ValueError("Outcome Judge failure codes are invalid")
+    if verdict == "pass" and (
+        not task_fulfilled or not grounded_in_tool_evidence or contains_material_error
+    ):
+        raise ValueError("Outcome Judge pass verdict is contradictory")
 
     return OutcomeJudgeVerdict(
         task_fulfilled=task_fulfilled,
