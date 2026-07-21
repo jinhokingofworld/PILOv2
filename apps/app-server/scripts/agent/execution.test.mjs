@@ -60,6 +60,27 @@ function plannerOutput(overrides = {}) {
   };
 }
 
+function resolvedContext(overrides = {}) {
+  const { target = {}, ...rest } = overrides;
+  return {
+    version: "agent-context-resolution:v1",
+    status: "resolved",
+    reasonCode: "context_reference_resolved",
+    target: {
+      contextRef: "ctx_1234567890abcdef12345678",
+      domain: "calendar",
+      resourceType: "event",
+      ordinal: 1,
+      generation: 1,
+      source: "tool_result",
+      ...target
+    },
+    constraints: {},
+    clarificationQuestion: null,
+    ...rest
+  };
+}
+
 function confirmationPlan() {
   return {
     toolName: "create_calendar_event",
@@ -1027,7 +1048,8 @@ function createExecutionServiceWithRegistry(
     prompt = "이번 주 일정 알려줘",
     timezone = "Asia/Seoul",
     requestContext = null,
-    latencyObserver = undefined
+    latencyObserver = undefined,
+    threadContextService = undefined
   } = {}
 ) {
   const state = {
@@ -1079,7 +1101,8 @@ function createExecutionServiceWithRegistry(
       undefined,
       outboxPublisherService,
       candidateSelectionService,
-      latencyObserver
+      latencyObserver,
+      threadContextService
     ),
     candidateSelectionService,
     confirmationService,
@@ -1098,7 +1121,8 @@ function createService({
   completedToolNames = [],
   publisherError = null,
   candidateSelectionService = undefined,
-  latencyObserver = undefined
+  latencyObserver = undefined,
+  threadContextService = undefined
 } = {}) {
   const state = {
     run: {
@@ -1142,7 +1166,8 @@ function createService({
       undefined,
       outboxPublisherService,
       candidateSelectionService,
-      latencyObserver
+      latencyObserver,
+      threadContextService
     ),
     workspaceService,
     database,
@@ -1719,6 +1744,31 @@ for (const testCase of [
     (call) => call.method === "completeToolStepAndAdvance"
   );
   assert.equal(completion.input.postExecutionDisposition, "complete_run");
+}
+
+{
+  const { service, loggingService } = createService({
+    completedToolNames: [],
+    registryState: { name: "update_calendar_event" },
+    planner: plannerOutput({
+      toolName: "update_calendar_event",
+      toolRouting: {
+        capabilityIds: ["calendar.events.update"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.run.errorCode, "AGENT_TOOL_CHAIN_MISMATCH");
+  assert.equal(
+    loggingService.calls.some(
+      (call) => call.method === "completeToolStepAndAdvance"
+    ),
+    false,
+    "an out-of-order tool must not execute"
+  );
 }
 
 {
@@ -2554,4 +2604,204 @@ for (const legacyTool of [
   assert.equal(boardService.calls[1].method, "listBoards");
   assert.equal(boardService.calls[2].method, "listBoardIssues");
   assert.equal(loggingService.calls[1].input.outputSummary.issues[0].title, "Board read/search tool adapter");
+}
+
+{
+  const { registry } = createSmokeRegistry();
+  const threadContextService = {
+    async buildContextState() {
+      throw new Error("projection unavailable");
+    }
+  };
+  const { loggingService, service } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: "search_board_issues",
+      riskLevel: "low",
+      executionMode: "auto",
+      requiresConfirmation: false,
+      input: { search: "Agent" }
+    }),
+    registry,
+    { threadContextService }
+  );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.notEqual(result.status, "failed");
+  assert.equal(
+    loggingService.calls.some(
+      (call) => call.method === "failStep" || call.method === "failRun"
+    ),
+    false
+  );
+  assert.equal(
+    loggingService.calls.some(
+      (call) => call.method === "completeToolStepAndAdvance"
+    ),
+    true
+  );
+}
+
+{
+  const threadContextService = {
+    calls: [],
+    async buildContextState() {
+      return null;
+    },
+    async resolveReference(context, contextRef) {
+      this.calls.push({ context, contextRef });
+      return {
+        domain: "calendar",
+        resourceType: "event",
+        resourceId: "101",
+        label: "Weekly sync",
+        metadata: {
+          startDate: "2026-07-09",
+          endDate: "2026-07-09"
+        }
+      };
+    }
+  };
+  const planner = plannerOutput({ contextResolution: resolvedContext() });
+  const { service, toolRegistryService } = createService({
+    planner,
+    threadContextService
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "skipped");
+  assert.equal(threadContextService.calls.length, 1);
+  assert.equal(
+    toolRegistryService.calls.some((call) => call.method === "execute"),
+    true
+  );
+}
+
+{
+  const threadContextService = {
+    async resolveReference() {
+      return {
+        domain: "calendar",
+        resourceType: "event",
+        resourceId: "101",
+        label: "Weekly sync",
+        metadata: {
+          startDate: "2026-07-09",
+          endDate: "2026-07-09"
+        }
+      };
+    }
+  };
+  const planner = plannerOutput({
+    toolName: "update_calendar_event",
+    riskLevel: "medium",
+    executionMode: "confirmation_required",
+    requiresConfirmation: true,
+    input: { changes: { title: "Updated sync" } },
+    contextResolution: resolvedContext()
+  });
+  const { service, toolRegistryService } = createService({
+    planner,
+    registryState: {
+      riskLevel: "medium",
+      executionMode: "confirmation_required"
+    },
+    threadContextService
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "waiting_confirmation");
+  const validation = toolRegistryService.calls.find(
+    (call) => call.method === "validateInput"
+  );
+  assert.equal(validation.input.target.title, "Weekly sync");
+  assert.equal(validation.input.target.startDate, "2026-07-09");
+}
+
+{
+  const threadContextService = {
+    async resolveReference() {
+      return null;
+    }
+  };
+  const planner = plannerOutput({ contextResolution: resolvedContext() });
+  const { service, loggingService, toolRegistryService } = createService({
+    planner,
+    threadContextService
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "waiting_user_input");
+  assert.equal(
+    loggingService.calls.some((call) => call.method === "waitForUserInput"),
+    true
+  );
+  assert.equal(
+    toolRegistryService.calls.some((call) => call.method === "execute"),
+    false
+  );
+}
+
+{
+  const planner = plannerOutput({
+    contextResolution: resolvedContext(),
+    input: {
+      start: "2026-07-09",
+      end: "2026-07-16",
+      eventId: 101
+    }
+  });
+  const { service, loggingService, toolRegistryService } = createService({ planner });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "waiting_user_input");
+  assert.equal(
+    loggingService.calls.some((call) => call.method === "waitForUserInput"),
+    true
+  );
+  assert.equal(
+    toolRegistryService.calls.some((call) => call.method === "validateInput"),
+    false
+  );
+}
+
+{
+  const planner = plannerOutput({
+    toolName: "search_workspace_documents",
+    contextResolution: resolvedContext()
+  });
+  const { service, loggingService, toolRegistryService } = createService({ planner });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "waiting_user_input");
+  const clarification = loggingService.calls.find(
+    (call) => call.method === "waitForUserInput"
+  );
+  assert.equal(
+    clarification.input.diagnosticCode,
+    "context_tool_domain_mismatch"
+  );
+  assert.equal(
+    toolRegistryService.calls.some((call) => call.method === "validateInput"),
+    false
+  );
 }

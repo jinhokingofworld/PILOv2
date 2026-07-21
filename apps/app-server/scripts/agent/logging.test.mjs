@@ -469,7 +469,10 @@ class FakeTransaction {
   await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "한 시간 뒤의 새 요청" });
   assert.equal(state.threads.length, 2);
   assert.equal(state.runs[0].thread_id, "new-thread-id");
-  assert.equal(state.threadLookupQuery, undefined);
+  assert.match(
+    state.threadLookupQuery,
+    /last_activity_at > now\(\) - INTERVAL '1 hour'/
+  );
 }
 
 {
@@ -479,9 +482,9 @@ class FakeTransaction {
   };
   const { service } = createService(state);
   await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "confirmation 대기 중인 요청" });
-  assert.equal(state.threads.length, 2);
-  assert.equal(state.runs[0].thread_id, "new-thread-id");
-  assert.equal(state.threadLookupQuery, undefined);
+  assert.equal(state.threads.length, 1);
+  assert.equal(state.runs[0].thread_id, THREAD_ID);
+  assert.match(state.threadLookupQuery, /confirmation\.status = 'pending'/);
 }
 
 function createService(state) {
@@ -555,8 +558,8 @@ function errorMessage(error) {
     prompt: "지난 회의록 이어서 알려줘"
   });
 
-  assert.equal(state.threads.length, 2);
-  assert.equal(state.runs[0].thread_id, "new-thread-id");
+  assert.equal(state.threads.length, 1);
+  assert.equal(state.runs[0].thread_id, THREAD_ID);
 }
 
 {
@@ -607,6 +610,28 @@ function errorMessage(error) {
       content: "몇 시에 시작할까요?"
     }
   ]);
+}
+
+{
+  const state = {
+    runs: [createRun({ status: "running" })],
+    steps: [],
+    logs: [],
+    messages: []
+  };
+  const { service } = createService(state);
+
+  await service.waitForUserInput(USER_ID, WORKSPACE_ID, {
+    runId: RUN_ID,
+    message: "대상을 다시 알려주세요.",
+    diagnosticCode: "context_reference_stale"
+  });
+
+  assert.equal(state.logs.length, 1);
+  assert.equal(state.logs[0].event_type, "context_resolution_rejected");
+  assert.deepEqual(state.logs[0].metadata_json, {
+    diagnosticCode: "context_reference_stale"
+  });
 }
 
 {

@@ -12,6 +12,7 @@ const USER_ID = "11111111-1111-1111-1111-111111111111";
 const OTHER_USER_ID = "99999999-9999-9999-9999-999999999999";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
+const THREAD_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
 const PR_REVIEW_SESSION_ID = "99999999-9999-4999-8999-999999999998";
 const CANVAS_ID = "99999999-9999-4999-8999-999999999999";
@@ -144,6 +145,7 @@ function createStoredRun(overrides = {}) {
 function createRunRow(overrides = {}) {
   return {
     id: RUN_ID,
+    thread_id: THREAD_ID,
     workspace_id: WORKSPACE_ID,
     requested_by_user_id: USER_ID,
     client_request_id: "request-1",
@@ -445,6 +447,18 @@ function createService({
   },
   agentOutboxPublisherService = new FakeAgentOutboxPublisherService(),
   canvasDelegationCompletionService,
+  agentCandidateSelectionService = null,
+  agentThreadContextService = {
+    toPublicResourceRefs(_threadId, _runId, _stepId, resourceRefs) {
+      return resourceRefs.map((resourceRef, index) => ({
+        domain: resourceRef.domain,
+        resourceType: resourceRef.resourceType,
+        contextRef: `ctx_${String(index + 1).padStart(24, "0")}`,
+        ...(resourceRef.label ? { label: resourceRef.label } : {}),
+        ...(resourceRef.status ? { status: resourceRef.status } : {})
+      }));
+    }
+  },
   loggingError = null
 } = {}) {
   const workspaceService = new FakeWorkspaceService();
@@ -460,7 +474,9 @@ function createService({
       workspaceService,
       agentLoggingService,
       agentOutboxPublisherService,
-      canvasDelegationCompletionService
+      canvasDelegationCompletionService,
+      agentCandidateSelectionService,
+      agentThreadContextService
     ),
     workspaceService,
     database,
@@ -496,7 +512,21 @@ function errorMessage(error) {
       created: false
     }
   ]);
-  const controller = new AgentController(runService, {});
+  const contextNavigationService = {
+    calls: [],
+    async resolveNavigation(currentUserId, workspaceId, runId, contextRef) {
+      this.calls.push({ currentUserId, workspaceId, runId, contextRef });
+      return {
+        kind: "meeting_report",
+        href: "/report?reportId=77777777-7777-4777-8777-777777777777"
+      };
+    }
+  };
+  const controller = new AgentController(
+    runService,
+    {},
+    contextNavigationService
+  );
   const createdReply = {
     statusCode: null,
     status(code) {
@@ -529,6 +559,28 @@ function errorMessage(error) {
   assert.equal(reusedReply.statusCode, 200);
   assert.equal(created.success, true);
   assert.equal(reused.success, true);
+
+  const navigation = await controller.resolveContextNavigation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    "ctx_111111111111111111111111"
+  );
+  assert.deepEqual(navigation, {
+    success: true,
+    data: {
+      kind: "meeting_report",
+      href: "/report?reportId=77777777-7777-4777-8777-777777777777"
+    }
+  });
+  assert.deepEqual(contextNavigationService.calls, [
+    {
+      currentUserId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      runId: RUN_ID,
+      contextRef: "ctx_111111111111111111111111"
+    }
+  ]);
 }
 
 {
@@ -644,6 +696,44 @@ function errorMessage(error) {
       assert.equal(errorMessage(error), "workspaceId must not be provided");
       return true;
     }
+  );
+}
+
+{
+  const state = {
+    listRows: [],
+    runRows: [createRunRow({ status: "waiting_confirmation" })],
+    stepRows: [],
+    messageRows: [],
+    confirmationRows: [
+      createConfirmationRow({
+        plan_json: {
+          kind: "choice",
+          toolName: "choose_target",
+          summary: "Choose one",
+          target: { domain: "meeting" },
+          call: { method: "POST" },
+          choices: [
+            {
+              id: "choice-safe-1",
+              label: "First",
+              input: {
+                resourceId: "77777777-7777-4777-8777-777777777777"
+              }
+            }
+          ]
+        }
+      })
+    ]
+  };
+  const { service } = createService({ state });
+
+  const result = await service.getRun(USER_ID, WORKSPACE_ID, RUN_ID);
+
+  assert.equal(result.run.confirmation.plan.choices[0].id, "choice-safe-1");
+  assert.equal(
+    "resourceId" in result.run.confirmation.plan.choices[0].input,
+    false
   );
 }
 
@@ -1173,8 +1263,14 @@ for (const requestContext of [
     result.run.steps[0].outputSummary.candidates[0].selectionToken,
     "77777777-7777-4777-8777-777777777777"
   );
-  assert.equal(result.run.steps[0].resourceRefs[0].metadata.visible, "ok");
-  assert.equal("token" in result.run.steps[0].resourceRefs[0].metadata, false);
+  assert.deepEqual(result.run.steps[0].resourceRefs[0], {
+    domain: "calendar",
+    resourceType: "event",
+    contextRef: "ctx_000000000000000000000001",
+    label: "주간 회의"
+  });
+  assert.equal(JSON.stringify(result.run.steps).includes("event-1"), false);
+  assert.equal(JSON.stringify(result.run.steps).includes("must-not-leak"), false);
   assert.equal(result.run.confirmation.id, CONFIRMATION_ID);
   assert.equal(result.run.confirmation.selectedChoiceId, null);
   assert.deepEqual(result.run.messages, [

@@ -52,6 +52,7 @@ export type AgentRunRequestContext =
   | null;
 
 export type AgentResourceRef = {
+  contextRef?: string | null;
   domain?: string | null;
   label?: string | null;
   metadata?: Record<string, unknown> | null;
@@ -176,6 +177,24 @@ export type SubmitAgentRunInput = {
 
 export type AgentRunDetailPayload = {
   run: AgentRun;
+};
+
+export type AgentContextNavigationPayload = {
+  kind: "meeting_report" | "drive_document" | "sql_erd_session";
+  href: string;
+  focus?: {
+    version: 1;
+    view: "table_focus";
+    sessionId: string;
+    sessionRevision: number;
+    modelFingerprint: string;
+    featureLabel: string;
+    primaryTableIds: string[];
+    relatedTableIds: string[];
+    contextTableIds: string[];
+    relationIds: string[];
+    confidence: "high" | "medium" | "low";
+  };
 };
 
 export type AgentConfirmationActionPayload = {

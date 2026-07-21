@@ -37,7 +37,10 @@ import { AgentConfirmationCard } from "@/features/agent/components/agent-confirm
 import { AgentCandidateSelections } from "@/features/agent/components/agent-candidate-selections";
 import { AgentResourceLinks } from "@/features/agent/components/agent-resource-links";
 import { AgentCanvasArtifact } from "@/features/agent/components/agent-canvas-artifact";
-import { applyAgentSqlErdTableFocus } from "@/features/agent/resource-links";
+import {
+  applyAgentSqlErdTableFocus,
+  getAgentResourceLinks
+} from "@/features/agent/resource-links";
 import {
   getCanvasAgentDelegationAdapter,
   subscribeCanvasAgentDelegationAdapter,
@@ -472,16 +475,45 @@ export function AgentChatWidget() {
   );
 
   const handleRunClientAction = useCallback(
-    (run: AgentRun) => {
-      applyAgentSqlErdTableFocus(
+    async (run: AgentRun) => {
+      const requestContext = readAgentRequestContext(
+        window.location.pathname,
+        window.location.search
+      );
+      const appliedLegacyFocus = applyAgentSqlErdTableFocus(
         run,
-        readAgentRequestContext(
-          window.location.pathname,
-          window.location.search
-        ),
+        requestContext,
         appliedSqlErdFocusActionKeysRef.current,
         stageSqlErdAgentTableFocus
       );
+      if (
+        !appliedLegacyFocus &&
+        run.status === "completed" &&
+        requestContext?.surface === "sql_erd"
+      ) {
+        const navigationLink = getAgentResourceLinks(run).find(
+          (link) => link.navigation?.kind === "sql_erd_session"
+        );
+        if (navigationLink?.navigation) {
+          try {
+            const navigation = await agentApiClient.resolveContextNavigation(
+              run.workspaceId,
+              run.id,
+              navigationLink.navigation.contextRef
+            );
+            const focus = navigation.focus;
+            if (focus?.sessionId === requestContext.sessionId) {
+              const actionKey = `${run.id}:${navigationLink.navigation.contextRef}:${focus.modelFingerprint}`;
+              if (!appliedSqlErdFocusActionKeysRef.current.has(actionKey)) {
+                stageSqlErdAgentTableFocus(focus);
+                appliedSqlErdFocusActionKeysRef.current.add(actionKey);
+              }
+            }
+          } catch {
+            // The authenticated link remains available for an explicit retry.
+          }
+        }
+      }
 
       const action = getMeetingConnectionAction(run);
       if (!action || !enqueueMeetingConnectionAction(action)) {
@@ -490,7 +522,7 @@ export function AgentChatWidget() {
 
       router.push("/meeting");
     },
-    [router]
+    [agentApiClient, router]
   );
 
   const pollAgentRunUntilStop = useCallback(async function pollAgentRunUntilStop(
@@ -504,7 +536,7 @@ export function AgentChatWidget() {
         ? Date.now() + AGENT_PLANNING_POLL_TIMEOUT_MS
         : null;
     let activePlannerStepId = getActivePlannerStepId(currentRun);
-    handleRunClientAction(currentRun);
+    void handleRunClientAction(currentRun);
     updateAssistantMessage(
       assistantMessageId,
       getAgentRunDisplayMessage(currentRun),
@@ -545,7 +577,7 @@ export function AgentChatWidget() {
         planningDeadlineAt = null;
       }
       activePlannerStepId = nextActivePlannerStepId;
-      handleRunClientAction(currentRun);
+      void handleRunClientAction(currentRun);
       updateAssistantMessage(
         assistantMessageId,
         getAgentRunDisplayMessage(currentRun),
@@ -1118,7 +1150,10 @@ export function AgentChatWidget() {
                         />
                       ) : null}
                       {message.run ? (
-                        <AgentResourceLinks run={message.run} />
+                        <AgentResourceLinks
+                          accessToken={accessToken}
+                          run={message.run}
+                        />
                       ) : null}
                       {message.run?.status === "completed" ? (
                         <AgentCanvasArtifact run={message.run} />

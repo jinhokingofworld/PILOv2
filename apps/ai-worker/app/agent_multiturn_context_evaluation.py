@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date
@@ -23,6 +24,16 @@ from app.agent_processor import (
 type FrozenJson = (
     None | bool | int | float | str | tuple[FrozenJson, ...] | Mapping[str, FrozenJson]
 )
+
+_CONTEXT_REF_PATTERN = re.compile(r"^ctx_[0-9a-f]{24}$")
+_DEFAULT_RESOURCE_TYPE_BY_DOMAIN = {
+    "meeting": "meeting_report",
+    "calendar": "event",
+    "board": "issue",
+    "drive": "document",
+    "sql_erd": "session",
+    "pr_review": "review_file",
+}
 
 
 @dataclass(frozen=True)
@@ -610,6 +621,7 @@ class _MultiTurnReplayRepository:
         self.current_turn_index = 0
         self.tool_calls: list[MultiTurnEvaluationToolCall] = []
         self.last_process_reason = "runtime_unknown"
+        self.context_state: dict[str, object] | None = None
 
     def begin_turn(self, turn_index: int, prompt: str) -> None:
         self.current_turn_index = turn_index
@@ -637,7 +649,62 @@ class _MultiTurnReplayRepository:
             planner_turn_count=self.planner_turn_count,
             latest_planner_tool_name=self.latest_planner_tool_name,
             planning_context=self.planning_context,
+            context_state=self.context_state,
         )
+
+    def record_tool_context(self, tool_name: str, output: object) -> None:
+        context_refs = tuple(dict.fromkeys(_fixture_context_refs(output)))
+        if not context_refs:
+            return
+        descriptor = (
+            next(
+                (
+                    candidate
+                    for candidate in (self.job.tool_capability_catalog.descriptors)
+                    if candidate.tool_name == tool_name
+                ),
+                None,
+            )
+            if self.job.tool_capability_catalog is not None
+            else None
+        )
+        domain = descriptor.domain if descriptor is not None else "meeting"
+        resource_type = _DEFAULT_RESOURCE_TYPE_BY_DOMAIN.get(domain, "resource")
+        existing_refs = (
+            list(self.context_state.get("resultSets", []))
+            if isinstance(self.context_state, dict)
+            and isinstance(self.context_state.get("resultSets"), list)
+            else []
+        )
+        generation = self.current_turn_index + 1
+        projected_refs = [
+            {
+                "contextRef": context_ref,
+                "domain": domain,
+                "resourceType": resource_type,
+                "label": resource_type,
+                "ordinal": index + 1,
+                "generation": generation,
+                "source": "tool_result",
+            }
+            for index, context_ref in enumerate(context_refs)
+        ]
+        refs_by_context_ref = {
+            reference.get("contextRef"): reference
+            for reference in (*existing_refs, *projected_refs)
+            if isinstance(reference, dict) and isinstance(reference.get("contextRef"), str)
+        }
+        result_sets = list(refs_by_context_ref.values())[-12:]
+        self.context_state = {
+            "version": 1,
+            "provenance": {
+                "turnSequence": self.job.turn_sequence + self.current_turn_index,
+                "stepOrder": len(self.tool_calls),
+            },
+            "activeDomain": domain,
+            "resultSets": result_sets,
+            "lastToolState": {"toolName": tool_name, "outcome": "completed"},
+        }
 
     def start_planner_step(self, _job: AgentRunJob, _context: AgentRunContext) -> str:
         self.planner_turn_count += 1
@@ -719,6 +786,7 @@ class _MultiTurnReplayHandoff:
             if fixture is not None and tool_name == fixture.tool
             else {"error": "unexpected tool"}
         )
+        self.repository.record_tool_context(tool_name, output)
         output_json = json.dumps(output, ensure_ascii=False, separators=(",", ":"))
         self.repository.planning_context = "\n".join(
             (
@@ -727,6 +795,20 @@ class _MultiTurnReplayHandoff:
             )
         )
         self.repository.status = "planning"
+
+
+def _fixture_context_refs(value: object) -> tuple[str, ...]:
+    references: list[str] = []
+    if isinstance(value, Mapping):
+        context_ref = value.get("contextRef")
+        if isinstance(context_ref, str) and _CONTEXT_REF_PATTERN.fullmatch(context_ref):
+            references.append(context_ref)
+        for item in value.values():
+            references.extend(_fixture_context_refs(item))
+    elif isinstance(value, list | tuple):
+        for item in value:
+            references.extend(_fixture_context_refs(item))
+    return tuple(references)
 
 
 def _thaw_json(value: FrozenJson) -> object:

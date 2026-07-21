@@ -1,25 +1,107 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
+import { notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
+import { SqlErdService } from "../sql-erd/sql-erd.service";
+import { WorkspaceService } from "../workspace/workspace.service";
 import type {
   AgentJsonObject,
+  AgentResourceRef,
   AgentToolContext
 } from "./types/agent-tool.types";
 
 const CONTEXT_REF_PATTERN = /^ctx_[0-9a-f]{24}$/;
 const THREAD_CONTEXT_MAX_RUNS = 6;
 const THREAD_CONTEXT_MAX_RESOURCE_REFS = 12;
+const SAFE_CONTEXT_DOMAINS = new Set([
+  "meeting",
+  "calendar",
+  "board",
+  "drive",
+  "sqltoerd",
+  "pr_review"
+]);
 const SAFE_MEETING_RESOURCE_TYPES = new Set([
   "meeting",
   "meeting_report",
   "meeting_report_action_item"
 ]);
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 interface ThreadResourceStepRow {
   thread_id: string;
   run_id: string;
   step_id: string;
   resource_refs: unknown;
+}
+
+interface ThreadStepScopeRow {
+  thread_id: string;
+  run_id: string;
+  step_id: string;
+  step_order: number | string;
+  turn_sequence: number | string;
+}
+
+interface StoredContextStateRow {
+  context_state: unknown;
+}
+
+interface ContextCandidateRow {
+  id: string;
+  domain: string;
+  resource_type: string;
+  resource_id: string;
+  report_id: string | null;
+  label: string;
+  status: string | null;
+}
+
+export interface AgentSafeContextReference {
+  domain: string;
+  resourceType: string;
+  contextRef: string;
+  label: string;
+  ordinal: number;
+  generation: number;
+  source: "tool_result" | "candidate";
+  status?: string;
+}
+
+export interface AgentPublicResourceReference {
+  domain: string;
+  resourceType: string;
+  contextRef: string;
+  label?: string;
+  status?: string;
+}
+
+export interface AgentContextState {
+  version: 1;
+  provenance: {
+    turnSequence: number;
+    stepOrder: number;
+  };
+  activeDomain?: string;
+  resultSets: AgentSafeContextReference[];
+  selectedTarget?: {
+    contextRef: string;
+    generation: number;
+    source: "candidate_button" | "resolved_follow_up";
+  };
+  lastToolState: {
+    toolName: string;
+    outcome: "completed" | "clarification" | "confirmation";
+  };
+  pendingState?: {
+    kind: "clarification" | "confirmation";
+  };
+}
+
+export interface AgentSelectedContextTarget {
+  contextRef: string;
+  generation: number;
 }
 
 export interface AgentThreadMeetingReference {
@@ -31,35 +113,69 @@ export interface AgentThreadMeetingReference {
   reportId?: string;
 }
 
+export interface AgentContextNavigationPayload {
+  kind: "meeting_report" | "drive_document" | "sql_erd_session";
+  href: string;
+  focus?: {
+    version: 1;
+    view: "table_focus";
+    sessionId: string;
+    sessionRevision: number;
+    modelFingerprint: string;
+    featureLabel: string;
+    primaryTableIds: string[];
+    relatedTableIds: string[];
+    contextTableIds: string[];
+    relationIds: string[];
+    confidence: "high" | "medium" | "low";
+  };
+}
+
 @Injectable()
 export class AgentThreadContextService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly workspaceService: WorkspaceService,
+    private readonly sqlErdService: SqlErdService
+  ) {}
 
   async resolveMeetingReference(
     context: AgentToolContext,
     contextRef: string
   ): Promise<AgentThreadMeetingReference | null> {
+    const reference = await this.resolveReference(context, contextRef);
+    return reference ? this.readMeetingReference(reference) : null;
+  }
+
+  async resolveReference(
+    context: AgentToolContext,
+    contextRef: string
+  ): Promise<AgentResourceRef | null> {
     if (!CONTEXT_REF_PATTERN.test(contextRef)) return null;
     const rows = await this.database.query<ThreadResourceStepRow>(
       `
         WITH current_run AS (
-          SELECT thread_id
-          FROM agent_runs
-          WHERE id = $1
-            AND workspace_id = $2
-            AND requested_by_user_id = $3
-            AND thread_id IS NOT NULL
+          SELECT run.thread_id
+          FROM agent_runs AS run
+          INNER JOIN agent_threads AS thread
+            ON thread.id = run.thread_id
+           AND thread.workspace_id = run.workspace_id
+           AND thread.requested_by_user_id = run.requested_by_user_id
+           AND thread.expires_at > now()
+          WHERE run.id = $1
+            AND run.workspace_id = $2
+            AND run.requested_by_user_id = $3
+            AND run.expires_at > now()
         ), recent_runs AS (
-          SELECT prior_run.id, prior_run.created_at, current_run.thread_id
-          FROM agent_runs AS prior_run
+          SELECT scoped_run.id, scoped_run.created_at, current_run.thread_id
+          FROM agent_runs AS scoped_run
           INNER JOIN current_run
-            ON current_run.thread_id = prior_run.thread_id
-          WHERE prior_run.id <> $1
-            AND prior_run.workspace_id = $2
-            AND prior_run.requested_by_user_id = $3
-            AND prior_run.status = 'completed'
-            AND prior_run.final_answer IS NOT NULL
-          ORDER BY prior_run.created_at DESC, prior_run.id DESC
+            ON current_run.thread_id = scoped_run.thread_id
+          WHERE scoped_run.workspace_id = $2
+            AND scoped_run.requested_by_user_id = $3
+            AND scoped_run.expires_at > now()
+            AND (scoped_run.id = $1 OR scoped_run.status = 'completed')
+          ORDER BY scoped_run.created_at DESC, scoped_run.id DESC
           LIMIT $4
         )
         SELECT
@@ -75,8 +191,8 @@ export class AgentThreadContextService {
         ORDER BY
           recent_run.created_at DESC,
           recent_run.id DESC,
-          step.step_order ASC,
-          step.id ASC
+          step.step_order DESC,
+          step.id DESC
       `,
       [
         context.runId,
@@ -87,12 +203,12 @@ export class AgentThreadContextService {
     );
 
     let acceptedRefs = 0;
-    let resolved: AgentThreadMeetingReference | null = null;
+    let resolved: AgentResourceRef | null = null;
     for (const row of rows) {
       if (!Array.isArray(row.resource_refs)) continue;
       for (const [index, candidate] of row.resource_refs.entries()) {
         if (acceptedRefs >= THREAD_CONTEXT_MAX_RESOURCE_REFS) return resolved;
-        const reference = this.readMeetingReference(candidate);
+        const reference = this.readResourceReference(candidate);
         if (!reference) continue;
         acceptedRefs += 1;
         if (this.contextRef(row.thread_id, row.run_id, row.step_id, index) !== contextRef) {
@@ -105,6 +221,392 @@ export class AgentThreadContextService {
     return resolved;
   }
 
+  async resolveNavigation(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    contextRef: string
+  ): Promise<AgentContextNavigationPayload> {
+    const reference = await this.resolveReference(
+      {
+        currentUserId,
+        workspaceId,
+        runId,
+        requestContext: null
+      },
+      contextRef
+    );
+    const resourceId = reference?.resourceId;
+    if (
+      !reference ||
+      typeof resourceId !== "string" ||
+      !UUID_PATTERN.test(resourceId)
+    ) {
+      throw notFound("Agent context navigation target not found");
+    }
+    await this.workspaceService.assertWorkspaceAccess(
+      currentUserId,
+      workspaceId
+    );
+
+    if (
+      reference.domain === "meeting" &&
+      reference.resourceType === "meeting_report"
+    ) {
+      return {
+        kind: "meeting_report",
+        href: `/report?reportId=${encodeURIComponent(resourceId)}`
+      };
+    }
+    if (
+      reference.domain === "drive" &&
+      reference.resourceType === "document"
+    ) {
+      return {
+        kind: "drive_document",
+        href: `/files?documentId=${encodeURIComponent(resourceId)}`
+      };
+    }
+    if (
+      reference.domain === "sqltoerd" &&
+      reference.resourceType === "session"
+    ) {
+      await this.sqlErdService.getSession(
+        currentUserId,
+        workspaceId,
+        resourceId
+      );
+      const focus = this.readSqlErdFocus(reference);
+      return {
+        kind: "sql_erd_session",
+        href: `/sql-erd/session?sessionId=${encodeURIComponent(resourceId)}`,
+        ...(focus ? { focus } : {})
+      };
+    }
+
+    throw notFound("Agent context navigation target not found");
+  }
+
+  async resolveCandidateReference(
+    context: AgentToolContext,
+    contextRef: string
+  ): Promise<AgentResourceRef | null> {
+    if (!CONTEXT_REF_PATTERN.test(contextRef)) return null;
+    const rows = await this.database.query<ContextCandidateRow>(
+      `
+        SELECT
+          candidate.id,
+          candidate.domain,
+          candidate.resource_type,
+          candidate.resource_id,
+          candidate.report_id,
+          candidate.label,
+          candidate.status
+        FROM agent_candidate_selections AS candidate
+        INNER JOIN agent_runs AS run
+          ON run.id = candidate.run_id
+         AND run.workspace_id = candidate.workspace_id
+         AND run.requested_by_user_id = candidate.requested_by_user_id
+         AND run.expires_at > now()
+        INNER JOIN agent_threads AS thread
+          ON thread.id = run.thread_id
+         AND thread.workspace_id = run.workspace_id
+         AND thread.requested_by_user_id = run.requested_by_user_id
+         AND thread.expires_at > now()
+        WHERE candidate.run_id = $1
+          AND candidate.workspace_id = $2
+          AND candidate.requested_by_user_id = $3
+          AND candidate.consumed_at IS NOT NULL
+          AND candidate.expires_at > now()
+          AND NOT EXISTS (
+            SELECT 1
+            FROM agent_steps AS resumed_step
+            WHERE resumed_step.run_id = candidate.run_id
+              AND resumed_step.step_type = 'tool'
+              AND resumed_step.status = 'completed'
+              AND resumed_step.step_order > (
+                SELECT source_step.step_order
+                FROM agent_steps AS source_step
+                WHERE source_step.id = candidate.tool_step_id
+              )
+          )
+        ORDER BY candidate.consumed_at DESC, candidate.id DESC
+        LIMIT 10
+      `,
+      [context.runId, context.workspaceId, context.currentUserId]
+    );
+    const matches = rows.filter(
+      (row) => this.candidateContextRef(row.id) === contextRef
+    );
+    if (matches.length !== 1) return null;
+    const row = matches[0];
+    return {
+      domain: row.domain,
+      resourceType: row.resource_type,
+      resourceId: row.resource_id,
+      label: row.label,
+      ...(row.status ? { status: row.status } : {}),
+      ...(row.report_id ? { metadata: { reportId: row.report_id } } : {})
+    };
+  }
+
+  async buildContextState(
+    context: AgentToolContext,
+    stepId: string,
+    toolName: string,
+    resourceRefs: AgentResourceRef[],
+    candidateSelections: Array<{
+      contextRef: string;
+      domain: string;
+      resourceType: string;
+      label: string;
+      status: string | null;
+      ordinal: number;
+      generation: number;
+    }> = [],
+    outcome: "completed" | "clarification" | "confirmation" = "completed",
+    selectedTarget?: AgentSelectedContextTarget | null
+  ): Promise<AgentContextState | null> {
+    const scope = await this.findStepScope(context, stepId);
+    if (!scope) return null;
+    const stepOrder = Number(scope.step_order);
+    const refs = resourceRefs
+      .slice(0, THREAD_CONTEXT_MAX_RESOURCE_REFS)
+      .map((reference, index) => this.toSafeContextReference(scope, reference, index))
+      .filter((reference): reference is AgentSafeContextReference => reference !== null);
+    const candidateRefs = candidateSelections
+      .slice(0, THREAD_CONTEXT_MAX_RESOURCE_REFS - refs.length)
+      .map((candidate) => this.toSafeCandidateReference(candidate))
+      .filter((reference): reference is AgentSafeContextReference => reference !== null);
+    const priorRefs = (await this.findPriorContextReferences(scope)).filter(
+      (reference) => outcome !== "completed" || reference.source !== "candidate"
+    );
+    const refsByContextRef = new Map<string, AgentSafeContextReference>();
+    for (const reference of [...priorRefs, ...refs, ...candidateRefs]) {
+      refsByContextRef.delete(reference.contextRef);
+      refsByContextRef.set(reference.contextRef, reference);
+    }
+    const resultSets = [...refsByContextRef.values()].slice(
+      -THREAD_CONTEXT_MAX_RESOURCE_REFS
+    );
+    const activeDomain = resultSets.at(-1)?.domain;
+    return {
+      version: 1,
+      provenance: {
+        turnSequence: Number(scope.turn_sequence),
+        stepOrder
+      },
+      ...(activeDomain ? { activeDomain } : {}),
+      resultSets,
+      ...(selectedTarget &&
+      resultSets.some(
+        (reference) =>
+          reference.contextRef === selectedTarget.contextRef &&
+          reference.generation === selectedTarget.generation
+      )
+        ? {
+            selectedTarget: {
+              contextRef: selectedTarget.contextRef,
+              generation: selectedTarget.generation,
+              source: "resolved_follow_up" as const
+            }
+          }
+        : {}),
+      lastToolState: { toolName, outcome },
+      ...(outcome === "clarification" || outcome === "confirmation"
+        ? { pendingState: { kind: outcome } }
+        : {})
+    };
+  }
+
+  toPublicResourceRefs(
+    threadId: string | null,
+    runId: string,
+    stepId: string,
+    resourceRefs: AgentResourceRef[]
+  ): AgentPublicResourceReference[] {
+    if (!threadId) return [];
+    return resourceRefs
+      .slice(0, THREAD_CONTEXT_MAX_RESOURCE_REFS)
+      .map((reference, index) => {
+        if (!SAFE_CONTEXT_DOMAINS.has(reference.domain)) return null;
+        const resourceType = this.boundText(reference.resourceType, 100);
+        if (!resourceType) return null;
+        const label = this.boundText(reference.label, 300);
+        const status = this.boundText(reference.status, 100);
+        return {
+          domain: reference.domain,
+          resourceType,
+          contextRef: this.contextRef(threadId, runId, stepId, index),
+          ...(label ? { label } : {}),
+          ...(status ? { status } : {})
+        };
+      })
+      .filter(
+        (reference): reference is AgentPublicResourceReference => reference !== null
+      );
+  }
+
+  private async findStepScope(
+    context: AgentToolContext,
+    stepId: string
+  ): Promise<ThreadStepScopeRow | null> {
+    return this.database.queryOne<ThreadStepScopeRow>(
+      `
+        SELECT
+          run.thread_id,
+          run.id AS run_id,
+          step.id AS step_id,
+          step.step_order,
+          outbox.turn_sequence
+        FROM agent_runs AS run
+        INNER JOIN agent_threads AS thread
+          ON thread.id = run.thread_id
+         AND thread.workspace_id = run.workspace_id
+         AND thread.requested_by_user_id = run.requested_by_user_id
+         AND thread.expires_at > now()
+        INNER JOIN agent_steps AS step
+          ON step.run_id = run.id
+         AND step.id = $4
+        INNER JOIN agent_run_outbox AS outbox
+          ON outbox.run_id = run.id
+        WHERE run.id = $1
+          AND run.workspace_id = $2
+          AND run.requested_by_user_id = $3
+          AND run.expires_at > now()
+        LIMIT 1
+      `,
+      [context.runId, context.workspaceId, context.currentUserId, stepId]
+    );
+  }
+
+  private async findPriorContextReferences(
+    scope: ThreadStepScopeRow
+  ): Promise<AgentSafeContextReference[]> {
+    const row = await this.database.queryOne<StoredContextStateRow>(
+      `
+        SELECT step.output_json->'agentContextState' AS context_state
+        FROM agent_steps AS step
+        INNER JOIN agent_runs AS run ON run.id = step.run_id
+        WHERE step.step_type = 'tool'
+          AND step.status = 'completed'
+          AND step.output_json ? 'agentContextState'
+          AND (
+            (step.run_id = $1 AND step.step_order < $2)
+            OR (
+              run.thread_id = $3
+              AND run.id <> $1
+              AND run.status = 'completed'
+              AND run.expires_at > now()
+            )
+          )
+        ORDER BY
+          CASE WHEN step.run_id = $1 THEN 0 ELSE 1 END,
+          run.created_at DESC,
+          step.step_order DESC,
+          step.id DESC
+        LIMIT 1
+      `,
+      [scope.run_id, Number(scope.step_order), scope.thread_id]
+    );
+    if (!row || !this.isPlainObject(row.context_state)) return [];
+    const resultSets = row.context_state.resultSets;
+    if (!Array.isArray(resultSets)) return [];
+    return resultSets
+      .slice(0, THREAD_CONTEXT_MAX_RESOURCE_REFS)
+      .map((reference) => this.readStoredContextReference(reference))
+      .filter((reference): reference is AgentSafeContextReference => reference !== null);
+  }
+
+  private readStoredContextReference(
+    value: unknown
+  ): AgentSafeContextReference | null {
+    if (!this.isPlainObject(value)) return null;
+    const contextRef = value.contextRef;
+    const domain = value.domain;
+    const resourceType = value.resourceType;
+    const label = value.label;
+    const ordinal = value.ordinal;
+    const generation = value.generation;
+    const source = value.source;
+    if (
+      typeof contextRef !== "string" ||
+      typeof domain !== "string" ||
+      typeof resourceType !== "string" ||
+      typeof label !== "string" ||
+      typeof ordinal !== "number" ||
+      !Number.isSafeInteger(ordinal) ||
+      typeof generation !== "number" ||
+      !Number.isSafeInteger(generation) ||
+      (source !== "tool_result" && source !== "candidate")
+    ) {
+      return null;
+    }
+    const reference = this.toSafeCandidateReference({
+      contextRef,
+      domain,
+      resourceType,
+      label,
+      status: typeof value.status === "string" ? value.status : null,
+      ordinal,
+      generation
+    });
+    return reference ? { ...reference, source } : null;
+  }
+
+  private toSafeContextReference(
+    scope: ThreadStepScopeRow,
+    reference: AgentResourceRef,
+    index: number
+  ): AgentSafeContextReference | null {
+    if (!SAFE_CONTEXT_DOMAINS.has(reference.domain)) return null;
+    const resourceType = this.boundText(reference.resourceType, 100);
+    if (!resourceType) return null;
+    const status = this.boundText(reference.status, 100);
+    return {
+      domain: reference.domain,
+      resourceType,
+      contextRef: this.contextRef(
+        scope.thread_id,
+        scope.run_id,
+        scope.step_id,
+        index
+      ),
+      label: this.boundText(reference.label, 300) ?? resourceType,
+      ordinal: index + 1,
+      generation: this.contextGeneration(scope.run_id, scope.step_id),
+      source: "tool_result",
+      ...(status ? { status } : {})
+    };
+  }
+
+  private toSafeCandidateReference(candidate: {
+    contextRef: string;
+    domain: string;
+    resourceType: string;
+    label: string;
+    status: string | null;
+    ordinal: number;
+    generation: number;
+  }): AgentSafeContextReference | null {
+    if (!CONTEXT_REF_PATTERN.test(candidate.contextRef)) return null;
+    if (!SAFE_CONTEXT_DOMAINS.has(candidate.domain)) return null;
+    const resourceType = this.boundText(candidate.resourceType, 100);
+    const label = this.boundText(candidate.label, 300);
+    const status = this.boundText(candidate.status, 100);
+    if (!resourceType || !label) return null;
+    return {
+      domain: candidate.domain,
+      resourceType,
+      contextRef: candidate.contextRef,
+      label,
+      ordinal: candidate.ordinal,
+      generation: candidate.generation,
+      source: "candidate",
+      ...(status ? { status } : {})
+    };
+  }
+
   private contextRef(
     threadId: string,
     runId: string,
@@ -115,6 +617,63 @@ export class AgentThreadContextService {
       .update(`${threadId}:${runId}:${stepId}:${index}`, "utf8")
       .digest("hex");
     return `ctx_${digest.slice(0, 24)}`;
+  }
+
+  private contextGeneration(runId: string, stepId: string): number {
+    const digest = createHash("sha256")
+      .update(`${runId}:${stepId}`, "utf8")
+      .digest("hex");
+    const generation = Number.parseInt(digest.slice(0, 13), 16);
+    return generation > 0 ? generation : 1;
+  }
+
+  private candidateContextRef(candidateSelectionId: string): string {
+    return `ctx_${createHash("sha256")
+      .update(`candidate:${candidateSelectionId}`, "utf8")
+      .digest("hex")
+      .slice(0, 24)}`;
+  }
+
+  private boundText(value: unknown, maxBytes: number): string | null {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim();
+    if (!normalized) return null;
+    let result = normalized;
+    while (Buffer.byteLength(result, "utf8") > maxBytes) {
+      result = result.slice(0, -1);
+    }
+    return result || null;
+  }
+
+  private isPlainObject(value: unknown): value is AgentJsonObject {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private readResourceReference(value: unknown): AgentResourceRef | null {
+    if (!this.isPlainObject(value)) return null;
+    const domain = this.boundText(value.domain, 100);
+    const resourceType = this.boundText(value.resourceType, 100);
+    const resourceId = this.boundText(value.resourceId, 500);
+    if (
+      !domain ||
+      !SAFE_CONTEXT_DOMAINS.has(domain) ||
+      !resourceType ||
+      !resourceId
+    ) {
+      return null;
+    }
+    const label = this.boundText(value.label, 300);
+    const url = this.boundText(value.url, 1000);
+    const status = this.boundText(value.status, 100);
+    return {
+      domain,
+      resourceType,
+      resourceId,
+      ...(label ? { label } : {}),
+      ...(url ? { url } : {}),
+      ...(status ? { status } : {}),
+      ...(this.isPlainObject(value.metadata) ? { metadata: value.metadata } : {})
+    };
   }
 
   private readMeetingReference(
@@ -142,6 +701,94 @@ export class AgentThreadContextService {
       return null;
     }
     return { resourceType, resourceId: value.resourceId, reportId };
+  }
+
+  private readSqlErdFocus(
+    reference: AgentResourceRef
+  ): AgentContextNavigationPayload["focus"] | null {
+    if (
+      reference.status !== "focused" ||
+      !this.isPlainObject(reference.metadata)
+    ) {
+      return null;
+    }
+    const metadata = reference.metadata;
+    if (
+      metadata.version !== 1 ||
+      metadata.view !== "table_focus" ||
+      !Number.isSafeInteger(metadata.sessionRevision) ||
+      Number(metadata.sessionRevision) < 1 ||
+      typeof metadata.modelFingerprint !== "string" ||
+      !/^fnv1a32:[0-9a-f]{8}$/.test(metadata.modelFingerprint) ||
+      typeof metadata.featureLabel !== "string" ||
+      !this.boundText(metadata.featureLabel, 100) ||
+      (metadata.confidence !== "high" &&
+        metadata.confidence !== "medium" &&
+        metadata.confidence !== "low")
+    ) {
+      return null;
+    }
+    const primaryTableIds = this.readUniqueIds(
+      metadata.primaryTableIds,
+      20,
+      true
+    );
+    const relatedTableIds = this.readUniqueIds(
+      metadata.relatedTableIds,
+      30,
+      false
+    );
+    const contextTableIds =
+      metadata.contextTableIds === undefined
+        ? []
+        : this.readUniqueIds(metadata.contextTableIds, 20, false);
+    const relationIds = this.readUniqueIds(metadata.relationIds, 300, false);
+    if (
+      !primaryTableIds ||
+      !relatedTableIds ||
+      !contextTableIds ||
+      !relationIds
+    ) {
+      return null;
+    }
+    const primarySet = new Set(primaryTableIds);
+    const relatedSet = new Set(relatedTableIds);
+    if (
+      relatedTableIds.some((id) => primarySet.has(id)) ||
+      contextTableIds.some((id) => primarySet.has(id) || relatedSet.has(id))
+    ) {
+      return null;
+    }
+    return {
+      version: 1,
+      view: "table_focus",
+      sessionId: reference.resourceId,
+      sessionRevision: Number(metadata.sessionRevision),
+      modelFingerprint: metadata.modelFingerprint,
+      featureLabel: metadata.featureLabel.trim().replace(/\s+/g, " "),
+      primaryTableIds,
+      relatedTableIds,
+      contextTableIds,
+      relationIds,
+      confidence: metadata.confidence
+    };
+  }
+
+  private readUniqueIds(
+    value: unknown,
+    maxItems: number,
+    requireOne: boolean
+  ): string[] | null {
+    if (
+      !Array.isArray(value) ||
+      (requireOne && value.length === 0) ||
+      value.length > maxItems ||
+      value.some((item) => typeof item !== "string" || !item.trim())
+    ) {
+      return null;
+    }
+    const ids = value.map((item) => String(item));
+    return new Set(ids).size === ids.length ? ids : null;
   }
 
   private isObject(value: unknown): value is Record<string, unknown> {

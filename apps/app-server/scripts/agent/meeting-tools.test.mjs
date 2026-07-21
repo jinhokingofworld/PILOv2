@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
@@ -872,7 +873,20 @@ class FakeCandidateSelectionDatabase {
   ]);
   assert.deepEqual(candidate, {
     candidateSelectionId: database.id,
+    domain: "meeting",
     resourceType: "meeting_room",
+    contextRef: `ctx_${createHash("sha256")
+      .update(`candidate:${database.id}`, "utf8")
+      .digest("hex")
+      .slice(0, 24)}`,
+    ordinal: 1,
+    generation: Number.parseInt(
+      createHash("sha256")
+        .update(CANDIDATE_STEP_ID, "utf8")
+        .digest("hex")
+        .slice(0, 8),
+      16
+    ),
     label: "기본 회의실",
     description: "기본 회의방",
     status: null

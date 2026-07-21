@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -143,7 +144,7 @@ def test_catalog_accepts_v1_compatibility_payload_and_rejects_unknown_version() 
     assert legacy is not None
     assert legacy.version == "agent-tool-capabilities:v1"
 
-    unknown = legacy_catalog_payload("agent-tool-capabilities:v3")
+    unknown = legacy_catalog_payload("agent-tool-capabilities:v4")
     with pytest.raises(ValueError, match="Unsupported toolCapabilityCatalog version"):
         parse_tool_capability_catalog(unknown, TOOL_SCHEMAS)
 
@@ -492,3 +493,74 @@ def test_v2_catalog_rejects_selector_kind_drift() -> None:
 
     with pytest.raises(ValueError, match="Invalid toolCapabilityCatalog"):
         parse_tool_capability_catalog(invalid, TOOL_SCHEMAS)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "duplicate_capability",
+        "invalid_selector",
+        "chain_mismatch",
+        "terminal_mismatch",
+        "confirmation_conflict",
+        "missing_boundary",
+        "unreachable_tool",
+        "cyclic_chain",
+    ),
+)
+def test_v3_catalog_fails_closed_on_boundary_and_chain_drift(mutation: str) -> None:
+    fixture = json.loads(QUALITY_FIXTURE_PATH.read_text(encoding="utf-8"))
+    schemas = fixture["eligibleToolSchemas"]
+    payload = deepcopy(fixture["toolCapabilityCatalog"])
+    capability = next(
+        item for item in payload["capabilities"] if item["id"] == "calendar.events.list"
+    )
+    descriptor = next(
+        item for item in payload["descriptors"] if item["toolName"] == "list_calendar_events"
+    )
+    if mutation == "duplicate_capability":
+        payload["capabilities"].append(deepcopy(capability))
+    elif mutation == "invalid_selector":
+        capability["selectorKinds"] = ["raw_resource_id"]
+        descriptor["selectorKinds"] = ["raw_resource_id"]
+    elif mutation == "chain_mismatch":
+        descriptor["followUpToolNames"].append("create_calendar_event")
+    elif mutation == "terminal_mismatch":
+        capability["terminalToolNames"] = ["update_calendar_event"]
+    elif mutation == "confirmation_conflict":
+        capability["requiresConfirmation"] = True
+    elif mutation == "missing_boundary":
+        capability["boundaryExamples"] = capability["boundaryExamples"][:-1]
+    elif mutation == "cyclic_chain":
+        update_capability = next(
+            item for item in payload["capabilities"] if item["id"] == "calendar.events.update"
+        )
+        reverse_capability = deepcopy(update_capability)
+        reverse_capability["id"] = "calendar.events.cyclic_test"
+        reverse_capability["toolNames"] = list(reversed(update_capability["toolNames"]))
+        payload["capabilities"].append(reverse_capability)
+    else:
+        descriptor["capabilityIds"] = []
+    payload["sha256"] = compute_tool_capability_catalog_sha(
+        payload["version"], payload["capabilities"], payload["descriptors"]
+    )
+
+    with pytest.raises(ValueError, match="Invalid toolCapabilityCatalog"):
+        parse_tool_capability_catalog(payload, schemas)
+
+
+def test_negated_write_and_tied_capabilities_fail_safe() -> None:
+    fixture = json.loads(QUALITY_FIXTURE_PATH.read_text(encoding="utf-8"))
+    catalog = parse_tool_capability_catalog(
+        fixture["toolCapabilityCatalog"], fixture["eligibleToolSchemas"]
+    )
+    assert catalog is not None
+
+    negated = retrieve_tool_shortlist("일정 만들지 말고 내일 일정 보여줘", catalog)
+    tied = retrieve_tool_shortlist("회의록 목록 상세", catalog)
+
+    assert negated.selected_capability_ids == ("calendar.events.list",)
+    assert "create_calendar_event" not in negated.tool_names
+    assert tied.tool_names == ()
+    assert tied.low_confidence is True
+    assert tied.fallback_reason == "conflicting_capabilities"

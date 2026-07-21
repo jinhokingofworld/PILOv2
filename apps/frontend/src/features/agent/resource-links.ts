@@ -6,10 +6,19 @@ import type { SqlErdAgentTableFocus } from "@/features/sql-erd/utils/agent-table
 
 export type AgentResourceLink = {
   focus?: SqlErdAgentTableFocus;
-  href: string;
+  href?: string;
   key: string;
   label: string;
+  navigation?: {
+    contextRef: string;
+    kind: AgentResourceNavigationKind;
+  };
 };
+
+type AgentResourceNavigationKind =
+  | "meeting_report"
+  | "drive_document"
+  | "sql_erd_session";
 
 type AgentSqlErdRequestContext = {
   surface: string;
@@ -18,6 +27,10 @@ type AgentSqlErdRequestContext = {
 
 export type StoredAgentCandidateSelection = {
   candidateSelectionId: string;
+  contextRef?: string;
+  domain?: string;
+  generation?: number;
+  ordinal?: number;
   resourceType: string;
   label: string;
   description: string | null;
@@ -84,6 +97,10 @@ export function getStoredAgentCandidateSelections(
   const candidates = rawCandidates.map((candidate) => {
     if (!isPlainObject(candidate)) return null;
     const candidateSelectionId = candidate.candidateSelectionId;
+    const contextRef = candidate.contextRef;
+    const domain = candidate.domain;
+    const generation = candidate.generation;
+    const ordinal = candidate.ordinal;
     const resourceType = candidate.resourceType;
     const label = normalizeCandidateTitle(candidate.label);
     const description = normalizeOptionalCandidateText(candidate.description, 1000);
@@ -92,6 +109,15 @@ export function getStoredAgentCandidateSelections(
       typeof candidateSelectionId !== "string" ||
       !UUID_PATTERN.test(candidateSelectionId) ||
       seenIds.has(candidateSelectionId) ||
+      (contextRef !== undefined &&
+        (typeof contextRef !== "string" ||
+          !/^ctx_[0-9a-f]{24}$/.test(contextRef))) ||
+      (domain !== undefined &&
+        (typeof domain !== "string" || !/^[a-z][a-z0-9_]{0,99}$/.test(domain))) ||
+      (generation !== undefined &&
+        (typeof generation !== "number" || !Number.isSafeInteger(generation))) ||
+      (ordinal !== undefined &&
+        (typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < 1)) ||
       !label ||
       typeof resourceType !== "string" ||
       !/^[a-z][a-z0-9_]{0,99}$/.test(resourceType)
@@ -101,6 +127,10 @@ export function getStoredAgentCandidateSelections(
     seenIds.add(candidateSelectionId);
     return {
       candidateSelectionId,
+      ...(typeof contextRef === "string" ? { contextRef } : {}),
+      ...(typeof domain === "string" ? { domain } : {}),
+      ...(typeof generation === "number" ? { generation } : {}),
+      ...(typeof ordinal === "number" ? { ordinal } : {}),
       resourceType,
       label,
       description,
@@ -144,6 +174,7 @@ export function getAgentResourceLinks(
 
     for (const resourceRef of step.resourceRefs) {
       const link =
+        toOpaqueContextNavigationLink(resourceRef) ??
         toSqlErdSessionLink(resourceRef) ??
         toCanvasLink(resourceRef, step.outputSummary) ??
         toMeetingReportLink(resourceRef) ??
@@ -155,6 +186,49 @@ export function getAgentResourceLinks(
   }
 
   return [...links.values()];
+}
+
+function toOpaqueContextNavigationLink(
+  resourceRef: Record<string, unknown>
+): AgentResourceLink | null {
+  const contextRef = resourceRef.contextRef;
+  if (
+    typeof contextRef !== "string" ||
+    !/^ctx_[0-9a-f]{24}$/.test(contextRef)
+  ) {
+    return null;
+  }
+
+  let kind: AgentResourceNavigationKind | null = null;
+  let label: string | null = null;
+  if (
+    resourceRef.domain === "meeting" &&
+    resourceRef.resourceType === "meeting_report"
+  ) {
+    kind = "meeting_report";
+    label = "회의록 보기";
+  } else if (
+    resourceRef.domain === "drive" &&
+    resourceRef.resourceType === "document"
+  ) {
+    kind = "drive_document";
+    const title = normalizeCandidateTitle(resourceRef.label);
+    label = title ? `${title} 보기` : "관련 문서 보기";
+  } else if (
+    resourceRef.domain === "sqltoerd" &&
+    resourceRef.resourceType === "session"
+  ) {
+    kind = "sql_erd_session";
+    label =
+      resourceRef.status === "focused" ? "집중 보기 열기" : "ERD 및 DDL 열기";
+  }
+  if (!label || !kind) return null;
+
+  return {
+    key: `context:${contextRef}`,
+    label,
+    navigation: { contextRef, kind }
+  };
 }
 
 function toMeetingReportLink(

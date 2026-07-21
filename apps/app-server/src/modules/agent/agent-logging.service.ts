@@ -110,6 +110,7 @@ export interface WaitForAgentUserInput {
   runId: string;
   message: string;
   riskLevel?: AgentRiskLevel | null;
+  diagnosticCode?: string;
 }
 
 export interface QueueNextAgentPlannerTurnInput {
@@ -404,6 +405,52 @@ export class AgentLoggingService {
     workspaceId: string,
     currentUserId: string
   ): Promise<string> {
+    await transaction.execute(
+      `
+        SELECT pg_advisory_xact_lock(
+          hashtextextended($1 || ':' || $2, 0)
+        )
+      `,
+      [workspaceId, currentUserId]
+    );
+    const existing = await transaction.queryOne<{ id: string }>(
+      `
+        SELECT thread.id
+        FROM agent_threads AS thread
+        WHERE thread.workspace_id = $1
+          AND thread.requested_by_user_id = $2
+          AND thread.expires_at > now()
+          AND (
+            thread.last_activity_at > now() - INTERVAL '1 hour'
+            OR EXISTS (
+              SELECT 1
+              FROM agent_runs AS run
+              INNER JOIN agent_confirmations AS confirmation
+                ON confirmation.run_id = run.id
+               AND confirmation.status = 'pending'
+               AND confirmation.expires_at > now()
+              WHERE run.thread_id = thread.id
+            )
+          )
+        ORDER BY
+          CASE WHEN EXISTS (
+            SELECT 1
+            FROM agent_runs AS run
+            INNER JOIN agent_confirmations AS confirmation
+              ON confirmation.run_id = run.id
+             AND confirmation.status = 'pending'
+             AND confirmation.expires_at > now()
+            WHERE run.thread_id = thread.id
+          ) THEN 0 ELSE 1 END,
+          thread.last_activity_at DESC,
+          thread.id DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [workspaceId, currentUserId]
+    );
+    if (existing) return existing.id;
+
     const created = await transaction.queryOne<{ id: string }>(
       `
         INSERT INTO agent_threads (workspace_id, requested_by_user_id)
@@ -662,6 +709,24 @@ export class AgentLoggingService {
         [run.id, input.riskLevel ?? null, message]
       );
       if (!updated) throw new Error("Agent run could not wait for user input");
+      if (input.diagnosticCode) {
+        await this.insertLog(transaction, {
+          workspaceId,
+          runId: run.id,
+          actorType: "app_server",
+          actorUserId: null,
+          level: "warn",
+          eventType: "context_resolution_rejected",
+          message: "Agent context resolution was rejected",
+          metadata: {
+            diagnosticCode: this.normalizeRequiredText(
+              input.diagnosticCode,
+              "diagnostic code"
+            )
+          },
+          resourceRefs: []
+        });
+      }
       return this.mapRun(updated);
     });
   }
