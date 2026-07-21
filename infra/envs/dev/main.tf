@@ -3,6 +3,7 @@ locals {
 
   agent_router_timeout_ms                = 45000
   agent_planner_timeout_ms               = 60000
+  canvas_html_timeout_ms                 = 180000
   agent_handoff_timeout_seconds          = 10
   agent_sqs_visibility_timeout_seconds   = 180
   agent_sqs_visibility_heartbeat_seconds = 45
@@ -313,6 +314,7 @@ module "ecs" {
         AGENT_TOOL_RETRIEVAL_MODE                 = "llm_router"
         OPENAI_AGENT_PLANNER_TIMEOUT_MS           = tostring(local.agent_planner_timeout_ms)
         OPENAI_AGENT_ROUTER_TIMEOUT_MS            = tostring(local.agent_router_timeout_ms)
+        OPENAI_CANVAS_HTML_TIMEOUT_MS             = tostring(local.canvas_html_timeout_ms)
         OPENAI_INDEXING_EMBEDDING_TIMEOUT_SECONDS = "30"
         LEGACY_MEETING_DRAIN_ENABLED              = tostring(var.legacy_meeting_drain_enabled)
         LEGACY_AGENT_DRAIN_ENABLED                = tostring(var.legacy_agent_drain_enabled)

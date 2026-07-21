@@ -93,6 +93,7 @@ def test_worker_reports_action_item_extraction_as_supported_job() -> None:
 def test_shared_ai_worker_does_not_require_meeting_queue_environment(monkeypatch) -> None:
     monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/ai-jobs")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_CANVAS_HTML_TIMEOUT_MS", "180000")
     monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_BASE_URL", raising=False)
     monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_TOKEN", raising=False)
     monkeypatch.delenv("SQS_MEETING_JOBS_QUEUE_URL", raising=False)
@@ -102,11 +103,13 @@ def test_shared_ai_worker_does_not_require_meeting_queue_environment(monkeypatch
     assert settings.sqs_queue_url == "https://sqs.example.com/ai-jobs"
     assert settings.legacy_meeting_drain_enabled is False
     assert settings.legacy_agent_drain_enabled is False
+    assert settings.openai_canvas_html_timeout_seconds == 180.0
 
 
 def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypatch) -> None:
     monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/ai-jobs")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_CANVAS_HTML_TIMEOUT_MS", "210000")
     monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_BASE_URL", raising=False)
     monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_TOKEN", raising=False)
 
@@ -143,10 +146,11 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
         "OpenAiCanvasAgentIntentClassifier",
         lambda *_args: object(),
     )
+    html_generator_args: list[tuple[object, ...]] = []
     monkeypatch.setattr(
         shared_ai_worker_runtime,
         "OpenAiCanvasAgentHtmlGenerator",
-        lambda *_args: object(),
+        lambda *_args: html_generator_args.append(_args) or object(),
     )
     monkeypatch.setattr(
         shared_ai_worker_runtime,
@@ -187,6 +191,7 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
 
     worker = shared_ai_worker_runtime.create_shared_ai_worker()
 
+    assert html_generator_args == [("test-key", "gpt-5.4-mini", 210.0)]
     assert worker.meeting_transcript_embedding_processor == (
         "meeting-transcript-repository",
         ("test-key", "text-embedding-3-small", 30.0),
