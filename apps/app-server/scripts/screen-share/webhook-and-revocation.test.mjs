@@ -6,6 +6,7 @@ import { TrackSource } from "livekit-server-sdk";
 import { MeetingModule } from "../../dist/modules/meeting/meeting.module.js";
 import { LiveKitWebhookService } from "../../dist/modules/meeting/livekit-webhook.service.js";
 import { ScreenShareCleanupService } from "../../dist/modules/screen-share/screen-share-cleanup.service.js";
+import { ScreenShareDeadlineService } from "../../dist/modules/screen-share/screen-share-deadline.service.js";
 import { ScreenShareMembershipRevocationService } from "../../dist/modules/screen-share/screen-share-membership-revocation.service.js";
 import { ScreenShareModule } from "../../dist/modules/screen-share/screen-share.module.js";
 import { ScreenShareRoomService } from "../../dist/modules/screen-share/screen-share-room.service.js";
@@ -1017,7 +1018,103 @@ try {
 }
 
 const screenShareProviders = Reflect.getMetadata("providers", ScreenShareModule);
+{
+  const session = activeSession();
+  const state = new FakeStateService(session);
+  state.deadline = session;
+  state.leaseUntilMs = 0;
+  state.claimDueDeadline = async (nowMs, leaseUntilMs) => {
+    if (!state.deadline || state.leaseUntilMs > nowMs) return null;
+    state.leaseUntilMs = leaseUntilMs;
+    return state.deadline;
+  };
+  const originalTerminate = state.terminateIfCurrent.bind(state);
+  state.terminateIfCurrent = async (...args) => {
+    const transition = await originalTerminate(...args);
+    if (transition) state.deadline = null;
+    return transition;
+  };
+  const realtime = { events: [], async flushPendingEvents() { this.events.push("flushed"); } };
+  const cleanup = { entries: [], async flushPendingCleanups() { this.entries.push("flushed"); } };
+  class TestScreenShareDeadlineService extends ScreenShareDeadlineService {
+    currentTimeMs = Date.parse(eventIso) + 12 * 60 * 60 * 1000;
+    nowMs() { return this.currentTimeMs; }
+  }
+  const deadline = new TestScreenShareDeadlineService(state, realtime, cleanup);
+  assert.equal(await deadline.flushDueDeadlines(), 1);
+  assert.equal(state.current, null);
+  assert.deepEqual(realtime.events, ["flushed"]);
+  assert.deepEqual(cleanup.entries, ["flushed"]);
+}
+{
+  const session = activeSession();
+  const state = new FakeStateService(session);
+  let leaseUntilMs = 0;
+  let terminateFailures = 1;
+  state.claimDueDeadline = async (nowMs, nextLeaseUntilMs) => {
+    if (!state.current || leaseUntilMs > nowMs) return null;
+    leaseUntilMs = nextLeaseUntilMs;
+    return session;
+  };
+  const originalTerminate = state.terminateIfCurrent.bind(state);
+  state.terminateIfCurrent = async (...args) => {
+    if (terminateFailures > 0) {
+      terminateFailures -= 1;
+      throw new Error("transient deadline failure");
+    }
+    return originalTerminate(...args);
+  };
+  const realtime = { async flushPendingEvents() {} };
+  const cleanup = { async flushPendingCleanups() {} };
+  class RetryingDeadlineService extends ScreenShareDeadlineService {
+    currentTimeMs = Date.parse(eventIso) + 12 * 60 * 60 * 1000;
+    nowMs() { return this.currentTimeMs; }
+  }
+  const deadline = new RetryingDeadlineService(state, realtime, cleanup);
+  await assert.rejects(deadline.flushDueDeadlines());
+  deadline.currentTimeMs += 30 * 1000 + 1;
+  assert.equal(await deadline.flushDueDeadlines(), 1);
+  assert.equal(state.current, null, "an expired lease must make a failed task retryable");
+}
+{
+  const session = activeSession();
+  const state = new FakeStateService(session);
+  let claimed = false;
+  state.claimDueDeadline = async () => {
+    if (claimed) return null;
+    claimed = true;
+    return session;
+  };
+  state.beforeTerminate = () => { state.current = null; };
+  const realtime = { calls: 0, async flushPendingEvents() { this.calls += 1; } };
+  const cleanup = { calls: 0, async flushPendingCleanups() { this.calls += 1; } };
+  const deadline = new ScreenShareDeadlineService(state, realtime, cleanup);
+  assert.equal(await deadline.flushDueDeadlines(), 1);
+  assert.equal(realtime.calls, 0, "an explicit end winning the race must not emit a second event");
+  assert.equal(cleanup.calls, 0, "an explicit end winning the race must not add cleanup work");
+}
+{
+  const priorRedisUrl = process.env.REDIS_URL;
+  process.env.REDIS_URL = "redis://screen-share-deadline.test:6379";
+  try {
+    const state = new FakeStateService(null);
+    state.claimDueDeadline = async () => null;
+    const deadline = new ScreenShareDeadlineService(
+      state,
+      { async flushPendingEvents() {} },
+      { async flushPendingCleanups() {} }
+    );
+    deadline.onModuleInit();
+    assert.ok(deadline.deadlineInterval, "startup must schedule deadline sweeps");
+    await deadline.onModuleDestroy();
+    assert.equal(deadline.deadlineInterval, null, "worker teardown must clear its interval");
+  } finally {
+    if (priorRedisUrl === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = priorRedisUrl;
+  }
+}
 assert.ok(screenShareProviders.includes(ScreenShareWebhookService));
+assert.ok(screenShareProviders.includes(ScreenShareDeadlineService));
 assert.ok(screenShareProviders.includes(ScreenShareMembershipRevocationService));
 assert.ok(screenShareProviders.includes(ScreenShareCleanupService));
 assert.ok(
