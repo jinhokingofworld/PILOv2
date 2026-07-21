@@ -414,7 +414,7 @@ export function MembersCard() {
           }
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className="w-[calc(100vw-2rem)] sm:w-full">
           <AlertDialogHeader>
             <AlertDialogTitle>워크스페이스에서 나갈까요?</AlertDialogTitle>
             <AlertDialogDescription>

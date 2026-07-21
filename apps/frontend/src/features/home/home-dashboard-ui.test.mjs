@@ -162,14 +162,45 @@ test("CalendarCard는 390px 높이에서 이번 주 7일과 기존 이동 계약
   assert.doesNotMatch(source, /calendarDates\.slice\(0,\s*7\)/);
 });
 
+test("Calendar date cells use tokenized grid separators", async () => {
+  const source = await readHomeSource("./components/calendar-card.tsx");
+
+  assert.match(
+    source,
+    /grid h-full min-w-\[720px\] grid-cols-7 gap-px overflow-hidden rounded-\[10px\] border border-border bg-border/
+  );
+  assert.match(source, /rounded-none border-0 bg-card/);
+});
+
 test("워크스페이스 현황은 반응형 3개 feed로 구성된다", async () => {
   const source = await readHomeSource(
     "./components/middle-dashboard-cards.tsx"
   );
 
-  assert.match(source, /md:grid-cols-2/);
+  assert.match(source, /grid-flow-col/);
+  assert.match(source, /auto-cols-\[min\(20rem,calc\(100vw-2rem\)\)\]/);
+  assert.match(source, /overflow-x-auto/);
+  assert.match(source, /sm:grid-flow-row/);
+  assert.match(source, /sm:grid-cols-2/);
   assert.match(source, /xl:grid-cols-3/);
-  assert.match(source, /md:col-span-2 xl:col-span-1/);
+  assert.match(source, /sm:col-span-2 xl:col-span-1/);
+});
+
+test("Home member dialogs fit mobile viewports", async () => {
+  const [memberProfileDialog, membersCard] = await Promise.all([
+    readHomeSource("./components/member-profile-dialog.tsx"),
+    readHomeSource("./components/members-card.tsx")
+  ]);
+
+  assert.match(
+    memberProfileDialog,
+    /h-\[calc\(100dvh-1\.5rem\)\].*w-\[calc\(100vw-1\.5rem\)\].*sm:h-\[calc\(100vh-3rem\)\].*sm:max-h-\[36rem\].*sm:w-\[calc\(100vw-3rem\)\]/
+  );
+  assert.match(memberProfileDialog, /px-4 pb-8 pt-8 sm:px-10 sm:pb-14 sm:pt-10/);
+  assert.match(
+    membersCard,
+    /<AlertDialogContent className="w-\[calc\(100vw-2rem\)\] sm:w-full">/
+  );
 });
 
 test("각 feed는 기존 상세 이동을 유지하며 최대 3개를 표시한다", async () => {

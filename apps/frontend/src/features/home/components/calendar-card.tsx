@@ -99,7 +99,7 @@ function ReadonlyCalendar({
           </Button>
         </div>
         <div className="-mx-1 min-h-0 flex-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="grid h-full min-w-[720px] grid-cols-7 gap-2">
+          <div className="grid h-full min-w-[720px] grid-cols-7 gap-px overflow-hidden rounded-[10px] border border-border bg-border">
             {calendarDates.map((date) => {
               const isToday = isSameCalendarDate(date, today);
               const dateValue = formatCalendarDate(date);
@@ -122,8 +122,8 @@ function ReadonlyCalendar({
                   key={date.toISOString()}
                   aria-label={`${dateValue} 캘린더로 이동`}
                   className={[
-                    "flex min-h-[92px] min-w-0 flex-col items-stretch gap-1.5 rounded-[10px] border border-border bg-muted/50 p-2 text-left transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                    isToday ? "border-primary bg-accent" : ""
+                    "flex min-h-[92px] min-w-0 flex-col items-stretch gap-1.5 rounded-none border-0 bg-card p-2 text-left transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    isToday ? "bg-accent ring-1 ring-inset ring-primary" : ""
                   ]
                     .filter(Boolean)
                     .join(" ")}

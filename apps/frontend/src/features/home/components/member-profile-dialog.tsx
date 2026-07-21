@@ -62,7 +62,7 @@ export function MemberProfileDialog({
   return (
     <Dialog open={Boolean(member)} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        className="h-[calc(100vh-3rem)] max-h-[36rem] w-[calc(100vw-3rem)] max-w-4xl gap-0 overflow-hidden rounded-xl border-0 bg-background p-0 shadow-2xl"
+        className="h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-h-none max-w-4xl gap-0 overflow-hidden rounded-lg border-0 bg-background p-0 shadow-2xl sm:h-[calc(100vh-3rem)] sm:max-h-[36rem] sm:w-[calc(100vw-3rem)] sm:rounded-xl"
         showCloseButton={false}
       >
         {member ? (
@@ -106,9 +106,9 @@ export function MemberProfileDialog({
             </aside>
 
             <main className="min-h-0 overflow-y-auto bg-background">
-              <div className="mx-auto w-full max-w-3xl px-6 pb-14 pt-10 sm:px-10 lg:px-12 lg:pt-12">
+              <div className="mx-auto w-full max-w-3xl px-4 pb-8 pt-8 sm:px-10 sm:pb-14 sm:pt-10 lg:px-12 lg:pt-12">
                 <DialogHeader className="pr-10">
-                  <DialogTitle className="text-3xl font-semibold tracking-tight">
+                  <DialogTitle className="text-2xl font-semibold tracking-tight sm:text-3xl">
                     프로필
                   </DialogTitle>
                   <DialogDescription className="mt-2 text-base text-foreground/80">
@@ -116,7 +116,7 @@ export function MemberProfileDialog({
                   </DialogDescription>
                 </DialogHeader>
 
-                <div className="mt-10 flex flex-col gap-5 sm:flex-row sm:items-center">
+                <div className="mt-6 flex flex-col gap-5 sm:mt-10 sm:flex-row sm:items-center">
                   <Avatar className="size-20 ring-4 ring-background shadow-sm">
                     <AvatarImage
                       alt={member.user.name ?? "Workspace 멤버"}
@@ -135,9 +135,11 @@ export function MemberProfileDialog({
                         {formatWorkspaceRole(member.role)}
                       </Badge>
                     </div>
-                    <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                      <Mail className="size-4" />
-                      {member.user.email ?? "이메일 없음"}
+                    <p className="mt-1 flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+                      <Mail className="size-4 shrink-0" />
+                      <span className="min-w-0 truncate">
+                        {member.user.email ?? "이메일 없음"}
+                      </span>
                     </p>
                     {member.user.jobTitle ? (
                       <p className="mt-2 text-sm font-medium text-foreground/80">
@@ -193,7 +195,7 @@ export function MemberProfileDialog({
                 ) : null}
 
                 {canRemoveSelectedMember ? (
-                  <div className="mt-8 flex items-center justify-between gap-4 border-t pt-6">
+                  <div className="mt-8 flex flex-col gap-4 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-sm font-medium">Workspace에서 제거</p>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -203,6 +205,7 @@ export function MemberProfileDialog({
                     <Button
                       disabled={isRemoving}
                       onClick={() => onRemoveMember(member)}
+                      className="w-full sm:w-auto"
                       variant="destructive"
                     >
                       {isRemoving ? "제거 중" : "멤버 제거"}
@@ -228,12 +231,12 @@ function MemberProfileRow({
   value: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-5 py-4 text-sm">
-      <dt className="flex items-center gap-3 text-muted-foreground [&_svg]:size-4">
+    <div className="flex items-center justify-between gap-3 py-3 text-sm sm:gap-5 sm:py-4">
+      <dt className="flex shrink-0 items-center gap-3 text-muted-foreground [&_svg]:size-4">
         {icon}
         {label}
       </dt>
-      <dd className="text-right font-medium">{value}</dd>
+      <dd className="min-w-0 truncate text-right font-medium">{value}</dd>
     </div>
   );
 }
