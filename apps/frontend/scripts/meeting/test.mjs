@@ -221,6 +221,14 @@ assert.match(meetingHook, /const canLoadReports = canLoad \|\| canLoadLocalMockR
 assert.match(meetingHook, /getLocalMeetingMockReportList/);
 assert.match(meetingHook, /isLocalMeetingMockReport/);
 assert.match(meetingHook, /localMeetingMockReportDetail/);
+assert.match(meetingHook, /localMeetingMockReportRef/);
+assert.match(meetingHook, /mutateLocalMockActionItem/);
+assert.match(meetingHook, /status: "APPROVED"/);
+assert.match(meetingHook, /status: "DISMISSED"/);
+assert.equal(
+  meetingHook.match(/isLocalMeetingMockReport\(reportId\)/g)?.length,
+  6
+);
 assert.match(meetingHook, /reloadCurrentMeeting/);
 assert.match(meetingHook, /meetingRoomId\?: string \| null/);
 assert.match(meetingHook, /usesRoomScopedApi/);
@@ -467,16 +475,15 @@ assert.match(meetingReportSection, /reference\.sourceType === sourceType/);
 assert.match(meetingReportSection, /reference\.sourceIndex === sourceIndex/);
 assert.match(meetingReportSection, /activityEvidenceForItem/);
 assert.match(meetingReportSection, /활동 \{activityEvidence\.length\}건/);
-assert.match(meetingReportSection, /selectedActivityEvidence/);
-assert.match(meetingReportSection, /selectedActivityEvidenceSourceLabel/);
-assert.match(meetingReportSection, /selectActivityEvidence/);
+assert.match(meetingReportSection, /InlineEvidencePanels/);
+assert.match(meetingReportSection, /activityEvidenceOpen/);
 assert.match(meetingReportSection, /getActivityEvidence\(report, "summary"\)/);
 assert.match(meetingReportSection, /getActivityEvidence\(report, "discussion"\)/);
 assert.match(meetingReportSection, /getActivityEvidence\(\s*report,\s*"action_item",\s*item\.sourceIndex\s*\)/);
 assert.match(meetingReportSection, /activityEvidence=\{summaryActivityEvidence\}/);
 assert.match(meetingReportSection, /activityEvidence=\{discussionActivityEvidence\}/);
 assert.match(meetingReportSection, /activityEvidence=\{activityEvidence\}/);
-assert.match(meetingReportSection, /후속 작업 \$\{item\.sourceIndex \+ 1\}/);
+assert.match(meetingReportSection, /후속 작업 \{actionItem\.sourceIndex \+ 1\}과 연결된 Workspace 활동/);
 assert.doesNotMatch(meetingReportSection, /selectedActivityDecisionIndex/);
 assert.doesNotMatch(meetingReportSection, /기록된 활동 근거가 없습니다/);
 assert.match(meetingReportSection, /grid gap-5 border-b pb-5/);
@@ -494,7 +501,14 @@ assert.match(meetingReportSection, /회의록 상세를 찾을 수 없습니다/
 assert.doesNotMatch(meetingReportSection, /from "socket\.io-client"/);
 assert.doesNotMatch(meetingReportSection, /useRouter/);
 assert.doesNotMatch(meetingReportSection, /buildCalendarDraftHref/);
-assert.match(meetingReportSection, /수정 & 승인/);
+assert.match(meetingReportSection, /rounded-2xl border border-border bg-muted\/50 p-4/);
+assert.match(meetingReportSection, /<X \/>\s*반려/);
+assert.match(meetingReportSection, /<Pencil \/>\s*수정/);
+assert.match(meetingReportSection, /<Check \/>\s*승인/);
+assert.match(meetingReportSection, /bg-sky-600 px-3 text-white hover:bg-sky-700/);
+assert.match(meetingReportSection, /activityEvidenceOpen/);
+assert.match(meetingReportSection, /actionItemEvidenceSegment/);
+assert.match(meetingReportSection, /후속 작업 \{actionItem\.sourceIndex \+ 1\}과 연결된 Workspace 활동/);
 assert.match(meetingReportSection, /생성 대상 선택/);
 assert.match(meetingReportSection, /\{pending && !editing \? \(/);
 assert.match(meetingReportSection, /\{pending && editing \? \(/);
@@ -582,8 +596,8 @@ assert.match(meetingReportSection, /formatTranscriptTimestamp/);
 assert.match(meetingReportSection, /EvidenceTimeButtons/);
 assert.match(meetingReportSection, /근거 Transcript/);
 assert.match(meetingReportSection, /selectedEvidenceSegment/);
-assert.match(meetingReportSection, /selectedEvidencePanelRef/);
-assert.match(
+assert.doesNotMatch(meetingReportSection, /selectedEvidencePanelRef/);
+assert.doesNotMatch(
   meetingReportSection,
   /scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/
 );

@@ -53,6 +53,7 @@ def build_multiturn_context_comparison(
         "multiTurnJudgePromptVersion",
         "multiTurnJudgeTemperature",
         "multiTurnJudgeVoteCount",
+        "judgeCalibrationStatus",
         "currentDate",
         "timezone",
         "repetitions",
@@ -118,6 +119,7 @@ def build_multiturn_context_snapshot(report: dict[str, object]) -> dict[str, obj
                 "multiTurnJudgePromptVersion",
                 "multiTurnJudgeTemperature",
                 "multiTurnJudgeVoteCount",
+                "judgeCalibrationStatus",
                 "currentDate",
                 "timezone",
                 "repetitions",
@@ -159,6 +161,8 @@ def _validate_multiturn_report(report: dict[str, object]) -> None:
         raise ValueError("Multi-turn Judge temperature must be zero")
     if metadata.get("multiTurnJudgeVoteCount") != 3:
         raise ValueError("Multi-turn Judge vote count must be three")
+    if metadata.get("judgeCalibrationStatus") not in {"pending", "passed"}:
+        raise ValueError("Multi-turn report has invalid Judge calibration status")
 
 
 def _multiturn_conversation_scores(
@@ -174,6 +178,8 @@ def _multiturn_conversation_scores(
             result.get("deterministicContinuationPassed"), bool
         ):
             raise ValueError("Invalid multi-turn deterministic result")
+        if not isinstance(result.get("toolSelectionPassed"), bool):
+            raise ValueError("Invalid multi-turn Tool selection verdict")
         grouped.setdefault(conversation_id, []).append(result)
     return {
         conversation_id: {
@@ -181,21 +187,14 @@ def _multiturn_conversation_scores(
                 [
                     float(
                         item["deterministicContextPassed"] is True
+                        and item.get("judgeVerdict") == "pass"
                         and item.get("judgeContextResolved") is True
                     )
                     for item in attempts
                 ]
             ),
             "multiTurnToolSelectionAccuracy": _mean(
-                [
-                    float(
-                        not any(
-                            reason in {"unexpected_tool", "tool_sequence"}
-                            for reason in _string_list(item.get("failureReasons", []))
-                        )
-                    )
-                    for item in attempts
-                ]
+                [float(item["toolSelectionPassed"] is True) for item in attempts]
             ),
         }
         for conversation_id, attempts in grouped.items()

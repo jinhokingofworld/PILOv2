@@ -7,6 +7,19 @@ import type {
 
 export const LOCAL_MEETING_MOCK_REPORT_ID = "local-meeting-report-mock";
 
+export const localMeetingMockActionItemDeliveryOptions = {
+  boards: [
+    {
+      id: "local-board-pilo-project",
+      name: "PILO_Project",
+      columns: [
+        { id: "local-column-todo", name: "To do" },
+        { id: "local-column-review", name: "검토 중" }
+      ]
+    }
+  ]
+};
+
 export const localMeetingMockReportSummary: MeetingReportSummary = {
   id: LOCAL_MEETING_MOCK_REPORT_ID,
   meetingId: "local-meeting-mock",
@@ -48,7 +61,7 @@ export const localMeetingMockReportSummary: MeetingReportSummary = {
 export const localMeetingMockReportDetail: MeetingReportDetail = {
   ...localMeetingMockReportSummary,
   transcriptText:
-    "00:15 오늘은 회의록 생성 워커 분리 작업과 배포 순서를 확인하겠습니다.\n00:20 앱 서버가 작업을 등록하고 워커가 처리 결과를 저장하는 흐름까지 구현했습니다.\n00:52 앱 서버에서 직접 생성하지 말고 워커가 받아서 처리하는 걸로 가죠. 배포 전에 기존 경로로 되돌릴 수 있는지만 확인하면 될 것 같습니다.\n01:19 워커를 먼저 올리고 처리 상태가 정상인지 본 다음 앱 서버를 배포하는 순서로 진행하겠습니다.",
+    "00:15 오늘은 회의록 생성 워커 분리 작업과 배포 순서를 확인하겠습니다.\n00:20 앱 서버가 작업을 등록하고 워커가 처리 결과를 저장하는 흐름까지 구현했습니다.\n00:52 앱 서버에서 직접 생성하지 말고 워커가 받아서 처리하는 걸로 가죠. 배포 전에 기존 경로로 되돌릴 수 있는지만 확인하면 될 것 같습니다.\n01:19 워커를 먼저 올리고 처리 상태가 정상인지 본 다음 앱 서버를 배포하는 순서로 진행하겠습니다.\n01:36 배포 순서와 롤백 방법을 검토하는 이슈를 만들고 확인 결과를 공유하겠습니다.\n02:05 기존 Supabase 설정이 남아 있는지 최종 확인하겠습니다.",
   evidenceSegments: [
     {
       id: "local-segment-summary",
@@ -77,6 +90,20 @@ export const localMeetingMockReportDetail: MeetingReportDetail = {
       startedAtMs: 79_000,
       endedAtMs: 91_000,
       text: "워커를 먼저 올리고 처리 상태가 정상인지 본 다음 앱 서버를 배포하는 순서로 진행하겠습니다."
+    },
+    {
+      id: "local-segment-action-item-1",
+      segmentIndex: 4,
+      startedAtMs: 96_000,
+      endedAtMs: 108_000,
+      text: "배포 순서와 롤백 방법을 검토하는 이슈를 만들고 확인 결과를 공유하겠습니다."
+    },
+    {
+      id: "local-segment-action-item-2",
+      segmentIndex: 5,
+      startedAtMs: 125_000,
+      endedAtMs: 132_000,
+      text: "기존 Supabase 설정이 남아 있는지 최종 확인하겠습니다."
     }
   ],
   evidence: [
@@ -99,6 +126,16 @@ export const localMeetingMockReportDetail: MeetingReportDetail = {
       sourceType: "decision",
       sourceIndex: 1,
       transcriptSegmentId: "local-segment-decision-2"
+    },
+    {
+      sourceType: "action_item",
+      sourceIndex: 0,
+      transcriptSegmentId: "local-segment-action-item-1"
+    },
+    {
+      sourceType: "action_item",
+      sourceIndex: 1,
+      transcriptSegmentId: "local-segment-action-item-2"
     }
   ],
   activityEvidence: [
@@ -117,10 +154,77 @@ export const localMeetingMockReportDetail: MeetingReportDetail = {
       action: "PILO Board · 이슈 이동",
       summary: "‘회의록 워커 배포 순서 확인’ 이슈가 검토 중으로 이동했습니다.",
       references: [{ sourceType: "decision", sourceIndex: 0 }]
+    },
+    {
+      id: "local-activity-action-item-1",
+      sourceIndex: 2,
+      occurredAt: "2026-07-20T10:39:00.000Z",
+      action: "PILO Board · 이슈 생성",
+      summary: "배포 순서와 롤백 방식 검토 이슈가 생성되었습니다.",
+      references: [{ sourceType: "action_item", sourceIndex: 0 }]
+    },
+    {
+      id: "local-activity-action-item-2",
+      sourceIndex: 3,
+      occurredAt: "2026-07-20T10:42:00.000Z",
+      action: "GitHub · 체크리스트 등록",
+      summary: "Supabase 기존 설정 최종 확인 항목이 배포 체크리스트에 추가되었습니다.",
+      references: [{ sourceType: "action_item", sourceIndex: 1 }]
     }
   ],
-  actionItems: [],
-  actionItemAssignees: [],
+  actionItems: [
+    {
+      id: "local-action-item-1",
+      sourceIndex: 0,
+      title: "배포 순서와 롤백 방식 검토",
+      description:
+        "워커와 앱 서버의 배포 순서를 확인하고, 장애 발생 시 기존 경로로 되돌리는 절차를 정리한다.",
+      priority: "HIGH",
+      assignee: { userId: "local-user-2", name: "김주형 (라건)", avatarUrl: null },
+      deliverySuggestion: { deliveryType: "pilo_issue", calendar: null },
+      status: "PENDING",
+      updatedByUserId: null,
+      approvedByUserId: null,
+      approvedAt: null,
+      dismissedByUserId: null,
+      dismissedAt: null,
+      delivery: null,
+      createdAt: "2026-07-20T10:38:00.000Z",
+      updatedAt: "2026-07-20T10:38:00.000Z"
+    },
+    {
+      id: "local-action-item-2",
+      sourceIndex: 1,
+      title: "Supabase 기존 설정 잔존 여부 최종 확인",
+      description:
+        "RDS 전환 이후 남아 있는 Supabase 설정과 연결 정보를 확인하고, 정리 결과를 배포 체크리스트에 기록한다.",
+      priority: "MEDIUM",
+      assignee: null,
+      deliverySuggestion: {
+        deliveryType: "calendar_event",
+        calendar: {
+          isAllDay: false,
+          startDate: "2026-07-21",
+          endDate: "2026-07-21",
+          startTime: "10:00",
+          endTime: "10:30"
+        }
+      },
+      status: "PENDING",
+      updatedByUserId: null,
+      approvedByUserId: null,
+      approvedAt: null,
+      dismissedByUserId: null,
+      dismissedAt: null,
+      delivery: null,
+      createdAt: "2026-07-20T10:41:00.000Z",
+      updatedAt: "2026-07-20T10:41:00.000Z"
+    }
+  ],
+  actionItemAssignees: [
+    { userId: "local-user-2", name: "김주형 (라건)", avatarUrl: null },
+    { userId: "local-user-3", name: "김진호", avatarUrl: null }
+  ],
   decisionItems: [
     {
       id: "local-decision-1",
