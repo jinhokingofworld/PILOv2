@@ -23,18 +23,13 @@ import {
   AgentRunListQuery,
   AgentService
 } from "./agent.service";
-import {
-  AgentContextNavigationPayload,
-  AgentThreadContextService
-} from "./agent-thread-context.service";
 
 @Controller("workspaces/:workspaceId/agent")
 @UseGuards(AuthGuard)
 export class AgentController {
   constructor(
     private readonly agentService: AgentService,
-    private readonly agentConfirmationService: AgentConfirmationService,
-    private readonly agentThreadContextService: AgentThreadContextService
+    private readonly agentConfirmationService: AgentConfirmationService
   ) {}
 
   @Post("runs")
@@ -83,22 +78,6 @@ export class AgentController {
       runId
     );
 
-    return apiResponse(result);
-  }
-
-  @Get("runs/:runId/context-references/:contextRef/navigation")
-  async resolveContextNavigation(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("runId") runId: string,
-    @Param("contextRef") contextRef: string
-  ): Promise<ApiSuccessResponse<AgentContextNavigationPayload>> {
-    const result = await this.agentThreadContextService.resolveNavigation(
-      currentUserId,
-      workspaceId,
-      runId,
-      contextRef
-    );
     return apiResponse(result);
   }
 

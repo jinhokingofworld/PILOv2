@@ -18,8 +18,6 @@ const { AgentDomainFeatureFlagService } = require(
 );
 const {
   buildAgentToolCapabilityCatalog,
-  getNextAgentCapabilityToolNames,
-  isNextAgentCapabilityTool,
   validateAgentToolCapabilityCatalog
 } = require(
   "../../dist/modules/agent/agent-tool-capability-catalog.js"
@@ -69,36 +67,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "e5dfff743067e2781cf96e02786ac7f9d3270726bb9f0ca8b4eeccf770b34f94";
-
-assert.deepEqual(
-  getNextAgentCapabilityToolNames(["calendar.events.update"], []),
-  ["list_calendar_events"]
-);
-assert.deepEqual(
-  getNextAgentCapabilityToolNames(
-    ["calendar.events.update"],
-    ["list_calendar_events"]
-  ),
-  ["update_calendar_event"]
-);
-assert.equal(
-  getNextAgentCapabilityToolNames(
-    ["calendar.events.update"],
-    ["update_calendar_event"]
-  ),
-  null,
-  "a terminal result without its prerequisite must fail closed"
-);
-assert.equal(
-  isNextAgentCapabilityTool(
-    ["calendar.events.update"],
-    "list_calendar_events",
-    ["list_calendar_events"]
-  ),
-  false,
-  "a completed tool must not be called again"
-);
+  "88a574298805f5c1442c064a751ff35cdc245e6b6ab0ea7c2b06fa97be0baf26";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -171,7 +140,7 @@ const payload = {
   assert.deepEqual(suite.tools, actualSnapshot);
 
   const capabilityCatalog = registry.listCapabilityCatalogForContext(null);
-  assert.equal(capabilityCatalog.version, "agent-tool-capabilities:v3");
+  assert.equal(capabilityCatalog.version, "agent-tool-capabilities:v2");
   assert.match(capabilityCatalog.sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(
     capabilityCatalog.descriptors.map((descriptor) => descriptor.toolName),
@@ -208,10 +177,6 @@ const payload = {
       (capability) =>
         capability.examples.length === 5 &&
         new Set(capability.examples.map((example) => example.kind)).size === 5 &&
-        capability.boundaryExamples.length === 5 &&
-        new Set(capability.boundaryExamples.map((example) => example.kind)).size === 5 &&
-        (capability.availability === "unsupported" ||
-          capability.terminalToolNames.length === 1) &&
         capability.selectorKinds.length > 0
     ),
     "every capability must carry DB-independent canonical and variation fixtures"
@@ -519,7 +484,7 @@ const inventory = fullRegistry.listToolInventory();
         oneToolCatalog.descriptors,
         [calendarDefinition]
       ),
-    /invalid capability|chain contract|cyclic tool chain/,
+    /invalid capability/,
     "duplicate tool names in a capability chain must fail closed"
   );
   assert.throws(
@@ -551,94 +516,6 @@ const inventory = fullRegistry.listToolInventory();
       ),
     /domain mismatch/,
     "a descriptor domain must match the registered tool domain"
-  );
-  assert.throws(
-    () =>
-      validateAgentToolCapabilityCatalog(
-        [
-          {
-            ...oneToolCatalog.capabilities[0],
-            selectorKinds: ["raw_resource_id"]
-          }
-        ],
-        [
-          {
-            ...oneToolCatalog.descriptors[0],
-            selectorKinds: ["raw_resource_id"]
-          }
-        ],
-        [calendarDefinition]
-      ),
-    /boundary contract/,
-    "unknown selector kinds must fail closed"
-  );
-  assert.throws(
-    () =>
-      validateAgentToolCapabilityCatalog(
-        oneToolCatalog.capabilities,
-        [
-          {
-            ...oneToolCatalog.descriptors[0],
-            followUpToolNames: ["list_calendar_events"]
-          }
-        ],
-        [calendarDefinition]
-      ),
-    /chain contract/,
-    "descriptor chain drift must fail closed"
-  );
-  assert.throws(
-    () =>
-      validateAgentToolCapabilityCatalog(
-        [
-          {
-            ...oneToolCatalog.capabilities[0],
-            requiresConfirmation: true
-          }
-        ],
-        oneToolCatalog.descriptors,
-        [calendarDefinition]
-      ),
-    /boundary contract/,
-    "capability confirmation drift must fail closed"
-  );
-  assert.throws(
-    () =>
-      validateAgentToolCapabilityCatalog(
-        oneToolCatalog.capabilities,
-        [
-          {
-            ...oneToolCatalog.descriptors[0],
-            capabilityIds: []
-          }
-        ],
-        [calendarDefinition]
-      ),
-    /chain contract/,
-    "unreachable registered tools must fail closed"
-  );
-  const fullDefinitions = fullRegistry.listDefinitions();
-  const fullCatalog = buildAgentToolCapabilityCatalog(fullDefinitions);
-  const calendarUpdate = fullCatalog.capabilities.find(
-    (capability) => capability.id === "calendar.events.update"
-  );
-  assert.ok(calendarUpdate);
-  assert.throws(
-    () =>
-      validateAgentToolCapabilityCatalog(
-        [
-          ...fullCatalog.capabilities,
-          {
-            ...calendarUpdate,
-            id: "calendar.events.cyclic_test",
-            toolNames: [...calendarUpdate.toolNames].reverse()
-          }
-        ],
-        fullCatalog.descriptors,
-        fullDefinitions
-      ),
-    /cyclic tool chain/,
-    "capability chain cycles must fail closed"
   );
 }
 
