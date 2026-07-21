@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { createMeetingApiClient } from "@/features/meeting/api/client";
 import {
+  localMeetingMockActionItemDeliveryOptions,
   getLocalMeetingMockReportList,
   isLocalMeetingMockReport,
   localMeetingMockReportDetail
@@ -413,6 +414,10 @@ export function useMeetingWorkspaceData({
 
   const getMeetingReportActionItemDeliveryOptions = useCallback(
     async (reportId: string, actionItemId: string) => {
+      if (canUseLocalMeetingMockData && isLocalMeetingMockReport(reportId)) {
+        return localMeetingMockActionItemDeliveryOptions;
+      }
+
       return meetingClient.getMeetingReportActionItemDeliveryOptions(
         requireWorkspace(),
         reportId,
