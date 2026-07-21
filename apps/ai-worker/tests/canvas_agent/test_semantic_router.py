@@ -98,7 +98,9 @@ def test_semantic_router_classifies_confident_canvas_shape_match() -> None:
     assert classification.intent == "find_shapes"
     assert classification.arguments["shapeIds"] == ["shape:auth", "shape:login"]
     assert classification.arguments["focusResult"] is True
-    assert repository.text_search_calls == []
+    assert repository.text_search_calls == [
+        ("workspace-1", "canvas-1", "인증 흐름"),
+    ]
 
 
 def test_semantic_router_classifies_direct_shape_search_prompt() -> None:
@@ -111,7 +113,9 @@ def test_semantic_router_classifies_direct_shape_search_prompt() -> None:
     assert classification is not None
     assert classification.intent == "find_shapes"
     assert classification.arguments["shapeIds"] == ["shape:auth"]
-    assert repository.text_search_calls == []
+    assert repository.text_search_calls == [
+        ("workspace-1", "canvas-1", "인증 흐름 어디 있어?"),
+    ]
 
 
 def test_semantic_router_skips_embedding_when_canvas_has_no_indexed_shapes() -> None:
@@ -128,7 +132,7 @@ def test_semantic_router_skips_embedding_when_canvas_has_no_indexed_shapes() -> 
     ]
 
 
-def test_semantic_router_uses_scoped_db_text_after_ambiguous_embedding() -> None:
+def test_semantic_router_uses_scoped_db_text_before_embedding() -> None:
     repository = FakeRepository(
         shapes=[
             CanvasSemanticShapeMatch("shape:other-a", 0.8),
@@ -149,7 +153,7 @@ def test_semantic_router_uses_scoped_db_text_after_ambiguous_embedding() -> None
     assert classification is not None
     assert classification.arguments["shapeIds"] == ["shape:dashboard"]
     assert classification.arguments["routingSource"] == "database_text"
-    assert repository.search_calls == 1
+    assert repository.search_calls == 0
     assert repository.text_search_calls == [
         ("workspace-1", "canvas-1", "대시보드 와이어프레임"),
     ]
@@ -187,3 +191,22 @@ def test_semantic_router_treats_mutation_wording_as_existing_shape_search() -> N
     assert classification is not None
     assert classification.intent == "find_shapes"
     assert classification.arguments["shapeIds"] == ["shape:auth"]
+
+
+def test_semantic_router_falls_back_to_embedding_after_empty_db_search() -> None:
+    repository = FakeRepository(
+        shapes=[CanvasSemanticShapeMatch("shape:auth", 0.91)],
+    )
+
+    classification = CanvasSemanticRouter(repository, FakeEmbedder()).classify(
+        context("인증 흐름 어디 있어?"),
+        "인증 흐름",
+    )
+
+    assert classification is not None
+    assert classification.arguments["shapeIds"] == ["shape:auth"]
+    assert classification.arguments["routingSource"] == "shape_embedding"
+    assert repository.text_search_calls == [
+        ("workspace-1", "canvas-1", "인증 흐름"),
+    ]
+    assert repository.search_calls == 1

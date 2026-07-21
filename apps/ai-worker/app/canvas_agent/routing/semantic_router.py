@@ -60,6 +60,23 @@ class CanvasSemanticRouter:
         if not query:
             return None
 
+        text_matches = self.repository.search_text_shapes(
+            context.workspace_id,
+            context.canvas_id,
+            query,
+        )
+        if text_matches:
+            return CanvasAgentIntentClassification(
+                intent="find_shapes",
+                arguments={
+                    "query": query,
+                    "shapeIds": [match.shape_id for match in text_matches[:4]],
+                    "focusResult": True,
+                    "routingSource": "database_text",
+                },
+                message="저장된 Canvas 도형의 제목과 내용에서 찾았어요.",
+            )
+
         if self.repository.has_semantic_shapes(context.workspace_id, context.canvas_id):
             try:
                 query_embedding = self.embedder.embed_query(query)
@@ -90,23 +107,6 @@ class CanvasSemanticRouter:
                         },
                         message="임베딩 검색으로 찾았어요. 여기 있는 내용이 가장 가까워요.",
                     )
-
-        text_matches = self.repository.search_text_shapes(
-            context.workspace_id,
-            context.canvas_id,
-            query,
-        )
-        if text_matches:
-            return CanvasAgentIntentClassification(
-                intent="find_shapes",
-                arguments={
-                    "query": query,
-                    "shapeIds": [match.shape_id for match in text_matches[:4]],
-                    "focusResult": True,
-                    "routingSource": "database_text",
-                },
-                message="저장된 Canvas 도형의 제목과 내용에서 찾았어요.",
-            )
 
         return None
 
