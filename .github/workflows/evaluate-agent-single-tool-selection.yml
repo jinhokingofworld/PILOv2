@@ -1,0 +1,206 @@
+name: Evaluate Agent Single Tool Selection
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Snapshot one main revision or compare baseline and candidate revisions
+        required: true
+        default: snapshot
+        type: choice
+        options: [snapshot, compare]
+      current_date:
+        description: Fixed Agent current date (YYYY-MM-DD)
+        required: true
+        default: "2026-07-21"
+      repetitions:
+        description: Fixed attempts for every benchmark case
+        required: true
+        default: "5"
+        type: choice
+        options: ["5"]
+      baseline_sha:
+        description: Baseline commit SHA (compare only)
+        required: false
+      candidate_sha:
+        description: Candidate PR HEAD SHA descending from baseline (compare only)
+        required: false
+      target_sha:
+        description: Current main SHA (snapshot only; blank uses dispatched main SHA)
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ap-northeast-2
+
+jobs:
+  prepare:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.revisions.outputs.targets }}
+      baseline_sha: ${{ steps.revisions.outputs.baseline_sha }}
+      candidate_sha: ${{ steps.revisions.outputs.candidate_sha }}
+      target_sha: ${{ steps.revisions.outputs.target_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: evaluator
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        if: ${{ inputs.mode == 'snapshot' }}
+        with:
+          ref: ${{ inputs.target_sha || github.sha }}
+          path: target
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        if: ${{ inputs.mode == 'compare' }}
+        with:
+          ref: ${{ inputs.baseline_sha }}
+          path: baseline
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        if: ${{ inputs.mode == 'compare' }}
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          path: candidate
+          fetch-depth: 0
+      - id: revisions
+        env:
+          MODE: ${{ inputs.mode }}
+          TARGET_SHA: ${{ inputs.target_sha || github.sha }}
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$MODE" == snapshot ]]; then
+            [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$(git -C target rev-parse HEAD)" == "$TARGET_SHA" ]]
+            [[ "$(git -C target rev-parse refs/remotes/origin/main)" == "$TARGET_SHA" ]] || {
+              echo "target SHA must be the current main revision" >&2; exit 1; }
+            echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+            echo 'targets=["target"]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$BASELINE_SHA" =~ ^[0-9a-f]{40}$ && "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASELINE_SHA" != "$CANDIDATE_SHA" ]]
+          [[ "$(git -C baseline rev-parse HEAD)" == "$BASELINE_SHA" ]]
+          [[ "$(git -C candidate rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
+          git -C candidate merge-base --is-ancestor "$BASELINE_SHA" "$CANDIDATE_SHA" || {
+            echo "candidate SHA must descend from baseline SHA" >&2; exit 1; }
+          echo "baseline_sha=$BASELINE_SHA" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          echo 'targets=["baseline","candidate"]' >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Build target registry-bound inputs
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/prepared"
+          if [[ "${{ inputs.mode }}" == snapshot ]]; then
+            targets=(target)
+          else
+            targets=(baseline candidate)
+          fi
+          for target in "${targets[@]}"; do
+            npm ci --prefix "$target/apps/app-server"
+            npm --prefix "$target/apps/app-server" run build
+            node "$target/apps/app-server/scripts/agent/export-tool-retrieval-snapshot.mjs" \
+              --output "$RUNNER_TEMP/prepared/$target-registry.json"
+            python "$target/apps/ai-worker/scripts/export_phase4e_evaluation_inputs.py" \
+              --registry-snapshot "$RUNNER_TEMP/prepared/$target-registry.json" \
+              --tool-snapshot-output "$RUNNER_TEMP/prepared/$target-suite.json" \
+              --catalog-output "$RUNNER_TEMP/prepared/$target-capability-catalog.json"
+          done
+          if [[ "${{ inputs.mode }}" == compare ]]; then
+            python - "$RUNNER_TEMP/prepared/baseline-registry.json" "$RUNNER_TEMP/prepared/candidate-registry.json" <<'PY'
+            import json
+            import sys
+            baseline, candidate = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:])
+            keys = ("sha256", "catalogSha256")
+            baseline_inventory = baseline.get("inventory", {})
+            candidate_inventory = candidate.get("inventory", {})
+            if any(baseline_inventory.get(key) != candidate_inventory.get(key) for key in keys):
+                raise SystemExit("Registry changed; this is not a comparable selection experiment")
+            PY
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: single-tool-selection-prepared-inputs
+          path: ${{ runner.temp }}/prepared
+          retention-days: 1
+
+  evaluate:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.prepare.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: ${{ github.sha }}, path: evaluator }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.target == 'target' && needs.prepare.outputs.target_sha || matrix.target == 'baseline' && needs.prepare.outputs.baseline_sha || needs.prepare.outputs.candidate_sha }}
+          path: target-source
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install -r target-source/apps/ai-worker/requirements.txt
+      - uses: actions/download-artifact@v4
+        with: { name: single-tool-selection-prepared-inputs, path: ${{ runner.temp }}/prepared }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Run frozen evaluator without Tool execution
+        working-directory: evaluator/apps/ai-worker
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          export OPENAI_API_KEY="$(aws secretsmanager get-secret-value --secret-id pilo-dev/ai-worker/OPENAI_API_KEY --query SecretString --output text)"
+          PYTHONPATH="$GITHUB_WORKSPACE/target-source/apps/ai-worker:$GITHUB_WORKSPACE/evaluator/apps/ai-worker" \
+            python scripts/evaluate_single_tool_selection.py \
+            --target-root "$GITHUB_WORKSPACE/target-source" \
+            --suite "$RUNNER_TEMP/prepared/${{ matrix.target }}-suite.json" \
+            --tool-capability-catalog "$RUNNER_TEMP/prepared/${{ matrix.target }}-capability-catalog.json" \
+            --registry-snapshot "$RUNNER_TEMP/prepared/${{ matrix.target }}-registry.json" \
+            --current-date "${{ inputs.current_date }}" --timezone Asia/Seoul --repetitions "${{ inputs.repetitions }}" \
+            --model gpt-5.4-mini --router-model gpt-5.4-mini \
+            --output "$RUNNER_TEMP/${{ matrix.target }}-single-tool-selection.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: single-tool-selection-${{ matrix.target }}
+          path: ${{ runner.temp }}/${{ matrix.target }}-single-tool-selection.json
+          retention-days: 30
+
+  compare:
+    if: ${{ inputs.mode == 'compare' && needs.prepare.result == 'success' }}
+    needs: [prepare, evaluate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: ${{ github.sha }}, path: evaluator }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/download-artifact@v4
+        with: { pattern: single-tool-selection-*, path: ${{ runner.temp }}/reports, merge-multiple: true }
+      - working-directory: evaluator/apps/ai-worker
+        run: |
+          PYTHONPATH=. python scripts/compare_single_tool_selection.py \
+            --baseline-report "$RUNNER_TEMP/reports/baseline-single-tool-selection.json" \
+            --candidate-report "$RUNNER_TEMP/reports/candidate-single-tool-selection.json" \
+            --output "$RUNNER_TEMP/single-tool-selection-comparison.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: single-tool-selection-comparison-${{ inputs.current_date }}
+          path: ${{ runner.temp }}/single-tool-selection-comparison.json
+          retention-days: 30

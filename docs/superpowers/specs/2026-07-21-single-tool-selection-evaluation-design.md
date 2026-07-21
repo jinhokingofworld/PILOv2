@@ -49,6 +49,15 @@ The committed catalog is a reproducible frozen benchmark, not a secret holdout: 
 
 The evaluation harness is checked out once at a pinned evaluator SHA and runs against both target source revisions. The target revisions must not each supply their own evaluator implementation. This prevents an evaluator change from invalidating the comparison through an `evaluatorSha256` mismatch.
 
+## Running the Benchmark
+
+Run the `Evaluate Agent Single Tool Selection` GitHub Actions workflow from `main`.
+
+- For an absolute snapshot, use `mode=snapshot` and the deployed `main` SHA (or leave `target_sha` empty).
+- For an improvement comparison, use `mode=compare`, set `baseline_sha` to the prior revision and `candidate_sha` to the unmerged PR HEAD. The workflow accepts the candidate only when the baseline is its ancestor; it does not require the candidate to be merged into `main` or `dev`.
+
+Read `singleTurnToolSelectionAccuracy.percentagePointDelta` together with its `pairedClusteredConfidenceInterval95`. Only a strictly positive lower bound permits the narrow claim: “Canvas 제외 고정 단일 턴 Tool-selection benchmark에서 실제 Agent의 첫 Tool 선택 정확도가 X%p 개선됐다.”
+
 ## Acceptance Criteria
 
 - A successful result is based on the directly selected first Tool, not an inferred terminal message.
