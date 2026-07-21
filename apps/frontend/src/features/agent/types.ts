@@ -130,6 +130,7 @@ export type AgentRunMessage = {
 
 export type AgentRun = {
   id: string;
+  conversationId: string;
   workspaceId: string;
   requestedByUserId: string;
   clientRequestId: string | null;
@@ -152,6 +153,7 @@ export type AgentRun = {
 
 export type CreateAgentRunInput = {
   prompt: string;
+  conversationId?: string | null;
   timezone?: string;
   clientRequestId?: string;
   requestContext?: AgentRunRequestContext;
@@ -181,6 +183,7 @@ export type AgentMessageDisposition =
 
 export type RouteAgentMessageInput = {
   message: string;
+  conversationId?: string | null;
   timezone?: string;
   clientRequestId: string;
   activeRunId: string | null;

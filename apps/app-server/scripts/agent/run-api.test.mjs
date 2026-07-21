@@ -13,6 +13,7 @@ const USER_ID = "11111111-1111-1111-1111-111111111111";
 const OTHER_USER_ID = "99999999-9999-9999-9999-999999999999";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
+const CONVERSATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
 const PR_REVIEW_SESSION_ID = "99999999-9999-4999-8999-999999999998";
 const CANVAS_ID = "99999999-9999-4999-8999-999999999999";
@@ -131,6 +132,7 @@ assert.match(
 function createStoredRun(overrides = {}) {
   return {
     id: RUN_ID,
+    conversationId: CONVERSATION_ID,
     workspaceId: WORKSPACE_ID,
     requestedByUserId: USER_ID,
     clientRequestId: "request-1",
@@ -154,6 +156,7 @@ function createStoredRun(overrides = {}) {
 function createRunRow(overrides = {}) {
   return {
     id: RUN_ID,
+    thread_id: CONVERSATION_ID,
     workspace_id: WORKSPACE_ID,
     requested_by_user_id: USER_ID,
     client_request_id: "request-1",
@@ -590,6 +593,7 @@ function errorMessage(error) {
 
   assert.equal(result.created, true);
   assert.equal(result.run.id, RUN_ID);
+  assert.equal(result.run.conversationId, CONVERSATION_ID);
   assert.deepEqual(result.run.steps, []);
   assert.deepEqual(result.run.messages, []);
   assert.equal(result.run.confirmation, null);
@@ -606,6 +610,26 @@ function errorMessage(error) {
     }
   ]);
   assert.deepEqual(agentOutboxPublisherService.calls, [RUN_ID]);
+}
+
+{
+  const { service, agentLoggingService } = createService();
+  await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "새 대화 시작",
+    conversationId: null
+  });
+  assert.equal(agentLoggingService.calls[0].input.conversationId, null);
+}
+
+{
+  const { service } = createService();
+  await assert.rejects(
+    service.createRun(USER_ID, WORKSPACE_ID, {
+      prompt: "잘못된 대화",
+      conversationId: "not-a-uuid"
+    }),
+    (error) => errorCode(error) === "BAD_REQUEST"
+  );
 }
 
 {

@@ -17,6 +17,7 @@ import {
   Loader2,
   MessageCircle,
   SendHorizontal,
+  SquarePen,
   Workflow,
   Wrench,
   X
@@ -66,6 +67,7 @@ type AgentChatMessage = {
   routingChoice?: {
     activeRunId: string;
     clientRequestId: string;
+    conversationId: string;
     message: string;
     requestContext: AgentRunRequestContext;
     targetMessageId: string | null;
@@ -87,6 +89,18 @@ const AGENT_RUN_POLL_INTERVAL_MS = 1800;
 const AGENT_PLANNING_POLL_TIMEOUT_MS = 270_000;
 const DEFAULT_AGENT_TIMEZONE = "Asia/Seoul";
 const MAX_MEETING_CLIENT_ACTION_EXPIRY_SECONDS = 300;
+const MAX_PERSISTED_AGENT_MESSAGES = 20;
+const MAX_PERSISTED_AGENT_STORAGE_CHARS = 200_000;
+const AGENT_CONVERSATION_STORAGE_VERSION = 1;
+const AGENT_RUN_STATUSES = new Set<AgentRun["status"]>([
+  "planning",
+  "waiting_user_input",
+  "waiting_confirmation",
+  "running",
+  "completed",
+  "failed",
+  "cancelled"
+]);
 
 const initialMessages: AgentChatMessage[] = [
   {
@@ -96,6 +110,96 @@ const initialMessages: AgentChatMessage[] = [
       "안녕하세요, PILO AI입니다.\n일정 관리, 회의록 확인 등 다양한 업무를 스마트하게 도와드릴게요.\n어떤 업무를 도와드릴까요?"
   }
 ];
+
+function getConversationStorageKey(userId: string, workspaceId: string) {
+  return `pilo-agent-conversation:${userId}:${workspaceId}`;
+}
+
+function readPersistedConversation(storageKey: string): {
+  conversationId: string;
+  messages: AgentChatMessage[];
+} | null {
+  try {
+    const value: unknown = JSON.parse(
+      window.localStorage.getItem(storageKey) ?? "null"
+    );
+    if (
+      !isRecord(value) ||
+      value.version !== AGENT_CONVERSATION_STORAGE_VERSION ||
+      typeof value.conversationId !== "string" ||
+      !Array.isArray(value.messages)
+    ) {
+      return null;
+    }
+    const messages = value.messages.flatMap((message): AgentChatMessage[] => {
+      if (
+        !isRecord(message) ||
+        typeof message.id !== "string" ||
+        typeof message.content !== "string" ||
+        (message.role !== "assistant" && message.role !== "user")
+      ) {
+        return [];
+      }
+      const run = isPersistedAgentRun(message.run) ? message.run : undefined;
+      return [
+        {
+          id: message.id,
+          content: message.content,
+          role: message.role,
+          ...(run ? { run } : {})
+        }
+      ];
+    });
+    return messages.length > 0
+      ? { conversationId: value.conversationId, messages }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistConversation(
+  storageKey: string,
+  conversationId: string,
+  messages: AgentChatMessage[]
+) {
+  try {
+    const persistedMessages = messages.slice(-MAX_PERSISTED_AGENT_MESSAGES);
+    let serialized = JSON.stringify({
+      version: AGENT_CONVERSATION_STORAGE_VERSION,
+      conversationId,
+      messages: persistedMessages
+    });
+    while (
+      serialized.length > MAX_PERSISTED_AGENT_STORAGE_CHARS &&
+      persistedMessages.length > 1
+    ) {
+      persistedMessages.shift();
+      serialized = JSON.stringify({
+        version: AGENT_CONVERSATION_STORAGE_VERSION,
+        conversationId,
+        messages: persistedMessages
+      });
+    }
+    window.localStorage.setItem(storageKey, serialized);
+  } catch {
+    // Storage may be disabled or full; the server conversation remains valid.
+  }
+}
+
+function isPersistedAgentRun(value: unknown): value is AgentRun {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.conversationId === "string" &&
+    typeof value.workspaceId === "string" &&
+    typeof value.status === "string" &&
+    AGENT_RUN_STATUSES.has(value.status as AgentRun["status"]) &&
+    Array.isArray(value.messages) &&
+    Array.isArray(value.steps) &&
+    (value.confirmation === null || isRecord(value.confirmation))
+  );
+}
 
 function createClientId(prefix: string) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -360,6 +464,7 @@ export function AgentChatWidget() {
   const router = useRouter();
   const authSession = useAuthSession();
   const workspaceId = authSession?.activeWorkspaceId ?? "";
+  const currentUserId = authSession?.user.id ?? "";
   const accessToken = authSession?.accessToken ?? null;
   const agentApiClient = useMemo(
     () =>
@@ -370,6 +475,10 @@ export function AgentChatWidget() {
   );
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<AgentChatMessage[]>(initialMessages);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [hydratedStorageKey, setHydratedStorageKey] = useState<string | null>(
+    null
+  );
   const [draft, setDraft] = useState("");
   const [busyState, setBusyState] = useState<AgentChatBusyState>("idle");
   const [confirmationAction, setConfirmationAction] =
@@ -385,6 +494,13 @@ export function AgentChatWidget() {
     () => null,
   );
   const [isCanvasToolHelpMode, setIsCanvasToolHelpMode] = useState(false);
+  const conversationStorageKey = useMemo(
+    () =>
+      currentUserId && workspaceId
+        ? getConversationStorageKey(currentUserId, workspaceId)
+        : null,
+    [currentUserId, workspaceId]
+  );
 
   const isBusy = busyState !== "idle";
   const hasActiveAgentRequest =
@@ -423,6 +539,30 @@ export function AgentChatWidget() {
       activeRunAbortControllerRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (!conversationStorageKey) {
+      setMessages(initialMessages);
+      setConversationId(null);
+      setHydratedStorageKey(null);
+      return;
+    }
+    const persisted = readPersistedConversation(conversationStorageKey);
+    setMessages(persisted?.messages ?? initialMessages);
+    setConversationId(persisted?.conversationId ?? null);
+    setHydratedStorageKey(conversationStorageKey);
+  }, [conversationStorageKey]);
+
+  useEffect(() => {
+    if (
+      !conversationStorageKey ||
+      hydratedStorageKey !== conversationStorageKey ||
+      !conversationId
+    ) {
+      return;
+    }
+    persistConversation(conversationStorageKey, conversationId, messages);
+  }, [conversationId, conversationStorageKey, hydratedStorageKey, messages]);
 
   useEffect(() => {
     setIsCanvasToolHelpMode(false);
@@ -496,6 +636,10 @@ export function AgentChatWidget() {
     []
   );
 
+  const rememberConversation = useCallback((run: AgentRun) => {
+    setConversationId(run.conversationId);
+  }, []);
+
   const handleRunClientAction = useCallback(
     (run: AgentRun) => {
       applyAgentSqlErdTableFocus(
@@ -524,6 +668,7 @@ export function AgentChatWidget() {
     signal: AbortSignal
   ) {
     let currentRun = initialRun;
+    rememberConversation(currentRun);
     let planningDeadlineAt =
       currentRun.status === "planning"
         ? Date.now() + AGENT_PLANNING_POLL_TIMEOUT_MS
@@ -558,6 +703,7 @@ export function AgentChatWidget() {
       );
       const previousStatus = currentRun.status;
       currentRun = runPayload.run;
+      rememberConversation(currentRun);
       const nextActivePlannerStepId = getActivePlannerStepId(currentRun);
       if (
         currentRun.status === "planning" &&
@@ -579,7 +725,12 @@ export function AgentChatWidget() {
     }
 
     return currentRun;
-  }, [agentApiClient, handleRunClientAction, updateAssistantMessage]);
+  }, [
+    agentApiClient,
+    handleRunClientAction,
+    rememberConversation,
+    updateAssistantMessage
+  ]);
 
   async function applyRoutedMessagePayload(
     payload: AgentMessagePayload,
@@ -603,6 +754,10 @@ export function AgentChatWidget() {
       }
     }
 
+    if (payload.run) {
+      rememberConversation(payload.run);
+    }
+
     if (payload.outcome === "needs_choice" && payload.clarification) {
       const activeRunId = routingInput.activeRunId ?? payload.run?.id ?? null;
       if (!activeRunId) {
@@ -618,6 +773,10 @@ export function AgentChatWidget() {
                 routingChoice: {
                   activeRunId,
                   clientRequestId: routingInput.clientRequestId,
+                  conversationId:
+                    payload.run?.conversationId ??
+                    routingInput.conversationId ??
+                    "",
                   message: routingInput.message,
                   requestContext: routingInput.requestContext ?? null,
                   targetMessageId,
@@ -652,7 +811,9 @@ export function AgentChatWidget() {
     updateAssistantMessage(
       assistantMessageId,
       payload.outcome === "started_new" && payload.previousRun
-        ? "이전 작업을 종료하고 새 요청을 처리하고 있습니다."
+        ? payload.previousRun.status === "cancelled"
+          ? "이전 작업을 종료하고 새 요청을 처리하고 있습니다."
+          : "기존 승인 대기를 유지하고 새 요청을 처리하고 있습니다."
         : payload.outcome === "continued"
           ? "기존 작업을 이어서 처리하고 있습니다."
           : getAgentRunDisplayMessage(payload.run),
@@ -760,6 +921,7 @@ export function AgentChatWidget() {
       const routingInput: RouteAgentMessageInput = {
         activeRunId: run.id,
         clientRequestId,
+        conversationId: run.conversationId,
         disposition: "auto",
         message: displayMessage,
         requestContext,
@@ -932,6 +1094,7 @@ export function AgentChatWidget() {
       const routingInput: RouteAgentMessageInput = {
         activeRunId: targetMessage?.run?.id ?? null,
         clientRequestId,
+        conversationId: targetMessage?.run?.conversationId ?? conversationId,
         disposition: "auto",
         message: trimmedPrompt,
         timezone: getBrowserTimezone(),
@@ -952,6 +1115,7 @@ export function AgentChatWidget() {
             workspaceId,
             {
               clientRequestId,
+              conversationId,
               prompt: trimmedPrompt,
               timezone: getBrowserTimezone(),
               requestContext
@@ -1028,6 +1192,7 @@ export function AgentChatWidget() {
       const routingInput: RouteAgentMessageInput = {
         activeRunId: choice.activeRunId,
         clientRequestId: choice.clientRequestId,
+        conversationId: choice.conversationId,
         disposition,
         message: choice.message,
         requestContext: choice.requestContext,
@@ -1288,6 +1453,18 @@ export function AgentChatWidget() {
     }
   }
 
+  function handleNewConversation() {
+    if (hasActiveAgentRequest) return;
+    if (conversationStorageKey) {
+      window.localStorage.removeItem(conversationStorageKey);
+    }
+    setConversationId(null);
+    setMessages(initialMessages);
+    setDraft("");
+    setConfirmationAction(null);
+    shouldAutoScrollRef.current = true;
+  }
+
   return (
     <>
       {isOpen ? (
@@ -1334,6 +1511,18 @@ export function AgentChatWidget() {
                   기능 설명
                 </Button>
               ) : null}
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="새 대화"
+                title="새 대화"
+                disabled={hasActiveAgentRequest}
+                onClick={handleNewConversation}
+              >
+                <SquarePen className="size-4" />
+              </Button>
 
               <Button
                 type="button"

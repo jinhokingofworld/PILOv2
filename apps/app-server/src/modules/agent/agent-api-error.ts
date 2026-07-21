@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus } from "@nestjs/common";
 
 type AgentApiErrorCode =
+  | "AGENT_CONVERSATION_UNAVAILABLE"
   | "AGENT_MESSAGE_ROUTING_DISABLED"
   | "AGENT_MESSAGE_ROUTING_STALE"
   | "AGENT_MESSAGE_ROUTING_UNAVAILABLE"
@@ -28,6 +29,14 @@ function agentApiError(
 
 export function confirmationExpired(message: string): HttpException {
   return agentApiError(HttpStatus.CONFLICT, "CONFIRMATION_EXPIRED", message);
+}
+
+export function agentConversationUnavailable(message: string): HttpException {
+  return agentApiError(
+    HttpStatus.CONFLICT,
+    "AGENT_CONVERSATION_UNAVAILABLE",
+    message
+  );
 }
 
 export function agentMessageRoutingDisabled(message: string): HttpException {

@@ -22,6 +22,7 @@ const EXPIRES_AT = new Date("2026-08-07T00:00:00.000Z");
 function createRun(overrides = {}) {
   return {
     id: RUN_ID,
+    thread_id: THREAD_ID,
     workspace_id: WORKSPACE_ID,
     requested_by_user_id: USER_ID,
     client_request_id: null,
@@ -112,6 +113,10 @@ class FakeTransaction {
 
     if (text.includes("INSERT INTO agent_threads")) {
       return this.insertThread(values);
+    }
+
+    if (text.includes("FROM agent_threads") && text.includes("WHERE id = $1")) {
+      return this.findOwnedThread(values);
     }
 
     if (text.includes("UPDATE agent_run_outbox")) {
@@ -267,6 +272,16 @@ class FakeTransaction {
     if (this.state.activeThread === false) return null;
     const thread = (this.state.threads ?? []).find(
       (candidate) =>
+        candidate.workspace_id === workspaceId &&
+        candidate.requested_by_user_id === currentUserId
+    );
+    return thread ? { id: thread.id } : null;
+  }
+
+  findOwnedThread([threadId, workspaceId, currentUserId]) {
+    const thread = (this.state.threads ?? []).find(
+      (candidate) =>
+        candidate.id === threadId &&
         candidate.workspace_id === workspaceId &&
         candidate.requested_by_user_id === currentUserId
     );
@@ -548,6 +563,7 @@ function errorMessage(error) {
   assert.equal(result.run.prompt, "내일 회의 일정 만들어줘");
   assert.equal(result.run.timezone, "Asia/Seoul");
   assert.equal(result.run.clientRequestId, "request-1");
+  assert.equal(result.run.conversationId, THREAD_ID);
   assert.equal(state.runs.length, 1);
   assert.equal(state.threads.length, 1);
   assert.equal(state.runs[0].thread_id, THREAD_ID);
@@ -563,6 +579,46 @@ function errorMessage(error) {
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
+}
+
+{
+  const state = {
+    runs: [], steps: [], logs: [], activeThread: true,
+    threads: [{ id: THREAD_ID, workspace_id: WORKSPACE_ID, requested_by_user_id: USER_ID }]
+  };
+  const { service } = createService(state);
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "명시적인 새 대화",
+    conversationId: null
+  });
+  assert.equal(state.threads.length, 2);
+  assert.equal(result.run.conversationId, "new-thread-id");
+}
+
+{
+  const state = {
+    runs: [], steps: [], logs: [], activeThread: false,
+    threads: [{ id: THREAD_ID, workspace_id: WORKSPACE_ID, requested_by_user_id: USER_ID }]
+  };
+  const { service } = createService(state);
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "오래된 대화에서 계속",
+    conversationId: THREAD_ID
+  });
+  assert.equal(state.threads.length, 1);
+  assert.equal(result.run.conversationId, THREAD_ID);
+}
+
+{
+  const state = { runs: [], steps: [], logs: [], threads: [] };
+  const { service } = createService(state);
+  await assert.rejects(
+    service.createRun(USER_ID, WORKSPACE_ID, {
+      prompt: "사용할 수 없는 대화",
+      conversationId: THREAD_ID
+    }),
+    (error) => errorCode(error) === "AGENT_CONVERSATION_UNAVAILABLE"
+  );
 }
 
 {

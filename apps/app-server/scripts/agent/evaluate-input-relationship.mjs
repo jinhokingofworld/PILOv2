@@ -35,8 +35,7 @@ function effectiveRelationship(decision, runStatus) {
     return "ambiguous";
   }
   if (
-    (decision.relationship === "new_intent" ||
-      decision.relationship === "cancel") &&
+    decision.relationship === "cancel" &&
     decision.confidence !== "high"
   ) {
     return "ambiguous";

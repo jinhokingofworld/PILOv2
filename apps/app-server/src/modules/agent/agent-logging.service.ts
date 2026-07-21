@@ -7,7 +7,10 @@ import {
   DatabaseTransaction
 } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import { clientRequestIdConflict } from "./agent-api-error";
+import {
+  agentConversationUnavailable,
+  clientRequestIdConflict
+} from "./agent-api-error";
 import type {
   AgentJsonObject,
   AgentResourceRef,
@@ -44,6 +47,7 @@ export type AgentLogLevel = "debug" | "info" | "warn" | "error";
 
 export interface CreateAgentRunInput {
   prompt: string;
+  conversationId?: string | null;
   timezone?: string;
   clientRequestId?: string | null;
   requestContext?: AgentRunRequestContext;
@@ -155,6 +159,7 @@ export interface SettleDelegatedAgentToolInput extends CompleteAgentStepInput {
 
 export interface AgentRunPayload {
   id: string;
+  conversationId: string;
   workspaceId: string;
   requestedByUserId: string | null;
   clientRequestId: string | null;
@@ -194,6 +199,7 @@ export interface AgentStepPayload {
 
 interface AgentRunRow extends QueryResultRow {
   id: string;
+  thread_id: string;
   workspace_id: string;
   requested_by_user_id: string | null;
   client_request_id: string | null;
@@ -315,7 +321,13 @@ export class AgentLoggingService {
       );
 
       if (existing) {
-        return this.mapIdempotentRun(existing, prompt, timezone, requestContext);
+        return this.mapIdempotentRun(
+          existing,
+          prompt,
+          timezone,
+          requestContext,
+          input.conversationId
+        );
       }
     }
 
@@ -326,11 +338,20 @@ export class AgentLoggingService {
           currentUserId,
           forcedThreadId
         )
-      : await this.selectOrCreateThread(
-          transaction,
-          workspaceId,
-          currentUserId
-        );
+      : input.conversationId === null
+        ? await this.createThread(transaction, workspaceId, currentUserId)
+        : input.conversationId
+          ? await this.lockOwnedThread(
+              transaction,
+              workspaceId,
+              currentUserId,
+              input.conversationId
+            )
+          : await this.selectOrCreateThread(
+              transaction,
+              workspaceId,
+              currentUserId
+            );
 
     const run = await transaction.queryOne<AgentRunRow>(
       `
@@ -378,7 +399,8 @@ export class AgentLoggingService {
             existing,
             prompt,
             timezone,
-            requestContext
+            requestContext,
+            input.conversationId
           );
         }
       }
@@ -490,7 +512,11 @@ export class AgentLoggingService {
       `,
       [threadId, workspaceId, currentUserId]
     );
-    if (!thread) throw new Error("Agent thread is unavailable");
+    if (!thread) {
+      throw agentConversationUnavailable(
+        "대화가 만료되었거나 사용할 수 없습니다. 새 대화를 시작해주세요."
+      );
+    }
     return thread.id;
   }
 
@@ -515,7 +541,8 @@ export class AgentLoggingService {
     run: AgentRunRow,
     prompt: string,
     timezone: string,
-    requestContext: AgentRunRequestContext
+    requestContext: AgentRunRequestContext,
+    conversationId?: string | null
   ): CreateAgentRunResult {
     if (
       run.prompt !== prompt ||
@@ -524,6 +551,11 @@ export class AgentLoggingService {
     ) {
       throw clientRequestIdConflict(
         "clientRequestId was already used for a different Agent run"
+      );
+    }
+    if (conversationId && run.thread_id !== conversationId) {
+      throw clientRequestIdConflict(
+        "clientRequestId was already used in a different Agent conversation"
       );
     }
 
@@ -1996,6 +2028,7 @@ export class AgentLoggingService {
   private mapRun(run: AgentRunRow): AgentRunPayload {
     return {
       id: run.id,
+      conversationId: run.thread_id,
       workspaceId: run.workspace_id,
       requestedByUserId: run.requested_by_user_id,
       clientRequestId: run.client_request_id,

@@ -46,6 +46,7 @@ export interface AgentRunListQuery {
 
 export interface AgentRunCreateInput {
   prompt: string;
+  conversationId?: string | null;
   timezone?: string;
   clientRequestId?: string | null;
   requestContext: AgentRunRequestContext;
@@ -66,6 +67,7 @@ export interface AgentRunInput {
 
 export interface AgentRunApiPayload {
   id: string;
+  conversationId: string;
   workspaceId: string;
   requestedByUserId: string | null;
   clientRequestId: string | null;
@@ -165,6 +167,7 @@ type AgentConfirmationStatus = "pending" | "approved" | "rejected" | "expired";
 
 interface AgentRunRow extends QueryResultRow {
   id: string;
+  thread_id: string;
   workspace_id: string;
   requested_by_user_id: string | null;
   client_request_id: string | null;
@@ -824,6 +827,14 @@ export class AgentService {
 
     return {
       prompt: this.readRequiredText(body.prompt, "prompt", MAX_PROMPT_BYTES),
+      ...("conversationId" in body
+        ? {
+            conversationId: this.readOptionalUuid(
+              body.conversationId,
+              "conversationId"
+            )
+          }
+        : {}),
       timezone: this.readTimezone(body.timezone),
       clientRequestId: this.readOptionalText(
         body.clientRequestId,
@@ -877,6 +888,14 @@ export class AgentService {
       surface: value.surface,
       sessionId: value.sessionId
     };
+  }
+
+  private readOptionalUuid(value: unknown, field: string): string | null {
+    if (value === null) return null;
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+      throw badRequest(`${field} must be a UUID or null`);
+    }
+    return value;
   }
 
   async assertRequestContextAccess(
@@ -1227,6 +1246,7 @@ export class AgentService {
   private mapStoredRun(run: StoredAgentRunPayload): AgentRunApiPayload {
     return {
       id: run.id,
+      conversationId: run.conversationId,
       workspaceId: run.workspaceId,
       requestedByUserId: run.requestedByUserId,
       clientRequestId: run.clientRequestId,
@@ -1248,6 +1268,7 @@ export class AgentService {
   private mapRun(row: AgentRunRow): AgentRunApiPayload {
     return {
       id: row.id,
+      conversationId: row.thread_id,
       workspaceId: row.workspace_id,
       requestedByUserId: row.requested_by_user_id,
       clientRequestId: row.client_request_id,

@@ -48,6 +48,7 @@ type AgentMessageDisposition = "auto" | "continue_previous" | "start_new";
 
 interface AgentMessageInput {
   message: string;
+  conversationId?: string | null;
   timezone: string;
   clientRequestId: string;
   activeRunId: string | null;
@@ -175,11 +176,20 @@ export class AgentMessageService {
         workspaceId,
         input.activeRunId
       );
+      if (
+        input.conversationId === null ||
+        (input.conversationId && input.conversationId !== snapshot.thread_id)
+      ) {
+        throw agentMessageRoutingStale(
+          "Agent run does not belong to the active conversation"
+        );
+      }
       this.assertSnapshotCanReceiveMessage(snapshot);
-    } else {
+    } else if (input.conversationId !== null) {
       snapshot = await this.loadLatestWaitingRunSnapshot(
         currentUserId,
-        workspaceId
+        workspaceId,
+        input.conversationId
       );
     }
     if (snapshot) {
@@ -355,6 +365,9 @@ export class AgentMessageService {
         workspaceId,
         {
           prompt: input.message,
+          ...(input.conversationId === undefined
+            ? {}
+            : { conversationId: input.conversationId }),
           timezone: input.timezone,
           clientRequestId: input.clientRequestId,
           requestContext: input.requestContext
@@ -493,12 +506,14 @@ export class AgentMessageService {
     if (!lockedRun.thread_id) {
       throw agentMessageRoutingStale("Agent run thread is unavailable");
     }
-    await this.cancelRunStateInTransaction(
-      transaction,
-      lockedRun.id,
-      currentUserId,
-      "새 요청이 시작되어 이전 요청을 종료했습니다."
-    );
+    if (lockedRun.status === "waiting_user_input") {
+      await this.cancelRunStateInTransaction(
+        transaction,
+        lockedRun.id,
+        currentUserId,
+        "새 요청이 시작되어 이전 요청을 종료했습니다."
+      );
+    }
     const replacement = await this.agentLoggingService.createRunInTransaction(
       transaction,
       currentUserId,
@@ -511,14 +526,16 @@ export class AgentMessageService {
       },
       lockedRun.thread_id
     );
-    await this.insertCancellationLog(
-      transaction,
-      currentUserId,
-      workspaceId,
-      lockedRun.id,
-      "superseded_by_new_intent",
-      replacement.run.id
-    );
+    if (lockedRun.status === "waiting_user_input") {
+      await this.insertCancellationLog(
+        transaction,
+        currentUserId,
+        workspaceId,
+        lockedRun.id,
+        "superseded_by_new_intent",
+        replacement.run.id
+      );
+    }
     await this.insertRouteLog(transaction, workspaceId, replacement.run.id, {
       currentUserId,
       clientRequestId: input.clientRequestId,
@@ -924,7 +941,8 @@ export class AgentMessageService {
 
   private async loadLatestWaitingRunSnapshot(
     currentUserId: string,
-    workspaceId: string
+    workspaceId: string,
+    conversationId?: string
   ): Promise<ActiveRunSnapshot | null> {
     const run = await this.database.queryOne<ActiveRunSnapshot>(
       `
@@ -952,6 +970,7 @@ export class AgentMessageService {
         ) AS confirmation ON true
         WHERE run.workspace_id = $1
           AND run.requested_by_user_id = $2
+          AND ($3::uuid IS NULL OR run.thread_id = $3)
           AND run.expires_at > now()
           AND (
             (
@@ -966,7 +985,7 @@ export class AgentMessageService {
         ORDER BY run.updated_at DESC, run.created_at DESC, run.id DESC
         LIMIT 1
       `,
-      [workspaceId, currentUserId]
+      [workspaceId, currentUserId, conversationId ?? null]
     );
     if (!run) return null;
     run.candidate_state = await this.loadCandidateState(
@@ -1021,9 +1040,7 @@ export class AgentMessageService {
     const shouldAskForChoice =
       (decision.relationship === "continuation" &&
         decision.confidence === "low") ||
-      ((decision.relationship === "new_intent" ||
-        decision.relationship === "cancel") &&
-        decision.confidence !== "high");
+      (decision.relationship === "cancel" && decision.confidence !== "high");
     if (!shouldAskForChoice) return decision;
     return {
       relationship: "ambiguous",
@@ -1148,6 +1165,7 @@ export class AgentMessageService {
     if (!this.isRecord(body)) throw badRequest("Request body must be an object");
     const allowedFields = new Set([
       "message",
+      "conversationId",
       "timezone",
       "clientRequestId",
       "activeRunId",
@@ -1167,6 +1185,10 @@ export class AgentMessageService {
       throw badRequest("activeRunId is required and may be null");
     }
     const activeRunId = this.optionalUuid(body.activeRunId, "activeRunId");
+    const conversationId = this.optionalConversationUuid(
+      body.conversationId,
+      "conversationId"
+    );
     const disposition = body.disposition ?? "auto";
     if (
       disposition !== "auto" &&
@@ -1177,6 +1199,7 @@ export class AgentMessageService {
     }
     const normalizedRun = this.agentService.normalizeCreateRunBody({
       prompt: message,
+      ...(conversationId === undefined ? {} : { conversationId }),
       timezone: body.timezone,
       clientRequestId,
       requestContext: body.requestContext
@@ -1187,6 +1210,7 @@ export class AgentMessageService {
     });
     return {
       message,
+      ...(conversationId === undefined ? {} : { conversationId }),
       timezone: normalizedRun.timezone ?? DEFAULT_TIMEZONE,
       clientRequestId,
       activeRunId,
@@ -1201,6 +1225,10 @@ export class AgentMessageService {
       .update(
         JSON.stringify({
           activeRunId: input.activeRunId,
+          conversationId:
+            input.conversationId === undefined
+              ? "legacy"
+              : input.conversationId,
           clientRequestId: input.clientRequestId,
           message: input.message,
           requestContext: input.requestContext,
@@ -1229,6 +1257,14 @@ export class AgentMessageService {
       throw badRequest(`${field} must be a UUID or null`);
     }
     return value;
+  }
+
+  private optionalConversationUuid(
+    value: unknown,
+    field: string
+  ): string | null | undefined {
+    if (value === undefined) return undefined;
+    return this.optionalUuid(value, field);
   }
 
   private truncate(value: string, maxLength: number): string {
