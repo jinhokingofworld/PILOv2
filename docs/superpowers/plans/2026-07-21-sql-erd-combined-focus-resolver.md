@@ -4,7 +4,7 @@
 
 **Goal:** Replace the public inspect-then-focus Agent chain with one focus tool that resolves the current SQLtoERD session server-side and safely returns a focus resource or clarification.
 
-**Architecture:** App Server owns session inspection, deterministic matching, optional bounded LLM fallback, FK expansion, and execution-time revision validation. AI Worker only selects `focus_sql_erd_tables` with a natural-language `featureQuery`. Existing focus resource metadata remains unchanged.
+**Architecture:** App Server owns session inspection, strict single-positive exact matching, optional bounded LLM fallback, FK expansion, and execution-time model/evidence validation. AI Worker only selects `focus_sql_erd_tables` with a natural-language `featureQuery`. Existing focus resource metadata remains unchanged.
 
 **Tech Stack:** NestJS/TypeScript, Python Agent worker, OpenAI Responses API strict JSON schema, Node/Python script tests.
 
@@ -29,9 +29,9 @@
 - Modify: `apps/app-server/src/modules/agent/tools/sql-erd-agent-tools.service.ts`
 - Modify: `apps/app-server/src/modules/agent/agent-read-result-formatter.ts`
 
-1. Add pure deterministic matching and direct FK expansion helpers.
+1. Add strict single-positive exact table/schema matching and direct FK expansion helpers.
 2. Add bounded strict-schema OpenAI fallback with timeout and safe failure.
-3. Make focus load the context session, resolve refs internally, re-fetch, and validate revision/fingerprint before producing a resource.
+3. Make focus load the context session, resolve refs internally, re-fetch, and validate model plus canonical projection evidence fingerprints before producing a resource.
 4. Return formatter-supported clarification without resource creation when resolution is unsafe.
 5. Run focused App Server build/tests until green.
 
@@ -72,7 +72,7 @@
 - Create or modify: App Server SQLtoERD resolver fixture/test under `apps/app-server/scripts/agent/`
 
 1. Add canonical, held-out, negative, and ambiguous fixtures without raw production SQL or IDs.
-2. Compare deterministic/new resolver outputs against expected selections; mock provider fallback.
+2. Compare strict-positive exact and LLM resolver outputs against expected selections; mock provider fallback.
 3. Run App Server build plus SQLtoERD/execution tests, narrow AI Worker tests/evals, frontend Agent tests, and format/type checks for changed packages.
 4. Inspect `git diff`, common-area lists, accidental secrets, generated files, and unrelated changes.
 

@@ -981,17 +981,21 @@ Status code: `200 OK`
 - App Server는 request context의 session을 membership으로 조회하고 modelJson/sourceText에서 최대
   9,000자의 bounded projection을 내부 생성한다. 내부 table/column ID, raw sourceText, DDL, 전체
   modelJson은 Planner context나 provider payload에 복제하지 않는다.
-- 혼합 resolver는 먼저 table/schema 이름과 bounded comment·column·type·enum evidence의 결정적
-  일치를 검사한다. 제외·부정 표현이 있거나 projection에서 이름이 잘린 table은 이름 기반 결정적
-  일치를 사용하지 않는다. projection은 잘린 이름의 compact ref를 `truncatedTableRefs`로 표시한다.
-  명확한 결과가 없을 때만 bounded projection을 strict JSON schema LLM fallback에 전달한다. provider
-  결과의 ref와 중복을 서버가 다시 검증하며, primary의 직접 FK 1-hop table은 서버가 related로
-  확장한다. 기본 2-hop 확장과 가짜 relation은 만들지 않는다.
+- 혼합 resolver의 결정적 경로는 projection에서 이름이 잘리지 않은 단일 table 또는 단일
+  schema-qualified table이 제한된 직접 집중 보기 긍정 문법으로 정확히 요청된 경우에만 사용한다.
+  동일한 table 이름이 여러 schema에 있으면 schema가 명시되지 않은 요청을 확정하지 않는다.
+  복수 table, 제외·부정, 의미 해석이나 추가 수식이 필요한 요청은 결정적으로 확정하지 않고 bounded
+  comment·column·type·enum evidence를 포함한 projection과 `featureQuery`를 strict JSON schema LLM
+  fallback에 전달한다. projection은 이름이 잘린 table의 compact ref를 `truncatedTableRefs`로 표시한다.
+  provider 결과의 ref가 현재 projection에 존재하고 중복되지 않는지 서버가 다시 검증하며, primary의
+  직접 FK 1-hop table은 서버가 related로 확장한다. 기본 2-hop 확장과 가짜 relation은 만들지 않는다.
 - 0건·모호함·provider 장애·invalid ref는 focus resource 없이 `needs_clarification` 질문으로 끝난다.
   최초 조회 또는 실행 직전 재조회에서 session이 없거나 접근 권한이 사라진 경우에도 대상의 존재나
   권한 상세를 노출하지 않는 `session_unavailable` clarification으로 끝낸다. 성공 직전 같은 session을
-  다시 조회해 model fingerprint를 검증하며, layout/annotation으로 revision만 증가하면 최신 revision으로
-  허용한다. 실제 model 변경은 resource 없이 `schema_changed` clarification으로 끝낸다.
+  다시 조회해 model fingerprint와 이번 resolver가 실제로 본 canonical projection evidence fingerprint를
+  검증한다. model 의미 또는 projection에 포함된 comment·column·type·enum evidence가 바뀌면 resource
+  없이 `schema_changed` clarification으로 끝낸다. layout/annotation 변경이나 resolver evidence에 영향을
+  주지 않는 source 공백·포맷 변경으로 revision만 증가하면 최신 revision으로 허용한다.
 - 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`, `modelFingerprint`,
   `featureLabel`, `primaryTableIds`, `relatedTableIds`, `relationIds`, `confidence`를 가진 resource ref다.
   새 결과에는 `contextTableIds`도 포함하며, 이 필드가 없는 기존 metadata는 빈 배열로 해석한다.

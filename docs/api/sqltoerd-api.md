@@ -272,20 +272,23 @@ type FocusSqlErdTablesInput = {
   직렬화 기준 최대 9,000자이며 table/column 이름, bounded comment/type/enum과 FK edge만 포함한다.
   이름이 잘린 table의 ref는 `truncatedTableRefs`로 표시한다. 내부 table/column ID, raw sourceText,
   DDL, layoutJson은 포함하지 않는다.
-- 혼합 resolver는 먼저 정규화한 query와 table/schema 이름 및 bounded schema evidence를 결정적으로
-  비교한다. 제외·부정 표현이 있는 query는 결정적 경로를 사용하지 않으며, `truncatedTableRefs`에
-  포함된 잘린 이름은 exact 또는 inflection match에 사용하지 않는다. 명확한 결과가 없을 때만 OpenAI
-  strict JSON schema fallback을 호출한다. LLM은 bounded projection과 featureQuery만 받고 primary
-  compact ref만 제안하며, direct FK 확장은 서버가 수행한다.
+- 혼합 resolver의 결정적 경로는 `truncatedTableRefs`에 포함되지 않은 단일 table 이름 또는 단일
+  schema-qualified table 이름이 제한된 직접 집중 보기 긍정 문법으로 exact match된 경우에만 사용한다.
+  동일한 table 이름이 여러 schema에 있으면 schema가 명시되지 않은 요청을 확정하지 않는다. 복수 table,
+  제외·부정, semantic 해석 또는 추가 수식이 필요한 요청은 bounded schema evidence와 `featureQuery`를
+  OpenAI strict JSON schema fallback에 전달한다. LLM은 primary compact ref만 제안하며, direct FK 확장은
+  서버가 수행한다.
 - provider가 반환한 ref는 현재 projection에 존재하고 중복되지 않는지 다시 검증한다. primary와 직접
   FK로 연결된 1-hop table만 related로 포함하며 기본 2-hop 확장, context 추측, 가짜 relation은 만들지
   않는다.
 - 0건, 복수 의미, provider timeout/장애, malformed 또는 unknown ref는 focus resource를 만들지 않고
   `needs_clarification` 질문을 반환한다.
-- 성공 resource 생성 직전에 같은 session을 다시 읽고 model fingerprint를 비교한다. 최초 조회 또는
-  재조회에서 session이 없거나 접근 권한이 사라진 경우에는 대상의 존재나 권한 상세를 노출하지 않는
-  `session_unavailable` clarification을 반환한다. layout/annotation만 바뀌어 revision이 증가한 경우
-  최신 revision으로 허용하고, 실제 model이 바뀌면 resource 없이 `schema_changed` clarification을 반환한다.
+- 성공 resource 생성 직전에 같은 session을 다시 읽고 model fingerprint와 이번 resolver가 실제로 본
+  canonical projection evidence fingerprint를 비교한다. 최초 조회 또는 재조회에서 session이 없거나 접근
+  권한이 사라진 경우에는 대상의 존재나 권한 상세를 노출하지 않는 `session_unavailable` clarification을
+  반환한다. model 의미 또는 projection에 포함된 comment·column·type·enum evidence가 바뀌면 resource 없이
+  `schema_changed` clarification을 반환한다. layout/annotation 변경이나 resolver evidence에 영향을 주지 않는
+  source 공백·포맷 변경으로 revision만 증가한 경우에는 최신 revision으로 허용한다.
 
 성공 resource ref:
 

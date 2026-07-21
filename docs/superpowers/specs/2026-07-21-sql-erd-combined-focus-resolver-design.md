@@ -34,31 +34,31 @@ App Server는 현재 사용자와 workspace membership으로 request context의 
 만들고 내부 resolver에만 전달한다. raw SQL, layout, UUID는 LLM 입력과 응답 계약에
 넣지 않는다.
 
-session 조회 시점의 model fingerprint를 보관하고, focus resource를 만들기 직전에
-같은 session을 다시 읽어 fingerprint를 비교한다. layout-only revision 증가는 focus
-대상 의미를 바꾸지 않으므로 허용하고 최종 resource에는 최신 revision을 넣는다.
-model이 변경된 경우에만 결과를 적용하지 않고 최신 요청으로 다시 시도하도록
-안내한다.
+session 조회 시점의 model fingerprint와 이번 resolver가 실제로 본 canonical projection
+evidence fingerprint를 보관하고, focus resource를 만들기 직전에 같은 session을 다시
+읽어 두 fingerprint를 비교한다. model 의미나 projection에 포함된 comment·column·type·enum
+evidence가 바뀌면 결과를 적용하지 않는다. layout/annotation 변경 또는 resolver evidence에
+영향을 주지 않는 source 공백·포맷 변경으로 revision만 증가한 경우에는 focus 대상 의미가
+같으므로 허용하고 최종 resource에는 최신 revision을 넣는다.
 
 ## 혼합 resolver
 
-1. 결정적 단계는 정규화한 query token을 table/schema 이름, table/column comment,
-   column 이름·type·enum 값과 비교한다.
-2. 제외·부정 표현이 있는 query와 projection에서 이름이 잘린 table은 이름 기반 결정적
-   일치를 사용하지 않는다. 잘린 table은 `truncatedTableRefs`로 표시한다.
-3. 명시적 table 이름이 하나 이상 정확히 일치하거나, 고유하고 충분한 schema
-   evidence가 있으면 이를 primary로 선택한다.
-4. primary와 직접 FK로 연결된 모든 table을 related로 확장한다.
-5. 결정적 결과가 없거나 복수 의미로 모호할 때만 bounded projection과 query를
-   OpenAI strict JSON schema에 전달한다.
-6. LLM 결과의 ref, 중복, role overlap, 직접 FK 관계와 evidence를 서버가 다시
-   검증한다. 검증 실패는 focus로 적용하지 않는다.
-7. provider 장애, timeout, 0건 또는 여전히 모호한 결과는
+1. 결정적 단계는 이름이 잘리지 않은 단일 table 또는 단일 schema-qualified table이
+   제한된 직접 집중 보기 긍정 문법으로 exact match된 경우에만 primary로 선택한다.
+2. 동일한 table 이름이 여러 schema에 있으면 schema가 명시되지 않은 요청을 확정하지
+   않는다. 잘린 table은 `truncatedTableRefs`로 표시하고 exact match에 사용하지 않는다.
+3. 복수 table, 제외·부정, semantic 해석 또는 추가 수식이 필요한 요청은 결정적으로
+   확정하지 않고 bounded comment·column·type·enum evidence와 query를 OpenAI strict
+   JSON schema에 전달한다.
+4. LLM 결과의 ref가 현재 projection에 존재하고 중복되지 않는지 서버가 검증한다.
+   검증 실패는 focus로 적용하지 않는다.
+5. primary와 직접 FK로 연결된 모든 table을 서버가 related로 확장한다.
+6. provider 장애, timeout, 0건 또는 여전히 모호한 결과는
    `needs_clarification`으로 종료하고 resource를 만들지 않는다.
 
-결정적 결과는 provider 호출을 생략해 일반적인 명시적 table 요청의 지연과 비용을
-줄인다. 한국어 기능명처럼 schema identifier와 직접 맞지 않는 요청만 LLM fallback을
-사용한다.
+엄격한 단일 positive exact 결과는 provider 호출을 생략해 단순 table 요청의 지연과
+비용을 줄인다. 그 밖의 요청은 잘못된 high-confidence 확정보다 LLM fallback 또는
+clarification을 우선한다.
 
 ## 응답과 개인정보 경계
 
@@ -75,10 +75,12 @@ legacy inspect를 복구하지는 않는다.
 
 ## 검증
 
-- exact table 요청은 provider 없이 focus된다.
+- 엄격한 단일 positive exact table 또는 schema-qualified table 요청은 provider 없이 focus된다.
+- 부정·복수·semantic 요청과 동일 이름의 unqualified 요청은 LLM 또는 clarification으로 진행한다.
 - 기능명 요청은 mock LLM fallback 후 FK 확장된다.
 - 0건·모호한 결과·invalid provider ref·provider 장애는 resource 없이 clarification한다.
-- session context 누락, 다른 workspace/user, revision/fingerprint 변경은 focus하지 않는다.
+- session context 누락, 다른 workspace/user, model 또는 canonical projection evidence fingerprint
+  변경은 focus하지 않는다.
 - capability catalog와 Planner에는 focus만 노출된다.
 - 기존 frontend focus metadata 적용은 그대로 통과한다.
 - 고정 fixture로 canonical, held-out, negative, ambiguous 결과를 오프라인 비교한다.
