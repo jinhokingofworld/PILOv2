@@ -61,6 +61,7 @@ assert.match(agentTypes, /export type AgentRunMessage/);
 assert.match(agentTypes, /messages: AgentRunMessage\[\]/);
 assert.match(agentTypes, /export type AgentRunDetailPayload/);
 assert.match(agentTypes, /export type AgentConfirmationActionPayload/);
+assert.match(agentTypes, /export type AgentContextNavigationPayload/);
 assert.match(agentTypes, /export type AgentRunRequestContext/);
 assert.match(agentTypes, /surface: "canvas"/);
 assert.match(agentTypes, /canvasContext/);
@@ -80,6 +81,8 @@ assert.match(agentApiClient, /cache: "no-store"/);
 assert.match(agentApiClient, /success === true/);
 assert.match(agentApiClient, /createRun/);
 assert.match(agentApiClient, /getRun/);
+assert.match(agentApiClient, /resolveContextNavigation/);
+assert.match(agentApiClient, /context-references/);
 
 assert.doesNotMatch(agentChatWidget, /thread-run-recovery/);
 assert.doesNotMatch(agentChatWidget, /sessionStorage/);
@@ -197,6 +200,8 @@ assert.match(agentChatWidget, /latestAssistantMessage/);
 assert.match(agentChatWidget, /같은 요청을 이어서 처리합니다/);
 assert.match(agentChatWidget, /enqueueMeetingConnectionAction/);
 assert.match(agentChatWidget, /applyAgentSqlErdTableFocus/);
+assert.match(agentChatWidget, /resolveContextNavigation/);
+assert.match(agentChatWidget, /navigation\?\.kind === "sql_erd_session"/);
 assert.match(agentChatWidget, /appliedSqlErdFocusActionKeysRef/);
 assert.match(agentChatWidget, /clientAction/);
 assert.match(agentChatWidget, /connect_meeting/);
@@ -251,6 +256,9 @@ assert.match(agentResourceLinks, /getAgentResourceLinks/);
 assert.match(agentResourceLinks, /<Link/);
 assert.match(agentResourceLinks, /stageSqlErdAgentTableFocus/);
 assert.match(agentResourceLinks, /link\.focus/);
+assert.match(agentResourceLinks, /resolveContextNavigation/);
+assert.match(agentResourceLinks, /router\.push\(navigation\.href\)/);
+assert.match(agentResourceLinks, /link\.navigation/);
 assert.match(agentCandidateSelections, /getAgentCandidateSelections/);
 assert.match(agentCandidateSelections, /disabled=\{disabled\}/);
 assert.match(agentCandidateSelections, /candidate\.selection/);
@@ -548,6 +556,58 @@ assert.deepEqual(
       label: "Async Processing Design 보기",
     },
   ],
+);
+
+const meetingContextRef = "ctx_111111111111111111111111";
+const driveContextRef = "ctx_222222222222222222222222";
+const sqlContextRef = "ctx_333333333333333333333333";
+assert.deepEqual(
+  getAgentResourceLinks({
+    status: "completed",
+    steps: [
+      {
+        id: "opaque-resource-step",
+        status: "completed",
+        outputSummary: {},
+        resourceRefs: [
+          {
+            domain: "meeting",
+            resourceType: "meeting_report",
+            contextRef: meetingContextRef
+          },
+          {
+            domain: "drive",
+            resourceType: "document",
+            contextRef: driveContextRef,
+            label: "Async Processing Design"
+          },
+          {
+            domain: "sqltoerd",
+            resourceType: "session",
+            contextRef: sqlContextRef,
+            status: "focused"
+          }
+        ]
+      }
+    ]
+  }),
+  [
+    {
+      key: `context:${meetingContextRef}`,
+      label: "회의록 보기",
+      navigation: { contextRef: meetingContextRef, kind: "meeting_report" }
+    },
+    {
+      key: `context:${driveContextRef}`,
+      label: "Async Processing Design 보기",
+      navigation: { contextRef: driveContextRef, kind: "drive_document" }
+    },
+    {
+      key: `context:${sqlContextRef}`,
+      label: "집중 보기 열기",
+      navigation: { contextRef: sqlContextRef, kind: "sql_erd_session" }
+    }
+  ]
 );
 
 for (const resourceRef of [

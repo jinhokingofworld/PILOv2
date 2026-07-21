@@ -6,10 +6,19 @@ import type { SqlErdAgentTableFocus } from "@/features/sql-erd/utils/agent-table
 
 export type AgentResourceLink = {
   focus?: SqlErdAgentTableFocus;
-  href: string;
+  href?: string;
   key: string;
   label: string;
+  navigation?: {
+    contextRef: string;
+    kind: AgentResourceNavigationKind;
+  };
 };
+
+type AgentResourceNavigationKind =
+  | "meeting_report"
+  | "drive_document"
+  | "sql_erd_session";
 
 type AgentSqlErdRequestContext = {
   surface: string;
@@ -165,6 +174,7 @@ export function getAgentResourceLinks(
 
     for (const resourceRef of step.resourceRefs) {
       const link =
+        toOpaqueContextNavigationLink(resourceRef) ??
         toSqlErdSessionLink(resourceRef) ??
         toCanvasLink(resourceRef, step.outputSummary) ??
         toMeetingReportLink(resourceRef) ??
@@ -176,6 +186,49 @@ export function getAgentResourceLinks(
   }
 
   return [...links.values()];
+}
+
+function toOpaqueContextNavigationLink(
+  resourceRef: Record<string, unknown>
+): AgentResourceLink | null {
+  const contextRef = resourceRef.contextRef;
+  if (
+    typeof contextRef !== "string" ||
+    !/^ctx_[0-9a-f]{24}$/.test(contextRef)
+  ) {
+    return null;
+  }
+
+  let kind: AgentResourceNavigationKind | null = null;
+  let label: string | null = null;
+  if (
+    resourceRef.domain === "meeting" &&
+    resourceRef.resourceType === "meeting_report"
+  ) {
+    kind = "meeting_report";
+    label = "회의록 보기";
+  } else if (
+    resourceRef.domain === "drive" &&
+    resourceRef.resourceType === "document"
+  ) {
+    kind = "drive_document";
+    const title = normalizeCandidateTitle(resourceRef.label);
+    label = title ? `${title} 보기` : "관련 문서 보기";
+  } else if (
+    resourceRef.domain === "sqltoerd" &&
+    resourceRef.resourceType === "session"
+  ) {
+    kind = "sql_erd_session";
+    label =
+      resourceRef.status === "focused" ? "집중 보기 열기" : "ERD 및 DDL 열기";
+  }
+  if (!label || !kind) return null;
+
+  return {
+    key: `context:${contextRef}`,
+    label,
+    navigation: { contextRef, kind }
+  };
 }
 
 function toMeetingReportLink(

@@ -403,8 +403,10 @@ tool step의 `resourceRefs`는 다음 bounded object 배열이다.
 | `status` | string \| undefined | 생성·수정 등 bounded 결과 상태 |
 
 Meeting, Calendar, Board, Drive, SQLtoERD, PR Review의 실제 resource ID, provider URL,
-raw tool payload와 credential metadata는 App Server 내부 저장소에서만 해석한다. API 응답,
-SQS payload와 AI Worker/LLM 입력에는 전달하지 않는다. `contextRef`는 같은 thread, Workspace,
+raw tool payload와 credential metadata는 App Server 내부 저장소에서만 해석한다. 일반 run API 응답,
+SQS payload와 AI Worker/LLM 입력에는 전달하지 않는다. 사용자가 허용된 결과 링크를 여는 경우에만
+아래의 인증된 context navigation endpoint가 ownership과 만료를 재검증한 뒤 allowlist된 내부 경로를
+해당 요청 응답으로만 반환한다. `contextRef`는 같은 thread, Workspace,
 요청 사용자와 유효 기간 범위에서만 다시 해소하며 stale·expired·consumed reference는 거부한다.
 Canvas Agent artifact resource 계약은 이번 변경 범위에서 제외한다.
 
@@ -525,9 +527,38 @@ choice plan은 다음 필드를 사용한다.
 | `POST` | `/workspaces/{workspaceId}/agent/runs` | 자연어 prompt로 Agent run 생성 |
 | `GET` | `/workspaces/{workspaceId}/agent/runs` | 현재 Workspace의 Agent run 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/agent/runs/{runId}` | Agent run 상세 조회 |
+| `GET` | `/workspaces/{workspaceId}/agent/runs/{runId}/context-references/{contextRef}/navigation` | opaque 결과 reference의 허용된 내부 이동 경로 해소 |
 | `POST` | `/workspaces/{workspaceId}/agent/runs/{runId}/inputs` | `waiting_user_input` run에 추가 입력 전달 |
 | `POST` | `/workspaces/{workspaceId}/agent/runs/{runId}/confirmations/{confirmationId}/approve` | confirmation 승인 후 저장된 plan 실행 |
 | `POST` | `/workspaces/{workspaceId}/agent/runs/{runId}/confirmations/{confirmationId}/reject` | confirmation 거절 |
+
+## Context navigation 해소
+
+```http
+GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}/context-references/{contextRef}/navigation
+Authorization: Bearer <access-token>
+```
+
+완료된 Agent 결과에서 Meeting 회의록, Drive 문서 또는 SQLtoERD session 화면을 사용자가 직접 열 때
+사용한다. App Server는 `runId`와 `contextRef`가 같은 요청 사용자·Workspace·thread에 속하고 run/thread가
+만료되지 않았으며, reference가 최근 완료 tool 결과에 남아 있는지 다시 확인한다. 형식 오류, 다른 사용자나
+Workspace의 reference, 만료·stale reference, 지원하지 않는 domain/resource type은 모두 `404 NOT_FOUND`로
+fail-closed한다.
+
+응답의 `href`는 `/report`, `/files`, `/sql-erd/session` 중 하나인 allowlist된 상대 경로다. SQLtoERD의
+bounded table focus metadata가 유효하면 `focus`를 함께 반환하며, raw provider payload·credential·임의 URL은
+반환하지 않는다. 이 endpoint의 응답은 UI navigation 용도로만 사용하고 Agent planning 입력이나 후속
+Tool 호출에 다시 전달하지 않는다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "kind": "meeting_report",
+    "href": "/report?reportId=meeting_report_uuid"
+  }
+}
+```
 
 ## Run 생성
 

@@ -144,6 +144,108 @@ class FakeCandidateDatabase {
 }
 
 {
+  const documentId = "88888888-8888-4888-8888-888888888881";
+  const sessionId = "99999999-9999-4999-8999-999999999991";
+  const database = new FakeDatabase([
+    {
+      thread_id: threadId,
+      run_id: priorRunId,
+      step_id: stepId,
+      resource_refs: [
+        {
+          domain: "meeting",
+          resourceType: "meeting_report",
+          resourceId: reportId
+        },
+        {
+          domain: "drive",
+          resourceType: "document",
+          resourceId: documentId
+        },
+        {
+          domain: "sqltoerd",
+          resourceType: "session",
+          resourceId: sessionId,
+          status: "focused",
+          metadata: {
+            version: 1,
+            view: "table_focus",
+            sessionRevision: 7,
+            modelFingerprint: "fnv1a32:1234abcd",
+            featureLabel: "결제 기능",
+            primaryTableIds: ["orders"],
+            relatedTableIds: ["payments"],
+            contextTableIds: ["activity_logs"],
+            relationIds: ["orders-payments"],
+            confidence: "high"
+          }
+        }
+      ]
+    }
+  ]);
+  const service = new AgentThreadContextService(database);
+
+  assert.deepEqual(
+    await service.resolveNavigation(
+      context.currentUserId,
+      context.workspaceId,
+      context.runId,
+      contextRef(0)
+    ),
+    {
+      kind: "meeting_report",
+      href: `/report?reportId=${reportId}`
+    }
+  );
+  assert.deepEqual(
+    await service.resolveNavigation(
+      context.currentUserId,
+      context.workspaceId,
+      context.runId,
+      contextRef(1)
+    ),
+    {
+      kind: "drive_document",
+      href: `/files?documentId=${documentId}`
+    }
+  );
+  assert.deepEqual(
+    await service.resolveNavigation(
+      context.currentUserId,
+      context.workspaceId,
+      context.runId,
+      contextRef(2)
+    ),
+    {
+      kind: "sql_erd_session",
+      href: `/sql-erd/session?sessionId=${sessionId}`,
+      focus: {
+        version: 1,
+        view: "table_focus",
+        sessionId,
+        sessionRevision: 7,
+        modelFingerprint: "fnv1a32:1234abcd",
+        featureLabel: "결제 기능",
+        primaryTableIds: ["orders"],
+        relatedTableIds: ["payments"],
+        contextTableIds: ["activity_logs"],
+        relationIds: ["orders-payments"],
+        confidence: "high"
+      }
+    }
+  );
+  await assert.rejects(
+    service.resolveNavigation(
+      context.currentUserId,
+      context.workspaceId,
+      context.runId,
+      "ctx_000000000000000000000000"
+    ),
+    (error) => error?.getStatus?.() === 404
+  );
+}
+
+{
   const candidateId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const candidateContextRef = `ctx_${createHash("sha256")
     .update(`candidate:${candidateId}`, "utf8")

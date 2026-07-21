@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
+import { notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import type {
   AgentJsonObject,
@@ -23,6 +24,8 @@ const SAFE_MEETING_RESOURCE_TYPES = new Set([
   "meeting_report",
   "meeting_report_action_item"
 ]);
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 interface ThreadResourceStepRow {
   thread_id: string;
@@ -106,6 +109,24 @@ export interface AgentThreadMeetingReference {
     | "meeting_report_action_item";
   resourceId: string;
   reportId?: string;
+}
+
+export interface AgentContextNavigationPayload {
+  kind: "meeting_report" | "drive_document" | "sql_erd_session";
+  href: string;
+  focus?: {
+    version: 1;
+    view: "table_focus";
+    sessionId: string;
+    sessionRevision: number;
+    modelFingerprint: string;
+    featureLabel: string;
+    primaryTableIds: string[];
+    relatedTableIds: string[];
+    contextTableIds: string[];
+    relationIds: string[];
+    confidence: "high" | "medium" | "low";
+  };
 }
 
 @Injectable()
@@ -192,6 +213,63 @@ export class AgentThreadContextService {
       }
     }
     return resolved;
+  }
+
+  async resolveNavigation(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    contextRef: string
+  ): Promise<AgentContextNavigationPayload> {
+    const reference = await this.resolveReference(
+      {
+        currentUserId,
+        workspaceId,
+        runId,
+        requestContext: null
+      },
+      contextRef
+    );
+    const resourceId = reference?.resourceId;
+    if (
+      !reference ||
+      typeof resourceId !== "string" ||
+      !UUID_PATTERN.test(resourceId)
+    ) {
+      throw notFound("Agent context navigation target not found");
+    }
+
+    if (
+      reference.domain === "meeting" &&
+      reference.resourceType === "meeting_report"
+    ) {
+      return {
+        kind: "meeting_report",
+        href: `/report?reportId=${encodeURIComponent(resourceId)}`
+      };
+    }
+    if (
+      reference.domain === "drive" &&
+      reference.resourceType === "document"
+    ) {
+      return {
+        kind: "drive_document",
+        href: `/files?documentId=${encodeURIComponent(resourceId)}`
+      };
+    }
+    if (
+      reference.domain === "sqltoerd" &&
+      reference.resourceType === "session"
+    ) {
+      const focus = this.readSqlErdFocus(reference);
+      return {
+        kind: "sql_erd_session",
+        href: `/sql-erd/session?sessionId=${encodeURIComponent(resourceId)}`,
+        ...(focus ? { focus } : {})
+      };
+    }
+
+    throw notFound("Agent context navigation target not found");
   }
 
   async resolveCandidateReference(
@@ -608,6 +686,94 @@ export class AgentThreadContextService {
       return null;
     }
     return { resourceType, resourceId: value.resourceId, reportId };
+  }
+
+  private readSqlErdFocus(
+    reference: AgentResourceRef
+  ): AgentContextNavigationPayload["focus"] | null {
+    if (
+      reference.status !== "focused" ||
+      !this.isPlainObject(reference.metadata)
+    ) {
+      return null;
+    }
+    const metadata = reference.metadata;
+    if (
+      metadata.version !== 1 ||
+      metadata.view !== "table_focus" ||
+      !Number.isSafeInteger(metadata.sessionRevision) ||
+      Number(metadata.sessionRevision) < 1 ||
+      typeof metadata.modelFingerprint !== "string" ||
+      !/^fnv1a32:[0-9a-f]{8}$/.test(metadata.modelFingerprint) ||
+      typeof metadata.featureLabel !== "string" ||
+      !this.boundText(metadata.featureLabel, 100) ||
+      (metadata.confidence !== "high" &&
+        metadata.confidence !== "medium" &&
+        metadata.confidence !== "low")
+    ) {
+      return null;
+    }
+    const primaryTableIds = this.readUniqueIds(
+      metadata.primaryTableIds,
+      20,
+      true
+    );
+    const relatedTableIds = this.readUniqueIds(
+      metadata.relatedTableIds,
+      30,
+      false
+    );
+    const contextTableIds =
+      metadata.contextTableIds === undefined
+        ? []
+        : this.readUniqueIds(metadata.contextTableIds, 20, false);
+    const relationIds = this.readUniqueIds(metadata.relationIds, 300, false);
+    if (
+      !primaryTableIds ||
+      !relatedTableIds ||
+      !contextTableIds ||
+      !relationIds
+    ) {
+      return null;
+    }
+    const primarySet = new Set(primaryTableIds);
+    const relatedSet = new Set(relatedTableIds);
+    if (
+      relatedTableIds.some((id) => primarySet.has(id)) ||
+      contextTableIds.some((id) => primarySet.has(id) || relatedSet.has(id))
+    ) {
+      return null;
+    }
+    return {
+      version: 1,
+      view: "table_focus",
+      sessionId: reference.resourceId,
+      sessionRevision: Number(metadata.sessionRevision),
+      modelFingerprint: metadata.modelFingerprint,
+      featureLabel: metadata.featureLabel.trim().replace(/\s+/g, " "),
+      primaryTableIds,
+      relatedTableIds,
+      contextTableIds,
+      relationIds,
+      confidence: metadata.confidence
+    };
+  }
+
+  private readUniqueIds(
+    value: unknown,
+    maxItems: number,
+    requireOne: boolean
+  ): string[] | null {
+    if (
+      !Array.isArray(value) ||
+      (requireOne && value.length === 0) ||
+      value.length > maxItems ||
+      value.some((item) => typeof item !== "string" || !item.trim())
+    ) {
+      return null;
+    }
+    const ids = value.map((item) => String(item));
+    return new Set(ids).size === ids.length ? ids : null;
   }
 
   private isObject(value: unknown): value is Record<string, unknown> {

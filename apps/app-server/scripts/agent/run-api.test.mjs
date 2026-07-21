@@ -512,7 +512,21 @@ function errorMessage(error) {
       created: false
     }
   ]);
-  const controller = new AgentController(runService, {});
+  const contextNavigationService = {
+    calls: [],
+    async resolveNavigation(currentUserId, workspaceId, runId, contextRef) {
+      this.calls.push({ currentUserId, workspaceId, runId, contextRef });
+      return {
+        kind: "meeting_report",
+        href: "/report?reportId=77777777-7777-4777-8777-777777777777"
+      };
+    }
+  };
+  const controller = new AgentController(
+    runService,
+    {},
+    contextNavigationService
+  );
   const createdReply = {
     statusCode: null,
     status(code) {
@@ -545,6 +559,28 @@ function errorMessage(error) {
   assert.equal(reusedReply.statusCode, 200);
   assert.equal(created.success, true);
   assert.equal(reused.success, true);
+
+  const navigation = await controller.resolveContextNavigation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    "ctx_111111111111111111111111"
+  );
+  assert.deepEqual(navigation, {
+    success: true,
+    data: {
+      kind: "meeting_report",
+      href: "/report?reportId=77777777-7777-4777-8777-777777777777"
+    }
+  });
+  assert.deepEqual(contextNavigationService.calls, [
+    {
+      currentUserId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      runId: RUN_ID,
+      contextRef: "ctx_111111111111111111111111"
+    }
+  ]);
 }
 
 {
