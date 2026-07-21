@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.canvas_agent.planning.html_generator import CanvasAgentHtmlGeneratorTimeoutError
 from app.canvas_agent.processor import CanvasAgentProcessor
 from app.canvas_agent.types import CanvasAgentIntentClassification, CanvasAgentRunContext
 
@@ -193,6 +194,22 @@ class FakeHtmlGenerator:
         }
 
 
+class TimeoutHtmlGenerator:
+    model = "html-model"
+
+    def generate(self, _context) -> dict[str, object]:
+        raise CanvasAgentHtmlGeneratorTimeoutError("timed out")
+
+
+class FailureRecordingRepository(FakeRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failure: tuple[str, str] | None = None
+
+    def mark_failed(self, run_id: str, error_message: str) -> None:
+        self.failure = (run_id, error_message)
+
+
 def test_canvas_agent_processor_generates_html_for_selected_scene() -> None:
     repository = FakeRepository()
     original_get_run_context = repository.get_run_context
@@ -259,6 +276,42 @@ def test_canvas_agent_processor_requests_selection_before_html_generation() -> N
     assert repository.classified[0] == "generate_html"
     assert repository.classified[1] == {"missingSelection": True}
     assert repository.classified[2] == "HTML로 만들 캔버스 영역을 먼저 선택해주세요."
+
+
+def test_canvas_agent_processor_terminally_fails_html_generation_timeout() -> None:
+    repository = FailureRecordingRepository()
+    original_get_run_context = repository.get_run_context
+
+    def get_run_context(job):
+        run_context = original_get_run_context(job)
+        run_context.request_context["selectedScene"] = {"shapes": [{"id": "shape:meeting"}]}
+        return run_context
+
+    repository.get_run_context = get_run_context
+    processor = CanvasAgentProcessor(
+        repository,
+        FakeHtmlIntentClassifier(),
+        html_generator=TimeoutHtmlGenerator(),
+    )
+
+    result = processor.process_payload(
+        {
+            "jobType": "canvas_agent_step_requested",
+            "runId": "11111111-1111-1111-1111-111111111111",
+            "workspaceId": "22222222-2222-2222-2222-222222222222",
+            "canvasId": "33333333-3333-3333-3333-333333333333",
+            "requestedByUserId": "44444444-4444-4444-4444-444444444444",
+            "schemaVersion": "canvas-agent:v1",
+        }
+    )
+
+    assert result.delete_message is True
+    assert result.reason == "canvas_agent_html_generation_timed_out"
+    assert repository.failure == (
+        "11111111-1111-1111-1111-111111111111",
+        "코드 생성 시간이 초과됐어요. 다시 시도해 주세요.",
+    )
+    assert repository.classified is None
 
 
 class FakeDriveImportIntentClassifier:

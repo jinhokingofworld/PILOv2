@@ -54,6 +54,7 @@ from app.meeting_transcript_embedding_processor import (
 )
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_OPENAI_CANVAS_HTML_TIMEOUT_MS = 180_000
 
 
 def _positive_float_env(key: str, default: float) -> float:
@@ -79,6 +80,7 @@ class SharedAiWorkerSettings:
     openai_api_key: str
     openai_agent_planner_model: str
     openai_agent_planner_timeout_seconds: float
+    openai_canvas_html_timeout_seconds: float
     openai_agent_router_model: str
     openai_agent_router_timeout_seconds: float
     agent_execution_handoff_base_url: str | None
@@ -122,6 +124,10 @@ class SharedAiWorkerSettings:
             openai_agent_planner_timeout_seconds=_positive_ms_env(
                 "OPENAI_AGENT_PLANNER_TIMEOUT_MS",
                 DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
+            ),
+            openai_canvas_html_timeout_seconds=_positive_ms_env(
+                "OPENAI_CANVAS_HTML_TIMEOUT_MS",
+                DEFAULT_OPENAI_CANVAS_HTML_TIMEOUT_MS,
             ),
             openai_agent_router_model=_env(
                 "OPENAI_AGENT_ROUTER_MODEL",
@@ -231,7 +237,7 @@ def create_shared_ai_worker(
     canvas_agent_html_generator = OpenAiCanvasAgentHtmlGenerator(
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
-        resolved_settings.openai_agent_planner_timeout_seconds,
+        resolved_settings.openai_canvas_html_timeout_seconds,
     )
     canvas_agent_chat_responder = OpenAiCanvasAgentChatResponder(
         resolved_settings.openai_api_key,

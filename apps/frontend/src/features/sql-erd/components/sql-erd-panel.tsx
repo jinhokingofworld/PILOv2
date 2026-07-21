@@ -4316,7 +4316,10 @@ function ColumnInspector({
 
   return (
     <>
-      <div className="overflow-hidden rounded-xl border bg-background px-4">
+      <div
+        className="bg-background px-4"
+        data-sqltoerd-inspector-column-summary
+      >
         <InspectorRow label="테이블" value={getTableDisplayName(table)} />
         <InspectorRow label="컬럼명" value={column.name} />
         <InspectorRow label="컬럼 타입" value={column.dataType} />

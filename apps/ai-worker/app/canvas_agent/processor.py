@@ -4,7 +4,10 @@ from typing import Protocol
 from uuid import UUID
 
 from app.canvas_agent.planning.chat_responder import CanvasAgentChatResponderError
-from app.canvas_agent.planning.html_generator import CanvasAgentHtmlGeneratorError
+from app.canvas_agent.planning.html_generator import (
+    CanvasAgentHtmlGeneratorError,
+    CanvasAgentHtmlGeneratorTimeoutError,
+)
 from app.canvas_agent.planning.planner import CanvasAgentIntentClassifierError
 from app.canvas_agent.types import (
     CANVAS_AGENT_JOB_TYPE,
@@ -233,6 +236,16 @@ class CanvasAgentProcessor:
                     arguments,
                     message,
                     model_name,
+                )
+            except CanvasAgentHtmlGeneratorTimeoutError:
+                self.repository.mark_failed(
+                    job.run_id,
+                    "코드 생성 시간이 초과됐어요. 다시 시도해 주세요.",
+                )
+                return CanvasAgentProcessResult(
+                    True,
+                    "canvas_agent_html_generation_timed_out",
+                    job.run_id,
                 )
             except CanvasAgentHtmlGeneratorError:
                 self.repository.mark_failed(

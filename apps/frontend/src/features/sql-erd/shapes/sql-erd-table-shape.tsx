@@ -708,7 +708,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                     isSelected
                   }),
                   columnGap: ROW_COLUMN_GAP,
-                  gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content minmax(max-content, 1fr)`
+                  gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content minmax(0, 1fr)`
                 }}
                 tabIndex={isFocusDimmed ? -1 : 0}
               >
@@ -778,7 +778,10 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 <span className="whitespace-nowrap text-slate-700">
                   {column.name}
                 </span>
-                <span className="justify-self-end whitespace-nowrap text-right text-slate-400">
+                <span
+                  className="min-w-0 w-full truncate justify-self-end whitespace-nowrap text-right text-slate-400"
+                  title={column.dataType}
+                >
                   {column.dataType.toLowerCase()}
                 </span>
               </div>

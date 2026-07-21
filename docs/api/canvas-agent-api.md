@@ -80,8 +80,8 @@ For a shape-finding request, Canvas Agent uses this bounded route:
 ```text
 Structured GPT intent classification over a bounded client shape summary
   -> use matching currently loaded shape ids when present
-  -> current-Canvas-only pgvector search with the extracted query otherwise
-  -> workspace-and-current-Canvas-scoped DB title/text search when embedding is unavailable or ambiguous
+  -> workspace-and-current-Canvas-scoped DB title/text search otherwise
+  -> current-Canvas-only pgvector search when DB text search returns no result
   -> App Server find_shapes handler
 ```
 
@@ -93,11 +93,11 @@ Structured GPT intent classification over a bounded client shape summary
 - A pre-checkpoint shape outside the requester's loaded regions is not included
   in that snapshot. It becomes searchable after it is loaded by the client or
   after the normal checkpoint writes it to DB.
-- DB fallback tries pgvector first. If no current embedding exists or the best
-  match is below the confidence/margin thresholds, it searches only active
-  shapes whose Canvas matches both the run `workspaceId` and `canvasId`. The
-  bounded title/text search returns at most four rows and never scans shapes
-  from another Workspace or Canvas.
+- DB retrieval first searches only active shapes whose Canvas matches both the
+  run `workspaceId` and `canvasId`. The bounded title/text search returns at
+  most four rows and never scans shapes from another Workspace or Canvas. Only
+  when that search returns no result does the router try pgvector; a missing or
+  ambiguous embedding match remains an empty result.
 - The configured local model is `intfloat/multilingual-e5-small` (384
   dimensions). Queries use `query: ` and indexed Canvas text uses `passage: `.
 - The default pgvector shape-result thresholds are shape similarity `0.78` and
@@ -159,6 +159,12 @@ the connector follows either bound shape when it moves. Repeated polling of the
 same run must not insert duplicates. The AI Worker and App Server never write
 these Canvas records directly, no Canvas draft is created, and generated HTML
 does not include JavaScript behavior.
+
+HTML generation uses a dedicated `OPENAI_CANVAS_HTML_TIMEOUT_MS` budget instead
+of the shorter shared planner timeout. Dev configures it to 180 seconds and caps
+the provider response at 32000 output tokens. A provider timeout terminally
+fails the run with a bounded retry message instead of leaving it in `planning`
+for the SQS visibility retry interval.
 
 For HTML generation, `styleMode: faithful` means structural fidelity rather
 than literal Canvas pixel reproduction. The generator preserves hierarchy,

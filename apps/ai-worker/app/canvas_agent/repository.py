@@ -11,6 +11,7 @@ from app.canvas_agent.types import (
 )
 
 CODE_GENERATION_FAILURE_MESSAGE = "코드 생성 중 오류가 났어요. 다시 시도해 주세요."
+CODE_GENERATION_TIMEOUT_MESSAGE = "코드 생성 시간이 초과됐어요. 다시 시도해 주세요."
 GENERIC_FAILURE_MESSAGE = "Canvas AI 작업을 완료하지 못했습니다."
 
 
@@ -209,8 +210,9 @@ class PgCanvasAgentRepository:
     def mark_failed(self, run_id: str, error_message: str) -> None:
         safe_error_message = error_message[:4096]
         user_message = (
-            CODE_GENERATION_FAILURE_MESSAGE
-            if safe_error_message == CODE_GENERATION_FAILURE_MESSAGE
+            safe_error_message
+            if safe_error_message
+            in {CODE_GENERATION_FAILURE_MESSAGE, CODE_GENERATION_TIMEOUT_MESSAGE}
             else GENERIC_FAILURE_MESSAGE
         )
         self.connection.execute(

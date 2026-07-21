@@ -12,6 +12,13 @@ class CanvasAgentHtmlGeneratorError(Exception):
     pass
 
 
+class CanvasAgentHtmlGeneratorTimeoutError(CanvasAgentHtmlGeneratorError):
+    pass
+
+
+CANVAS_HTML_MAX_OUTPUT_TOKENS = 32_000
+
+
 class OpenAiCanvasAgentHtmlGenerator:
     def __init__(self, api_key: str, model: str, timeout_seconds: float | None = None) -> None:
         from openai import OpenAI
@@ -19,7 +26,7 @@ class OpenAiCanvasAgentHtmlGenerator:
         kwargs: dict[str, object] = {"api_key": api_key}
         if timeout_seconds is not None:
             kwargs["timeout"] = timeout_seconds
-        self.client = OpenAI(**kwargs)
+        self.client = OpenAI(**kwargs, max_retries=0)
         self.model = model
 
     def generate(self, context: CanvasAgentRunContext) -> dict[str, object]:
@@ -30,6 +37,7 @@ class OpenAiCanvasAgentHtmlGenerator:
         try:
             response = self.client.responses.create(
                 model=self.model,
+                max_output_tokens=CANVAS_HTML_MAX_OUTPUT_TOKENS,
                 input=[
                     {"role": "system", "content": _system_prompt()},
                     {
@@ -60,6 +68,10 @@ class OpenAiCanvasAgentHtmlGenerator:
                     }
                 },
             )
+        except _timeout_errors() as error:
+            raise CanvasAgentHtmlGeneratorTimeoutError(
+                "Canvas Agent HTML generator timed out"
+            ) from error
         except _retryable_errors() as error:
             raise InfrastructureError("OpenAI Canvas HTML generator retryable failure") from error
         except Exception as error:
@@ -184,6 +196,14 @@ def _retryable_errors() -> tuple[type[BaseException], ...]:
     except Exception:
         return ()
     return (APIConnectionError, APITimeoutError, InternalServerError, RateLimitError)
+
+
+def _timeout_errors() -> tuple[type[BaseException], ...]:
+    try:
+        from openai import APITimeoutError
+    except Exception:
+        return ()
+    return (APITimeoutError,)
 
 
 def _extract_response_text(response: Any) -> str:

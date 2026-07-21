@@ -188,6 +188,7 @@ UI Preview는 local 개발 편의 기능이며 실제 bearer session이나 Works
 | `S3_UPLOADS_BUCKET` | uploads bucket name |
 | `SQS_AI_JOBS_QUEUE_URL` | Agent와 Canvas를 소비하는 shared AI jobs queue URL. 실제 병렬성은 ECS service의 desired count로 관리한다. |
 | `DATABASE_SSL` | Set to `true` when `DATABASE_URL` points to Supabase/Postgres that requires SSL. |
+| `OPENAI_CANVAS_HTML_TIMEOUT_MS` | Canvas 정적 HTML/CSS 생성 전용 OpenAI timeout. dev 기본값은 `180000`ms이다. |
 | `AGENT_EXECUTION_HANDOFF_BASE_URL` | Agent 실행 handoff를 보낼 App Server origin |
 | `LEGACY_MEETING_DRAIN_ENABLED` | AP-19 cutover 동안 기존 `ai-jobs`의 MeetingReport를 처리하도록 Meeting processor를 임시로 유지한다. 기존 MeetingReport job drain 확인 뒤에만 `false`로 전환한다. |
 
