@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Loader2,
   Pencil,
+  Plus,
   RefreshCw,
   Trash2,
   X
@@ -30,6 +31,7 @@ import {
   type CalendarEventBarSegment
 } from "@/features/calendar/calendar-event-bars";
 import { CalendarWorkspaceLocationAdapter } from "@/features/calendar/calendar-workspace-location-adapter";
+import { CalendarMonthPicker } from "@/features/calendar/components/calendar-month-picker";
 import {
   formatCalendarDate,
   useCalendarMonthEvents
@@ -120,10 +122,6 @@ function getCalendarGridDates(monthDate: Date) {
   return Array.from({ length: calendarGridCellCount }, (_, index) =>
     formatCalendarDate(addCalendarDays(gridStartDate, index))
   );
-}
-
-function formatMonthLabel(date: Date) {
-  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`;
 }
 
 function formatDateLabel(date: string) {
@@ -1151,7 +1149,6 @@ export function CalendarPanel() {
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const workspaceId = authSession?.activeWorkspaceId ?? "";
-  const monthLabel = formatMonthLabel(monthDate);
   const today = useMemo(() => formatCalendarDate(new Date()), []);
   const normalizedAccessToken = authSession?.accessToken.trim() ?? "";
   const calendarEvents = useCalendarMonthEvents({
@@ -1243,12 +1240,6 @@ export function CalendarPanel() {
     const nextMonthStart = startOfCalendarMonth(nextMonthDate);
     setMonthDate(nextMonthStart);
     setSelectedDate(formatCalendarDate(nextMonthStart));
-  }, []);
-
-  const goToToday = useCallback(() => {
-    const now = new Date();
-    setMonthDate(startOfCalendarMonth(now));
-    setSelectedDate(formatCalendarDate(now));
   }, []);
 
   const openCreateDialog = useCallback((date: string) => {
@@ -1485,8 +1476,8 @@ export function CalendarPanel() {
       />
       <section id="month" className="flex min-h-0 flex-1 flex-col gap-4">
         <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
+          <div className="hidden lg:block" aria-hidden="true" />
+          <div className="flex items-center gap-1 lg:justify-self-center">
               <Button
                 type="button"
                 variant="outline"
@@ -1496,15 +1487,10 @@ export function CalendarPanel() {
               >
                 <ChevronLeft />
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-label="오늘이 포함된 달로 이동"
-                onClick={goToToday}
-              >
-                오늘
-              </Button>
+              <CalendarMonthPicker
+                monthDate={monthDate}
+                onMonthChange={goToMonth}
+              />
               <Button
                 type="button"
                 variant="outline"
@@ -1514,18 +1500,7 @@ export function CalendarPanel() {
               >
                 <ChevronRight />
               </Button>
-            </div>
-            <span className="text-sm text-muted-foreground">
-              {calendarEvents.events.length}개 일정
-            </span>
           </div>
-
-          <h1
-            className="justify-self-start rounded-md px-2 py-1 text-left font-heading text-2xl font-semibold leading-tight outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring lg:justify-self-center"
-            onDoubleClick={goToToday}
-          >
-            {monthLabel}
-          </h1>
 
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             <Button
@@ -1642,6 +1617,7 @@ export function CalendarPanel() {
                         className="absolute inset-0 z-0 hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label={`${formatDateLabel(date)} 선택`}
                         onClick={() => setSelectedDate(date)}
+                        onDoubleClick={() => openCreateDialog(date)}
                       />
                       <div className="relative z-20 flex items-center justify-between">
                         <span
@@ -1652,6 +1628,18 @@ export function CalendarPanel() {
                         >
                           {formatCellDay(date)}
                         </span>
+                        {isSelected ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="size-6 rounded-full"
+                            aria-label={`${formatDateLabel(date)} 일정 추가`}
+                            onClick={() => openCreateDialog(date)}
+                          >
+                            <Plus />
+                          </Button>
+                        ) : null}
                       </div>
                       <div
                         className="relative z-20 flex flex-col gap-1"

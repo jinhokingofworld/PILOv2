@@ -65,6 +65,19 @@ assert.match(calendarPanel, /getCalendarGridDates/);
 assert.match(calendarPanel, /getEventsForCalendarDate/);
 assert.match(calendarPanel, /getCalendarWeekEventBars/);
 assert.match(calendarPanel, /getCalendarDateBarLayout/);
+assert.match(calendarPanel, /CalendarMonthPicker/);
+assert.match(
+  calendarPanel,
+  /onDoubleClick=\{\(\) => openCreateDialog\(date\)\}/
+);
+assert.match(
+  calendarPanel,
+  /aria-label=\{`\$\{formatDateLabel\(date\)\} 일정 추가`\}/
+);
+assert.doesNotMatch(
+  calendarPanel,
+  /calendarEvents\.events\.length\}개 일정/
+);
 assert.match(calendarPanel, /dateBarLayout\.connectsToPrevious/);
 assert.match(calendarPanel, /dateBarLayout\.connectsToNext/);
 assert.match(calendarPanel, /border-l-0/);
