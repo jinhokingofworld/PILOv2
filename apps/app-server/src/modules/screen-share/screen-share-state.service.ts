@@ -351,8 +351,10 @@ for _ = 1, maxInvalidSkips do
   local sessionId = sessionIds[1]
   local encoded = redis.call("GET", ARGV[3] .. sessionId)
   local validSnapshot = false
+  local decoded = false
+  local session = nil
   if encoded then
-    local decoded, session = pcall(cjson.decode, encoded)
+    decoded, session = pcall(cjson.decode, encoded)
     if decoded and type(session) == "table" and
       session.sessionId == sessionId and
       session.status == "active" and

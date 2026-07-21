@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { badRequest } from "../../dist/common/api-error.js";
 import { ScreenShareStateService } from "../../dist/modules/screen-share/screen-share-state.service.js";
 import { ScreenShareTokenService } from "../../dist/modules/screen-share/screen-share-token.service.js";
@@ -6,6 +7,29 @@ import {
   screenShareAlreadyActive,
   screenShareNotFound
 } from "../../dist/modules/screen-share/screen-share.errors.js";
+
+const stateServiceSource = readFileSync(
+  new URL(
+    "../../src/modules/screen-share/screen-share-state.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const claimDeadlineLuaSource = stateServiceSource
+  .split("const CLAIM_DUE_DEADLINE_SCRIPT = `")[1]
+  .split("`;", 1)[0];
+assert.equal(
+  claimDeadlineLuaSource.includes(
+    "local decoded, session = pcall(cjson.decode, encoded)"
+  ),
+  false,
+  "deadline claim Lua must not shadow the session used after the encoded block"
+);
+assert.match(
+  claimDeadlineLuaSource,
+  /local decoded = false\s+local session = nil\s+if encoded then\s+decoded, session = pcall\(cjson\.decode, encoded\)/,
+  "deadline claim Lua must keep the decoded session in the loop scope"
+);
 
 const decodeJwtPayload = token => {
   const payload = token.split(".")[1];
