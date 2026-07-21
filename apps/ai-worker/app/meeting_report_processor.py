@@ -502,6 +502,132 @@ def parse_generated_report_json(
     )
 
 
+def parse_generated_core_report_json(
+    raw_text: str,
+    transcript_text: str,
+    transcript_segments: list[TranscriptSegment],
+    activity_evidence: list[ActivityEvidence] | None = None,
+) -> GeneratedMeetingReport:
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError as error:
+        raise ProviderBusinessError("Invalid meeting report JSON") from error
+
+    if not isinstance(payload, dict):
+        raise ProviderBusinessError("Invalid meeting report payload")
+
+    title = _require_payload_string(payload, "title")
+    if len(title.encode("utf-8")) > 500:
+        raise ProviderBusinessError("Invalid meeting report title")
+
+    activities = list(activity_evidence or [])
+    summary, summary_evidence, summary_activity_references = _parse_grounded_content(
+        payload.get("summary"),
+        "summary",
+        0,
+        transcript_segments,
+        activities,
+    )
+    discussion_points, discussion_evidence, discussion_activity_references = (
+        _parse_grounded_content(
+            payload.get("discussionPoints"),
+            "discussion",
+            0,
+            transcript_segments,
+            activities,
+        )
+    )
+
+    raw_decisions = payload.get("decisions")
+    if not isinstance(raw_decisions, dict):
+        raise ProviderBusinessError("Invalid decisions")
+    decisions = _require_payload_string(raw_decisions, "text")
+    raw_decision_items = raw_decisions.get("items")
+    if not isinstance(raw_decision_items, list) or not raw_decision_items:
+        raise ProviderBusinessError("Invalid decision items")
+
+    decision_items: list[str] = []
+    decision_evidence: list[EvidenceReference] = []
+    decision_activity_references: list[ActivityEvidenceReference] = []
+    for source_index, raw_item in enumerate(raw_decision_items):
+        item, evidence, activity_references = _parse_grounded_content(
+            raw_item,
+            "decision",
+            source_index,
+            transcript_segments,
+            activities,
+        )
+        if len(item.encode("utf-8")) > 5_000:
+            raise ProviderBusinessError("Invalid decision item")
+        decision_items.append(item)
+        decision_evidence.extend(evidence)
+        decision_activity_references.extend(activity_references)
+
+    return GeneratedMeetingReport(
+        transcript_text=transcript_text,
+        title=title,
+        summary=summary,
+        discussion_points=discussion_points,
+        decisions=decisions,
+        action_item_candidates=[],
+        transcript_segments=transcript_segments,
+        evidence=[*summary_evidence, *discussion_evidence, *decision_evidence],
+        activity_evidence=activities,
+        activity_evidence_references=[
+            *summary_activity_references,
+            *discussion_activity_references,
+            *decision_activity_references,
+        ],
+        decision_items=decision_items,
+    )
+
+
+def _parse_grounded_content(
+    value: object,
+    source_type: str,
+    source_index: int,
+    transcript_segments: list[TranscriptSegment],
+    activity_evidence: list[ActivityEvidence],
+) -> tuple[str, list[EvidenceReference], list[ActivityEvidenceReference]]:
+    if not isinstance(value, dict):
+        raise ProviderBusinessError("Invalid grounded meeting report content")
+
+    text = _require_payload_string(value, "text")
+    segment_indexes = _parse_inline_evidence_indexes(
+        value.get("segmentIndexes"),
+        {segment.segment_index for segment in transcript_segments},
+        "INVALID_TRANSCRIPT_SEGMENT_INDEX",
+    )
+    activity_indexes = _parse_inline_evidence_indexes(
+        value.get("activityIndexes"),
+        {item.source_index for item in activity_evidence},
+        "INVALID_ACTIVITY_EVIDENCE_INDEX",
+    )
+    transcript_references = (
+        [EvidenceReference(source_type, source_index, segment_indexes)]
+        if segment_indexes
+        else []
+    )
+    activity_references = (
+        [ActivityEvidenceReference(source_type, source_index, activity_indexes)]
+        if activity_indexes
+        else []
+    )
+    return text, transcript_references, activity_references
+
+
+def _parse_inline_evidence_indexes(
+    value: object,
+    valid_indexes: set[int],
+    invalid_index_code: str,
+) -> list[int]:
+    if not isinstance(value, list):
+        raise EvidenceValidationError("INVALID_EVIDENCE_FORMAT")
+    if not all(isinstance(index, int) and index in valid_indexes for index in value):
+        raise EvidenceValidationError(invalid_index_code)
+    return list(dict.fromkeys(value))
+
+
 def _without_action_item_references(value: object) -> object:
     if not isinstance(value, list):
         return value
