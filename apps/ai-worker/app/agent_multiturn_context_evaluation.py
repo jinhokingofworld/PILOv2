@@ -214,6 +214,28 @@ def validate_multiturn_catalog_against_job(
             raise ValueError(
                 f"Multi-turn catalog has invalid context surface: {conversation.conversation_id}"
             )
+        if conversation.context_surface is not None:
+            catalog = job.tool_capability_catalog
+            if catalog is None:
+                raise ValueError(
+                    "Multi-turn catalog context surface requires a registry capability catalog: "
+                    f"{conversation.conversation_id}"
+                )
+            descriptors = {descriptor.tool_name: descriptor for descriptor in catalog.descriptors}
+            expected_tools = {
+                tool_name for turn in conversation.turns for tool_name in turn.expected_tools
+            }
+            unsupported_tools = sorted(
+                tool_name
+                for tool_name in expected_tools
+                if descriptors.get(tool_name) is None
+                or descriptors[tool_name].context_surface != conversation.context_surface
+            )
+            if unsupported_tools:
+                raise ValueError(
+                    "Multi-turn catalog context surface is not supported by registered tools: "
+                    f"{conversation.conversation_id} {unsupported_tools}"
+                )
         for turn_index, turn in enumerate(conversation.turns):
             fixture_sequence = tuple(fixture.tool for fixture in turn.fixtures)
             if fixture_sequence != turn.expected_tools:

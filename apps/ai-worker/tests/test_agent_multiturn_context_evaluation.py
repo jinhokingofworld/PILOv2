@@ -307,6 +307,35 @@ def test_preflight_rejects_a_selector_not_in_the_registered_tool_schema() -> Non
         validate_multiturn_catalog_against_job((conversation,), suite.job)
 
 
+def test_preflight_rejects_a_context_surface_without_a_registry_catalog() -> None:
+    conversation = MultiTurnConversation(
+        conversation_id="sqltoerd_missing_context_surface",
+        context_surface="sql_erd",
+        turns=(
+            MultiTurnTurn(
+                user="Create an ERD.",
+                expected_tools=("generate_sql_erd",),
+                expected_context=ExpectedContext("none", None, {}),
+                fixtures=(MultiTurnToolFixture("generate_sql_erd", {"tables": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+            MultiTurnTurn(
+                user="Show the payment tables.",
+                expected_tools=("focus_sql_erd_tables",),
+                expected_context=ExpectedContext(
+                    "prior_result_selector", "sql_erd_1", {"featureQuery": "payment"}
+                ),
+                fixtures=(MultiTurnToolFixture("focus_sql_erd_tables", {"tables": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+        ),
+    )
+    suite = load_evaluation_suite(Path("evals/agent_planner_korean_v1.json"))
+
+    with pytest.raises(ValueError, match="context surface"):
+        validate_multiturn_catalog_against_job((conversation,), suite.job)
+
+
 def test_continuation_fails_when_right_tool_uses_context_from_a_different_turn() -> None:
     conversation = MultiTurnConversation(
         conversation_id="meeting_context_reference",
