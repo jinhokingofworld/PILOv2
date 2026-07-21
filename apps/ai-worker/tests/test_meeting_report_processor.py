@@ -16,6 +16,7 @@ from app.meeting_report_processor import (
     PermanentStorageError,
     ProviderBusinessError,
     TranscriptSegment,
+    parse_generated_core_report_json,
     parse_generated_report_json,
     parse_meeting_report_job,
     serialize_action_items,
@@ -26,6 +27,8 @@ from app.meeting_report_runtime import (
     PgMeetingReportRepository,
     RuntimeSettings,
     S3RecordingStorage,
+    _action_item_extraction_schema,
+    _core_meeting_report_schema,
 )
 
 REPORT_ID = "77777777-7777-7777-7777-777777777777"
@@ -1023,44 +1026,153 @@ def test_openai_transcribe_uses_timestamped_segment_format(tmp_path) -> None:
     assert transcriptions.kwargs["timestamp_granularities"] == ["segment"]
 
 
+def test_parse_generated_core_report_assigns_evidence_source_indexes_from_structure() -> None:
+    activity = ActivityEvidence(
+        activity_log_id="88888888-8888-8888-8888-888888888888",
+        source_index=0,
+        occurred_at="2026-07-16T00:00:00+00:00",
+        action="calendar_event_updated",
+        summary="디자인 리뷰 일정을 변경했습니다.",
+    )
+    report = parse_generated_core_report_json(
+        json.dumps(
+            {
+                "title": "배포 회의",
+                "summary": {
+                    "text": "배포 방향을 정리했다.",
+                    "segmentIndexes": [0, 0],
+                    "activityIndexes": [],
+                },
+                "discussionPoints": {
+                    "text": "디자인 리뷰 일정을 논의했다.",
+                    "segmentIndexes": [],
+                    "activityIndexes": [0],
+                },
+                "decisions": {
+                    "text": "두 가지를 결정했다.",
+                    "items": [
+                        {
+                            "text": "Worker가 DB를 갱신한다.",
+                            "segmentIndexes": [0],
+                            "activityIndexes": [],
+                        },
+                        {
+                            "text": "리뷰 일정을 변경한다.",
+                            "segmentIndexes": [],
+                            "activityIndexes": [0],
+                        },
+                    ],
+                },
+            }
+        ),
+        "원문",
+        [TranscriptSegment(0, 0, 1_000, "원문")],
+        [activity],
+    )
+
+    assert report.action_item_candidates == []
+    assert report.decision_items == ["Worker가 DB를 갱신한다.", "리뷰 일정을 변경한다."]
+    assert [
+        (item.source_type, item.source_index, item.segment_indexes) for item in report.evidence
+    ] == [("summary", 0, [0]), ("decision", 0, [0])]
+    assert [
+        (item.source_type, item.source_index, item.activity_indexes)
+        for item in report.activity_evidence_references
+    ] == [("discussion", 0, [0]), ("decision", 1, [0])]
+
+
+def test_openai_core_report_uses_inline_evidence_schema_without_cross_references() -> None:
+    output = json.dumps(
+        {
+            "title": "회의",
+            "summary": {"text": "요약", "segmentIndexes": [0], "activityIndexes": []},
+            "discussionPoints": {
+                "text": "논의",
+                "segmentIndexes": [0],
+                "activityIndexes": [],
+            },
+            "decisions": {
+                "text": "결정",
+                "items": [
+                    {
+                        "text": "결정",
+                        "segmentIndexes": [0],
+                        "activityIndexes": [],
+                    }
+                ],
+            },
+        }
+    )
+    responses = FakeOpenAiResponses([output])
+    ai_client = OpenAiMeetingReportClient.__new__(OpenAiMeetingReportClient)
+    ai_client.client = SimpleNamespace(responses=responses)
+    ai_client.meeting_report_model = "gpt-5.4-mini"
+
+    report = ai_client.generate_core_report(
+        "원문",
+        [TranscriptSegment(0, 0, 1_000, "원문")],
+        [],
+        [],
+    )
+
+    assert report.summary == "요약"
+    schema = responses.calls[0]["text"]["format"]["schema"]
+    serialized_schema = json.dumps(schema)
+    assert "sourceIndex" not in serialized_schema
+    assert "sourceType" not in serialized_schema
+    assert "actionItemCandidates" not in serialized_schema
+
+
+def test_llm_schemas_do_not_expose_evidence_cross_reference_indexes() -> None:
+    assert "sourceIndex" not in json.dumps(_core_meeting_report_schema())
+    assert "sourceIndex" not in json.dumps(_action_item_extraction_schema())
+
+
 def test_openai_report_retries_once_with_evidence_repair_instruction() -> None:
     first_output = json.dumps(
         {
-            "summary": "첫 응답은 근거가 없는 액션 아이템을 포함합니다.",
-            "discussionPoints": "논의",
-            "decisions": "결정",
-            "decisionItems": ["결정"],
-            "actionItemCandidates": [
-                {
-                    "title": "작업",
-                    "description": "설명",
-                    "assigneeUserId": None,
-                    "priority": "MEDIUM",
-                }
-            ],
-            "evidence": [{"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0]}],
-            "activityEvidenceReferences": [],
+            "title": "회의",
+            "summary": {"text": "요약", "segmentIndexes": [99], "activityIndexes": []},
+            "discussionPoints": {
+                "text": "논의",
+                "segmentIndexes": [0],
+                "activityIndexes": [],
+            },
+            "decisions": {
+                "text": "결정",
+                "items": [
+                    {
+                        "text": "결정",
+                        "segmentIndexes": [0],
+                        "activityIndexes": [],
+                    }
+                ],
+            },
         }
     )
     repaired_output = json.dumps(
         {
-            "summary": "근거를 연결한 회의록입니다.",
-            "discussionPoints": "논의",
-            "decisions": "결정",
-            "decisionItems": ["결정"],
-            "actionItemCandidates": [
-                {
-                    "title": "작업",
-                    "description": "설명",
-                    "assigneeUserId": None,
-                    "priority": "MEDIUM",
-                }
-            ],
-            "evidence": [
-                {"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0]},
-                {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
-            ],
-            "activityEvidenceReferences": [],
+            "title": "회의",
+            "summary": {
+                "text": "근거를 연결한 회의록입니다.",
+                "segmentIndexes": [0],
+                "activityIndexes": [],
+            },
+            "discussionPoints": {
+                "text": "논의",
+                "segmentIndexes": [0],
+                "activityIndexes": [],
+            },
+            "decisions": {
+                "text": "결정",
+                "items": [
+                    {
+                        "text": "결정",
+                        "segmentIndexes": [0],
+                        "activityIndexes": [],
+                    }
+                ],
+            },
         }
     )
     responses = FakeOpenAiResponses([first_output, repaired_output])
@@ -1078,27 +1190,30 @@ def test_openai_report_retries_once_with_evidence_repair_instruction() -> None:
     assert report.summary == "근거를 연결한 회의록입니다."
     assert len(responses.calls) == 2
     repair_prompt = responses.calls[1]["input"][0]["content"]
-    assert "MISSING_ACTION_ITEM_EVIDENCE" in repair_prompt
+    assert "INVALID_TRANSCRIPT_SEGMENT_INDEX" in repair_prompt
     assert first_output not in responses.calls[1]["input"][1]["content"]
 
 
 def test_openai_report_stops_after_one_evidence_repair_attempt() -> None:
     invalid_output = json.dumps(
         {
-            "summary": "요약",
-            "discussionPoints": "논의",
-            "decisions": "결정",
-            "decisionItems": ["결정"],
-            "actionItemCandidates": [
-                {
-                    "title": "작업",
-                    "description": "설명",
-                    "assigneeUserId": None,
-                    "priority": "MEDIUM",
-                }
-            ],
-            "evidence": [],
-            "activityEvidenceReferences": [],
+            "title": "회의",
+            "summary": {"text": "요약", "segmentIndexes": [99], "activityIndexes": []},
+            "discussionPoints": {
+                "text": "논의",
+                "segmentIndexes": [0],
+                "activityIndexes": [],
+            },
+            "decisions": {
+                "text": "결정",
+                "items": [
+                    {
+                        "text": "결정",
+                        "segmentIndexes": [0],
+                        "activityIndexes": [],
+                    }
+                ],
+            },
         }
     )
     responses = FakeOpenAiResponses([invalid_output, invalid_output])
@@ -1114,7 +1229,7 @@ def test_openai_report_stops_after_one_evidence_repair_attempt() -> None:
             [],
         )
 
-    assert raised.value.code == "MISSING_ACTION_ITEM_EVIDENCE"
+    assert raised.value.code == "INVALID_TRANSCRIPT_SEGMENT_INDEX"
     assert len(responses.calls) == 2
 
 

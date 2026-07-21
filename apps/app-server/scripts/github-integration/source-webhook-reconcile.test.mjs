@@ -118,7 +118,7 @@ assert.equal(parseGithubSourceWebhookContext("repository", webhookBody("issue"))
 }
 
 class SourceDatabase {
-  constructor(eventName, { activeReceivedLease = false } = {}) {
+  constructor(eventName, { activeReceivedLease = false, targetCount = 1 } = {}) {
     this.activeReceivedLease = activeReceivedLease;
     this.boardLookupSql = null;
     this.claimSql = null;
@@ -131,6 +131,7 @@ class SourceDatabase {
     this.pullRequestValues = null;
     this.processed = 0;
     this.retried = 0;
+    this.targetCount = targetCount;
   }
 
   async queryOne(text, values = []) {
@@ -165,6 +166,9 @@ class SourceDatabase {
     if (/FROM github_installations AS installation/i.test(text)) {
       this.events.push("targets");
       assert.deepEqual(values, [12, "34"]);
+      if (this.targetCount === 0) {
+        return [];
+      }
       return [{
         github_installation_id: 12,
         repository_id: repositoryId,
@@ -192,7 +196,7 @@ class SourceDatabase {
       this.processed += 1;
       return { rowCount: 1 };
     }
-    if (/GitHub source webhook reconcile failed/i.test(text)) {
+    if (/status='received'[\s\S]*lease_expires_at=now\(\) \+ interval '6 minutes'/i.test(text)) {
       this.retried += 1;
       return { rowCount: 1 };
     }
@@ -275,6 +279,28 @@ function createService({ database, githubAppClient, published, publisherFails = 
     },
     { publishInvalidation: async () => undefined },
   );
+}
+
+{
+  const database = new SourceDatabase("pull_request", { targetCount: 0 });
+  const service = createService({
+    database,
+    githubAppClient: {
+      getPullRequestWebhookSnapshot: async () => {
+        throw new Error("a delivery without a target must not fetch GitHub");
+      },
+    },
+    published: [],
+  });
+  assert.equal(await service.processDelivery("unresolved-target-delivery"), "retry");
+  assert.equal(database.processed, 0);
+  assert.equal(database.retried, 1);
+  assert.deepEqual(database.events, [
+    "transaction:start",
+    "lock",
+    "targets",
+    "transaction:rollback",
+  ]);
 }
 
 {
@@ -418,7 +444,7 @@ function createService({ database, githubAppClient, published, publisherFails = 
     await assert.rejects(
       () => client.getPullRequestWebhookSnapshot(request),
       (error) => error instanceof GithubSourceSnapshotNotFoundError,
-      "only the webhook snapshot lookup opts into terminal source-not-found",
+      "the webhook snapshot lookup maps a source-not-found response for retry",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -426,18 +452,21 @@ function createService({ database, githubAppClient, published, publisherFails = 
 }
 
 {
-  const database = new SourceDatabase("issues");
+  const database = new SourceDatabase("pull_request");
   const service = createService({
     database,
     githubAppClient: {
-      getRepositoryIssue: async () => { throw new GithubSourceSnapshotNotFoundError(); },
+      getPullRequestWebhookSnapshot: async () => {
+        throw new GithubSourceSnapshotNotFoundError();
+      },
     },
     published: [],
   });
-  assert.equal(await service.processDelivery("missing-delivery"), "terminal");
-  assert.equal(database.issueValues, null, "404 must retain the existing local cache");
-  assert.equal(database.processed, 1);
-  assert.equal(database.retried, 0);
+  assert.equal(await service.processDelivery("missing-delivery"), "retry");
+  assert.equal(database.pullRequestValues, null, "404 must retain the existing local cache");
+  assert.equal(database.processed, 0);
+  assert.equal(database.retried, 1);
+  assert.equal(database.events.at(-1), "transaction:rollback");
 }
 
 {

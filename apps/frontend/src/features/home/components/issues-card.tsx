@@ -5,44 +5,43 @@ import { ListChecks } from "lucide-react";
 
 import type { BoardIssueCardPayload } from "@/features/board/types";
 import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
-import {
-  homeIssueListLimit,
-  type HomeIssuesState
-} from "../hooks/use-home-dashboard-data";
+import type { HomeIssuesState } from "../hooks/use-home-dashboard-data";
 import {
   DashboardCard,
   DashboardCardMessage,
   DashboardNavigationAction,
   StatusPill
 } from "./dashboard-card";
-import { IssuesBackground } from "./home-backgrounds";
 
 export function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {
-  const visibleTodoIssues = issuesState.issues.slice(0, homeIssueListLimit);
+  const visibleTodoIssues = issuesState.issues.slice(0, 3);
   const isLoading = issuesState.status === "loading";
   const isRecentMode = issuesState.mode === "recent";
+  const issueDescription = isLoading
+    ? "이슈를 불러오는 중입니다"
+    : issuesState.status === "error"
+      ? "이슈 상태를 확인할 수 없습니다"
+      : `${issuesState.total}개의 open 이슈`;
 
   return (
     <DashboardCard
       action={
         <DashboardNavigationAction ariaLabel="이슈로 이동" href="/board#issues" />
       }
-      background={<IssuesBackground />}
-      className="border-[#D8D1FF] bg-[#F7F5FF] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]"
+      className="min-h-[280px]"
       cursorTarget={{ id: "issues", label: "이슈", type: "home_card" }}
-      description={null}
+      description={issueDescription}
       icon={<ListChecks className="size-4" />}
       title={isRecentMode ? "최근 이슈" : "내 이슈"}
       titleAdornment={
         isRecentMode ? (
-          <span className="min-w-0 truncate text-[0.7rem] font-medium text-destructive">
+          <span className="min-w-0 truncate text-[15px] font-medium text-destructive">
             GitHub 연결 시 내 담당 이슈만 볼 수 있어요
           </span>
         ) : null
       }
-      titleClassName="text-[#5B4BC4]"
     >
-      <div className="grid min-h-0 flex-1 grid-rows-[repeat(5,minmax(0,1fr))] gap-2 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
         {isLoading ? (
           <DashboardCardMessage>이슈 불러오는 중</DashboardCardMessage>
         ) : issuesState.status === "error" ? (
@@ -75,12 +74,12 @@ function IssueTodoRow({ issue }: { issue: BoardIssueCardPayload }) {
         type: "home_issue"
       })}
       aria-label={`${issue.title} 이슈로 이동`}
-      className="flex min-h-0 min-w-0 items-center overflow-hidden rounded-lg border bg-background/90 p-3 text-left shadow-sm backdrop-blur transition hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="flex min-h-[54px] min-w-0 items-center overflow-hidden rounded-[10px] border border-border bg-muted/50 px-3 py-2.5 text-left transition hover:bg-muted hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       onClick={() => router.push(boardIssueHref)}
       type="button"
     >
       <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-        <p className="min-w-0 flex-1 truncate text-sm font-medium">
+        <p className="min-w-0 flex-1 truncate text-[17px] font-medium text-foreground">
           {issue.title}
         </p>
         <StatusPill label={issue.issueNumber} tone="neutral" />

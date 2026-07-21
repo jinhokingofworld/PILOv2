@@ -105,23 +105,33 @@ def validate_observation(
     planner_steps = [
         step for step in steps if isinstance(step, dict) and step.get("type") == "planner"
     ]
-    retrievals = []
+    observations = []
     for step in planner_steps:
         summary = step.get("outputSummary")
-        retrieval = summary.get("toolRetrieval") if isinstance(summary, dict) else None
-        if isinstance(retrieval, dict):
-            retrievals.append(retrieval)
-    if not retrievals or any(item.get("mode") != expected_mode for item in retrievals):
+        key = "toolRouting" if expected_mode == "llm_router" else "toolRetrieval"
+        observation = summary.get(key) if isinstance(summary, dict) else None
+        if isinstance(observation, dict):
+            observations.append(observation)
+    if not observations or any(item.get("mode") != expected_mode for item in observations):
         raise ValueError("Agent smoke did not observe the expected retrieval mode")
-    if expected_mode == "shortlist" and not any(
-        item.get("usedShortlist") is True for item in retrievals
+    if expected_mode == "llm_router" and not all(
+        item.get("status") == "routed"
+        and isinstance(item.get("domains"), list)
+        and bool(item["domains"])
+        and isinstance(item.get("capabilityIds"), list)
+        and bool(item["capabilityIds"])
+        for item in observations
     ):
-        raise ValueError("Agent smoke did not exercise a real shortlist")
-    if not any(item.get("primaryToolName") == expected_primary_tool for item in retrievals):
+        raise ValueError("Agent smoke did not exercise the LLM Router")
+    tool_steps = [step for step in steps if isinstance(step, dict) and step.get("type") == "tool"]
+    primary_tool_observed = any(
+        step.get("toolName") == expected_primary_tool for step in tool_steps
+    ) or any(item.get("primaryToolName") == expected_primary_tool for item in observations)
+    if not primary_tool_observed:
         raise ValueError("Agent smoke selected an unexpected primary tool")
     return {
         "plannerStepCount": len(planner_steps),
-        "retrievalObservationCount": len(retrievals),
+        "routingObservationCount": len(observations),
         "expectedPrimaryToolObserved": True,
     }
 

@@ -26,6 +26,7 @@ from app.agent_processor import (
     _agent_planner_system_prompt,
     _agent_planner_user_prompt,
     _agent_router_schema,
+    _agent_router_system_prompt,
     _agent_router_user_prompt,
     normalize_agent_planner_decision,
     normalize_agent_routing_decision,
@@ -755,6 +756,19 @@ class FakeExecutionHandoffClient:
             raise self.error
 
 
+class FakeAgentLatencyObserver:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.clock = 0.0
+
+    def start(self) -> float:
+        self.clock += 0.01
+        return self.clock
+
+    def observe(self, **input_value: object) -> None:
+        self.calls.append(input_value)
+
+
 class FakeGroundedAnswerHandoffClient:
     def __init__(self, context: dict[str, object]) -> None:
         self.context = context
@@ -933,6 +947,7 @@ def create_processor(
     execution_handoff_client: FakeExecutionHandoffClient | None = None,
     router_client: FakeRouterClient | None = None,
     tool_retrieval_mode: str | None = None,
+    latency_observer: FakeAgentLatencyObserver | None = None,
 ) -> AgentRunProcessor:
     return AgentRunProcessor(
         repository,
@@ -941,7 +956,328 @@ def create_processor(
         current_date_provider=lambda _timezone: date(2026, 7, 9),
         router_client=router_client,
         tool_retrieval_mode=tool_retrieval_mode,
+        latency_observer=latency_observer,
     )
+
+
+def sql_erd_focus_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
+    capability = {
+        "id": "sql_erd.tables.focus",
+        "domain": "sql_erd",
+        "toolNames": ["focus_sql_erd_tables"],
+        "whenToUse": "SQLtoERD에서 특정 기능 관련 테이블에 집중할 때",
+        "mustNotUseFor": ["SQLtoERD 외 화면 요청"],
+        "positiveExamples": [
+            "회의 관련 테이블만 집중적으로 보여줘",
+            "학생 관련 테이블에 집중해줘",
+            "결제 테이블만 선명하게 보여주ㅓ",
+            "회의 테이블만 보여주세요",
+            "ERD 집중 보기",
+        ],
+        "examples": [
+            {"kind": "canonical", "utterance": "회의 관련 테이블만 집중적으로 보여줘"},
+            {"kind": "paraphrase", "utterance": "학생 관련 테이블에 집중해줘"},
+            {"kind": "typo", "utterance": "결제 테이블만 선명하게 보여주ㅓ"},
+            {"kind": "honorific", "utterance": "회의 테이블만 보여주세요"},
+            {"kind": "abbreviation", "utterance": "ERD 집중 보기"},
+        ],
+        "selectorKinds": ["sql_erd_table_ref"],
+        "requiresConfirmation": False,
+        "availability": "supported",
+    }
+    descriptors = []
+    for tool in tools:
+        input_schema = tool["inputSchema"]
+        assert isinstance(input_schema, dict)
+        descriptors.append(
+            {
+                "toolName": tool["name"],
+                "domain": "sql_erd",
+                "action": tool["name"],
+                "operation": "read",
+                "capabilityIds": [capability["id"]],
+                "whenToUse": capability["whenToUse"],
+                "mustNotUseFor": capability["mustNotUseFor"],
+                "acceptedSelectorFields": list(input_schema["properties"]),
+                "selectorKinds": ["sql_erd_table_ref"],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+                "riskLevel": "low",
+                "executionMode": tool["executionMode"],
+                "requiresConfirmation": False,
+                "contextSurface": "sql_erd",
+                "inputSchemaSha256": compute_input_schema_sha256(input_schema),
+            }
+        )
+    catalog = {
+        "version": "agent-tool-capabilities:v2",
+        "capabilities": [capability],
+        "descriptors": descriptors,
+    }
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
+def test_sql_erd_planning_emits_queue_router_planner_handoff_and_turn_latency() -> None:
+    tools = [
+        tool_snapshot(
+            name="focus_sql_erd_tables",
+            inputSchema={
+                "type": "object",
+                "required": ["featureQuery"],
+                "additionalProperties": False,
+                "properties": {"featureQuery": {"type": "string"}},
+            },
+        ),
+    ]
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            prompt="회의 관련 테이블만 집중적으로 보여줘",
+            queue_wait_ms=37,
+        )
+    )
+    observer = FakeAgentLatencyObserver()
+    router_client = FakeRouterClient(
+        decision=routing_decision(
+            domains=("sql_erd",),
+            capability_ids=("sql_erd.tables.focus",),
+            provider_input_tokens=11,
+            provider_output_tokens=4,
+            provider_total_tokens=15,
+        )
+    )
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            tool_name="focus_sql_erd_tables",
+            tool_input={"featureQuery": "회의"},
+            provider_input_tokens=19,
+            provider_output_tokens=7,
+            provider_total_tokens=26,
+        )
+    )
+    processor = create_processor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        router_client,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+        observer,
+    )
+
+    result = processor.process_payload(
+        agent_payload(
+            requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+            tools=tools,
+            toolCapabilityCatalog=sql_erd_focus_catalog(tools),
+        )
+    )
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert [call["stage"] for call in observer.calls] == [
+        "queue_wait",
+        "router",
+        "planner",
+        "execution_handoff",
+        "planning_turn",
+    ]
+    assert observer.calls[0]["elapsed_ms"] == 37
+    assert observer.calls[1]["provider_total_tokens"] == 15
+    assert observer.calls[2]["provider_total_tokens"] == 26
+    assert all(call["surface"] == "sql_erd" for call in observer.calls)
+    assert all(call["turn_sequence"] == 1 for call in observer.calls)
+
+
+def test_non_sql_erd_planning_does_not_emit_latency_events() -> None:
+    observer = FakeAgentLatencyObserver()
+    repository = FakeAgentRunRepository()
+    processor = create_processor(repository, latency_observer=observer)
+
+    processor.process_payload(agent_payload())
+
+    assert observer.calls == []
+
+
+def test_sql_erd_generate_planning_does_not_emit_focus_latency_events() -> None:
+    observer = FakeAgentLatencyObserver()
+    repository = FakeAgentRunRepository(context=run_context(prompt="주문 관리 ERD를 생성해줘"))
+    processor = create_processor(repository, latency_observer=observer)
+
+    processor.process_payload(
+        agent_payload(
+            requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+            tools=[
+                tool_snapshot(
+                    name="generate_sql_erd",
+                    riskLevel="medium",
+                    executionMode="contextual",
+                    inputSchema={"type": "object"},
+                )
+            ],
+        )
+    )
+
+    assert observer.calls == []
+
+
+def test_sql_erd_unexpected_processor_failure_emits_failed_planning_turn() -> None:
+    tools = [
+        tool_snapshot(
+            name="focus_sql_erd_tables",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+    observer = FakeAgentLatencyObserver()
+    repository = FakeAgentRunRepository(
+        context=run_context(prompt="?뚯쓽 愿???뚯씠釉붾쭔 蹂댁뿬以?")
+    )
+    processor = create_processor(
+        repository,
+        planner_client=FakePlannerClient(error=RuntimeError("unexpected")),
+        latency_observer=observer,
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected"):
+        processor.process_payload(
+            agent_payload(
+                requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+                tools=tools,
+                toolCapabilityCatalog=sql_erd_focus_catalog(tools),
+            )
+        )
+
+    assert [call["stage"] for call in observer.calls] == ["planner", "planning_turn"]
+    assert all(call["outcome"] == "failure" for call in observer.calls)
+
+
+def test_sql_erd_generate_unexpected_failure_does_not_emit_focus_latency() -> None:
+    observer = FakeAgentLatencyObserver()
+    repository = FakeAgentRunRepository(context_error=RuntimeError("unexpected"))
+    processor = create_processor(repository, latency_observer=observer)
+
+    with pytest.raises(RuntimeError, match="unexpected"):
+        processor.process_payload(
+            agent_payload(
+                requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+                tools=[
+                    tool_snapshot(
+                        name="generate_sql_erd",
+                        riskLevel="medium",
+                        executionMode="contextual",
+                        inputSchema={"type": "object"},
+                    )
+                ],
+            )
+        )
+
+    assert observer.calls == []
+
+
+def test_sql_erd_focus_router_failure_emits_failure_latency_from_pre_route_hint() -> None:
+    tools = [
+        tool_snapshot(
+            name="focus_sql_erd_tables",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+    observer = FakeAgentLatencyObserver()
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            prompt="?뚯쓽 愿???뚯씠釉붾쭔 蹂댁뿬以?",
+            queue_wait_ms=23,
+        )
+    )
+    processor = create_processor(
+        repository,
+        FakePlannerClient(),
+        FakeExecutionHandoffClient(),
+        FakeRouterClient(error=RuntimeError("router unavailable")),
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+        observer,
+    )
+
+    with pytest.raises(RuntimeError, match="router unavailable"):
+        processor.process_payload(
+            agent_payload(
+                requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+                tools=tools,
+                toolCapabilityCatalog=sql_erd_focus_catalog(tools),
+            )
+        )
+
+    assert [call["stage"] for call in observer.calls] == [
+        "queue_wait",
+        "router",
+        "planning_turn",
+    ]
+    assert observer.calls[1]["outcome"] == "failure"
+
+
+def test_sql_erd_focus_toolless_planner_clarification_emits_latency() -> None:
+    tools = [
+        tool_snapshot(
+            name="focus_sql_erd_tables",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+    observer = FakeAgentLatencyObserver()
+    repository = FakeAgentRunRepository(
+        context=run_context(prompt="?숈깮 愿???뚯씠釉붿뿉 吏묒쨷?댁쨾")
+    )
+    processor = create_processor(
+        repository,
+        planner_client=FakePlannerClient(
+            decision=planner_decision(
+                status="needs_clarification",
+                tool_name=None,
+                tool_input={},
+                missing_fields=("featureQuery",),
+            )
+        ),
+        latency_observer=observer,
+    )
+
+    result = processor.process_payload(
+        agent_payload(
+            requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+            tools=tools,
+            toolCapabilityCatalog=sql_erd_focus_catalog(tools),
+        )
+    )
+
+    assert result.reason == "agent_waiting_user_input"
+    assert [call["stage"] for call in observer.calls] == ["planner", "planning_turn"]
+    assert all(call["outcome"] == "clarification" for call in observer.calls)
+
+
+def test_sql_erd_running_handoff_retry_recovers_target_from_latest_planner_tool() -> None:
+    retry_context = run_context(
+        status="running",
+        queue_wait_ms=41,
+        latest_planner_tool_name="focus_sql_erd_tables",
+    )
+    observer = FakeAgentLatencyObserver()
+    handoff = FakeExecutionHandoffClient()
+    processor = create_processor(
+        FakeAgentRunRepository(context=retry_context),
+        execution_handoff_client=handoff,
+        latency_observer=observer,
+    )
+
+    result = processor.process_payload(
+        agent_payload(
+            requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+        )
+    )
+
+    assert result.reason == "agent_execution_handoff_retried"
+    assert handoff.calls == [RUN_ID]
+    assert [call["stage"] for call in observer.calls] == [
+        "execution_handoff",
+        "planning_turn",
+    ]
+    assert observer.calls[0]["outcome"] == "success"
 
 
 def test_llm_router_then_planner_selects_calendar_tool() -> None:
@@ -1296,6 +1632,17 @@ def test_agent_router_prompt_uses_compact_catalog_without_tool_schema() -> None:
     assert "toolNames" not in prompt["capabilities"][0]
     assert "inputSchema" not in json.dumps(prompt)
     assert schema["properties"]["domains"]["maxItems"] == 3
+
+
+def test_agent_router_prompt_distinguishes_existing_sql_erd_from_generation() -> None:
+    prompt = _agent_router_system_prompt()
+
+    assert "existing SQLtoERD session" in prompt
+    assert "sql_erd.inspect" in prompt
+    assert "new ERD, schema, or DDL" in prompt
+    assert "sql_erd.generate" in prompt
+    assert "SQL input is not required" in prompt
+    assert "Do not ask the user to choose" in prompt
 
 
 def test_agent_router_prompt_and_schema_filter_capabilities_by_context_surface() -> None:
@@ -3841,7 +4188,11 @@ def test_openai_router_repairs_malformed_output_once_with_the_same_schema(monkey
                     if len(self.calls) == 1
                     else valid_payload
                 ),
-                usage=None,
+                usage=SimpleNamespace(
+                    input_tokens=10 if len(self.calls) == 1 else 20,
+                    output_tokens=2 if len(self.calls) == 1 else 4,
+                    total_tokens=12 if len(self.calls) == 1 else 24,
+                ),
             )
 
     class FakeOpenAI:
@@ -3878,6 +4229,9 @@ def test_openai_router_repairs_malformed_output_once_with_the_same_schema(monkey
     assert len(FakeResponses.calls) == 2
     assert FakeResponses.calls[1]["text"] == FakeResponses.calls[0]["text"]
     assert "repair" in str(FakeResponses.calls[1]["input"]).lower()
+    assert decision.provider_input_tokens == 30
+    assert decision.provider_output_tokens == 6
+    assert decision.provider_total_tokens == 36
 
 
 def test_openai_planner_repairs_malformed_output_once_with_the_same_schema(monkeypatch) -> None:
@@ -3911,7 +4265,11 @@ def test_openai_planner_repairs_malformed_output_once_with_the_same_schema(monke
                     if len(self.calls) == 1
                     else valid_payload
                 ),
-                usage=None,
+                usage=SimpleNamespace(
+                    input_tokens=10 if len(self.calls) == 1 else 20,
+                    output_tokens=2 if len(self.calls) == 1 else 4,
+                    total_tokens=12 if len(self.calls) == 1 else 24,
+                ),
             )
 
     class FakeOpenAI:
@@ -3947,6 +4305,9 @@ def test_openai_planner_repairs_malformed_output_once_with_the_same_schema(monke
     assert len(FakeResponses.calls) == 2
     assert FakeResponses.calls[1]["text"] == FakeResponses.calls[0]["text"]
     assert "repair" in str(FakeResponses.calls[1]["input"]).lower()
+    assert decision.provider_input_tokens == 30
+    assert decision.provider_output_tokens == 6
+    assert decision.provider_total_tokens == 36
 
 
 def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:
@@ -3982,56 +4343,6 @@ def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:
         "nested": {
             "visible": "ok",
         },
-    }
-
-
-def test_sql_erd_session_selection_token_survives_tool_input_sanitizing() -> None:
-    selection_token = "88888888-8888-4888-8888-888888888888"
-    decision = parse_agent_planner_output(
-        json.dumps(
-            {
-                "status": "tool_candidate",
-                "message": "선택한 SQL ERD 세션을 확인합니다.",
-                "finalAnswerDraft": None,
-                "toolName": "inspect_sql_erd_schema",
-                "inputJson": json.dumps(
-                    {
-                        "featureQuery": "회의 기능",
-                        "sessionSelectionToken": selection_token,
-                        "accessToken": "must-not-leak",
-                    }
-                ),
-                "requiresConfirmation": False,
-                "missingFields": [],
-                "unsupportedReason": None,
-            }
-        )
-    )
-    tools = [
-        tool_snapshot(
-            name="inspect_sql_erd_schema",
-            executionMode="contextual",
-            inputSchema={
-                "type": "object",
-                "required": ["featureQuery"],
-                "additionalProperties": False,
-                "properties": {
-                    "featureQuery": {"type": "string"},
-                    "sessionSelectionToken": {"type": "string", "format": "uuid"},
-                },
-            },
-        )
-    ]
-    job = parse_agent_run_job_payload(agent_payload(tools=tools))
-
-    assert decision.tool_input == {
-        "featureQuery": "회의 기능",
-        "sessionSelectionToken": selection_token,
-    }
-    normalized = normalize_agent_planner_decision(decision, job)
-    assert normalized.output_summary["input"] == {
-        "featureQuery": "회의 기능",
-        "sessionSelectionToken": selection_token,
     }
 
 
@@ -4075,109 +4386,6 @@ def test_agent_planner_schema_is_strict_closed_schema() -> None:
     ]
 
 
-def test_sql_erd_planner_workflow_constraint_forces_focus_after_inspection(
-    monkeypatch,
-) -> None:
-    class FakeProviderError(Exception):
-        pass
-
-    class FakeResponses:
-        calls: list[dict[str, object]] = []
-
-        def create(self, **kwargs):
-            self.calls.append(kwargs)
-            return SimpleNamespace(
-                output_text=json.dumps(
-                    {
-                        "status": "tool_candidate",
-                        "message": "회의 관련 테이블을 집중 보기로 표시합니다.",
-                        "finalAnswerDraft": None,
-                        "toolName": "focus_sql_erd_tables",
-                        "inputJson": "{}",
-                        "requiresConfirmation": False,
-                        "missingFields": [],
-                        "unsupportedReason": None,
-                    }
-                ),
-                usage=None,
-            )
-
-    class FakeOpenAI:
-        def __init__(self, **_kwargs) -> None:
-            self.responses = FakeResponses()
-
-    monkeypatch.setitem(
-        sys.modules,
-        "openai",
-        SimpleNamespace(
-            OpenAI=FakeOpenAI,
-            APIConnectionError=FakeProviderError,
-            APITimeoutError=FakeProviderError,
-            InternalServerError=FakeProviderError,
-            RateLimitError=FakeProviderError,
-        ),
-    )
-    tools = [
-        tool_snapshot(
-            name="inspect_sql_erd_schema",
-            executionMode="contextual",
-            inputSchema={"type": "object"},
-        ),
-        tool_snapshot(
-            name="focus_sql_erd_tables",
-            inputSchema={"type": "object"},
-        ),
-    ]
-    job = parse_agent_run_job_payload(agent_payload(tools=tools))
-    request = AgentPlanningRequest(
-        run_id=RUN_ID,
-        prompt="회의 관련 테이블만 집중해서 보여줘",
-        timezone="Asia/Seoul",
-        current_date="2026-07-20",
-        tool_schema_version=AGENT_TOOL_SCHEMA_VERSION,
-        tools=job.tools,
-        planning_context=sql_erd_inspection_planning_context("t22", "t23"),
-        context_surface="sql_erd",
-    )
-
-    OpenAiAgentPlannerClient("test-key", "gpt-test", 45).plan(request)
-
-    call = FakeResponses.calls[0]
-    user_payload = json.loads(call["input"][1]["content"])
-    response_schema = call["text"]["format"]["schema"]
-    assert user_payload.get("workflowConstraint") == {
-        "requiredToolName": "focus_sql_erd_tables",
-        "completionAllowed": False,
-    }
-    assert "completed" not in response_schema["properties"]["status"]["enum"]
-    assert response_schema["properties"]["toolName"]["enum"] == [
-        "focus_sql_erd_tables",
-        None,
-    ]
-
-    FakeResponses.calls.clear()
-    completed_request = AgentPlanningRequest(
-        run_id=request.run_id,
-        prompt=request.prompt,
-        timezone=request.timezone,
-        current_date=request.current_date,
-        tool_schema_version=request.tool_schema_version,
-        tools=request.tools,
-        planning_context=(
-            request.planning_context + '\ntool focus_sql_erd_tables: {"action":"focused"}'
-        ),
-        context_surface=request.context_surface,
-    )
-
-    OpenAiAgentPlannerClient("test-key", "gpt-test", 45).plan(completed_request)
-
-    completed_call = FakeResponses.calls[0]
-    completed_payload = json.loads(completed_call["input"][1]["content"])
-    completed_schema = completed_call["text"]["format"]["schema"]
-    assert completed_payload["workflowConstraint"] is None
-    assert "completed" in completed_schema["properties"]["status"]["enum"]
-
-
 def test_sql_erd_planner_contract_uses_structured_schema_without_raw_ddl() -> None:
     prompt = _agent_planner_system_prompt()
 
@@ -4192,69 +4400,31 @@ def test_sql_erd_planner_contract_uses_structured_schema_without_raw_ddl() -> No
     assert "successful schema replacement" in prompt
 
 
-def test_sql_erd_table_focus_planner_contract_inspects_before_focusing() -> None:
+def test_sql_erd_table_focus_planner_contract_uses_server_owned_resolution() -> None:
     prompt = _agent_planner_system_prompt()
 
-    assert "inspect_sql_erd_schema" in prompt
     assert "focus_sql_erd_tables" in prompt
-    assert "compact table refs" in prompt
-    assert "direct FK neighbors" in prompt
-    assert "Never invent SQLtoERD session IDs" in prompt
-    assert "candidates include selectionToken" in prompt
-    assert "copy the exact selected selectionToken into sessionSelectionToken" in prompt
-    assert "completed inspect_sql_erd_schema result" in prompt
-    assert "sessionRevision" in prompt
-    assert "modelFingerprint" in prompt
-    assert "primaryTableRefs" in prompt
-    assert "relatedTableRefs" in prompt
-    assert "contextTableRefs" in prompt
-    assert "schema evidence" in prompt
-    assert "never invent relation lines" in prompt
+    assert "with only the user's concise featureQuery" in prompt
+    assert "App Server owns schema inspection" in prompt
+    assert "direct FK expansion" in prompt
+    assert "Never include or invent session IDs" in prompt
+    assert "table refs" in prompt
+    assert "outside the current SQLtoERD screen" in prompt
 
 
-def sql_erd_inspection_planning_context(*table_refs: str) -> str:
-    return "tool inspect_sql_erd_schema: " + json.dumps(
-        {
-            "sessionId": SQL_ERD_SESSION_ID,
-            "sessionRevision": 7,
-            "modelFingerprint": "fnv1a32:1234abcd",
-            "projection": {
-                "tables": [{"ref": table_ref} for table_ref in table_refs],
-                "edges": [],
-                "truncated": False,
-            },
-        }
-    )
-
-
-@pytest.mark.parametrize(
-    "primary_table_refs",
-    [
-        [],
-        "t1",
-        ["t0"],
-        ["table-meetings"],
-        ["t1", "t1"],
-        [f"t{index}" for index in range(1, 22)],
-    ],
-)
-def test_sql_erd_table_focus_rejects_invalid_primary_refs_before_handoff(
-    primary_table_refs: object,
-) -> None:
+def test_sql_erd_focus_single_tool_passes_only_feature_query() -> None:
     focus_tool = tool_snapshot(
         name="focus_sql_erd_tables",
-        description="SQLtoERD 테이블 집중 보기를 생성합니다.",
+        description="현재 SQLtoERD session의 관련 table을 집중 보기로 만듭니다.",
         inputSchema={
             "type": "object",
-            "required": ["primaryTableRefs"],
+            "required": ["featureQuery"],
             "additionalProperties": False,
             "properties": {
-                "primaryTableRefs": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 20,
-                    "uniqueItems": True,
-                    "items": {"type": "string", "pattern": "^t[1-9][0-9]*$"},
+                "featureQuery": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
                 }
             },
         },
@@ -4264,310 +4434,14 @@ def test_sql_erd_table_focus_rejects_invalid_primary_refs_before_handoff(
     normalized = normalize_agent_planner_decision(
         planner_decision(
             tool_name="focus_sql_erd_tables",
-            tool_input={
-                "sessionId": SQL_ERD_SESSION_ID,
-                "sessionRevision": 7,
-                "modelFingerprint": "fnv1a32:1234abcd",
-                "primaryTableRefs": primary_table_refs,
-            },
+            tool_input={"featureQuery": "회의 관련 핵심 테이블"},
         ),
         job,
-        planning_context=sql_erd_inspection_planning_context("t1", "t20"),
-    )
-
-    assert normalized.status == "needs_clarification"
-    assert normalized.output_summary["missingFields"] == ["primaryTableRefs"]
-    assert "핵심 테이블" in normalized.final_answer
-    assert "toolName" not in normalized.output_summary
-
-
-def test_sql_erd_table_focus_accepts_unique_compact_primary_refs() -> None:
-    focus_tool = tool_snapshot(
-        name="focus_sql_erd_tables",
-        description="SQLtoERD 테이블 집중 보기를 생성합니다.",
-        inputSchema={
-            "type": "object",
-            "required": ["primaryTableRefs"],
-            "additionalProperties": False,
-            "properties": {
-                "primaryTableRefs": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 20,
-                    "uniqueItems": True,
-                    "items": {"type": "string", "pattern": "^t[1-9][0-9]*$"},
-                }
-            },
-        },
-    )
-    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
-
-    normalized = normalize_agent_planner_decision(
-        planner_decision(
-            tool_name="focus_sql_erd_tables",
-            tool_input={
-                "sessionId": SQL_ERD_SESSION_ID,
-                "sessionRevision": 7,
-                "modelFingerprint": "fnv1a32:1234abcd",
-                "primaryTableRefs": ["t1", "t20"],
-            },
-        ),
-        job,
-        planning_context=sql_erd_inspection_planning_context("t1", "t20"),
     )
 
     assert normalized.status == "tool_candidate"
-    assert normalized.output_summary["input"]["primaryTableRefs"] == ["t1", "t20"]
-
-
-def test_sql_erd_table_focus_drops_related_ref_without_direct_primary_edge() -> None:
-    focus_tool = tool_snapshot(
-        name="focus_sql_erd_tables",
-        inputSchema={
-            "type": "object",
-            "required": [
-                "primaryTableRefs",
-                "relatedTableRefs",
-                "contextTableRefs",
-                "reasons",
-            ],
-            "properties": {
-                "primaryTableRefs": {"type": "array", "minItems": 1},
-                "relatedTableRefs": {"type": "array"},
-                "contextTableRefs": {"type": "array"},
-                "reasons": {"type": "array", "minItems": 1},
-            },
-        },
-    )
-    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
-    planning_context = "tool inspect_sql_erd_schema: " + json.dumps(
-        {
-            "sessionId": SQL_ERD_SESSION_ID,
-            "sessionRevision": 7,
-            "modelFingerprint": "fnv1a32:1234abcd",
-            "projection": {
-                "tables": [
-                    {"ref": "t16", "name": "pr_review_sessions"},
-                    {"ref": "t22", "name": "meetings"},
-                    {"ref": "t23", "name": "meeting_participants"},
-                ],
-                "edges": [["t22", "t23"]],
-                "truncated": False,
-            },
-        }
-    )
-
-    normalized = normalize_agent_planner_decision(
-        planner_decision(
-            tool_name="focus_sql_erd_tables",
-            tool_input={
-                "sessionId": SQL_ERD_SESSION_ID,
-                "sessionRevision": 7,
-                "modelFingerprint": "fnv1a32:1234abcd",
-                "primaryTableRefs": ["t22"],
-                "relatedTableRefs": ["t16"],
-                "contextTableRefs": [],
-                "reasons": [
-                    {"tableRef": "t22", "reason": "회의 핵심 테이블"},
-                    {"tableRef": "t16", "reason": "의미상 관련된 테이블"},
-                ],
-            },
-        ),
-        job,
-        planning_context=planning_context,
-    )
-
-    assert normalized.status == "tool_candidate"
-    assert normalized.output_summary["input"]["relatedTableRefs"] == []
-    assert normalized.output_summary["input"]["reasons"] == [
-        {"tableRef": "t22", "reason": "회의 핵심 테이블"}
-    ]
-
-
-def test_sql_erd_table_focus_drops_invalid_optional_evidence_item() -> None:
-    focus_tool = tool_snapshot(
-        name="focus_sql_erd_tables",
-        inputSchema={
-            "type": "object",
-            "required": [
-                "primaryTableRefs",
-                "relatedTableRefs",
-                "contextTableRefs",
-                "reasons",
-            ],
-            "properties": {
-                "primaryTableRefs": {"type": "array", "minItems": 1},
-                "relatedTableRefs": {"type": "array"},
-                "contextTableRefs": {"type": "array"},
-                "reasons": {"type": "array", "minItems": 1},
-            },
-        },
-    )
-    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
-    planning_context = "tool inspect_sql_erd_schema: " + json.dumps(
-        {
-            "sessionId": SQL_ERD_SESSION_ID,
-            "sessionRevision": 7,
-            "modelFingerprint": "fnv1a32:1234abcd",
-            "projection": {
-                "tables": [
-                    {"ref": "t22", "name": "meetings"},
-                    {
-                        "ref": "t3",
-                        "name": "activity_logs",
-                        "columns": [
-                            {
-                                "name": "action",
-                                "dataType": "activity_log_action",
-                                "enumValues": ["meeting_started", "meeting_ended"],
-                                "primaryKey": False,
-                                "foreignKey": False,
-                            }
-                        ],
-                    },
-                ],
-                "edges": [],
-                "truncated": False,
-            },
-        }
-    )
-
-    normalized = normalize_agent_planner_decision(
-        planner_decision(
-            tool_name="focus_sql_erd_tables",
-            tool_input={
-                "sessionId": SQL_ERD_SESSION_ID,
-                "sessionRevision": 7,
-                "modelFingerprint": "fnv1a32:1234abcd",
-                "primaryTableRefs": ["t22"],
-                "relatedTableRefs": [],
-                "contextTableRefs": ["t3"],
-                "reasons": [
-                    {"tableRef": "t22", "reason": "회의 핵심 테이블"},
-                    {
-                        "tableRef": "t3",
-                        "reason": "회의 활동 로그",
-                        "evidence": [
-                            {"kind": "table_name", "value": "activity_logs"},
-                            {
-                                "kind": "column_name",
-                                "columnName": "action",
-                                "value": "meeting_started, meeting_ended",
-                            },
-                        ],
-                    },
-                ],
-            },
-        ),
-        job,
-        planning_context=planning_context,
-    )
-
-    assert normalized.status == "tool_candidate"
-    assert normalized.output_summary["input"]["contextTableRefs"] == ["t3"]
-    assert normalized.output_summary["input"]["reasons"][1]["evidence"] == [
-        {"kind": "table_name", "value": "activity_logs"}
-    ]
-
-
-def test_sql_erd_table_focus_rejects_ref_missing_from_latest_inspection() -> None:
-    focus_tool = tool_snapshot(
-        name="focus_sql_erd_tables",
-        description="SQLtoERD 테이블 집중 보기를 생성합니다.",
-        inputSchema={
-            "type": "object",
-            "required": ["primaryTableRefs"],
-            "additionalProperties": False,
-            "properties": {"primaryTableRefs": {"type": "array", "minItems": 1}},
-        },
-    )
-    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
-
-    normalized = normalize_agent_planner_decision(
-        planner_decision(
-            tool_name="focus_sql_erd_tables",
-            tool_input={
-                "sessionId": SQL_ERD_SESSION_ID,
-                "sessionRevision": 7,
-                "modelFingerprint": "fnv1a32:1234abcd",
-                "primaryTableRefs": ["t999"],
-            },
-        ),
-        job,
-        planning_context=sql_erd_inspection_planning_context("t1", "t20"),
-    )
-
-    assert normalized.status == "needs_clarification"
-    assert normalized.output_summary["missingFields"] == ["primaryTableRefs"]
-    assert "toolName" not in normalized.output_summary
-
-
-def test_sql_erd_table_focus_drops_invalid_or_overlapping_context_refs() -> None:
-    focus_tool = tool_snapshot(
-        name="focus_sql_erd_tables",
-        description="SQLtoERD 테이블 집중 보기를 생성합니다.",
-        inputSchema={
-            "type": "object",
-            "required": ["primaryTableRefs", "contextTableRefs"],
-            "additionalProperties": False,
-            "properties": {
-                "primaryTableRefs": {"type": "array", "minItems": 1},
-                "contextTableRefs": {"type": "array"},
-            },
-        },
-    )
-    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
-
-    for context_refs in (["t999"], ["t1"], ["t2", "t2"]):
-        normalized = normalize_agent_planner_decision(
-            planner_decision(
-                tool_name="focus_sql_erd_tables",
-                tool_input={
-                    "sessionId": SQL_ERD_SESSION_ID,
-                    "sessionRevision": 7,
-                    "modelFingerprint": "fnv1a32:1234abcd",
-                    "primaryTableRefs": ["t1"],
-                    "contextTableRefs": context_refs,
-                },
-            ),
-            job,
-            planning_context=sql_erd_inspection_planning_context("t1", "t2"),
-        )
-
-        assert normalized.status == "tool_candidate"
-        assert normalized.output_summary["input"]["contextTableRefs"] == []
-
-
-def test_sql_erd_table_focus_requires_latest_inspection_context() -> None:
-    focus_tool = tool_snapshot(
-        name="focus_sql_erd_tables",
-        description="SQLtoERD 테이블 집중 보기를 생성합니다.",
-        inputSchema={
-            "type": "object",
-            "required": ["primaryTableRefs"],
-            "additionalProperties": False,
-            "properties": {"primaryTableRefs": {"type": "array", "minItems": 1}},
-        },
-    )
-    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
-
-    normalized = normalize_agent_planner_decision(
-        planner_decision(
-            tool_name="focus_sql_erd_tables",
-            tool_input={
-                "sessionId": SQL_ERD_SESSION_ID,
-                "sessionRevision": 7,
-                "modelFingerprint": "fnv1a32:1234abcd",
-                "primaryTableRefs": ["t1"],
-            },
-        ),
-        job,
-    )
-
-    assert normalized.status == "needs_clarification"
-    assert normalized.output_summary["missingFields"] == ["sqlErdInspection"]
-    assert "스키마" in normalized.final_answer
-    assert "toolName" not in normalized.output_summary
+    assert normalized.output_summary["input"] == {"featureQuery": "회의 관련 핵심 테이블"}
+    assert "sessionId" not in normalized.output_summary["input"]
 
 
 def test_sql_erd_nullable_requested_dialect_is_not_missing() -> None:

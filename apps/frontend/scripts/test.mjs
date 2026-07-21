@@ -550,6 +550,30 @@ assert.match(mainShell, /HeaderMeetingStatus/);
 assert.match(mainShell, /HeaderNotificationDropdown/);
 assert.match(mainShell, /sticky top-0/);
 assert.match(mainShell, /<span className="truncate">\{activeFeature\.title\}<\/span>/);
+assert.match(mainShell, /data-sqltoerd-workspace-header/);
+assert.match(mainShell, /href="\/home"/);
+assert.match(mainShell, /<Home className="size-4"/);
+assert.match(mainShell, /SqlErdSessionHeaderTitle/);
+assert.match(
+  mainShell,
+  /isSqlErdImmersiveRoute[\s\S]*?<SqlErdSessionHeaderTitle[\s\S]*?fallback=\{activeFeature\.title\}/
+);
+assert.match(
+  mainShell,
+  /<span className="truncate">\{activeFeature\.title\}<\/span>/
+);
+assert.match(mainShell, /function WorkspaceHeaderActions/);
+const sqlErdWorkspaceHeader = mainShell.slice(
+  mainShell.lastIndexOf(
+    "<header",
+    mainShell.indexOf("data-sqltoerd-workspace-header")
+  ),
+  mainShell.indexOf("{children}", mainShell.indexOf("data-sqltoerd-workspace-header"))
+);
+assert.match(sqlErdWorkspaceHeader, /min-h-14/);
+assert.match(sqlErdWorkspaceHeader, /border-b/);
+assert.match(sqlErdWorkspaceHeader, /<WorkspaceHeaderActions \/>/);
+assert.doesNotMatch(sqlErdWorkspaceHeader, /mode="floating"/);
 assert.match(mainShell, /peer-data-\[variant=inset\]:!m-0/);
 assert.match(mainShell, /peer-data-\[state=collapsed\]:!ml-0/);
 assert.match(headerNotificationDropdown, /PopoverTrigger/);
@@ -1002,7 +1026,14 @@ assert.match(canvasRemoteOperations, /unloadedShapeIds/);
 assert.match(canvasRemoteOperations, /collectCanvasFrameDescendantShapeIds/);
 assert.match(canvasRemoteOperations, /function isShapeParentId/);
 assert.match(canvasRemoteOperations, /parentId\.startsWith\("shape:"\)/);
-assert.match(canvasRemoteOperations, /shapeDetailCache\.get\(parentId\)/);
+assert.match(
+  canvasRemoteOperations,
+  /isShapeParentId\(parentId\) && !currentShapeMap\.has\(parentId\)/,
+);
+assert.doesNotMatch(
+  canvasRemoteOperations,
+  /currentShapeMap\.get\(parentId\)\s*\?\?\s*shapeDetailCache\.get\(parentId\)/,
+);
 assert.match(canvasRemoteOperations, /parentId/);
 assert.match(canvasRuntime, /pendingRemoteFrameChildrenRequestRef/);
 assert.match(canvasRuntime, /result\.frameIdsToLoad/);
@@ -2195,6 +2226,7 @@ await import("./pr-review/test.mjs");
 await import("./pr-review-decision-realtime.test.mjs");
 await import("./pr-review-room-delete.test.mjs");
 await import("./sql-erd/test.mjs");
+await import("../src/features/sql-erd/session-header-title-store.test.mjs");
 await import("./sql-erd-realtime.test.mjs");
 await import("../src/shared/page-cursor/page-cursor.test.mjs");
 await import("../src/features/workspace-onboarding/github-onboarding.test.mjs");

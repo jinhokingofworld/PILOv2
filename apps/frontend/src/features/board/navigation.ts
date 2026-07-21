@@ -10,9 +10,5 @@ export const boardNavigation: FeatureNavigationItem = {
   action: "보드 보기",
   href: "/board",
   icon: LayoutDashboard,
-  items: [
-    { title: "칸반 보드", href: "/board#kanban" },
-    { title: "컬럼", href: "/board#columns" },
-    { title: "이슈 상세", href: "/board#issues" }
-  ]
+  items: []
 };

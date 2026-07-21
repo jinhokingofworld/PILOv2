@@ -10,8 +10,5 @@ export const sqlErdNavigation: FeatureNavigationItem = {
   action: "SQLtoERD 열기",
   href: "/sql-erd",
   icon: Database,
-  items: [
-    { title: "Source", href: "/sql-erd#source" },
-    { title: "Canvas", href: "/sql-erd#canvas" }
-  ]
+  items: []
 };

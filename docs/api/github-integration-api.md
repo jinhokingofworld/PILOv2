@@ -261,9 +261,8 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
 
 - 모든 `/workspaces/{workspaceId}/github/*` 조회 API는 PILO bearer token과
   Workspace 접근 권한을 요구한다.
-- `DELETE /workspaces/{workspaceId}/github/installations/{installationId}`만
-  Workspace owner 권한을 요구한다. Installation 시작, 목록, 원본 조회, sync run
-  조회/시작은 Workspace 접근 권한을 사용한다.
+- GitHub App installation 시작·삭제와 수동 sync run 시작은 Workspace owner만 할 수
+  있다. Installation 목록, 원본 조회, sync run 조회는 Workspace 접근 권한을 사용한다.
 - 페이지네이션 query는 `page`, `limit`을 사용한다. `page`와 `limit`은 양의 정수여야
   하며 `limit` 최대값은 `100`이다.
 - repository 목록, ProjectV2 목록, sync run 목록, PR file 목록의 기본 `limit`은
@@ -1032,9 +1031,22 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 ## Asynchronous sync execution
 
 Manual `POST /workspaces/{workspaceId}/github/sync-runs` returns `202 Accepted`.
-It creates a `queued` run and publishes a durable `github-sync-jobs` message; a worker
-performs the transition `queued → running → success|failed`. A queue-publish failure
-marks the run failed and returns an API error instead of leaving a stranded queued run.
+It requires an `Idempotency-Key` header containing exactly 1-128 raw printable ASCII
+bytes. Leading and trailing printable ASCII spaces are preserved and distinct. The
+server stores only its lowercase SHA-256 hash. A replay with the same manual-sync scope
+returns the original run; a compatible active run is reused. Both `202` replay/reuse
+responses do not create or enqueue another job. Reusing a key with a different scope
+returns `409 GITHUB_SYNC_IDEMPOTENCY_CONFLICT`.
+
+New manual runs are admitted only for the Workspace owner and are limited per user and
+per Workspace, with a cooldown; these limits do not apply to automatic, webhook, polling,
+or legacy sync. `400` is returned for a missing or invalid `Idempotency-Key`. A rejected
+manual rate limit returns `429 GITHUB_SYNC_RATE_LIMITED` with safe `limitScope` and
+`retryAfterSeconds` details. Global manual queue saturation returns
+`503 GITHUB_SYNC_QUEUE_SATURATED` with only safe retry advice; clients should retry after
+the indicated delay and must not infer queue depth. A queue-publish failure after a newly
+created durable run marks that run failed and returns an API error instead of leaving a
+stranded queued run.
 
 ## ProjectV2 setup and selected sync scope
 

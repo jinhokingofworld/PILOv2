@@ -154,6 +154,61 @@ variable "github_sync_worker_desired_count" {
   default     = 1
 }
 
+variable "github_manual_sync_user_limit" {
+  description = "Maximum new manual GitHub sync runs per user in each rate window."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.github_manual_sync_user_limit > 0 && floor(var.github_manual_sync_user_limit) == var.github_manual_sync_user_limit && var.github_manual_sync_user_limit <= 9007199254740991
+    error_message = "github_manual_sync_user_limit must be a positive integer no greater than 9007199254740991."
+  }
+}
+
+variable "github_manual_sync_workspace_limit" {
+  description = "Maximum new manual GitHub sync runs per Workspace in each rate window."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.github_manual_sync_workspace_limit > 0 && floor(var.github_manual_sync_workspace_limit) == var.github_manual_sync_workspace_limit && var.github_manual_sync_workspace_limit <= 9007199254740991
+    error_message = "github_manual_sync_workspace_limit must be a positive integer no greater than 9007199254740991."
+  }
+}
+
+variable "github_manual_sync_rate_window_seconds" {
+  description = "Rate-limit window in seconds for new manual GitHub sync runs."
+  type        = number
+  default     = 600
+
+  validation {
+    condition     = var.github_manual_sync_rate_window_seconds > 0 && floor(var.github_manual_sync_rate_window_seconds) == var.github_manual_sync_rate_window_seconds && var.github_manual_sync_rate_window_seconds <= 9007199254740991
+    error_message = "github_manual_sync_rate_window_seconds must be a positive integer no greater than 9007199254740991."
+  }
+}
+
+variable "github_manual_sync_cooldown_seconds" {
+  description = "Minimum seconds between new manual GitHub sync runs for a user or Workspace."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.github_manual_sync_cooldown_seconds > 0 && floor(var.github_manual_sync_cooldown_seconds) == var.github_manual_sync_cooldown_seconds && var.github_manual_sync_cooldown_seconds <= 9007199254740991
+    error_message = "github_manual_sync_cooldown_seconds must be a positive integer no greater than 9007199254740991."
+  }
+}
+
+variable "github_manual_sync_max_queued_jobs" {
+  description = "Maximum globally queued manual GitHub sync jobs before admission is rejected."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.github_manual_sync_max_queued_jobs > 0 && floor(var.github_manual_sync_max_queued_jobs) == var.github_manual_sync_max_queued_jobs && var.github_manual_sync_max_queued_jobs <= 9007199254740991
+    error_message = "github_manual_sync_max_queued_jobs must be a positive integer no greater than 9007199254740991."
+  }
+}
+
 variable "app_server_cpu" {
   type    = number
   default = 256

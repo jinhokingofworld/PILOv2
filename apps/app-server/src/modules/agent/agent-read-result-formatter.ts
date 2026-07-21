@@ -107,6 +107,12 @@ export function buildAgentReadResultAnswer(
 }
 
 function formatSqlErdTableFocus(input: AgentReadResultFormatterInput): string | null {
+  if (readString(input.outputSummary.action) === "needs_clarification") {
+    return (
+      boundText(input.outputSummary.question, 240) ??
+      "집중해서 볼 테이블 이름이나 기능 범위를 더 구체적으로 알려주세요."
+    );
+  }
   if (readString(input.outputSummary.action) !== "focused") {
     return null;
   }

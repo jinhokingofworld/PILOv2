@@ -11,6 +11,7 @@ const { GithubOAuthClient } = require("../../dist/modules/github-integration/git
 const { GithubOAuthInstallationLookupError } = require("../../dist/modules/github-integration/github-oauth-installation-lookup.error.js");
 const { GithubTokenEncryptionService } = require("../../dist/modules/github-integration/github-token-encryption.service.js");
 const { GithubSyncJobEnqueueError } = require("../../dist/modules/github-integration/github-sync-job.service.js");
+const { forbidden } = require("../../dist/common/api-error.js");
 
 class FakeDatabase {
   constructor({ oneRows = [], rows = [], handlers = {} } = {}) {
@@ -65,6 +66,7 @@ class FakeWorkspaceService {
 
   async assertWorkspaceOwnerAccess(currentUserId, workspaceId) {
     this.ownerChecks.push({ currentUserId, workspaceId });
+    if (this.ownerError) throw this.ownerError;
     return {
       id: workspaceId,
       name: "Engineering",
@@ -133,6 +135,24 @@ const connectedGithubOAuthRow = {
   revoked_at: null
 };
 
+{
+  const database = new FakeDatabase({ oneRows: [connectedGithubOAuthRow] });
+  const workspaceService = new FakeWorkspaceService();
+  workspaceService.ownerError = forbidden("Workspace owner access is required");
+  let installationLookupCalled = false;
+  const service = createService({
+    database,
+    workspaceService,
+    githubOAuthClient: { async assertUserInstallationLookupSupported() { installationLookupCalled = true; } }
+  });
+  await assert.rejects(
+    () => service.startGithubAppInstallation(currentUserId, workspaceId, { returnUrl: "https://pilo.test/github" }),
+    error => error.getStatus() === 403
+  );
+  assert.deepEqual(database.queries, []);
+  assert.equal(installationLookupCalled, false);
+}
+
 function createService({
   database,
   workspaceService,
@@ -178,7 +198,8 @@ function createService({
     returnUrl: "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github"
   });
 
-  assert.deepEqual(workspaceService.accessChecks, [{ currentUserId, workspaceId }]);
+  assert.deepEqual(workspaceService.ownerChecks, [{ currentUserId, workspaceId }]);
+  assert.deepEqual(workspaceService.accessChecks, []);
   assert.match(database.queries[0].text, /access_token_encrypted/i);
   assert.deepEqual(database.queries[0].values, [currentUserId, "app_user"]);
 

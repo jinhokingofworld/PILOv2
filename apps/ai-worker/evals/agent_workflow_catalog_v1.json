@@ -1,0 +1,344 @@
+{
+  "version": "agent-workflow-regression:v3",
+  "scenarioCount": 31,
+  "workflowCases": [
+    {
+      "id": "meeting_report_list", "category": "single_tool", "evaluationDomains": ["meeting"],
+      "prompt": "최근 완료된 회의록 3건을 보여줘", "expectedDomains": ["meeting"], "expectedCapabilityIds": ["meeting.reports.list"],
+      "finalAnswerContains": ["주간 제품 회의록"],
+      "outcome": {"responseEvidence": [{"allOf": ["주간", "제품", "회의록"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "list_meeting_reports", "inputContains": {"status": "COMPLETED", "limit": 3}, "output": {"reports": [{"title": "주간 제품 회의록"}]}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "meeting_report_summary", "category": "grounded_answer", "evaluationDomains": ["meeting"],
+      "prompt": "완료된 회의록의 논의사항과 결정사항을 요약해줘", "expectedDomains": ["meeting"], "expectedCapabilityIds": ["meeting.report.summary"],
+      "finalAnswerContains": ["출시일은 8월 1일"],
+      "outcome": {"responseEvidence": [{"allOf": ["출시일", "8월", "1일"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "summarize_meeting_report", "inputContains": {"status": "COMPLETED", "sections": ["discussionPoints", "decisions"]}, "output": {"title": "출시 준비 회의", "discussionPoints": ["배포 위험 점검"], "decisions": ["출시일은 8월 1일"]}, "requiresConfirmation": null},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "meeting_action_items", "category": "single_tool", "evaluationDomains": ["meeting"],
+      "prompt": "내 담당 회의 후속 작업을 찾아줘", "expectedDomains": ["meeting"], "expectedCapabilityIds": ["meeting.action_items.list"],
+      "finalAnswerContains": ["배포 체크리스트 작성"],
+      "outcome": {"responseEvidence": [{"allOf": ["배포", "체크리스트"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "find_action_items", "inputContains": {"assigneeSelf": true}, "output": {"items": [{"title": "배포 체크리스트 작성", "status": "OPEN"}]}, "requiresConfirmation": null},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "meeting_room_list", "category": "single_tool", "evaluationDomains": ["meeting"],
+      "prompt": "회의방과 현재 진행 상태를 보여줘", "expectedDomains": ["meeting"], "expectedCapabilityIds": ["meeting.rooms.list"],
+      "finalAnswerContains": ["회의실 A"],
+      "outcome": {"responseEvidence": [{"allOf": ["회의실", "A"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "list_meeting_rooms", "inputContains": {}, "output": {"rooms": [{"name": "회의실 A", "status": "IDLE"}]}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "meeting_decision_evidence", "category": "multi_tool", "evaluationDomains": ["meeting"],
+      "prompt": "최근 출시 준비 회의의 첫 번째 결정 근거를 보여줘", "expectedDomains": ["meeting"], "expectedCapabilityIds": ["meeting.decision.evidence"],
+      "finalAnswerContains": ["고객 공지 완료 후 배포"],
+      "outcome": {"responseEvidence": [{"allOf": ["고객", "공지", "배포"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "list_meeting_reports", "inputContains": {"limit": 1}, "output": {"reports": [{"title": "출시 준비 회의", "contextRef": "ctx_111111111111111111111111"}]}, "requiresConfirmation": false},
+        {"toolName": "get_meeting_decision_evidence", "inputContains": {"decisionIndex": 0}, "output": {"decision": "8월 1일 출시", "evidence": ["고객 공지 완료 후 배포"]}, "requiresConfirmation": null},
+        {"status": "completed"}
+      ]
+    },
+
+    {
+      "id": "calendar_event_list", "category": "single_tool", "evaluationDomains": ["calendar"],
+      "prompt": "2026년 7월 22일 일정을 보여줘", "expectedDomains": ["calendar"], "expectedCapabilityIds": ["calendar.events.list"],
+      "finalAnswerContains": ["스프린트 계획"],
+      "outcome": {"responseEvidence": [{"allOf": ["스프린트", "계획"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "list_calendar_events", "inputContains": {"start": "2026-07-22", "end": "2026-07-22"}, "output": {"events": [{"title": "스프린트 계획"}]}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "calendar_event_create", "category": "confirmation", "evaluationDomains": ["calendar"],
+      "prompt": "2026년 7월 23일 오후 3시에 디자인 리뷰 일정을 만들어줘", "expectedDomains": ["calendar"], "expectedCapabilityIds": ["calendar.events.create"],
+      "expectedPlannerStatus": "tool_candidate", "expectedTerminalStatus": "waiting_user_input",
+      "outcome": {"responseEvidence": [], "responseForbidden": [], "requireResponse": true},
+      "stages": [
+        {"toolName": "create_calendar_event", "inputContains": {"title": "디자인 리뷰", "startDate": "2026-07-23", "endDate": "2026-07-23", "startTime": "15:00"}, "output": {}, "requiresConfirmation": true},
+        {"status": "waiting_user_input"}
+      ]
+    },
+    {
+      "id": "calendar_event_update", "category": "multi_tool", "evaluationDomains": ["calendar"],
+      "prompt": "2026년 7월 24일 오후 3시 주간 회의를 오후 4시로 바꿔줘", "expectedDomains": ["calendar"], "expectedCapabilityIds": ["calendar.events.update"],
+      "expectedPlannerStatus": "tool_candidate", "expectedTerminalStatus": "waiting_user_input",
+      "outcome": {"responseEvidence": [], "responseForbidden": [], "requireResponse": true},
+      "stages": [
+        {"toolName": "list_calendar_events", "inputContains": {"start": "2026-07-24", "end": "2026-07-24"}, "output": {"events": [{"title": "주간 회의", "startTime": "15:00"}]}, "requiresConfirmation": false},
+        {"toolName": "update_calendar_event", "inputContains": {"target": {"title": "주간 회의", "startDate": "2026-07-24", "endDate": "2026-07-24", "startTime": "15:00"}, "changes": {"startTime": "16:00"}}, "output": {}, "requiresConfirmation": true},
+        {"status": "waiting_user_input"}
+      ]
+    },
+    {
+      "id": "calendar_create_missing_time", "category": "clarification", "evaluationDomains": ["calendar"],
+      "prompt": "다음 주에 팀 회의 일정 만들어줘", "expectedDomains": ["calendar"], "expectedCapabilityIds": ["calendar.events.create"],
+      "expectedPlannerStatus": "needs_clarification", "expectedTerminalStatus": "waiting_user_input",
+      "outcome": {"responseEvidence": [], "responseForbidden": [], "requireResponse": true},
+      "stages": [{"status": "waiting_user_input"}]
+    },
+    {
+      "id": "calendar_delete_unsupported", "category": "unsupported", "evaluationDomains": ["calendar"],
+      "prompt": "내일 일정을 삭제해줘", "expectedDomains": [], "expectedCapabilityIds": [],
+      "expectedRouterStatus": "unsupported", "expectedPlannerStatus": "unsupported", "expectedTerminalStatus": "completed",
+      "outcome": {"responseEvidence": [], "responseForbidden": [], "requireResponse": true},
+      "stages": [{"status": "unsupported"}]
+    },
+
+    {
+      "id": "board_issue_search", "category": "multi_tool", "evaluationDomains": ["board"],
+      "prompt": "Board에서 Agent 평가 이슈를 검색해줘", "expectedDomains": ["board"], "expectedCapabilityIds": ["board.issues.search"],
+      "finalAnswerContains": ["Agent 평가 범위 확장"],
+      "outcome": {"responseEvidence": [{"allOf": ["Agent", "평가", "확장"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "search_board_issues", "inputContains": {"search": "Agent 평가"}, "output": {"issues": [{"issueNumber": "#1487", "title": "Agent 평가 범위 확장"}]}, "requiresConfirmation": false},
+        {"toolName": "get_board_issue_context", "inputContains": {"issueNumber": "#1487"}, "output": {"issueNumber": "#1487", "title": "Agent 평가 범위 확장", "state": "open"}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "board_issue_detail", "category": "multi_tool", "evaluationDomains": ["board"],
+      "prompt": "Board의 #1575 이슈 상세와 관련 PR을 보여줘", "expectedDomains": ["board"], "expectedCapabilityIds": ["board.issues.search"],
+      "finalAnswerContains": ["로그인 세션 오류", "PR #1604"],
+      "outcome": {"responseEvidence": [{"allOf": ["로그인", "세션", "오류"]}, {"allOf": ["PR", "1604"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "search_board_issues", "inputContains": {"search": "#1575"}, "output": {"issues": [{"issueNumber": "#1575", "title": "로그인 세션 오류"}]}, "requiresConfirmation": false},
+        {"toolName": "get_board_issue_context", "inputContains": {"issueNumber": "#1575"}, "output": {"issueNumber": "#1575", "title": "로그인 세션 오류", "relatedPullRequests": ["PR #1604"]}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "board_issue_create", "category": "confirmation", "evaluationDomains": ["board"],
+      "prompt": "Todo에 로그인 오류 이슈를 생성해줘", "expectedDomains": ["board"], "expectedCapabilityIds": ["board.issues.create"],
+      "expectedPlannerStatus": "tool_candidate", "expectedTerminalStatus": "waiting_user_input",
+      "outcome": {"responseEvidence": [], "responseForbidden": [], "requireResponse": true},
+      "stages": [
+        {"toolName": "create_board_issue", "inputContains": {"title": "로그인 오류", "columnName": "Todo"}, "output": {}, "requiresConfirmation": true},
+        {"status": "waiting_user_input"}
+      ]
+    },
+    {
+      "id": "board_issue_move", "category": "multi_tool", "evaluationDomains": ["board"],
+      "prompt": "#134 이슈를 In Progress로 옮겨줘", "expectedDomains": ["board"], "expectedCapabilityIds": ["board.issues.move"],
+      "expectedPlannerStatus": "tool_candidate", "expectedTerminalStatus": "waiting_user_input",
+      "outcome": {"responseEvidence": [], "responseForbidden": [], "requireResponse": true},
+      "stages": [
+        {"toolName": "search_board_issues", "inputContains": {"search": "#134"}, "output": {"issues": [{"issueNumber": "#134", "title": "OAuth 오류", "columnName": "Todo"}]}, "requiresConfirmation": false},
+        {"toolName": "move_board_issue_status", "inputContains": {"issueNumber": "#134", "columnName": "In Progress"}, "output": {}, "requiresConfirmation": true},
+        {"status": "waiting_user_input"}
+      ]
+    },
+    {
+      "id": "board_issue_assign", "category": "multi_tool", "evaluationDomains": ["board"],
+      "prompt": "#134 이슈에 alice를 담당자로 추가해줘", "expectedDomains": ["board"], "expectedCapabilityIds": ["board.issues.assign"],
+      "expectedPlannerStatus": "tool_candidate", "expectedTerminalStatus": "waiting_user_input",
+      "outcome": {"responseEvidence": [], "responseForbidden": [], "requireResponse": true},
+      "stages": [
+        {"toolName": "search_board_issues", "inputContains": {"search": "#134"}, "output": {"issues": [{"issueNumber": "#134", "title": "OAuth 오류"}]}, "requiresConfirmation": false},
+        {"toolName": "assign_board_issue_safely", "inputContains": {"issueNumber": "#134", "addAssignees": ["alice"]}, "output": {}, "requiresConfirmation": true},
+        {"status": "waiting_user_input"}
+      ]
+    },
+
+    {
+      "id": "drive_title_search", "category": "single_tool", "evaluationDomains": ["drive"],
+      "prompt": "Workspace에서 제목이 로그인 장애 대응 절차인 문서를 찾아줘", "expectedDomains": ["drive"], "expectedCapabilityIds": ["drive.documents.search"],
+      "finalAnswerContains": ["로그인 장애 대응 절차"],
+      "outcome": {"responseEvidence": [{"allOf": ["로그인", "세션", "오류"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "search_workspace_documents", "inputContains": {"query": "로그인 장애 대응 절차"}, "output": {"documents": [{"title": "로그인 장애 대응 절차", "excerpt": "세션 만료와 OAuth callback을 점검한다."}]}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "drive_content_search", "category": "grounded_answer", "evaluationDomains": ["drive"],
+      "prompt": "문서 본문에서 세인이 ERD 1차 MVP를 어디까지 구현한다고 했는지 찾아줘", "expectedDomains": ["drive"], "expectedCapabilityIds": ["drive.documents.search"],
+      "finalAnswerContains": ["DDL 파싱과 관계선"],
+      "outcome": {"responseEvidence": [{"allOf": ["DDL", "관계"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "search_workspace_documents", "inputContains": {"query": "세인이 ERD 1차 MVP를 어디까지 구현"}, "output": {"documents": [{"title": "ERD MVP 범위", "excerpt": "1차 MVP는 DDL 파싱과 관계선까지 구현한다."}]}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "drive_no_result", "category": "grounded_answer", "evaluationDomains": ["drive"],
+      "prompt": "Workspace에서 2030년 화성 지사 이전 계획 문서를 찾아줘", "expectedDomains": ["drive"], "expectedCapabilityIds": ["drive.documents.search"],
+      "finalAnswerContains": ["찾지 못"],
+      "outcome": {"responseEvidence": [{"allOf": ["찾지", "못"]}], "responseForbidden": ["찾지 못한 것은 아닙니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "search_workspace_documents", "inputContains": {"query": "2030년 화성 지사 이전 계획"}, "output": {"documents": [], "message": "관련 문서를 찾지 못했습니다."}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "drive_similar_documents", "category": "grounded_answer", "evaluationDomains": ["drive"],
+      "prompt": "Workspace에서 Agent 평가 설계 문서와 실행 계획 문서를 구분해서 찾아줘", "expectedDomains": ["drive"], "expectedCapabilityIds": ["drive.documents.search"],
+      "finalAnswerContains": ["Agent 평가 설계", "Agent 평가 실행 계획"],
+      "outcome": {"responseEvidence": [{"allOf": ["Agent", "평가", "설계"]}, {"allOf": ["Agent", "평가", "실행", "계획"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "search_workspace_documents", "inputContains": {"query": "Agent 평가 설계 문서와 실행 계획 문서"}, "output": {"documents": [{"title": "Agent 평가 설계", "type": "design"}, {"title": "Agent 평가 실행 계획", "type": "plan"}]}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "drive_evidence_lookup", "category": "grounded_answer", "evaluationDomains": ["drive"],
+      "prompt": "Workspace 문서에서 로그인 실패 시 확인해야 할 항목을 찾아줘.", "expectedDomains": ["drive"], "expectedCapabilityIds": ["drive.documents.search"],
+      "finalAnswerContains": ["세션 만료", "OAuth callback"],
+      "outcome": {"responseEvidence": [{"allOf": ["세션", "OAuth"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "search_workspace_documents", "inputContains": {"query": "로그인 실패 확인 항목"}, "outcomeInputAssertions": [{"path": ["query"], "containsAll": ["로그인", "실패"]}], "output": {"documents": [{"title": "로그인 장애 대응 절차", "excerpt": "세션 만료와 OAuth callback 설정을 확인한다."}]}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "drive_avoids_meeting_confusion", "category": "routing_boundary", "evaluationDomains": ["routing_boundary"],
+      "prompt": "Workspace 문서 말고 최근 출시 회의록의 첫 번째 결정 근거를 보여줘", "expectedDomains": ["meeting"], "expectedCapabilityIds": ["meeting.decision.evidence"],
+      "finalAnswerContains": ["QA 승인 후 배포"],
+      "outcome": {"responseEvidence": [{"allOf": ["QA", "배포"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "list_meeting_reports", "inputContains": {"limit": 1}, "output": {"reports": [{"title": "출시 회의록", "contextRef": "ctx_222222222222222222222222"}]}, "requiresConfirmation": false},
+        {"toolName": "get_meeting_decision_evidence", "inputContains": {"decisionIndex": 0}, "output": {"decision": "금요일 배포", "evidence": ["QA 승인 후 배포"]}, "requiresConfirmation": null},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "drive_avoids_board_confusion", "category": "routing_boundary", "evaluationDomains": ["routing_boundary"],
+      "prompt": "Workspace 문서 말고 Board에서 로그인 장애 이슈를 찾아줘", "expectedDomains": ["board"], "expectedCapabilityIds": ["board.issues.search"],
+      "finalAnswerContains": ["로그인 세션 오류"],
+      "outcome": {"responseEvidence": [{"allOf": ["로그인", "세션", "오류"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "search_board_issues", "inputContains": {"search": "로그인 장애"}, "output": {"issues": [{"issueNumber": "#1575", "title": "로그인 세션 오류"}]}, "requiresConfirmation": false},
+        {"toolName": "get_board_issue_context", "inputContains": {"issueNumber": "#1575"}, "output": {"issueNumber": "#1575", "title": "로그인 세션 오류", "state": "open"}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+
+    {
+      "id": "sql_erd_generate", "category": "single_tool", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "prompt": "사용자와 주문, 주문 항목이 있는 쇼핑몰 ERD를 PostgreSQL로 만들어줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.generate"],
+      "finalAnswerContains": ["SQLtoERD"],
+      "outcome": {"responseEvidence": [{"allOf": ["ERD"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "generate_sql_erd", "inputContains": {"version": 1, "requestedDialect": "postgresql"}, "output": {"action": "created", "title": "쇼핑몰 주문 ERD", "tableCount": 3, "relationCount": 2}, "requiresConfirmation": null},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "sql_erd_generate_hamburger_shop", "category": "routing_boundary", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "prompt": "햄버거 가게 관련 ERD를 생성해줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.generate"],
+      "finalAnswerContains": ["SQLtoERD"],
+      "outcome": {"responseEvidence": [{"allOf": ["ERD"]}], "responseForbidden": ["집중할 테이블", "안전하게 확정하지 못했습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "generate_sql_erd", "inputContains": {"version": 1}, "output": {"action": "created", "title": "햄버거 가게 ERD", "tableCount": 5, "relationCount": 4}, "requiresConfirmation": null},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "sql_erd_focus_meeting_tables", "category": "routing_boundary", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "prompt": "현재 ERD에서 회의 관련 테이블만 집중적으로 보여줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.inspect"],
+      "finalAnswerContains": ["meetings", "meeting_participants"],
+      "outcome": {"responseEvidence": [{"allOf": ["meetings", "meeting_participants"]}], "responseForbidden": ["ERD를 생성", "새 ERD"], "requireResponse": true},
+      "stages": [
+        {"toolName": "focus_sql_erd_tables", "inputContains": {"featureQuery": "회의 관련 테이블"}, "output": {"action": "focused", "sessionRevision": 7, "modelFingerprint": "fnv1a32:1234abcd", "title": "업무 ERD", "featureLabel": "회의 관련 테이블", "confidence": "high", "primaryTables": [{"name": "meetings", "reason": "회의 기능의 중심 테이블"}], "relatedTables": [{"name": "meeting_participants", "reason": "meetings와 직접 FK 연결"}, {"name": "meeting_recordings", "reason": "meetings와 직접 FK 연결"}], "contextTables": [], "ignoredContextTables": [], "relationCount": 2}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "sql_erd_schema_inspect", "category": "single_tool", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "prompt": "현재 SQLtoERD schema의 핵심 테이블을 보여줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.inspect"],
+      "finalAnswerContains": ["users", "orders"],
+      "outcome": {"responseEvidence": [{"allOf": ["users", "orders"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "focus_sql_erd_tables", "inputContains": {"featureQuery": "핵심 테이블"}, "output": {"action": "focused", "sessionRevision": 7, "modelFingerprint": "fnv1a32:1234abcd", "title": "쇼핑몰 ERD", "featureLabel": "핵심 테이블", "confidence": "high", "primaryTables": [{"name": "users", "reason": "사용자 기능의 중심 테이블"}], "relatedTables": [{"name": "orders", "reason": "users와 직접 FK 연결"}], "contextTables": [], "ignoredContextTables": [], "relationCount": 1}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "sql_erd_relation_explore", "category": "single_tool", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "prompt": "SQLtoERD에서 결제와 주문의 관계를 탐색해줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.inspect"],
+      "finalAnswerContains": ["payments", "orders"],
+      "outcome": {"responseEvidence": [{"allOf": ["payments", "orders"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "focus_sql_erd_tables", "inputContains": {"featureQuery": "결제와 주문 관계"}, "output": {"action": "focused", "sessionRevision": 7, "modelFingerprint": "fnv1a32:1234abcd", "title": "결제 ERD", "featureLabel": "결제와 주문 관계", "confidence": "high", "primaryTables": [{"name": "payments", "reason": "결제 기능의 중심 테이블"}], "relatedTables": [{"name": "orders", "reason": "payments와 직접 FK 연결"}], "contextTables": [], "ignoredContextTables": [], "relationCount": 1}, "requiresConfirmation": false},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "sql_erd_missing_entities", "category": "clarification", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "prompt": "ERD를 하나 만들어줘", "expectedDomains": ["sql_erd"], "expectedCapabilityIds": ["sql_erd.generate"],
+      "expectedPlannerStatus": "needs_clarification", "expectedTerminalStatus": "waiting_user_input",
+      "outcome": {"responseEvidence": [], "responseForbidden": [], "requireResponse": true},
+      "stages": [{"status": "waiting_user_input"}]
+    },
+    {
+      "id": "sql_erd_database_execution_unsupported", "category": "unsupported", "evaluationDomains": ["sql_erd"], "contextSurface": "sql_erd",
+      "prompt": "이 SQL을 운영 데이터베이스에 바로 실행해줘", "expectedDomains": [], "expectedCapabilityIds": [],
+      "expectedRouterStatus": "unsupported", "expectedPlannerStatus": "unsupported", "expectedTerminalStatus": "completed",
+      "outcome": {"responseEvidence": [], "responseForbidden": [], "requireResponse": true},
+      "stages": [{"status": "unsupported"}]
+    },
+
+    {
+      "id": "pr_review_backend_focus", "category": "single_tool", "evaluationDomains": ["pr_review"], "contextSurface": "pr_review",
+      "prompt": "현재 PR에서 백엔드 기준으로 먼저 볼 변경을 추천해줘", "expectedDomains": ["pr_review"], "expectedCapabilityIds": ["pr_review.focus"],
+      "finalAnswerContains": ["agent_processor.py"],
+      "outcome": {"responseEvidence": [{"allOf": ["agent", "processor"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "recommend_pr_review_focus", "inputContains": {"focus": "backend"}, "output": {"focus": "backend", "mustReview": [{"path": "apps/ai-worker/app/agent_processor.py"}]}, "requiresConfirmation": null},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "pr_review_frontend_focus", "category": "single_tool", "evaluationDomains": ["pr_review"], "contextSurface": "pr_review",
+      "prompt": "현재 PR에서 프론트엔드 기준으로 먼저 볼 변경을 추천해줘", "expectedDomains": ["pr_review"], "expectedCapabilityIds": ["pr_review.focus"],
+      "finalAnswerContains": ["AgentPanel.tsx"],
+      "outcome": {"responseEvidence": [{"allOf": ["AgentPanel"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "recommend_pr_review_focus", "inputContains": {"focus": "frontend"}, "output": {"focus": "frontend", "mustReview": [{"path": "apps/frontend/src/components/AgentPanel.tsx"}]}, "requiresConfirmation": null},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "pr_review_api_focus", "category": "single_tool", "evaluationDomains": ["pr_review"], "contextSurface": "pr_review",
+      "prompt": "현재 PR에서 API 계약 기준으로 먼저 볼 변경을 추천해줘", "expectedDomains": ["pr_review"], "expectedCapabilityIds": ["pr_review.focus"],
+      "finalAnswerContains": ["agent.controller.ts"],
+      "outcome": {"responseEvidence": [{"allOf": ["agent", "controller"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "recommend_pr_review_focus", "inputContains": {"focus": "api"}, "output": {"focus": "api", "mustReview": [{"path": "apps/app-server/src/modules/agent/agent.controller.ts"}]}, "requiresConfirmation": null},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "pr_review_test_focus", "category": "grounded_answer", "evaluationDomains": ["pr_review"], "contextSurface": "pr_review",
+      "prompt": "현재 PR에서 테스트 기준으로 먼저 볼 파일을 추천해줘", "expectedDomains": ["pr_review"], "expectedCapabilityIds": ["pr_review.focus"],
+      "finalAnswerContains": ["test_agent_processor.py"],
+      "outcome": {"responseEvidence": [{"allOf": ["test", "agent", "processor"]}], "responseForbidden": ["찾지 못", "없습니다"], "requireResponse": true},
+      "stages": [
+        {"toolName": "recommend_pr_review_focus", "inputContains": {"focus": "test"}, "output": {"focus": "test", "mustReview": [{"path": "apps/ai-worker/tests/test_agent_processor.py"}]}, "requiresConfirmation": null},
+        {"status": "completed"}
+      ]
+    },
+    {
+      "id": "pr_review_submit_unsupported", "category": "unsupported", "evaluationDomains": ["pr_review"], "contextSurface": "pr_review",
+      "prompt": "이 PR review를 제출하고 바로 merge해줘", "expectedDomains": [], "expectedCapabilityIds": [],
+      "expectedRouterStatus": "unsupported", "expectedPlannerStatus": "unsupported", "expectedTerminalStatus": "completed",
+      "outcome": {"responseEvidence": [], "responseForbidden": [], "requireResponse": true},
+      "stages": [{"status": "unsupported"}]
+    }
+  ]
+}

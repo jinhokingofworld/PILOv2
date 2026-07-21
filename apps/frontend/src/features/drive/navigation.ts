@@ -10,7 +10,5 @@ export const driveNavigation: FeatureNavigationItem = {
   action: "파일 보기",
   href: "/files",
   icon: Folder,
-  items: [
-    { title: "공유 파일", href: "/files" }
-  ]
+  items: []
 };

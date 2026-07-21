@@ -261,7 +261,7 @@ def test_full_catalog_shortlists_calendar_list_for_common_date_queries(prompt: s
         (
             "현재 ERD 테이블 보여줘",
             "sql_erd.inspect",
-            {"inspect_sql_erd_schema", "focus_sql_erd_tables"},
+            {"focus_sql_erd_tables"},
         ),
         (
             "PR 리뷰 우선순위 보여줘",
@@ -286,6 +286,25 @@ def test_full_catalog_uses_korean_intent_cues_across_domains(
     assert retrieval.selected_capability_ids == (capability_id,)
     assert set(retrieval.tool_names) == tool_names
     assert retrieval.fallback_reason is None
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "오늘 오후 3시 일정 만들어줘",
+        "새 보드 이슈 만들어줘",
+    ),
+)
+def test_general_create_requests_do_not_cross_select_sql_erd_generate(prompt: str) -> None:
+    fixture = json.loads(QUALITY_FIXTURE_PATH.read_text(encoding="utf-8"))
+    schemas = fixture["eligibleToolSchemas"]
+    catalog = parse_tool_capability_catalog(fixture["toolCapabilityCatalog"], schemas)
+    assert catalog is not None
+
+    retrieval = retrieve_tool_shortlist(prompt, catalog)
+
+    assert "sql_erd.generate" not in retrieval.selected_capability_ids
+    assert "generate_sql_erd" not in retrieval.tool_names
 
 
 def test_full_catalog_routes_korean_delete_request_to_unsupported_capability() -> None:

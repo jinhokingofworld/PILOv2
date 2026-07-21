@@ -1555,10 +1555,10 @@
       }
     },
     {
-      "name": "inspect_sql_erd_schema",
-      "description": "Workspace SQLtoERD session의 테이블 이름, 주요 컬럼, data type, 제한된 enum 값과 FK 관계를 projection으로 조회합니다. 기능 관련 테이블을 찾을 때 반드시 먼저 사용하며 session이 여러 개면 사용자가 선택할 후보를 반환합니다.",
+      "name": "focus_sql_erd_tables",
+      "description": "현재 SQLtoERD 화면의 schema를 서버가 안전하게 검사해 요청 기능의 핵심 테이블과 직접 FK 연결 테이블을 집중 보기로 만듭니다. featureQuery만 전달하며 session ID나 table ref를 추측하지 않습니다.",
       "riskLevel": "low",
-      "executionMode": "contextual",
+      "executionMode": "auto",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1570,180 +1570,6 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200
-          },
-          "sessionId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "sessionSelectionToken": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "sessionTitle": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 120
-          }
-        }
-      }
-    },
-    {
-      "name": "focus_sql_erd_tables",
-      "description": "inspect_sql_erd_schema 결과의 compact table ref와 schema evidence를 model fingerprint로 검증하고 핵심, 직접 FK 관련 및 문맥 테이블의 일회성 집중 보기 링크를 만듭니다. SQLtoERD session과 실제 관계선은 변경하지 않습니다.",
-      "riskLevel": "low",
-      "executionMode": "auto",
-      "inputSchema": {
-        "type": "object",
-        "required": [
-          "sessionId",
-          "sessionRevision",
-          "modelFingerprint",
-          "featureLabel",
-          "primaryTableRefs",
-          "relatedTableRefs",
-          "contextTableRefs",
-          "confidence",
-          "reasons"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "sessionRevision": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "modelFingerprint": {
-            "type": "string",
-            "pattern": "^fnv1a32:[0-9a-f]{8}$"
-          },
-          "featureLabel": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
-          },
-          "primaryTableRefs": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 20,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "pattern": "^t[1-9][0-9]*$"
-            }
-          },
-          "relatedTableRefs": {
-            "type": "array",
-            "maxItems": 30,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "pattern": "^t[1-9][0-9]*$"
-            }
-          },
-          "contextTableRefs": {
-            "type": "array",
-            "maxItems": 20,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "pattern": "^t[1-9][0-9]*$"
-            }
-          },
-          "confidence": {
-            "type": "string",
-            "enum": [
-              "high",
-              "medium",
-              "low"
-            ]
-          },
-          "reasons": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 70,
-            "items": {
-              "type": "object",
-              "required": [
-                "tableRef",
-                "reason"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "tableRef": {
-                  "type": "string",
-                  "pattern": "^t[1-9][0-9]*$"
-                },
-                "reason": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 240
-                },
-                "evidence": {
-                  "type": "array",
-                  "minItems": 1,
-                  "maxItems": 5,
-                  "items": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "required": [
-                          "kind",
-                          "value"
-                        ],
-                        "additionalProperties": false,
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "table_name",
-                              "table_comment",
-                              "column_name"
-                            ]
-                          },
-                          "value": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 240
-                          }
-                        }
-                      },
-                      {
-                        "type": "object",
-                        "required": [
-                          "kind",
-                          "columnName",
-                          "value"
-                        ],
-                        "additionalProperties": false,
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "column_comment",
-                              "data_type",
-                              "enum_value"
-                            ]
-                          },
-                          "columnName": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 80
-                          },
-                          "value": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 240
-                          }
-                        }
-                      }
-                    ]
-                  }
-                }
-              }
-            }
           }
         }
       }
@@ -2360,24 +2186,11 @@
       "prompt": "SQLtoERD에서 결제 기능과 관련된 테이블만 집중해서 보여줘",
       "expected": {
         "status": "tool_candidate",
-        "toolName": "inspect_sql_erd_schema",
+        "toolName": "focus_sql_erd_tables",
         "inputContains": {
           "featureQuery": "결제 기능"
         },
-        "requiresConfirmation": null
-      }
-    },
-    {
-      "id": "sql_erd_select_session_token",
-      "prompt": "[PILO_INTERNAL_SELECTION kind=sql_erd_session sessionSelectionToken=88888888-8888-4888-8888-888888888888]\n결제 기능 집중 보기를 위해 Untitled ERD 세션을 선택했습니다.",
-      "expected": {
-        "status": "tool_candidate",
-        "toolName": "inspect_sql_erd_schema",
-        "inputContains": {
-          "featureQuery": "결제 기능",
-          "sessionSelectionToken": "88888888-8888-4888-8888-888888888888"
-        },
-        "requiresConfirmation": null
+        "requiresConfirmation": false
       }
     },
     {

@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
+import localFont from "next/font/local";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
+
+const pretendard = localFont({
+  display: "swap",
+  src: "./fonts/PretendardVariable.woff2",
+  variable: "--font-pretendard",
+  weight: "45 920"
+});
 
 export const metadata: Metadata = {
   title: "PILO",
@@ -13,7 +21,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko">
+    <html className={pretendard.variable} lang="ko">
       <body>
         <TooltipProvider>{children}</TooltipProvider>
       </body>
