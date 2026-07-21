@@ -208,7 +208,13 @@ class FakeNavigationSqlErdService {
       ]
     }
   ]);
-  const service = new AgentThreadContextService(database);
+  const workspaceService = new FakeWorkspaceAccessService();
+  const sqlErdService = new FakeNavigationSqlErdService();
+  const service = new AgentThreadContextService(
+    database,
+    workspaceService,
+    sqlErdService
+  );
 
   assert.deepEqual(
     await service.resolveNavigation(
