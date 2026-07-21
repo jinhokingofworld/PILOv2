@@ -17,6 +17,7 @@ from app.agent_multiturn_context_evaluation import (
     evaluate_deterministic_continuation,
     evaluate_multiturn_conversation,
     load_multiturn_catalog,
+    validate_multiturn_catalog_against_job,
 )
 from app.agent_outcome_judge import MultiTurnJudgeEvidence
 from app.agent_planner_evaluation import load_evaluation_suite
@@ -206,6 +207,65 @@ def test_multiturn_report_emits_only_primary_rates_and_non_raw_diagnostics() -> 
     assert summary["inconclusiveRate"] == 0.5
     assert "conversationHistory" not in str(report)
     assert "toolInput" not in str(report)
+
+
+def test_missing_tool_call_is_not_a_tool_selection_success() -> None:
+    conversation = MultiTurnConversation(
+        conversation_id="meeting_missing_tool",
+        turns=(
+            MultiTurnTurn(
+                user="Show the meeting report.",
+                expected_tools=("list_meeting_reports",),
+                expected_context=ExpectedContext("none", None, {}),
+                fixtures=(MultiTurnToolFixture("list_meeting_reports", {"reports": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+            MultiTurnTurn(
+                user="Show its action items.",
+                expected_tools=("find_action_items",),
+                expected_context=ExpectedContext(
+                    "prior_context_ref", "ctx_111111111111111111111111", {}
+                ),
+                fixtures=(MultiTurnToolFixture("find_action_items", {"items": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+        ),
+    )
+
+    result = evaluate_deterministic_continuation(conversation, ())
+
+    assert result.tool_selection_passed is False
+    assert result.executed_tool_sequence == ()
+
+
+def test_preflight_rejects_a_selector_not_in_the_registered_tool_schema() -> None:
+    conversation = MultiTurnConversation(
+        conversation_id="meeting_invalid_selector",
+        turns=(
+            MultiTurnTurn(
+                user="Show the meeting report.",
+                expected_tools=("list_meeting_reports",),
+                expected_context=ExpectedContext("none", None, {}),
+                fixtures=(MultiTurnToolFixture("list_meeting_reports", {"reports": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+            MultiTurnTurn(
+                user="Show its action items.",
+                expected_tools=("find_action_items",),
+                expected_context=ExpectedContext(
+                    "prior_context_ref",
+                    "ctx_111111111111111111111111",
+                    {"unknownSelector": "value"},
+                ),
+                fixtures=(MultiTurnToolFixture("find_action_items", {"items": []}),),
+                expected_outcome=ExpectedOutcome(True, ()),
+            ),
+        ),
+    )
+    suite = load_evaluation_suite(Path("evals/agent_planner_korean_v1.json"))
+
+    with pytest.raises(ValueError, match="selector"):
+        validate_multiturn_catalog_against_job((conversation,), suite.job)
 
 
 def test_continuation_fails_when_right_tool_uses_context_from_a_different_turn() -> None:

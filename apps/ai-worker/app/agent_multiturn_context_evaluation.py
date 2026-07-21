@@ -84,6 +84,9 @@ class MultiTurnEvaluationResult:
     judge_failure_codes: tuple[str, ...] = ()
     judge_context_resolved: bool | None = None
     judge_follow_up_delivered: bool | None = None
+    tool_selection_passed: bool = False
+    expected_tool_sequence: tuple[str, ...] = ()
+    executed_tool_sequence: tuple[str, ...] = ()
 
 
 def load_multiturn_catalog(catalog_path: Path) -> MultiTurnCatalog:
@@ -151,6 +154,11 @@ def evaluate_deterministic_continuation(
     attempt: int = 1,
 ) -> MultiTurnEvaluationResult:
     failure_reasons: list[str] = []
+    expected_tool_sequence = tuple(
+        tool_name for turn in conversation.turns for tool_name in turn.expected_tools
+    )
+    executed_tool_sequence = tuple(call.tool_name for call in tool_calls)
+    tool_selection_passed = expected_tool_sequence == executed_tool_sequence
     calls_by_turn: dict[int, list[MultiTurnEvaluationToolCall]] = {}
     for call in tool_calls:
         calls_by_turn.setdefault(call.turn_index, []).append(call)
@@ -183,13 +191,56 @@ def evaluate_deterministic_continuation(
     return MultiTurnEvaluationResult(
         conversation_id=conversation.conversation_id,
         attempt=attempt,
-        deterministic_context_passed=not any(
+        deterministic_context_passed=tool_selection_passed
+        and not any(
             reason in {"context_reference", "context_constraints"}
             for reason in unique_failure_reasons
         ),
         deterministic_continuation_passed=not unique_failure_reasons,
         failure_reasons=unique_failure_reasons,
+        tool_selection_passed=tool_selection_passed,
+        expected_tool_sequence=expected_tool_sequence,
+        executed_tool_sequence=executed_tool_sequence,
     )
+
+
+def validate_multiturn_catalog_against_job(
+    conversations: tuple[MultiTurnConversation, ...],
+    job: AgentRunJob,
+) -> None:
+    tools_by_name = {tool.name: tool for tool in job.tools}
+    for conversation in conversations:
+        if conversation.context_surface not in {None, "sql_erd", "pr_review"}:
+            raise ValueError(
+                f"Multi-turn catalog has invalid context surface: {conversation.conversation_id}"
+            )
+        for turn_index, turn in enumerate(conversation.turns):
+            fixture_sequence = tuple(fixture.tool for fixture in turn.fixtures)
+            if fixture_sequence != turn.expected_tools:
+                raise ValueError(
+                    "Multi-turn catalog fixture sequence must match expected tools: "
+                    f"{conversation.conversation_id} turn {turn_index}"
+                )
+            for tool_name in turn.expected_tools:
+                tool = tools_by_name.get(tool_name)
+                if tool is None:
+                    raise ValueError(
+                        "Multi-turn catalog references unavailable tool: "
+                        f"{conversation.conversation_id} {tool_name}"
+                    )
+                properties = tool.input_schema.get("properties")
+                if not isinstance(properties, dict):
+                    raise ValueError(
+                        "Multi-turn catalog tool schema has no properties: "
+                        f"{conversation.conversation_id} {tool_name}"
+                    )
+                unknown_selector_fields = set(turn.expected_context.constraints) - set(properties)
+                if unknown_selector_fields:
+                    raise ValueError(
+                        "Multi-turn catalog selector is not in registered tool schema: "
+                        f"{conversation.conversation_id} {tool_name} "
+                        f"{sorted(unknown_selector_fields)}"
+                    )
 
 
 def evaluate_multiturn_conversation(
@@ -265,6 +316,9 @@ def evaluate_multiturn_conversation(
         judge_failure_codes=(),
         judge_context_resolved=None,
         judge_follow_up_delivered=None,
+        tool_selection_passed=result.tool_selection_passed,
+        expected_tool_sequence=result.expected_tool_sequence,
+        executed_tool_sequence=result.executed_tool_sequence,
     )
 
 
@@ -281,6 +335,7 @@ def evaluate_multiturn_suite(
 ) -> tuple[MultiTurnEvaluationResult, ...]:
     if repetitions < 1:
         raise ValueError("Multi-turn repetitions must be positive")
+    validate_multiturn_catalog_against_job(conversations, job)
     return tuple(
         evaluate_multiturn_conversation(
             planner,
@@ -626,6 +681,9 @@ def _with_multiturn_judge(
         judge_failure_codes=verdict.failure_codes,
         judge_context_resolved=verdict.context_resolved,
         judge_follow_up_delivered=verdict.follow_up_delivered,
+        tool_selection_passed=result.tool_selection_passed,
+        expected_tool_sequence=result.expected_tool_sequence,
+        executed_tool_sequence=result.executed_tool_sequence,
     )
 
 
