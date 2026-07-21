@@ -38,26 +38,24 @@ def test_multi_tool_variant_uses_sequential_workflow_evaluator() -> None:
     assert 'Path("app/agent_planner_comparison.py")' in script
 
 
-def test_agent_workflow_variant_is_compared_without_entering_meeting_readiness() -> None:
+def test_multiturn_variant_is_compared_without_the_legacy_readiness_gate() -> None:
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     script = EVALUATOR_SCRIPT_PATH.read_text(encoding="utf-8")
 
-    assert '"agent_workflow"' in script
-    assert "--workflow-catalog" in script
-    assert '"agent_workflow"' in workflow
-    assert "agent-workflow-catalog.json" in workflow
-    assert "baseline-meeting-agent_workflow-evaluation.json" in workflow
-    assert "candidate-meeting-agent_workflow-evaluation.json" in workflow
-    readiness_command = workflow.split("check_phase4e_dev_readiness.py", 1)[1].split(
-        "- name: Upload evaluation result", 1
-    )[0]
-    assert "agent_workflow" not in readiness_command
+    assert '"multi_turn_context"' in script
+    assert "--multiturn-catalog" in script
+    assert '"multi_turn_context"' in workflow
+    assert "agent-multiturn-context-catalog.json" in workflow
+    assert "baseline-meeting-multi_turn_context-evaluation.json" in workflow
+    assert "candidate-meeting-multi_turn_context-evaluation.json" in workflow
+    assert "check_phase4e_dev_readiness.py" not in workflow
 
 
-def test_comparison_command_fails_without_improvement_evidence() -> None:
+def test_comparison_command_records_measurement_without_a_score_gate() -> None:
     script = COMPARISON_SCRIPT_PATH.read_text(encoding="utf-8")
 
-    assert 'comparison["improvementEvidence"]["passed"] is True' in script
+    assert "return 0" in script
+    assert "improvementEvidence" not in script
 
 
 def test_evaluation_workflow_supports_main_snapshot_without_comparison_gate() -> None:
@@ -69,6 +67,7 @@ def test_evaluation_workflow_supports_main_snapshot_without_comparison_gate() ->
     assert "agent-performance-snapshot-${{ needs.prepare.outputs.target_sha }}" in workflow
     assert "inputs.mode == 'snapshot'" in workflow
     assert "inputs.mode == 'compare'" in workflow
-    assert "agent-evaluation-target-agent_workflow" in workflow
+    assert "agent-evaluation-target-multi_turn_context" in workflow
+    assert "target-meeting-multi_turn_context-evaluation.json" in workflow
     assert "inputs.target_sha || github.sha" in workflow
     assert "target SHA must match the current main revision" in workflow

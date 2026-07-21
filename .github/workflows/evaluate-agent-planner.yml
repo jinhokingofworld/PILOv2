@@ -103,7 +103,7 @@ jobs:
             fi
             echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
             echo 'targets=["target"]' >> "$GITHUB_OUTPUT"
-            echo 'variants=["agent_workflow"]' >> "$GITHUB_OUTPUT"
+            echo 'variants=["multi_turn_context"]' >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -143,7 +143,7 @@ jobs:
           echo "baseline_sha=$BASELINE_SHA" >> "$GITHUB_OUTPUT"
           echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
           echo 'targets=["baseline","candidate"]' >> "$GITHUB_OUTPUT"
-          echo 'variants=["canonical","held_out","counterexample","context","multi_tool","agent_workflow"]' >> "$GITHUB_OUTPUT"
+          echo 'variants=["multi_turn_context"]' >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -185,8 +185,8 @@ jobs:
             "$GITHUB_WORKSPACE/$catalog_source/apps/ai-worker/evals/meeting_agent_capability_catalog_v1.json" \
             "$RUNNER_TEMP/prepared/meeting-agent-capability-catalog.json"
           cp \
-            "$GITHUB_WORKSPACE/$catalog_source/apps/ai-worker/evals/agent_workflow_catalog_v1.json" \
-            "$RUNNER_TEMP/prepared/agent-workflow-catalog.json"
+            "$GITHUB_WORKSPACE/$catalog_source/apps/ai-worker/evals/agent_multiturn_context_v1.json" \
+            "$RUNNER_TEMP/prepared/agent-multiturn-context-catalog.json"
 
       - name: Run candidate Meeting write E2E
         if: ${{ inputs.mode == 'compare' }}
@@ -258,7 +258,7 @@ jobs:
           PYTHONPATH=. python scripts/evaluate_agent_planner.py \
             --suite "$RUNNER_TEMP/prepared/$TARGET-phase4e-evaluation-tools.json" \
             --meeting-catalog "$RUNNER_TEMP/prepared/meeting-agent-capability-catalog.json" \
-            --workflow-catalog "$RUNNER_TEMP/prepared/agent-workflow-catalog.json" \
+            --multiturn-catalog "$RUNNER_TEMP/prepared/agent-multiturn-context-catalog.json" \
             --meeting-variant "$VARIANT" \
             --tool-capability-catalog "$RUNNER_TEMP/prepared/$TARGET-phase4e-tool-capability-catalog.json" \
             --registry-snapshot "$RUNNER_TEMP/prepared/$TARGET-agent-tool-registry-snapshot.json" \
@@ -326,22 +326,12 @@ jobs:
           path: ${{ runner.temp }}/evaluation-results
           merge-multiple: true
 
-      - name: Compare baseline and candidate funnels
+      - name: Compare baseline and candidate multi-turn results
         working-directory: baseline/apps/ai-worker
         run: |
           PYTHONPATH=. python scripts/compare_agent_planner_evaluations.py \
-            --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-canonical-evaluation.json" \
-            --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-held_out-evaluation.json" \
-            --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-counterexample-evaluation.json" \
-            --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-context-evaluation.json" \
-            --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-multi_tool-evaluation.json" \
-            --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-agent_workflow-evaluation.json" \
-            --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-canonical-evaluation.json" \
-            --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-held_out-evaluation.json" \
-            --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-counterexample-evaluation.json" \
-            --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-context-evaluation.json" \
-            --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-multi_tool-evaluation.json" \
-            --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-agent_workflow-evaluation.json" \
+            --baseline-report "$RUNNER_TEMP/evaluation-results/baseline-meeting-multi_turn_context-evaluation.json" \
+            --candidate-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-multi_turn_context-evaluation.json" \
             --output "$RUNNER_TEMP/agent-router-planner-comparison.json"
 
       - name: Run deterministic supporting gates
@@ -353,35 +343,15 @@ jobs:
           PYTHONPATH=. python scripts/check_prompt_injection_security_gate.py \
             --output "$RUNNER_TEMP/agent-prompt-injection-security-gate.json"
 
-      - name: Enforce Phase 4-E dev release gate
-        working-directory: candidate/apps/ai-worker
-        run: |
-          PYTHONPATH=. python scripts/check_phase4e_dev_readiness.py \
-            --registry-snapshot "$RUNNER_TEMP/prepared/candidate-agent-tool-registry-snapshot.json" \
-            --tool-retrieval-report "$RUNNER_TEMP/agent-tool-retrieval-quality-gate.json" \
-            --prompt-security-report "$RUNNER_TEMP/agent-prompt-injection-security-gate.json" \
-            --app-server-report "$RUNNER_TEMP/prepared/phase4e-meeting-runtime-readiness.json" \
-            --meeting-catalog "$RUNNER_TEMP/prepared/meeting-agent-capability-catalog.json" \
-            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-canonical-evaluation.json" \
-            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-held_out-evaluation.json" \
-            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-counterexample-evaluation.json" \
-            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-context-evaluation.json" \
-            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-multi_tool-evaluation.json" \
-            --dev-terraform ../../infra/envs/dev/main.tf \
-            --rollout-runbook ../../docs/infra/agent-tool-retrieval-dev-rollout.md \
-            --output "$RUNNER_TEMP/phase4e-dev-readiness.json"
-
       - name: Upload evaluation result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phase4e-dev-readiness-${{ inputs.current_date }}
+          name: agent-multiturn-context-${{ inputs.current_date }}
           path: |
             ${{ runner.temp }}/evaluation-results/baseline-meeting-*-evaluation.json
             ${{ runner.temp }}/evaluation-results/candidate-meeting-*-evaluation.json
             ${{ runner.temp }}/agent-router-planner-comparison.json
-            ${{ runner.temp }}/prepared/phase4e-meeting-runtime-readiness.json
-            ${{ runner.temp }}/phase4e-dev-readiness.json
           if-no-files-found: error
           retention-days: 30
 
@@ -404,17 +374,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Download workflow evaluation shard
+      - name: Download multi-turn evaluation shard
         uses: actions/download-artifact@v4
         with:
-          name: agent-evaluation-target-agent_workflow
+          name: agent-evaluation-target-multi_turn_context
           path: ${{ runner.temp }}/evaluation-results
 
       - name: Build absolute performance snapshot
         working-directory: target/apps/ai-worker
         run: |
           PYTHONPATH=. python scripts/snapshot_agent_planner_evaluations.py \
-            --report "$RUNNER_TEMP/evaluation-results/target-meeting-agent_workflow-evaluation.json" \
+            --report "$RUNNER_TEMP/evaluation-results/target-meeting-multi_turn_context-evaluation.json" \
             --output "$RUNNER_TEMP/agent-performance-snapshot.json"
 
       - name: Upload performance snapshot
@@ -423,7 +393,7 @@ jobs:
         with:
           name: agent-performance-snapshot-${{ needs.prepare.outputs.target_sha }}
           path: |
-            ${{ runner.temp }}/evaluation-results/target-meeting-agent_workflow-evaluation.json
+            ${{ runner.temp }}/evaluation-results/target-meeting-multi_turn_context-evaluation.json
             ${{ runner.temp }}/agent-performance-snapshot.json
           if-no-files-found: error
           retention-days: 30

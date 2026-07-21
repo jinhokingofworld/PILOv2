@@ -26,8 +26,32 @@ class OutcomeJudgeVerdict:
     failure_codes: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class MultiTurnJudgeEvidence:
+    conversation_history: tuple[str, ...]
+    tool_trace: tuple[str, ...]
+    expected_context_transition: str
+    tool_facts: tuple[str, ...]
+    expected_outcome_facts: tuple[str, ...]
+    final_answer: str
+    deterministic_context_passed: bool
+
+
+@dataclass(frozen=True)
+class MultiTurnJudgeVerdict:
+    context_resolved: bool
+    follow_up_delivered: bool
+    contains_material_error: bool
+    verdict: OutcomeJudgeLabel
+    failure_codes: tuple[str, ...]
+
+
 class OutcomeJudgeClient(Protocol):
     def judge(self, evidence: OutcomeJudgeEvidence) -> str: ...
+
+
+class MultiTurnJudgeClient(Protocol):
+    def judge(self, evidence: MultiTurnJudgeEvidence) -> str: ...
 
 
 class OpenAiOutcomeJudge:
@@ -73,6 +97,49 @@ class OpenAiOutcomeJudge:
         return output
 
 
+class OpenAiMultiTurnJudge:
+    def __init__(self, api_key: str, model: str, timeout_seconds: float) -> None:
+        from openai import OpenAI
+
+        self.client = OpenAI(api_key=api_key, timeout=timeout_seconds)
+        self.model = model
+
+    def judge(self, evidence: MultiTurnJudgeEvidence) -> str:
+        response = self.client.responses.create(
+            model=self.model,
+            temperature=0,
+            input=[
+                {"role": "system", "content": _MULTITURN_JUDGE_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "conversationHistory": evidence.conversation_history,
+                            "toolTrace": evidence.tool_trace,
+                            "expectedContextTransition": evidence.expected_context_transition,
+                            "toolFacts": evidence.tool_facts,
+                            "expectedOutcomeFacts": evidence.expected_outcome_facts,
+                            "finalAnswer": evidence.final_answer,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "agent_multiturn_context_judge",
+                    "strict": True,
+                    "schema": _MULTITURN_JUDGE_SCHEMA,
+                }
+            },
+        )
+        output = getattr(response, "output_text", None)
+        if not isinstance(output, str) or not output.strip():
+            raise ValueError("Multi-turn Judge returned no text")
+        return output
+
+
 _OUTCOME_JUDGE_SYSTEM_PROMPT = (
     "Judge only the supplied evidence. Do not infer unstated facts or reward wording. "
     "Return pass only when the user task is fulfilled, grounded in tool facts, "
@@ -91,6 +158,32 @@ _OUTCOME_JUDGE_SCHEMA = {
     "properties": {
         "taskFulfilled": {"type": "boolean"},
         "groundedInToolEvidence": {"type": "boolean"},
+        "containsMaterialError": {"type": "boolean"},
+        "verdict": {"type": "string", "enum": ["pass", "partial", "fail", "inconclusive"]},
+        "failureCodes": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+_MULTITURN_JUDGE_SYSTEM_PROMPT = (
+    "Judge only the supplied evidence. Determine whether the final follow-up correctly "
+    "resolves the prior conversational context and delivers the requested result. "
+    "Treat toolFacts and expectedOutcomeFacts as the only factual grounding source: a "
+    "follow-up that omits, contradicts, or invents a material fact must not pass. "
+    "Do not infer unstated facts or reward wording."
+)
+_MULTITURN_JUDGE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "contextResolved",
+        "followUpDelivered",
+        "containsMaterialError",
+        "verdict",
+        "failureCodes",
+    ],
+    "properties": {
+        "contextResolved": {"type": "boolean"},
+        "followUpDelivered": {"type": "boolean"},
         "containsMaterialError": {"type": "boolean"},
         "verdict": {"type": "string", "enum": ["pass", "partial", "fail", "inconclusive"]},
         "failureCodes": {"type": "array", "items": {"type": "string"}},
@@ -123,6 +216,38 @@ def judge_outcome(
         contains_material_error=False,
         verdict="inconclusive",
         failure_codes=tuple(
+            dict.fromkeys(
+                code for vote in votes for code in (*vote.failure_codes, "judge_vote_split")
+            )
+        ),
+    )
+
+
+def judge_multiturn_context(
+    evidence: MultiTurnJudgeEvidence,
+    judge: MultiTurnJudgeClient,
+) -> MultiTurnJudgeVerdict:
+    if not evidence.deterministic_context_passed:
+        return MultiTurnJudgeVerdict(False, False, False, "fail", ("deterministic_context_gate",))
+    votes = tuple(_judge_multiturn_once(evidence, judge) for _ in range(3))
+    if any("judge_unavailable" in vote.failure_codes for vote in votes):
+        return MultiTurnJudgeVerdict(
+            False,
+            False,
+            False,
+            "inconclusive",
+            tuple(dict.fromkeys(code for vote in votes for code in vote.failure_codes)),
+        )
+    for label in ("pass", "partial", "fail", "inconclusive"):
+        matching = tuple(vote for vote in votes if vote.verdict == label)
+        if len(matching) >= 2:
+            return matching[0]
+    return MultiTurnJudgeVerdict(
+        False,
+        False,
+        False,
+        "inconclusive",
+        tuple(
             dict.fromkeys(
                 code for vote in votes for code in (*vote.failure_codes, "judge_vote_split")
             )
@@ -181,4 +306,50 @@ def parse_outcome_judge_verdict(raw: str) -> OutcomeJudgeVerdict:
         contains_material_error=contains_material_error,
         verdict=verdict,
         failure_codes=tuple(code.strip() for code in failure_codes),
+    )
+
+
+def _judge_multiturn_once(
+    evidence: MultiTurnJudgeEvidence,
+    judge: MultiTurnJudgeClient,
+) -> MultiTurnJudgeVerdict:
+    try:
+        return parse_multiturn_judge_verdict(judge.judge(evidence))
+    except Exception:
+        return MultiTurnJudgeVerdict(False, False, False, "inconclusive", ("judge_unavailable",))
+
+
+def parse_multiturn_judge_verdict(raw: str) -> MultiTurnJudgeVerdict:
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError("Multi-turn Judge must return valid JSON") from error
+    if not isinstance(payload, dict):
+        raise ValueError("Multi-turn Judge response must be an object")
+    context_resolved = payload.get("contextResolved")
+    follow_up_delivered = payload.get("followUpDelivered")
+    contains_material_error = payload.get("containsMaterialError")
+    verdict = payload.get("verdict")
+    failure_codes = payload.get("failureCodes")
+    if not all(
+        isinstance(value, bool)
+        for value in (context_resolved, follow_up_delivered, contains_material_error)
+    ):
+        raise ValueError("Multi-turn Judge response booleans are invalid")
+    if verdict not in {"pass", "partial", "fail", "inconclusive"}:
+        raise ValueError("Multi-turn Judge verdict is invalid")
+    if not isinstance(failure_codes, list) or not all(
+        isinstance(code, str) and code.strip() for code in failure_codes
+    ):
+        raise ValueError("Multi-turn Judge failure codes are invalid")
+    if verdict == "pass" and (
+        not context_resolved or not follow_up_delivered or contains_material_error
+    ):
+        raise ValueError("Multi-turn Judge pass verdict is contradictory")
+    return MultiTurnJudgeVerdict(
+        context_resolved,
+        follow_up_delivered,
+        contains_material_error,
+        verdict,
+        tuple(code.strip() for code in failure_codes),
     )
