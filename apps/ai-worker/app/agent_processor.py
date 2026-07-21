@@ -11,6 +11,13 @@ from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from app.agent_decision_trace import (
+    attach_decision_trace,
+    build_agent_decision_trace,
+    canonical_sha256,
+    emit_decision_trace_event,
+    record_trace_stage,
+)
 from app.agent_latency import AgentLatencyObserver
 from app.agent_prompt_security import (
     PromptSecurityAssessment,
@@ -134,9 +141,11 @@ class AgentRunContext:
     status: str
     prompt: str
     timezone: str
+    thread_id: str | None = None
     planner_turn_count: int = 0
     queue_wait_ms: int | None = None
     latest_planner_tool_name: str | None = None
+    latest_decision_correlation_id: str | None = None
     planning_context: str = ""
     untrusted_context_sources: tuple[PromptSecuritySource, ...] = ()
     current_user_source: PromptSecuritySource | None = None
@@ -823,6 +832,7 @@ class AgentRunProcessor:
                     job,
                     retried=True,
                     latency_scope=latency_scope,
+                    correlation_id=context.latest_decision_correlation_id,
                 )
 
             if status != "planning":
@@ -858,9 +868,38 @@ class AgentRunProcessor:
         latency_scope: _AgentLatencyScope,
     ) -> AgentProcessResult:
         step_id: str | None = None
+        decision_trace: dict[str, object] | None = None
         try:
             step_id = self.repository.start_planner_step(job, context)
             current_date = self.current_date_provider(context.timezone).isoformat()
+            decision_trace = build_agent_decision_trace(
+                run_id=job.run_id,
+                thread_id=context.thread_id,
+                turn_sequence=job.turn_sequence,
+                prompt=context.prompt,
+                request_context=job.request_context,
+                planning_context=context.planning_context,
+                planner_model=_client_model_id(self.planner_client),
+                router_model=(
+                    _client_model_id(self.router_client)
+                    if self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER
+                    else None
+                ),
+                tool_schema_version=job.tool_schema_version,
+                tools=job.tools,
+                catalog_version=(
+                    job.tool_capability_catalog.version
+                    if job.tool_capability_catalog
+                    else job.received_tool_capability_catalog_version
+                ),
+                catalog_sha256=(
+                    job.tool_capability_catalog.sha256
+                    if job.tool_capability_catalog
+                    else job.received_tool_capability_catalog_sha256
+                ),
+                planner_prompt_template=_agent_planner_system_prompt(),
+                router_prompt_template=_agent_router_system_prompt(),
+            )
             current_user_source = context.current_user_source or PromptSecuritySource(
                 "current_user",
                 context.prompt,
@@ -875,6 +914,7 @@ class AgentRunProcessor:
                     job,
                     step_id,
                     prompt_security,
+                    decision_trace,
                 )
             context_surface = (
                 job.request_context["surface"] if job.request_context is not None else None
@@ -946,19 +986,24 @@ class AgentRunProcessor:
                     targeted=latency_scope.targeted,
                 )
                 if routing.status == "needs_clarification":
+                    _record_router_trace(decision_trace, routing)
                     return self._complete_routing_clarification(
                         job,
                         step_id,
                         routing,
                         prompt_security,
+                        decision_trace,
                     )
                 if routing.status == "unsupported":
+                    _record_router_trace(decision_trace, routing)
                     return self._complete_unsupported_routing(
                         job,
                         step_id,
                         routing,
                         prompt_security,
+                        decision_trace,
                     )
+                _record_router_trace(decision_trace, routing)
                 planner_tools = select_agent_planner_tools_for_routing(
                     selection_job,
                     routing,
@@ -1001,12 +1046,19 @@ class AgentRunProcessor:
                 )
             )
             if not planner_tools and not routed_workflow_completed:
+                _record_next_tool_trace(
+                    decision_trace,
+                    planner_tools,
+                    status="needs_clarification",
+                )
                 output_summary = _retrieval_clarification_summary(
                     job,
                     self.tool_retrieval_mode,
                     planner_selection,
                 )
                 output_summary["promptSecurity"] = prompt_security.observation()
+                _record_terminal_trace(decision_trace, "clarification")
+                attach_decision_trace(output_summary, decision_trace)
                 planner_step_completed = self.repository.complete_planner_step(
                     job.run_id,
                     step_id,
@@ -1032,6 +1084,7 @@ class AgentRunProcessor:
                     ),
                 )
             planner_job = replace(selection_job, tools=planner_tools)
+            _record_next_tool_trace(decision_trace, planner_tools, status="allowed")
             workflow_incomplete = routing is not None and _has_incomplete_routed_workflow(
                 selection_job,
                 routing,
@@ -1113,6 +1166,25 @@ class AgentRunProcessor:
                     job,
                 )
             output_summary["promptSecurity"] = prompt_security.observation()
+            _record_planner_trace(
+                decision_trace,
+                exposed_tool_count=len(planner_tools),
+                selected_tool_name=decision.tool_name,
+                normalized_status=normalized.status,
+            )
+            _record_terminal_trace(
+                decision_trace,
+                (
+                    "handoff_pending"
+                    if normalized.status == "tool_candidate"
+                    else (
+                        "clarification"
+                        if normalized.status == "needs_clarification"
+                        else normalized.status
+                    )
+                ),
+            )
+            attach_decision_trace(output_summary, decision_trace)
             planner_step_completed = self.repository.complete_planner_step(
                 job.run_id,
                 step_id,
@@ -1134,6 +1206,7 @@ class AgentRunProcessor:
                     job,
                     retried=False,
                     latency_scope=latency_scope,
+                    correlation_id=_trace_correlation_id(decision_trace),
                 )
 
             if normalized.status == "needs_clarification":
@@ -1163,18 +1236,22 @@ class AgentRunProcessor:
         except InfrastructureError:
             raise
         except AgentRouterOutputError:
+            _record_failure_trace(decision_trace, "router", "invalid_output")
             return self._clarify_invalid_output(
                 job,
                 step_id,
                 AGENT_ROUTER_OUTPUT_CLARIFICATION_MESSAGE,
                 reason="agent_router_output_needs_clarification",
+                decision_trace=decision_trace,
             )
         except AgentPlannerOutputError:
+            _record_failure_trace(decision_trace, "plannerInput", "invalid_output")
             return self._clarify_invalid_output(
                 job,
                 step_id,
                 AGENT_PLANNER_OUTPUT_CLARIFICATION_MESSAGE,
                 reason="agent_planner_output_needs_clarification",
+                decision_trace=decision_trace,
             )
 
     def _complete_routing_clarification(
@@ -1183,6 +1260,7 @@ class AgentRunProcessor:
         step_id: str,
         routing: AgentRoutingDecision,
         prompt_security: PromptSecurityAssessment,
+        decision_trace: dict[str, object] | None,
     ) -> AgentProcessResult:
         question = routing.clarification_question or AGENT_TOOL_RETRIEVAL_CLARIFICATION_MESSAGE
         output_summary = {
@@ -1194,6 +1272,8 @@ class AgentRunProcessor:
             "toolRouting": _agent_routing_observation(routing, job, 0),
             "promptSecurity": prompt_security.observation(),
         }
+        _record_terminal_trace(decision_trace, "clarification")
+        attach_decision_trace(output_summary, decision_trace)
         if not self.repository.complete_planner_step(job.run_id, step_id, output_summary):
             return self._result(
                 job,
@@ -1215,6 +1295,7 @@ class AgentRunProcessor:
         step_id: str,
         routing: AgentRoutingDecision,
         prompt_security: PromptSecurityAssessment,
+        decision_trace: dict[str, object] | None,
     ) -> AgentProcessResult:
         final_answer = "현재 Agent가 지원하는 작업으로 분류할 수 없습니다."
         output_summary = {
@@ -1226,6 +1307,8 @@ class AgentRunProcessor:
             "toolRouting": _agent_routing_observation(routing, job, 0),
             "promptSecurity": prompt_security.observation(),
         }
+        _record_terminal_trace(decision_trace, "unsupported")
+        attach_decision_trace(output_summary, decision_trace)
         if not self.repository.complete_planner_step(job.run_id, step_id, output_summary):
             return self._result(
                 job,
@@ -1249,6 +1332,7 @@ class AgentRunProcessor:
         job: AgentRunJob,
         step_id: str,
         assessment: PromptSecurityAssessment,
+        decision_trace: dict[str, object] | None,
     ) -> AgentProcessResult:
         selection = AgentPlannerToolSelection(
             tools=tuple(),
@@ -1272,6 +1356,9 @@ class AgentRunProcessor:
             ),
             "promptSecurity": assessment.observation(),
         }
+        _record_failure_trace(decision_trace, "plannerInput", "prompt_injection_suspected")
+        _record_terminal_trace(decision_trace, "clarification")
+        attach_decision_trace(output_summary, decision_trace)
         planner_step_completed = self.repository.complete_planner_step(
             job.run_id,
             step_id,
@@ -1301,11 +1388,19 @@ class AgentRunProcessor:
         *,
         retried: bool,
         latency_scope: _AgentLatencyScope,
+        correlation_id: str | None,
     ) -> AgentProcessResult:
         handoff_started_at = self.latency_observer.start()
         try:
             self.execution_handoff_client.execute(job.run_id)
         except InfrastructureError as error:
+            emit_decision_trace_event(
+                correlation_id=correlation_id,
+                turn_sequence=job.turn_sequence,
+                stage="handoff",
+                outcome="failure",
+                diagnostic_code="execution_handoff_unavailable",
+            )
             self._observe_latency(
                 job,
                 stage="execution_handoff",
@@ -1315,6 +1410,12 @@ class AgentRunProcessor:
                 targeted=latency_scope.targeted,
             )
             raise AgentExecutionHandoffError() from error
+        emit_decision_trace_event(
+            correlation_id=correlation_id,
+            turn_sequence=job.turn_sequence,
+            stage="handoff",
+            outcome="success",
+        )
         self._observe_latency(
             job,
             stage="execution_handoff",
@@ -1339,17 +1440,21 @@ class AgentRunProcessor:
         message: str,
         *,
         reason: str,
+        decision_trace: dict[str, object] | None = None,
     ) -> AgentProcessResult:
+        output_summary: dict[str, object] = {
+            "status": "needs_clarification",
+            "message": message,
+            "finalAnswerDraft": message,
+            "toolSchemaVersion": job.tool_schema_version,
+            "missingFields": ["intent"],
+        }
+        _record_terminal_trace(decision_trace, "clarification")
+        attach_decision_trace(output_summary, decision_trace)
         if step_id and not self.repository.complete_planner_step(
             job.run_id,
             step_id,
-            {
-                "status": "needs_clarification",
-                "message": message,
-                "finalAnswerDraft": message,
-                "toolSchemaVersion": job.tool_schema_version,
-                "missingFields": ["intent"],
-            },
+            output_summary,
         ):
             return self._result(
                 job,
@@ -3676,6 +3781,98 @@ def _retrieval_clarification_summary(
             job,
         ),
     }
+
+
+def _client_model_id(client: object | None) -> str | None:
+    model = getattr(client, "model", None)
+    return model if isinstance(model, str) else None
+
+
+def _trace_correlation_id(trace: dict[str, object] | None) -> str | None:
+    if trace is None:
+        return None
+    value = trace.get("correlationId")
+    return value if isinstance(value, str) else None
+
+
+def _record_router_trace(
+    trace: dict[str, object] | None,
+    routing: AgentRoutingDecision,
+) -> None:
+    if trace is None:
+        return
+    record_trace_stage(
+        trace,
+        "router",
+        {
+            "status": routing.status,
+            "domains": list(routing.domains),
+            "capabilityIds": list(routing.capability_ids),
+            "confidence": routing.confidence,
+        },
+    )
+
+
+def _record_next_tool_trace(
+    trace: dict[str, object] | None,
+    tools: tuple[AgentToolSchema, ...],
+    *,
+    status: str,
+) -> None:
+    if trace is None:
+        return
+    tool_names = sorted(tool.name for tool in tools)
+    record_trace_stage(
+        trace,
+        "nextTool",
+        {
+            "status": status,
+            "allowedToolCount": len(tool_names),
+            "allowedToolSetSha256": canonical_sha256(tool_names),
+        },
+    )
+
+
+def _record_planner_trace(
+    trace: dict[str, object] | None,
+    *,
+    exposed_tool_count: int,
+    selected_tool_name: str | None,
+    normalized_status: str,
+) -> None:
+    if trace is None:
+        return
+    record_trace_stage(
+        trace,
+        "plannerInput",
+        {
+            "status": "completed",
+            "exposedToolCount": exposed_tool_count,
+            "selectedToolName": selected_tool_name,
+            "normalizedStatus": normalized_status,
+        },
+    )
+
+
+def _record_failure_trace(
+    trace: dict[str, object] | None,
+    stage: str,
+    code: str,
+) -> None:
+    if trace is None:
+        return
+    record_trace_stage(trace, stage, {"status": "failed", "code": code})
+
+
+def _record_terminal_trace(
+    trace: dict[str, object] | None,
+    outcome: str,
+) -> None:
+    if trace is None:
+        return
+    record_trace_stage(trace, "terminalPolicy", {"status": outcome})
+    if outcome == "handoff_pending":
+        record_trace_stage(trace, "handoff", {"status": "pending"})
 
 
 def _tool_retrieval_observation(

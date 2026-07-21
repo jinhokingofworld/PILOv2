@@ -959,6 +959,37 @@ def create_processor(
     )
 
 
+def test_processor_records_redacted_decision_trace_on_planner_step() -> None:
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            thread_id="55555555-5555-4555-8555-555555555555",
+            planning_context="prior raw context must be hashed",
+        )
+    )
+    planner = FakePlannerClient()
+    planner.model = "gpt-planner-snapshot"
+
+    result = create_processor(repository, planner).process_payload(agent_payload())
+
+    assert result.reason == "agent_execution_handoff_completed"
+    trace = repository.completed_steps[0][2]["decisionTrace"]
+    assert trace["models"]["planner"] == "gpt-planner-snapshot"
+    assert trace["turnSequence"] == 1
+    assert trace["stages"]["nextTool"]["allowedToolCount"] == 1
+    assert trace["stages"]["plannerInput"] == {
+        "status": "completed",
+        "exposedToolCount": 1,
+        "selectedToolName": "list_calendar_events",
+        "normalizedStatus": "tool_candidate",
+    }
+    assert trace["stages"]["terminalPolicy"]["status"] == "handoff_pending"
+    serialized = json.dumps(trace, ensure_ascii=False)
+    assert "이번 주 일정 알려줘" not in serialized
+    assert "prior raw context must be hashed" not in serialized
+    assert RUN_ID not in serialized
+    assert WORKSPACE_ID not in serialized
+
+
 def sql_erd_focus_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
     capability = {
         "id": "sql_erd.tables.focus",

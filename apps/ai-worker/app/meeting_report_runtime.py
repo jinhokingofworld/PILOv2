@@ -1663,11 +1663,14 @@ class PgAgentRunRepository:
               run.id,
               run.workspace_id,
               run.requested_by_user_id,
+              run.thread_id,
               run.status,
               run.prompt,
               run.timezone,
               run.planner_turn_count,
               latest_planner.output_json->>'toolName' AS latest_planner_tool_name,
+              latest_planner.output_json#>>'{decisionTrace,correlationId}'
+                AS latest_decision_correlation_id,
               CASE
                 WHEN outbox.planning_started_at IS NULL THEN NULL
                 ELSE GREATEST(
@@ -1878,10 +1881,16 @@ class PgAgentRunRepository:
             status=str(row["status"]),
             prompt=str(row["prompt"]),
             timezone=str(row["timezone"]),
+            thread_id=(str(row["thread_id"]) if row.get("thread_id") is not None else None),
             planner_turn_count=int(row["planner_turn_count"]),
             latest_planner_tool_name=(
                 str(row["latest_planner_tool_name"])
                 if row.get("latest_planner_tool_name") is not None
+                else None
+            ),
+            latest_decision_correlation_id=(
+                str(row["latest_decision_correlation_id"])
+                if row.get("latest_decision_correlation_id") is not None
                 else None
             ),
             queue_wait_ms=(
