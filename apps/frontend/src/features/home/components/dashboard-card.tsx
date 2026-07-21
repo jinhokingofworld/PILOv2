@@ -45,7 +45,7 @@ export function DashboardCard({
   return (
     <Card
       {...(cursorTarget ? pageCursorTargetAttributes(cursorTarget) : {})}
-      className={`relative h-full min-h-0 overflow-hidden rounded-[15px] border-[#e7e9ee] bg-white shadow-[0_10px_30px_rgba(32,33,36,0.05)] ${className ?? ""}`}
+      className={`relative h-full min-h-0 overflow-hidden rounded-[15px] border-border bg-card text-card-foreground shadow-sm ${className ?? ""}`}
       size="sm"
     >
       {background ? (
@@ -54,15 +54,15 @@ export function DashboardCard({
         </div>
       ) : null}
       <CardHeader className="relative z-10 gap-1.5 px-5 pt-5">
-        <CardTitle className="flex items-center gap-2.5 text-[19px] font-semibold tracking-[-0.01em] text-[#202124] group-data-[size=sm]/card:text-[19px]">
-          <span className="flex size-8 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f6f7f9] text-[#6b6f78]">
+        <CardTitle className="flex items-center gap-2.5 text-[19px] font-semibold tracking-[-0.01em] text-foreground group-data-[size=sm]/card:text-[19px]">
+          <span className="flex size-8 items-center justify-center rounded-[10px] border border-border bg-muted text-muted-foreground">
             {icon}
           </span>
           <span className={titleClassName}>{title}</span>
           {titleAdornment}
         </CardTitle>
         {description ? (
-          <CardDescription className="text-[15px] leading-5 text-[#6b6f78]">
+          <CardDescription className="text-[15px] leading-5 text-muted-foreground">
             {description}
           </CardDescription>
         ) : null}
@@ -116,7 +116,7 @@ export function DashboardCardMessage({
 }) {
   return (
     <div
-      className={`${rowSpanClassName} flex min-h-0 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f8f9fb] p-3 text-center text-[15px] font-medium ${
+      className={`${rowSpanClassName} flex min-h-0 items-center justify-center rounded-[10px] border border-border bg-muted p-3 text-center text-[15px] font-medium ${
         tone === "danger" ? "text-destructive" : "text-muted-foreground"
       }`}
     >

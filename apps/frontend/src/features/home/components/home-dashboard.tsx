@@ -52,14 +52,14 @@ export function HomeDashboard() {
 
   return (
     <PageCursorSurface
-      className="relative flex min-h-0 flex-1 flex-col bg-[#f6f7f9] p-4 sm:p-5"
+      className="relative flex min-h-0 flex-1 flex-col bg-background p-3 sm:p-5"
       enabled={Boolean(authSession?.activeWorkspaceId)}
       page="home"
       workspaceId={authSession?.activeWorkspaceId ?? ""}
     >
       <HomeWorkspaceLocationAdapter />
       <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-6">
-        <section className="grid gap-4 xl:grid-cols-[minmax(260px,0.66fr)_minmax(0,1.34fr)]">
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,0.66fr)_minmax(0,1.34fr)]">
           <MembersCard />
           <CalendarCard
             calendarDates={visibleCalendarDates}
@@ -69,10 +69,10 @@ export function HomeDashboard() {
         </section>
         <section className="space-y-3">
           <div>
-            <h2 className="text-[21px] font-semibold tracking-[-0.01em] text-[#202124]">
+            <h2 className="text-[21px] font-semibold tracking-[-0.01em] text-foreground">
               워크스페이스 현황
             </h2>
-            <p className="mt-1 text-[16px] text-[#6b6f78]">
+            <p className="mt-1 text-[16px] text-muted-foreground">
               진행 중인 작업과 최근 기록을 한눈에 확인하세요.
             </p>
           </div>
