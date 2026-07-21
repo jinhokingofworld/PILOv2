@@ -5,6 +5,7 @@ from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
+from app.agent_outcome_judge import OutcomeJudgeEvidence
 from app.agent_planner_evaluation import load_evaluation_suite
 from app.agent_processor import AgentPlannerDecision, AgentRoutingDecision
 from app.agent_tool_retrieval import (
@@ -13,6 +14,8 @@ from app.agent_tool_retrieval import (
     ToolCapabilityDescriptor,
 )
 from app.agent_workflow_evaluation import (
+    OutcomeInputAssertion,
+    WorkflowOutcomeAssertions,
     WorkflowScenario,
     WorkflowToolFixture,
     build_workflow_evaluation_report,
@@ -98,6 +101,71 @@ def test_workflow_rejects_wrong_tool_output_or_terminal_state() -> None:
 
     assert result.task_success is False
     assert result.failure_reasons == ("final_answer_grounding",)
+
+
+def test_workflow_hides_fixture_result_when_task_critical_input_is_wrong() -> None:
+    scenario = replace(
+        _scenario(),
+        fixtures=(
+            replace(
+                _scenario().fixtures[0],
+                outcome_input_assertions=(
+                    OutcomeInputAssertion(path=("limit",), contains_all=("1",)),
+                ),
+            ),
+            _scenario().fixtures[1],
+        ),
+        outcome_assertions=WorkflowOutcomeAssertions(
+            response_evidence=(("주간", "회의록"), ("제품", "회의")),
+            require_response=True,
+        ),
+    )
+    mismatched_decisions = _successful_decisions()
+    mismatched_decisions[0] = replace(mismatched_decisions[0], tool_input={"limit": 2})
+
+    matched = evaluate_workflow_suite(
+        ScriptedPlanner(_successful_decisions()),
+        ScriptedRouter(),
+        _job(),
+        (scenario,),
+        current_date="2026-07-21",
+    )[0]
+    mismatched = evaluate_workflow_suite(
+        ScriptedPlanner(mismatched_decisions),
+        ScriptedRouter(),
+        _job(),
+        (scenario,),
+        current_date="2026-07-21",
+    )[0]
+
+    assert matched.task_success is True
+    assert "task_critical_input" in mismatched.failure_reasons
+
+
+def test_workflow_uses_judge_verdict_for_task_outcome_success() -> None:
+    class PassingJudge:
+        def judge(self, _evidence: OutcomeJudgeEvidence) -> str:
+            return (
+                '{"taskFulfilled":true,"groundedInToolEvidence":true,'
+                '"containsMaterialError":false,"verdict":"pass","failureCodes":[]}'
+            )
+
+    scenario = replace(
+        _scenario(),
+        outcome_assertions=WorkflowOutcomeAssertions(require_response=True),
+    )
+
+    result = evaluate_workflow_suite(
+        ScriptedPlanner(_successful_decisions()),
+        ScriptedRouter(),
+        _job(),
+        (scenario,),
+        current_date="2026-07-21",
+        outcome_judge=PassingJudge(),
+    )[0]
+
+    assert result.task_success is True
+    assert result.outcome_judge_verdict == "pass"
 
 
 def test_workflow_separates_user_task_outcome_from_strict_execution_contract() -> None:
@@ -257,12 +325,16 @@ def test_agent_workflow_catalog_covers_supported_domains_except_canvas() -> None
     represented_domains = {
         domain for scenario in catalog.scenarios for domain in scenario.evaluation_domains
     }
+    product_domains = represented_domains - {"routing_boundary"}
     domain_counts = Counter(
-        domain for scenario in catalog.scenarios for domain in scenario.evaluation_domains
+        domain
+        for scenario in catalog.scenarios
+        for domain in scenario.evaluation_domains
+        if domain != "routing_boundary"
     )
 
-    assert catalog.version == "agent-workflow-regression:v2"
-    assert represented_domains == {
+    assert catalog.version == "agent-workflow-regression:v3"
+    assert product_domains == {
         "board",
         "calendar",
         "drive",
@@ -270,6 +342,7 @@ def test_agent_workflow_catalog_covers_supported_domains_except_canvas() -> None
         "pr_review",
         "sql_erd",
     }
+    assert "routing_boundary" in represented_domains
     assert len(catalog.scenarios) >= 30
     assert min(domain_counts.values()) >= 5
     assert all("canvas" not in scenario.evaluation_domains for scenario in catalog.scenarios)
@@ -292,6 +365,14 @@ def test_agent_workflow_catalog_covers_required_task_categories() -> None:
         "confirmation",
         "grounded_answer",
     } <= categories
+
+
+def test_every_workflow_case_declares_outcome_assertions() -> None:
+    raw = json.loads(Path("evals/agent_workflow_catalog_v1.json").read_text(encoding="utf-8"))
+
+    for case in raw["workflowCases"]:
+        assert "outcome" in case, case["id"]
+        assert "requireResponse" in case["outcome"], case["id"]
 
 
 def test_agent_workflow_catalog_includes_terminal_tools_for_routed_capabilities() -> None:

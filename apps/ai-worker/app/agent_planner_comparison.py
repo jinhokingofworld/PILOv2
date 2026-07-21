@@ -47,9 +47,10 @@ def build_agent_performance_snapshot(
     report = reports_by_variant["agent_workflow"]
     if (
         not isinstance(report.get("workflowEvaluation"), dict)
-        or report.get("totalCases") != SNAPSHOT_SCENARIO_COUNT
+        or not isinstance(report.get("totalCases"), int)
+        or report["totalCases"] < SNAPSHOT_SCENARIO_COUNT
     ):
-        raise ValueError("Snapshot requires 31 complete workflow scenarios")
+        raise ValueError("Snapshot requires at least 31 complete workflow scenarios")
     _validate_complete_workflow_attempts(report)
     scenario_attempts: dict[str, list[dict[str, object]]] = {}
     for result in _raw_results(report):
@@ -59,7 +60,7 @@ def build_agent_performance_snapshot(
             raise ValueError("Invalid workflow scenario id")
         scenario_attempts.setdefault(scenario_id, []).append(result)
     if len(scenario_attempts) != SNAPSHOT_SCENARIO_COUNT:
-        raise ValueError("Snapshot requires 31 complete workflow scenarios")
+        raise ValueError("Snapshot requires at least 31 complete workflow scenarios")
 
     scenario_success: dict[str, float] = {}
     scenario_contract_success: dict[str, float] = {}
@@ -69,6 +70,8 @@ def build_agent_performance_snapshot(
     scenario_tokens: list[float] = []
     has_complete_tokens = True
     safety_violations = 0
+    partial_attempts = 0
+    inconclusive_attempts = 0
     for scenario_id, attempts in scenario_attempts.items():
         success_rate = _mean([float(_task_success(item)) for item in attempts])
         scenario_success[scenario_id] = success_rate
@@ -76,7 +79,8 @@ def build_agent_performance_snapshot(
             [float(_execution_contract_passed(item)) for item in attempts]
         )
         for domain in _expected_domains(attempts[0]):
-            domain_success.setdefault(domain, []).append(success_rate)
+            if domain != "routing_boundary":
+                domain_success.setdefault(domain, []).append(success_rate)
         category = attempts[0].get("kind")
         if not isinstance(category, str) or not category:
             raise ValueError("Invalid workflow task category")
@@ -90,6 +94,10 @@ def build_agent_performance_snapshot(
         else:
             scenario_tokens.append(_mean([float(value) for value in token_values]))
         safety_violations += sum(_safety_violation_count(item) for item in attempts)
+        partial_attempts += sum(_outcome_judge_verdict(item) == "partial" for item in attempts)
+        inconclusive_attempts += sum(
+            _outcome_judge_verdict(item) == "inconclusive" for item in attempts
+        )
 
     return {
         "format": SNAPSHOT_FORMAT,
@@ -100,6 +108,12 @@ def build_agent_performance_snapshot(
         "aggregate": _aggregate(reports_by_variant.values()),
         "uniqueScenarioCount": len(scenario_attempts),
         "taskSuccessRate": round(_mean(list(scenario_success.values())), 4),
+        "partialRate": round(
+            _fraction(partial_attempts, sum(map(len, scenario_attempts.values()))), 4
+        ),
+        "inconclusiveRate": round(
+            _fraction(inconclusive_attempts, sum(map(len, scenario_attempts.values()))), 4
+        ),
         "executionContractPassRate": round(_mean(list(scenario_contract_success.values())), 4),
         "meanLatencyMs": round(_mean(scenario_latency), 4),
         "meanProviderTotalTokens": (
@@ -188,6 +202,18 @@ def _validate_paired_inputs(baseline: dict[str, object], candidate: dict[str, ob
         for key in _PAIRED_METADATA_KEYS
     ):
         raise ValueError("Baseline and candidate must use the same fixed inputs")
+    judge_keys = (
+        "outcomeJudgeModel",
+        "outcomeJudgePromptVersion",
+        "outcomeJudgeTemperature",
+        "outcomeJudgeVoteCount",
+    )
+    if any(key in baseline_metadata or key in candidate_metadata for key in judge_keys) and any(
+        baseline_metadata.get(key) is None
+        or baseline_metadata.get(key) != candidate_metadata.get(key)
+        for key in judge_keys
+    ):
+        raise ValueError("Baseline and candidate must use the same outcome Judge")
     if baseline_metadata.get("suiteVersion") != candidate_metadata.get("suiteVersion"):
         raise ValueError("Baseline and candidate must use the same fixed inputs")
     _validate_complete_workflow_attempts(baseline)
@@ -284,7 +310,8 @@ def _paired_improvement_evidence(
             )
         )
         for domain in _expected_domains(pairs[0][0]):
-            domain_success_pairs.setdefault(domain, []).append(success_pair)
+            if domain != "routing_boundary":
+                domain_success_pairs.setdefault(domain, []).append(success_pair)
         category = pairs[0][0].get("kind")
         if not isinstance(category, str) or not category:
             raise ValueError("Invalid workflow task category")
@@ -384,6 +411,17 @@ def _execution_contract_passed(result: dict[str, object]) -> bool:
     ):
         raise ValueError("Invalid workflow execution contract result")
     return workflow["executionContractPassed"]
+
+
+def _outcome_judge_verdict(result: dict[str, object]) -> str | None:
+    workflow = result.get("workflow")
+    if not isinstance(workflow, dict):
+        return None
+    judge = workflow.get("outcomeJudge")
+    if not isinstance(judge, dict):
+        return None
+    verdict = judge.get("verdict")
+    return verdict if isinstance(verdict, str) else None
 
 
 def _validate_workflow_result(result: dict[str, object]) -> None:

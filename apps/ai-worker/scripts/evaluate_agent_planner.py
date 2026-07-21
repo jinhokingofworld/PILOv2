@@ -9,6 +9,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.agent_outcome_judge import OpenAiOutcomeJudge
 from app.agent_planner_evaluation import (
     attach_tool_capability_catalog,
     build_evaluation_input_hashes,
@@ -30,6 +31,7 @@ from app.agent_workflow_evaluation import (
 _EVALUATOR_SOURCE_PATHS = (
     Path("app/agent_planner_evaluation.py"),
     Path("app/agent_workflow_evaluation.py"),
+    Path("app/agent_outcome_judge.py"),
     Path("app/agent_planner_comparison.py"),
     Path("scripts/evaluate_agent_planner.py"),
 )
@@ -130,6 +132,16 @@ def main() -> None:
         help="Router model used by --llm-routing. Defaults to the Planner model.",
     )
     parser.add_argument(
+        "--judge-model",
+        default=os.environ.get("OPENAI_AGENT_OUTCOME_JUDGE_MODEL", "gpt-5.4"),
+        help="Evidence-grounded outcome Judge model used for agent_workflow evaluation.",
+    )
+    parser.add_argument(
+        "--judge-prompt-version",
+        default="agent-outcome-judge:v1",
+        help="Fixed Judge prompt version recorded with the snapshot.",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=0,
@@ -206,6 +218,11 @@ def main() -> None:
         if args.llm_routing
         else None
     )
+    outcome_judge = (
+        OpenAiOutcomeJudge(api_key, args.judge_model, args.timeout_seconds)
+        if args.meeting_variant == "agent_workflow"
+        else None
+    )
     if workflow_mode:
         assert router is not None
         if args.meeting_variant == "agent_workflow":
@@ -224,6 +241,7 @@ def main() -> None:
             current_date=args.current_date,
             timezone=args.timezone,
             repetitions=args.repetitions,
+            outcome_judge=outcome_judge,
         )
         report = build_workflow_evaluation_report(workflow_results)
     elif args.compare_shadow_retrieval:
@@ -275,6 +293,10 @@ def main() -> None:
         "compareShadowRetrieval": args.compare_shadow_retrieval,
         "llmRouting": args.llm_routing,
         "routerModel": args.router_model if args.llm_routing else None,
+        "outcomeJudgeModel": args.judge_model if outcome_judge else None,
+        "outcomeJudgePromptVersion": args.judge_prompt_version if outcome_judge else None,
+        "outcomeJudgeTemperature": 0 if outcome_judge else None,
+        "outcomeJudgeVoteCount": 3 if outcome_judge else None,
         "retrievalTopK": args.retrieval_top_k,
         "retrieverVersion": TOOL_RETRIEVER_VERSION,
         "evaluationSeed": args.seed,
