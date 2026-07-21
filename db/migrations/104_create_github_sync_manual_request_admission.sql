@@ -50,8 +50,25 @@ ALTER TABLE public.github_sync_manual_requests ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.github_sync_manual_requests FROM PUBLIC;
 
-REVOKE ALL ON TABLE public.github_sync_manual_requests
-  FROM anon, authenticated, service_role;
+DO $pilo_roles$
+DECLARE
+  target_role TEXT;
+BEGIN
+  FOREACH target_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role']
+  LOOP
+    IF EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_roles
+      WHERE rolname = target_role
+    ) THEN
+      EXECUTE pg_catalog.format(
+        'REVOKE ALL ON TABLE public.github_sync_manual_requests FROM %I',
+        target_role
+      );
+    END IF;
+  END LOOP;
+END;
+$pilo_roles$;
 
 COMMENT ON TABLE public.github_sync_manual_requests IS
   'Durable manual GitHub sync idempotency ledger scoped to one Workspace and requester.';
