@@ -417,13 +417,71 @@ function EvidenceTimeButtons({
   );
 }
 
+function InlineEvidencePanels({
+  activityEvidence = [],
+  evidenceSegment,
+  onActivityEvidenceClose,
+  onEvidenceSegmentClose,
+  sourceLabel
+}: {
+  activityEvidence?: MeetingReportActivityEvidence[];
+  evidenceSegment: MeetingReportTranscriptSegment | null;
+  onActivityEvidenceClose: () => void;
+  onEvidenceSegmentClose: () => void;
+  sourceLabel: string;
+}) {
+  return (
+    <>
+      {evidenceSegment ? (
+        <section className="grid gap-2 rounded-lg border border-sky-200 bg-background/70 p-3 dark:border-sky-900/60">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-foreground">근거 Transcript</p>
+            <Button type="button" size="sm" variant="ghost" onClick={onEvidenceSegmentClose}>
+              닫기
+            </Button>
+          </div>
+          <p className="text-xs font-semibold text-muted-foreground">
+            {formatTranscriptTimestamp(evidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(evidenceSegment.endedAtMs)}
+          </p>
+          <p className="whitespace-pre-wrap break-words text-base leading-6">
+            {evidenceSegment.text}
+          </p>
+        </section>
+      ) : null}
+      {activityEvidence.length ? (
+        <section className="grid gap-2 rounded-lg border border-sky-200 bg-background/70 p-3 dark:border-sky-900/60">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-foreground">활동 근거</p>
+            <Button type="button" size="sm" variant="ghost" onClick={onActivityEvidenceClose}>
+              닫기
+            </Button>
+          </div>
+          <p className="text-xs font-semibold text-muted-foreground">
+            {sourceLabel}과 연결된 Workspace 활동 {activityEvidence.length}건
+          </p>
+          <ul className="grid gap-2">
+            {activityEvidence.map((activity) => (
+              <li key={activity.id} className="rounded-md border bg-background p-3 text-base">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  {formatReportDateTime(activity.occurredAt)} · {activity.action}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words leading-6">
+                  {activity.summary}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
 function ReportTextBlock({
   activityEvidence = [],
   asList = false,
   emptyLabel,
   evidenceSegments = [],
-  onActivitySelect,
-  onEvidenceSelect,
   title,
   value
 }: {
@@ -431,11 +489,13 @@ function ReportTextBlock({
   asList?: boolean;
   emptyLabel: string;
   evidenceSegments?: MeetingReportTranscriptSegment[];
-  onActivitySelect?: (activityEvidence: MeetingReportActivityEvidence[]) => void;
-  onEvidenceSelect?: (segment: MeetingReportTranscriptSegment) => void;
   title: string;
   value: string | null;
 }) {
+  const [selectedEvidenceSegment, setSelectedEvidenceSegment] = useState<
+    MeetingReportTranscriptSegment | null
+  >(null);
+  const [activityEvidenceOpen, setActivityEvidenceOpen] = useState(false);
   const listItems = (value ?? "")
     .split(/\r?\n/)
     .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
@@ -455,14 +515,23 @@ function ReportTextBlock({
           <span className="text-muted-foreground">{emptyLabel}</span>
         )}
       </div>
-      {onEvidenceSelect || onActivitySelect ? (
+      {evidenceSegments.length || activityEvidence.length ? (
         <EvidenceTimeButtons
           activityEvidence={activityEvidence}
-          onActivitySelect={onActivitySelect}
+          onActivitySelect={() => setActivityEvidenceOpen((open) => !open)}
           segments={evidenceSegments}
-          onSelect={onEvidenceSelect}
+          onSelect={(segment) => setSelectedEvidenceSegment((current) => (
+            current?.id === segment.id ? null : segment
+          ))}
         />
       ) : null}
+      <InlineEvidencePanels
+        activityEvidence={activityEvidenceOpen ? activityEvidence : []}
+        evidenceSegment={selectedEvidenceSegment}
+        onActivityEvidenceClose={() => setActivityEvidenceOpen(false)}
+        onEvidenceSegmentClose={() => setSelectedEvidenceSegment(null)}
+        sourceLabel={title}
+      />
     </section>
   );
 }
@@ -473,8 +542,6 @@ function EditableReportTextBlock({
   editable,
   emptyLabel,
   evidenceSegments = [],
-  onActivitySelect,
-  onEvidenceSelect,
   onSave,
   saving,
   singleLine = false,
@@ -486,8 +553,6 @@ function EditableReportTextBlock({
   editable: boolean;
   emptyLabel: string;
   evidenceSegments?: MeetingReportTranscriptSegment[];
-  onActivitySelect?: (activityEvidence: MeetingReportActivityEvidence[]) => void;
-  onEvidenceSelect?: (segment: MeetingReportTranscriptSegment) => void;
   onSave: (value: string) => Promise<void>;
   saving: boolean;
   singleLine?: boolean;
@@ -496,6 +561,10 @@ function EditableReportTextBlock({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
+  const [selectedEvidenceSegment, setSelectedEvidenceSegment] = useState<
+    MeetingReportTranscriptSegment | null
+  >(null);
+  const [activityEvidenceOpen, setActivityEvidenceOpen] = useState(false);
   const listItems = (value ?? "")
     .split(/\r?\n/)
     .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
@@ -573,14 +642,23 @@ function EditableReportTextBlock({
           )}
         </div>
       )}
-      {onEvidenceSelect || onActivitySelect ? (
+      {evidenceSegments.length || activityEvidence.length ? (
         <EvidenceTimeButtons
           activityEvidence={activityEvidence}
-          onActivitySelect={onActivitySelect}
+          onActivitySelect={() => setActivityEvidenceOpen((open) => !open)}
           segments={evidenceSegments}
-          onSelect={onEvidenceSelect}
+          onSelect={(segment) => setSelectedEvidenceSegment((current) => (
+            current?.id === segment.id ? null : segment
+          ))}
         />
       ) : null}
+      <InlineEvidencePanels
+        activityEvidence={activityEvidenceOpen ? activityEvidence : []}
+        evidenceSegment={selectedEvidenceSegment}
+        onActivityEvidenceClose={() => setActivityEvidenceOpen(false)}
+        onEvidenceSegmentClose={() => setSelectedEvidenceSegment(null)}
+        sourceLabel={title}
+      />
     </section>
   );
 }
@@ -590,8 +668,6 @@ function DecisionItemsBlock({
   editable,
   emptyLabel,
   evidenceForItem,
-  onActivityEvidenceSelect,
-  onEvidenceSelect,
   onSave,
   saving,
   items
@@ -600,17 +676,19 @@ function DecisionItemsBlock({
   editable: boolean;
   emptyLabel: string;
   evidenceForItem: (item: MeetingReportDecisionItem) => MeetingReportTranscriptSegment[];
-  onActivityEvidenceSelect: (
-    activityEvidence: MeetingReportActivityEvidence[],
-    sourceIndex: number
-  ) => void;
-  onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
   onSave: (item: MeetingReportDecisionItem, text: string) => Promise<void>;
   saving: boolean;
   items: MeetingReportDecisionItem[];
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [selectedEvidence, setSelectedEvidence] = useState<{
+    itemId: string;
+    segment: MeetingReportTranscriptSegment;
+  } | null>(null);
+  const [activityEvidenceOpenItemId, setActivityEvidenceOpenItemId] = useState<
+    string | null
+  >(null);
 
   return (
     <section className="grid gap-2">
@@ -619,6 +697,8 @@ function DecisionItemsBlock({
         <ul className="grid gap-2">
           {items.map((item) => {
             const editing = editingId === item.id;
+            const activityEvidence = activityEvidenceForItem(item);
+            const evidenceSegments = evidenceForItem(item);
             return (
               <li key={item.id} className="grid gap-2 rounded-lg border bg-background p-3 text-base leading-6">
                 <div className="flex items-center justify-between gap-2">
@@ -653,13 +733,29 @@ function DecisionItemsBlock({
                   <p className="whitespace-pre-wrap break-words">{item.text}</p>
                 )}
                 <EvidenceTimeButtons
-                  activityEvidence={activityEvidenceForItem(item)}
-                  onActivitySelect={(activityEvidence) => onActivityEvidenceSelect(
-                    activityEvidence,
-                    item.sourceIndex
-                  )}
-                  segments={evidenceForItem(item)}
-                  onSelect={onEvidenceSelect}
+                  activityEvidence={activityEvidence}
+                  onActivitySelect={() => setActivityEvidenceOpenItemId((current) => (
+                    current === item.id ? null : item.id
+                  ))}
+                  segments={evidenceSegments}
+                  onSelect={(segment) => setSelectedEvidence((current) => (
+                    current?.itemId === item.id && current.segment.id === segment.id
+                      ? null
+                      : { itemId: item.id, segment }
+                  ))}
+                />
+                <InlineEvidencePanels
+                  activityEvidence={
+                    activityEvidenceOpenItemId === item.id ? activityEvidence : []
+                  }
+                  evidenceSegment={
+                    selectedEvidence?.itemId === item.id
+                      ? selectedEvidence.segment
+                      : null
+                  }
+                  onActivityEvidenceClose={() => setActivityEvidenceOpenItemId(null)}
+                  onEvidenceSegmentClose={() => setSelectedEvidence(null)}
+                  sourceLabel={`결정 ${item.sourceIndex + 1}`}
                 />
               </li>
             );
@@ -678,20 +774,20 @@ function DecisionTextItemsBlock({
   activityEvidenceForItem,
   emptyLabel,
   evidenceForItem,
-  onActivityEvidenceSelect,
-  onEvidenceSelect,
   value
 }: {
   activityEvidenceForItem: (sourceIndex: number) => MeetingReportActivityEvidence[];
   emptyLabel: string;
   evidenceForItem: (sourceIndex: number) => MeetingReportTranscriptSegment[];
-  onActivityEvidenceSelect: (
-    activityEvidence: MeetingReportActivityEvidence[],
-    sourceIndex: number
-  ) => void;
-  onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
   value: string | null;
 }) {
+  const [selectedEvidence, setSelectedEvidence] = useState<{
+    sourceIndex: number;
+    segment: MeetingReportTranscriptSegment;
+  } | null>(null);
+  const [activityEvidenceOpenSourceIndex, setActivityEvidenceOpenSourceIndex] = useState<
+    number | null
+  >(null);
   const items = (value ?? "")
     .split(/\r?\n/)
     .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
@@ -702,7 +798,10 @@ function DecisionTextItemsBlock({
       <h3 className="font-heading text-xl font-semibold">결정사항</h3>
       {items.length ? (
         <ul className="grid gap-2">
-          {items.map((item, sourceIndex) => (
+          {items.map((item, sourceIndex) => {
+            const activityEvidence = activityEvidenceForItem(sourceIndex);
+            const evidenceSegments = evidenceForItem(sourceIndex);
+            return (
             <li
               key={`${item}-${sourceIndex}`}
               className="grid gap-2 rounded-lg border bg-background p-3 text-base leading-6"
@@ -712,16 +811,35 @@ function DecisionTextItemsBlock({
               </span>
               <p className="whitespace-pre-wrap break-words">{item}</p>
               <EvidenceTimeButtons
-                activityEvidence={activityEvidenceForItem(sourceIndex)}
-                onActivitySelect={(activityEvidence) => onActivityEvidenceSelect(
-                  activityEvidence,
-                  sourceIndex
-                )}
-                onSelect={onEvidenceSelect}
-                segments={evidenceForItem(sourceIndex)}
+                activityEvidence={activityEvidence}
+                onActivitySelect={() => setActivityEvidenceOpenSourceIndex((current) => (
+                  current === sourceIndex ? null : sourceIndex
+                ))}
+                onSelect={(segment) => setSelectedEvidence((current) => (
+                  current?.sourceIndex === sourceIndex && current.segment.id === segment.id
+                    ? null
+                    : { sourceIndex, segment }
+                ))}
+                segments={evidenceSegments}
+              />
+              <InlineEvidencePanels
+                activityEvidence={
+                  activityEvidenceOpenSourceIndex === sourceIndex
+                    ? activityEvidence
+                    : []
+                }
+                evidenceSegment={
+                  selectedEvidence?.sourceIndex === sourceIndex
+                    ? selectedEvidence.segment
+                    : null
+                }
+                onActivityEvidenceClose={() => setActivityEvidenceOpenSourceIndex(null)}
+                onEvidenceSegmentClose={() => setSelectedEvidence(null)}
+                sourceLabel={`결정 ${sourceIndex + 1}`}
               />
             </li>
-          ))}
+            );
+          })}
         </ul>
       ) : (
         <div className="min-h-24 rounded-lg border bg-background p-3 text-base leading-6 text-muted-foreground">
@@ -752,10 +870,8 @@ function ActionItemReviewCard({
   activityEvidence,
   busy,
   evidenceSegments,
-  onActivityEvidenceSelect,
   onDeliver,
   onDismiss,
-  onEvidenceSelect,
   onLoadIssueDeliveryOptions,
   onSave
 }: {
@@ -764,12 +880,8 @@ function ActionItemReviewCard({
   activityEvidence: MeetingReportActivityEvidence[];
   busy: boolean;
   evidenceSegments: MeetingReportTranscriptSegment[];
-  onActivityEvidenceSelect: (
-    activityEvidence: MeetingReportActivityEvidence[]
-  ) => void;
   onDeliver: (input: MeetingReportActionItemDeliveryInput) => Promise<void>;
   onDismiss: () => void;
-  onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
   onLoadIssueDeliveryOptions: () => Promise<MeetingReportActionItemDeliveryOptions>;
   onSave: (body: UpdateMeetingReportActionItemInput) => Promise<boolean>;
 }) {
@@ -792,6 +904,10 @@ function ActionItemReviewCard({
   const [selectedColumnId, setSelectedColumnId] = useState("");
   const [deliveryOptionsError, setDeliveryOptionsError] = useState<string | null>(null);
   const [loadingIssueOptions, setLoadingIssueOptions] = useState(false);
+  const [activityEvidenceOpen, setActivityEvidenceOpen] = useState(false);
+  const [actionItemEvidenceSegment, setActionItemEvidenceSegment] = useState<
+    MeetingReportTranscriptSegment | null
+  >(null);
   const pending = actionItem.status === "PENDING";
   const retryingDelivery = actionItem.status === "DELIVERY_FAILED";
   const selectedBoard = issueOptions?.boards.find((board) => board.id === selectedBoardId);
@@ -818,6 +934,8 @@ function ActionItemReviewCard({
     setPriority(actionItem.priority);
     setAssigneeUserId(actionItem.assignee?.userId ?? "");
     setEditing(false);
+    setActivityEvidenceOpen(false);
+    setActionItemEvidenceSegment(null);
     const draft = actionItem.status === "DELIVERY_FAILED" ? actionItem.delivery?.draft : null;
     const suggestion = actionItem.deliverySuggestion;
     if (draft?.deliveryType === "calendar_event") {
@@ -958,47 +1076,38 @@ function ActionItemReviewCard({
   }
 
   return (
-    <li className="grid gap-3 rounded-lg border bg-background p-3 text-base">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {getActionItemStatusLabel(actionItem.status)}
-          </span>
-          {pending && !editing ? (
-            <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-              {deliveryType === "calendar_event" ? "일정" : "이슈"}
-            </span>
-          ) : null}
-          {pending && editing ? (
-            <div aria-label="생성 대상 선택" className="flex rounded-md border bg-background p-0.5">
-              <Button type="button" size="sm" variant={deliveryType === "calendar_event" ? "default" : "ghost"} className="h-7 px-2 text-xs" disabled={busy || loadingIssueOptions} onClick={() => void selectDeliveryType("calendar_event")}>
-                일정
-              </Button>
-              <Button type="button" size="sm" variant={deliveryType === "pilo_issue" ? "default" : "ghost"} className="h-7 px-2 text-xs" disabled={busy || loadingIssueOptions} onClick={() => void selectDeliveryType("pilo_issue")}>
-                {loadingIssueOptions ? <Loader2 className="animate-spin" /> : null}
-                이슈
-              </Button>
-            </div>
-          ) : null}
-        </div>
-        <span className="text-xs text-muted-foreground">
-          AI 후보 #{actionItem.sourceIndex + 1}
+    <li className="grid gap-3 rounded-2xl border border-border bg-muted/50 p-4 text-base">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-600 dark:bg-sky-950/40 dark:text-sky-300">
+          {getActionItemStatusLabel(actionItem.status)}
         </span>
+        {pending && !editing ? (
+          <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-600 dark:bg-sky-950/40 dark:text-sky-300">
+            {deliveryType === "calendar_event" ? "일정" : "이슈"}
+          </span>
+        ) : null}
+        {!editing ? (
+          <span className="text-sm text-muted-foreground">
+            AI 후보 #{actionItem.sourceIndex + 1}
+          </span>
+        ) : null}
+        {pending && editing ? (
+          <div aria-label="생성 대상 선택" className="ml-auto flex rounded-md border bg-background p-0.5">
+            <Button type="button" size="sm" variant={deliveryType === "calendar_event" ? "default" : "ghost"} className="h-7 px-2 text-xs" disabled={busy || loadingIssueOptions} onClick={() => void selectDeliveryType("calendar_event")}>
+              일정
+            </Button>
+            <Button type="button" size="sm" variant={deliveryType === "pilo_issue" ? "default" : "ghost"} className="h-7 px-2 text-xs" disabled={busy || loadingIssueOptions} onClick={() => void selectDeliveryType("pilo_issue")}>
+              {loadingIssueOptions ? <Loader2 className="animate-spin" /> : null}
+              이슈
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {editing && pending ? (
         <div className="grid gap-2">
           <Input className="text-base" aria-label="후속 작업 제목" disabled={busy} value={title} onChange={(event) => setTitle(event.target.value)} />
           <textarea aria-label="후속 작업 설명" className="min-h-20 rounded-md border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={busy} value={description} onChange={(event) => setDescription(event.target.value)} />
-          <div className="grid gap-2 sm:grid-cols-2">
-            <select aria-label="우선순위 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy} value={priority} onChange={(event) => setPriority(event.target.value as MeetingReportActionItem["priority"])}>
-              <option value="LOW">낮음</option><option value="MEDIUM">보통</option><option value="HIGH">높음</option>
-            </select>
-            <select aria-label="담당자 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy} value={assigneeUserId} onChange={(event) => setAssigneeUserId(event.target.value)}>
-              <option value="">담당자 미지정</option>
-              {(actionItemAssignees ?? []).map((assignee) => <option key={assignee.userId} value={assignee.userId}>{assignee.name?.trim() || "이름 없음"}</option>)}
-            </select>
-          </div>
         </div>
       ) : (
         <div>
@@ -1009,12 +1118,105 @@ function ActionItemReviewCard({
       )}
 
       {!editing && (evidenceSegments.length || activityEvidence.length) ? (
-        <EvidenceTimeButtons
-          activityEvidence={activityEvidence}
-          onActivitySelect={onActivityEvidenceSelect}
-          segments={evidenceSegments}
-          onSelect={onEvidenceSelect}
-        />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <EvidenceTimeButtons
+            activityEvidence={activityEvidence}
+            onActivitySelect={() => setActivityEvidenceOpen((open) => !open)}
+            segments={evidenceSegments}
+            onSelect={(segment) => setActionItemEvidenceSegment((current) => (
+              current?.id === segment.id ? null : segment
+            ))}
+          />
+          {pending ? (
+            <div className="ml-auto flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 px-3"
+                disabled={busy}
+                onClick={() => onDismiss()}
+              >
+                <X />
+                반려
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 px-3"
+                disabled={busy}
+                onClick={() => void beginEditing()}
+              >
+                <Pencil />
+                수정
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-9 bg-sky-600 px-3 text-white hover:bg-sky-700"
+                disabled={busy}
+                onClick={() => void beginEditing()}
+              >
+                <Check />
+                승인
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {actionItemEvidenceSegment ? (
+        <section className="grid gap-2 rounded-lg border border-sky-200 bg-background/70 p-3 dark:border-sky-900/60">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-foreground">근거 Transcript</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setActionItemEvidenceSegment(null)}
+            >
+              닫기
+            </Button>
+          </div>
+          <p className="text-xs font-semibold text-muted-foreground">
+            {formatTranscriptTimestamp(actionItemEvidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(actionItemEvidenceSegment.endedAtMs)}
+          </p>
+          <p className="whitespace-pre-wrap break-words text-base leading-6">
+            {actionItemEvidenceSegment.text}
+          </p>
+        </section>
+      ) : null}
+
+      {activityEvidenceOpen && activityEvidence.length ? (
+        <section className="grid gap-2 rounded-lg border border-violet-200 bg-background/70 p-3 dark:border-violet-900/60">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-foreground">활동 근거</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setActivityEvidenceOpen(false)}
+            >
+              닫기
+            </Button>
+          </div>
+          <p className="text-xs font-semibold text-muted-foreground">
+            후속 작업 {actionItem.sourceIndex + 1}과 연결된 Workspace 활동 {activityEvidence.length}건
+          </p>
+          <ul className="grid gap-2">
+            {activityEvidence.map((activity) => (
+              <li key={activity.id} className="rounded-md border bg-background p-3 text-base">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  {formatReportDateTime(activity.occurredAt)} · {activity.action}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words leading-6">
+                  {activity.summary}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       {actionItem.delivery ? (
@@ -1047,9 +1249,9 @@ function ActionItemReviewCard({
       ) : null}
 
       {editing ? (
-        <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="grid gap-3">
           {deliveryType === "calendar_event" ? (
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 rounded-md border bg-background/70 p-3 sm:grid-cols-2">
               <label className="grid gap-1 text-xs text-muted-foreground">
                 시작 날짜
                 <Input type="date" disabled={busy} value={startDate} onChange={(event) => {
@@ -1074,40 +1276,56 @@ function ActionItemReviewCard({
               ) : null}
             </div>
           ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {loadingIssueOptions ? (
-                <p className="text-xs text-muted-foreground sm:col-span-2">
-                  생성 가능한 Board와 Column을 불러오는 중입니다.
-                </p>
-              ) : issueOptions && !hasIssueDeliveryTarget ? (
-                <p className="text-xs text-muted-foreground sm:col-span-2">
-                  생성 가능한 대상이 없습니다. GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board를 동기화한 뒤 다시 시도해주세요.
-                </p>
-              ) : (
-                <>
-                  <select aria-label="Board 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || retryingDelivery} value={selectedBoardId} onChange={(event) => changeBoard(event.target.value)}>
-                    <option value="">Board 선택</option>
-                    {issueOptions?.boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
-                  </select>
-                  <select aria-label="Column 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || !selectedBoard || retryingDelivery} value={selectedColumnId} onChange={(event) => setSelectedColumnId(event.target.value)}>
-                    <option value="">Column 선택</option>
-                    {selectedBoard?.columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}
-                  </select>
-                  {hasStaleIssueDeliverySelection ? (
-                    <p className="text-xs text-muted-foreground sm:col-span-2">
-                      선택한 Board 또는 Column을 사용할 수 없습니다. GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board와 Column을 동기화한 뒤 다시 시도해주세요.
-                    </p>
-                  ) : null}
-                </>
-              )}
-              {deliveryOptionsError ? <p className="text-xs text-destructive sm:col-span-2">{deliveryOptionsError}</p> : null}
+            <div className="grid gap-3 rounded-md border bg-background/70 p-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <select aria-label="우선순위 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy} value={priority} onChange={(event) => setPriority(event.target.value as MeetingReportActionItem["priority"])}>
+                  <option value="LOW">낮음</option><option value="MEDIUM">보통</option><option value="HIGH">높음</option>
+                </select>
+                <select aria-label="담당자 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy} value={assigneeUserId} onChange={(event) => setAssigneeUserId(event.target.value)}>
+                  <option value="">담당자 미지정</option>
+                  {(actionItemAssignees ?? []).map((assignee) => <option key={assignee.userId} value={assignee.userId}>{assignee.name?.trim() || "이름 없음"}</option>)}
+                </select>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {loadingIssueOptions ? (
+                  <p className="text-xs text-muted-foreground sm:col-span-2">
+                    생성 가능한 Board와 Column을 불러오는 중입니다.
+                  </p>
+                ) : issueOptions && !hasIssueDeliveryTarget ? (
+                  <p className="text-xs text-muted-foreground sm:col-span-2">
+                    생성 가능한 대상이 없습니다. GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board를 동기화한 뒤 다시 시도해주세요.
+                  </p>
+                ) : (
+                  <>
+                    <select aria-label="Board 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || retryingDelivery} value={selectedBoardId} onChange={(event) => changeBoard(event.target.value)}>
+                      <option value="">Board 선택</option>
+                      {issueOptions?.boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
+                    </select>
+                    <select aria-label="Column 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || !selectedBoard || retryingDelivery} value={selectedColumnId} onChange={(event) => setSelectedColumnId(event.target.value)}>
+                      <option value="">Column 선택</option>
+                      {selectedBoard?.columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}
+                    </select>
+                    {hasStaleIssueDeliverySelection ? (
+                      <p className="text-xs text-muted-foreground sm:col-span-2">
+                        선택한 Board 또는 Column을 사용할 수 없습니다. GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board와 Column을 동기화한 뒤 다시 시도해주세요.
+                      </p>
+                    ) : null}
+                  </>
+                )}
+                {deliveryOptionsError ? <p className="text-xs text-destructive sm:col-span-2">{deliveryOptionsError}</p> : null}
+              </div>
             </div>
           )}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
+            <EvidenceTimeButtons
+              segments={evidenceSegments}
+              onSelect={(segment) => setActionItemEvidenceSegment((current) => (
+                current?.id === segment.id ? null : segment
+              ))}
+            />
             <div className="flex gap-2">
               <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(false)}>취소</Button>
-              <Button type="button" size="sm" disabled={busy || !title.trim() || !description.trim() || (deliveryType === "calendar_event" ? !startDate || (!isAllDay && !startTime) : !hasIssueDeliverySelection)} onClick={() => void submitApproval()}>
+              <Button type="button" size="sm" className="bg-sky-600 text-white hover:bg-sky-700" disabled={busy || !title.trim() || !description.trim() || (deliveryType === "calendar_event" ? !startDate || (!isAllDay && !startTime) : !hasIssueDeliverySelection)} onClick={() => void submitApproval()}>
                 {busy ? <Loader2 className="animate-spin" /> : null}
                 승인
               </Button>
@@ -1116,19 +1334,19 @@ function ActionItemReviewCard({
         </div>
       ) : null}
 
-      {pending && !editing ? (
+      {pending && !editing && !evidenceSegments.length && !activityEvidence.length ? (
         <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => onDismiss()}
-          >
+          <Button type="button" size="sm" variant="outline" className="h-9 px-3" disabled={busy} onClick={() => onDismiss()}>
+            <X />
             반려
           </Button>
-          <Button type="button" size="sm" disabled={busy} onClick={() => void beginEditing()}>
-            수정 & 승인
+          <Button type="button" size="sm" variant="outline" className="h-9 px-3" disabled={busy} onClick={() => void beginEditing()}>
+            <Pencil />
+            수정
+          </Button>
+          <Button type="button" size="sm" className="h-9 bg-sky-600 px-3 text-white hover:bg-sky-700" disabled={busy} onClick={() => void beginEditing()}>
+            <Check />
+            승인
           </Button>
         </div>
       ) : null}
@@ -1194,15 +1412,6 @@ function MeetingReportDetailModal({
   const [detailView, setDetailView] = useState<ReportDetailView>("detail");
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const [selectedEvidenceSegment, setSelectedEvidenceSegment] = useState<
-    MeetingReportTranscriptSegment | null
-  >(null);
-  const [selectedActivityEvidence, setSelectedActivityEvidence] = useState<
-    MeetingReportActivityEvidence[] | null
-  >(null);
-  const [selectedActivityEvidenceSourceLabel, setSelectedActivityEvidenceSourceLabel] =
-    useState<string | null>(null);
-  const selectedEvidencePanelRef = useRef<HTMLElement | null>(null);
   const actionItemsWithEvidence = report
     ? actionItems.map((item, index) => ({
         item,
@@ -1221,9 +1430,6 @@ function MeetingReportDetailModal({
 
   useEffect(() => {
     setDetailView("detail");
-    setSelectedEvidenceSegment(null);
-    setSelectedActivityEvidence(null);
-    setSelectedActivityEvidenceSourceLabel(null);
     setEditingTitle(false);
     setTitleDraft(report?.title ?? "");
   }, [report?.id, report?.evidenceSegments, report?.activityEvidence]);
@@ -1233,31 +1439,6 @@ function MeetingReportDetailModal({
       setTitleDraft(report?.title ?? "");
     }
   }, [editingTitle, report?.title]);
-
-  useEffect(() => {
-    if (!selectedEvidenceSegment && !selectedActivityEvidence) return;
-
-    const panel = selectedEvidencePanelRef.current;
-    if (!panel) return;
-
-    panel.scrollIntoView({ behavior: "smooth", block: "center" });
-    panel.focus({ preventScroll: true });
-  }, [selectedActivityEvidence, selectedEvidenceSegment]);
-
-  function selectTranscriptSegment(segment: MeetingReportTranscriptSegment) {
-    setSelectedActivityEvidence(null);
-    setSelectedActivityEvidenceSourceLabel(null);
-    setSelectedEvidenceSegment(segment);
-  }
-
-  function selectActivityEvidence(
-    activityEvidence: MeetingReportActivityEvidence[],
-    sourceLabel: string
-  ) {
-    setSelectedEvidenceSegment(null);
-    setSelectedActivityEvidence(activityEvidence);
-    setSelectedActivityEvidenceSourceLabel(sourceLabel);
-  }
 
   function startTitleEdit() {
     if (!report?.canEdit || report.status !== "COMPLETED") return;
@@ -1493,11 +1674,6 @@ function MeetingReportDetailModal({
                       : "등록된 요약이 없습니다."
                   }
                   evidenceSegments={summaryEvidence}
-                  onActivitySelect={(activityEvidence) => selectActivityEvidence(
-                    activityEvidence,
-                    "요약"
-                  )}
-                  onEvidenceSelect={selectTranscriptSegment}
                   title="요약"
                   value={report.summary}
                 />
@@ -1511,11 +1687,6 @@ function MeetingReportDetailModal({
                       : "등록된 논의사항이 없습니다."
                   }
                   evidenceSegments={discussionEvidence}
-                  onActivitySelect={(activityEvidence) => selectActivityEvidence(
-                    activityEvidence,
-                    "논의사항"
-                  )}
-                  onEvidenceSelect={selectTranscriptSegment}
                   onSave={(discussionPoints) => onUpdateContent({
                     expectedVersion: report.contentVersion,
                     discussionPoints
@@ -1540,10 +1711,6 @@ function MeetingReportDetailModal({
                     }
                     evidenceForItem={(item) => getEvidenceSegments(report, "decision", item.sourceIndex)}
                     items={decisionItems}
-                    onActivityEvidenceSelect={(activityEvidence, sourceIndex) =>
-                      selectActivityEvidence(activityEvidence, `결정 ${sourceIndex + 1}`)
-                    }
-                    onEvidenceSelect={selectTranscriptSegment}
                     onSave={(item, text) => onUpdateContent({
                       expectedVersion: report.contentVersion,
                       decisionItems: [{ id: item.id, text }]
@@ -1567,10 +1734,6 @@ function MeetingReportDetailModal({
                       "decision",
                       sourceIndex
                     )}
-                    onActivityEvidenceSelect={(activityEvidence, sourceIndex) =>
-                      selectActivityEvidence(activityEvidence, `결정 ${sourceIndex + 1}`)
-                    }
-                    onEvidenceSelect={selectTranscriptSegment}
                     value={report.decisions}
                   />
                 )}
@@ -1593,15 +1756,8 @@ function MeetingReportDetailModal({
                             activityEvidence={activityEvidence}
                             busy={mutatingActionItemId === item.id}
                             evidenceSegments={evidenceSegments}
-                            onActivityEvidenceSelect={(selectedActivityEvidence) =>
-                              selectActivityEvidence(
-                                selectedActivityEvidence,
-                                `후속 작업 ${item.sourceIndex + 1}`
-                              )
-                            }
                             onDeliver={(input) => onDeliverActionItem(item, input)}
                             onDismiss={() => onDismissActionItem(item)}
-                            onEvidenceSelect={selectTranscriptSegment}
                             onLoadIssueDeliveryOptions={() => onLoadIssueDeliveryOptions(item)}
                             onSave={(body) => onUpdateActionItem(item, body)}
                           />
@@ -1635,62 +1791,6 @@ function MeetingReportDetailModal({
                   )}
                 </section>
 
-                {selectedEvidenceSegment || selectedActivityEvidence ? (
-                  <section
-                    ref={selectedEvidencePanelRef}
-                    tabIndex={-1}
-                    className="grid gap-2 rounded-lg border border-primary/30 bg-primary/5 p-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-heading text-xl font-semibold">
-                        {selectedEvidenceSegment ? "근거 Transcript" : "활동 근거"}
-                      </h3>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setSelectedEvidenceSegment(null);
-                          setSelectedActivityEvidence(null);
-                          setSelectedActivityEvidenceSourceLabel(null);
-                        }}
-                      >
-                        닫기
-                      </Button>
-                    </div>
-                    {selectedEvidenceSegment ? (
-                      <>
-                        <p className="text-xs font-semibold text-muted-foreground">
-                          {formatTranscriptTimestamp(selectedEvidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(selectedEvidenceSegment.endedAtMs)}
-                        </p>
-                        <p className="whitespace-pre-wrap break-words text-base leading-6">
-                          {selectedEvidenceSegment.text}
-                        </p>
-                      </>
-                    ) : selectedActivityEvidence ? (
-                      <>
-                        <p className="text-xs font-semibold text-muted-foreground">
-                          {selectedActivityEvidenceSourceLabel ?? "선택한 항목"}과 연결된 Workspace 활동 {selectedActivityEvidence.length}건
-                        </p>
-                        <ul className="grid gap-2">
-                          {selectedActivityEvidence.map((activity) => (
-                            <li
-                              key={activity.id}
-                              className="rounded-md border bg-background p-3 text-base"
-                            >
-                              <p className="text-xs font-semibold text-muted-foreground">
-                                {formatReportDateTime(activity.occurredAt)} · {activity.action}
-                              </p>
-                              <p className="mt-1 whitespace-pre-wrap break-words leading-6">
-                                {activity.summary}
-                              </p>
-                            </li>
-                          ))}
-                        </ul>
-                      </>
-                    ) : null}
-                  </section>
-                ) : null}
               </div>
             ) : null}
           </div>
