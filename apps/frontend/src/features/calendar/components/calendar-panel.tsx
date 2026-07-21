@@ -764,7 +764,7 @@ function CalendarEventDialog({
                 onFormChange={onFormChange}
               />
 
-              <div className="border-t p-4">
+              <div className="border-t p-4 space-y-3">
                 <Button
                   type="button"
                   variant="destructive"
@@ -1494,35 +1494,39 @@ export function CalendarPanel() {
         className="flex min-h-0 flex-1 flex-col gap-4 rounded-[15px] border-border bg-card px-4 py-4 text-card-foreground shadow-sm"
       >
         <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">
+          <div
+            className="flex items-center gap-1"
+            data-calendar-month-navigation="true"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label="이전 달"
+              disabled={!isCalendarMonthInRange(shiftMonth(monthDate, -1))}
+              onClick={() => goToMonth(shiftMonth(monthDate, -1))}
+            >
+              <ChevronLeft />
+            </Button>
+            <CalendarMonthPicker
+              monthDate={monthDate}
+              onMonthChange={goToMonth}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label="다음 달"
+              disabled={!isCalendarMonthInRange(shiftMonth(monthDate, 1))}
+              onClick={() => goToMonth(shiftMonth(monthDate, 1))}
+            >
+              <ChevronRight />
+            </Button>
+          </div>
+
+          <h1 className="justify-self-start font-heading text-2xl font-semibold tracking-tight lg:justify-self-center">
             캘린더
           </h1>
-          <div className="flex items-center gap-1 lg:justify-self-center">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                aria-label="이전 달"
-                disabled={!isCalendarMonthInRange(shiftMonth(monthDate, -1))}
-                onClick={() => goToMonth(shiftMonth(monthDate, -1))}
-              >
-                <ChevronLeft />
-              </Button>
-              <CalendarMonthPicker
-                monthDate={monthDate}
-                onMonthChange={goToMonth}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                aria-label="다음 달"
-                disabled={!isCalendarMonthInRange(shiftMonth(monthDate, 1))}
-                onClick={() => goToMonth(shiftMonth(monthDate, 1))}
-              >
-                <ChevronRight />
-              </Button>
-          </div>
 
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             <Button
