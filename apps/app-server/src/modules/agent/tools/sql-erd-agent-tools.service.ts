@@ -16,6 +16,7 @@ import type {
   AgentToolExecutionResult,
   AgentToolInputSchema
 } from "../types/agent-tool.types";
+import { AgentLatencyObserver } from "../agent-latency-observer";
 import {
   buildSqlErdAgentSchemaProjection,
   createSqlErdModelFingerprint,
@@ -266,7 +267,10 @@ const SQL_ERD_SCHEMA_SPEC_INPUT_SCHEMA: AgentToolInputSchema = {
 
 @Injectable()
 export class SqlErdAgentToolsService {
-  constructor(private readonly sqlErdService: SqlErdService) {}
+  constructor(
+    private readonly sqlErdService: SqlErdService,
+    private readonly agentLatencyObserver?: AgentLatencyObserver
+  ) {}
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
     return [
@@ -493,7 +497,11 @@ export class SqlErdAgentToolsService {
     const inspectedEvidenceFingerprint = createSqlErdModelFingerprint(projection);
     const resolution =
       resolveDeterministicSqlErdTableFocus(projection, input.featureQuery) ??
-      (await this.resolveSqlErdTableFocusWithLlm(projection, input.featureQuery));
+      (await this.resolveSqlErdTableFocusWithLlm(
+        context.runId,
+        projection,
+        input.featureQuery
+      ));
     if (resolution.kind === "needs_clarification") {
       return {
         outputSummary: this.toAgentJsonObject({
@@ -649,9 +657,11 @@ export class SqlErdAgentToolsService {
   }
 
   private async resolveSqlErdTableFocusWithLlm(
+    runId: string,
     projection: ReturnType<typeof buildSqlErdAgentSchemaProjection>,
     featureQuery: string
   ): Promise<SqlErdFocusResolution> {
+    const startedAt = performance.now();
     const apiKey = process.env.OPENAI_API_KEY?.trim();
     if (!apiKey) {
       return {
@@ -737,21 +747,127 @@ export class SqlErdAgentToolsService {
         }
       );
       if (!response.ok) {
+        this.observeFocusResolver(
+          runId,
+          startedAt,
+          "failure",
+          "provider_error",
+          "http_error",
+          response.status
+        );
         return this.focusResolverUnavailable();
       }
-      const body = await response.json();
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        this.observeFocusResolver(
+          runId,
+          startedAt,
+          "failure",
+          controller.signal.aborted ? "timeout" : "validation_error",
+          controller.signal.aborted ? "timeout" : "json_parse_error"
+        );
+        return this.focusResolverUnavailable();
+      }
       const outputText = this.extractOpenAiOutputText(body);
-      return outputText
-        ? validateLlmSqlErdTableFocus(
-            projection,
-            featureQuery,
-            JSON.parse(outputText)
-          )
-        : this.focusResolverUnavailable();
+      if (!outputText) {
+        this.observeFocusResolver(
+          runId,
+          startedAt,
+          "failure",
+          "provider_error",
+          "empty_output"
+        );
+        return this.focusResolverUnavailable();
+      }
+      let parsedOutput: unknown;
+      try {
+        parsedOutput = JSON.parse(outputText);
+      } catch {
+        this.observeFocusResolver(
+          runId,
+          startedAt,
+          "failure",
+          "validation_error",
+          "json_parse_error"
+        );
+        return this.focusResolverUnavailable();
+      }
+      let resolution: SqlErdFocusResolution;
+      try {
+        resolution = validateLlmSqlErdTableFocus(
+          projection,
+          featureQuery,
+          parsedOutput
+        );
+      } catch {
+        this.observeFocusResolver(
+          runId,
+          startedAt,
+          "failure",
+          "validation_error",
+          "validation_error"
+        );
+        return this.focusResolverUnavailable();
+      }
+      if (
+        resolution.kind === "needs_clarification" &&
+        resolution.reason === "invalid_resolver_result"
+      ) {
+        this.observeFocusResolver(
+          runId,
+          startedAt,
+          "failure",
+          "validation_error",
+          "validation_error"
+        );
+        return resolution;
+      }
+      this.observeFocusResolver(runId, startedAt, "success");
+      return resolution;
     } catch {
+      this.observeFocusResolver(
+        runId,
+        startedAt,
+        "failure",
+        controller.signal.aborted ? "timeout" : "provider_error",
+        controller.signal.aborted ? "timeout" : "network_error"
+      );
       return this.focusResolverUnavailable();
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+  private observeFocusResolver(
+    runId: string,
+    startedAt: number,
+    outcome: "success" | "failure",
+    failureType?: "provider_error" | "timeout" | "validation_error",
+    failureDetail?:
+      | "http_error"
+      | "network_error"
+      | "timeout"
+      | "empty_output"
+      | "json_parse_error"
+      | "validation_error",
+    httpStatus?: number
+  ): void {
+    try {
+      this.agentLatencyObserver?.observe({
+        runId,
+        stage: "focus_resolver",
+        outcome,
+        surface: "sql_erd",
+        toolName: "focus_sql_erd_tables",
+        startedAt,
+        ...(failureType === undefined ? {} : { failureType }),
+        ...(failureDetail === undefined ? {} : { failureDetail }),
+        ...(httpStatus === undefined ? {} : { httpStatus })
+      });
+    } catch {
+      return;
     }
   }
 
