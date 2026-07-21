@@ -110,7 +110,7 @@ if session.status == "active" then
   redis.call("PERSIST", KEYS[5])
   redis.call("PERSIST", KEYS[6])
   redis.call("PERSIST", KEYS[7])
-  redis.call("ZADD", KEYS[8], ARGV[4], session.sessionId)
+  redis.call("ZADD", KEYS[8], "NX", ARGV[4], session.sessionId)
   redis.call("DEL", KEYS[3])
   return {encoded, "", ""}
 end

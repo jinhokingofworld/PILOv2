@@ -111,7 +111,9 @@ class FakeRedisClient {
         this.expiries.delete(lifecycleKey);
         this.expiries.delete(lifecycleWorkspaceKey);
         this.expiries.delete(lifecycleRoomKey);
-        this.deadlines.set(session.sessionId, Number(options.arguments[3]));
+        if (!this.deadlines.has(session.sessionId)) {
+          this.deadlines.set(session.sessionId, Number(options.arguments[3]));
+        }
         this.values.delete(rollbackKey);
         this.expiries.delete(rollbackKey);
         return [value, "", ""];
@@ -839,6 +841,33 @@ try {
         )
       ),
       legacySession
+    );
+    const scheduledDeadlineMs =
+      Date.parse(legacySession.startedAt) + 12 * 60 * 60 * 1000;
+    const workerLeaseUntilMs = scheduledDeadlineMs + 30 * 1000;
+    upgradeRedis.deadlines.set(legacySession.sessionId, workerLeaseUntilMs);
+    await upgradeState.activate({
+      workspaceId: legacySession.workspaceId,
+      sessionId: legacySession.sessionId,
+      livekitRoomName: legacySession.livekitRoomName,
+      startedAt: "2026-07-18T00:00:03.000Z"
+    });
+    assert.equal(
+      upgradeRedis.deadlines.get(legacySession.sessionId),
+      workerLeaseUntilMs,
+      "active redelivery must not replace a deadline worker lease"
+    );
+    upgradeRedis.deadlines.set(legacySession.sessionId, scheduledDeadlineMs - 1);
+    await upgradeState.activate({
+      workspaceId: legacySession.workspaceId,
+      sessionId: legacySession.sessionId,
+      livekitRoomName: legacySession.livekitRoomName,
+      startedAt: "2026-07-18T00:00:04.000Z"
+    });
+    assert.equal(
+      upgradeRedis.deadlines.get(legacySession.sessionId),
+      scheduledDeadlineMs - 1,
+      "active redelivery must preserve an existing scheduled deadline"
     );
     assert.equal(
       (
