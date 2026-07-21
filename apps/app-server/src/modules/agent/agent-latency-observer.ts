@@ -5,6 +5,7 @@ const SQL_ERD_TOOL_NAMES = new Set([
   "focus_sql_erd_tables"
 ]);
 const LATENCY_STAGES = new Set([
+  "focus_resolver",
   "tool_preparation",
   "tool_execution",
   "tool_advance",
@@ -18,10 +19,19 @@ const LATENCY_OUTCOMES = new Set([
 ]);
 const FAILURE_TYPES = new Set([
   "timeout",
+  "provider_error",
   "validation_error",
   "repository_error",
   "domain_error",
   "unknown"
+]);
+const FAILURE_DETAILS = new Set([
+  "http_error",
+  "network_error",
+  "timeout",
+  "empty_output",
+  "json_parse_error",
+  "validation_error"
 ]);
 
 export interface AgentLatencyObservationInput {
@@ -34,6 +44,8 @@ export interface AgentLatencyObservationInput {
   elapsedMs?: number;
   turnSequence?: number;
   failureType?: string;
+  failureDetail?: string;
+  httpStatus?: number;
 }
 
 export interface AgentLatencyEvent {
@@ -47,6 +59,8 @@ export interface AgentLatencyEvent {
   surface: "sql_erd";
   tool_name: string;
   failure_type?: string;
+  failure_detail?: string;
+  http_status?: number;
 }
 
 export function agentLatencyTraceKey(runId: string): string {
@@ -91,6 +105,19 @@ export function buildAgentLatencyEvent(
     event.failure_type = FAILURE_TYPES.has(input.failureType)
       ? input.failureType
       : "unknown";
+  }
+  if (input.failureDetail !== undefined) {
+    event.failure_detail = FAILURE_DETAILS.has(input.failureDetail)
+      ? input.failureDetail
+      : "unknown";
+  }
+  if (
+    typeof input.httpStatus === "number" &&
+    Number.isSafeInteger(input.httpStatus) &&
+    input.httpStatus >= 100 &&
+    input.httpStatus <= 599
+  ) {
+    event.http_status = input.httpStatus;
   }
   return event;
 }

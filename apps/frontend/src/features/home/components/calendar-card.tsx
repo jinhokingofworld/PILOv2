@@ -65,7 +65,7 @@ function ReadonlyCalendar({
         label: "캘린더",
         type: "home_card"
       })}
-      className="relative h-full min-h-0 overflow-hidden rounded-[15px] border-border bg-card text-card-foreground shadow-sm"
+      className="relative h-full min-h-0 overflow-hidden rounded-[15px] border-2 border-border bg-card text-card-foreground shadow-sm"
       size="sm"
     >
       <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-5 pt-5">
