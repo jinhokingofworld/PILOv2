@@ -542,29 +542,41 @@ export class AgentConfirmationService {
       confirmationId: string;
     }
   ): Promise<AgentConfirmationWithRunRow | null> {
-    return transaction.queryOne<AgentConfirmationWithRunRow>(
+    const run = await transaction.queryOne<{
+      status: AgentRunStatus;
+      message: string | null;
+      request_context_json: AgentRunRequestContext;
+    }>(
       `
-        SELECT
-          c.*,
-          r.status AS run_status,
-          r.message AS run_message,
-          r.request_context_json AS run_request_context_json
-        FROM agent_confirmations c
-        JOIN agent_runs r
-          ON r.id = c.run_id
-        WHERE c.id = $1
-          AND c.run_id = $2
-          AND r.workspace_id = $3
-          AND r.requested_by_user_id = $4
-        FOR UPDATE OF c, r
+        SELECT status, message, request_context_json
+        FROM agent_runs
+        WHERE id = $1
+          AND workspace_id = $2
+          AND requested_by_user_id = $3
+        FOR UPDATE
       `,
-      [
-        input.confirmationId,
-        input.runId,
-        input.workspaceId,
-        input.currentUserId
-      ]
+      [input.runId, input.workspaceId, input.currentUserId]
     );
+    if (!run) return null;
+    const confirmation =
+      await transaction.queryOne<AgentConfirmationRow>(
+        `
+          SELECT *
+          FROM agent_confirmations
+          WHERE id = $1
+            AND run_id = $2
+          FOR UPDATE
+        `,
+        [input.confirmationId, input.runId]
+      );
+    return confirmation
+      ? {
+          ...confirmation,
+          run_status: run.status,
+          run_message: run.message,
+          run_request_context_json: run.request_context_json
+        }
+      : null;
   }
 
   private async expireConfirmation(

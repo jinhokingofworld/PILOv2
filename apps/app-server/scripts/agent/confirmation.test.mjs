@@ -496,6 +496,18 @@ class FakeTransaction {
       return this.findConfirmationForUpdate(values);
     }
 
+    if (
+      text.includes("SELECT *") &&
+      text.includes("FROM agent_confirmations") &&
+      text.includes("WHERE id = $1")
+    ) {
+      const confirmation = this.state.confirmations.find(
+        (candidate) =>
+          candidate.id === values[0] && candidate.run_id === values[1]
+      );
+      return confirmation ? { ...confirmation } : null;
+    }
+
     if (text.includes("FROM agent_confirmations")) {
       return this.findPendingConfirmation(values);
     }

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+const { HTTP_CODE_METADATA } = require("@nestjs/common/constants");
 const { AgentController } = require(
   "../../dist/modules/agent/agent.controller.js"
 );
@@ -22,6 +23,15 @@ const CREATED_AT = new Date("2026-07-08T00:00:00.000Z");
 const UPDATED_AT = new Date("2026-07-08T00:01:00.000Z");
 const EXPIRES_AT = new Date("2026-08-07T00:00:00.000Z");
 const CONFIRMATION_EXPIRES_AT = new Date("2026-07-08T00:15:00.000Z");
+
+assert.equal(
+  Reflect.getMetadata(
+    HTTP_CODE_METADATA,
+    AgentController.prototype.routeMessage
+  ),
+  200,
+  "POST /agent/messages must return the documented 200 OK status"
+);
 const contextualExecutionMigration = readFileSync(
   new URL(
     "../../../../db/migrations/078_add_agent_contextual_execution.sql",
@@ -496,7 +506,7 @@ function errorMessage(error) {
       created: false
     }
   ]);
-  const controller = new AgentController(runService, {});
+  const controller = new AgentController(runService, {}, {});
   const createdReply = {
     statusCode: null,
     status(code) {
@@ -529,6 +539,44 @@ function errorMessage(error) {
   assert.equal(reusedReply.statusCode, 200);
   assert.equal(created.success, true);
   assert.equal(reused.success, true);
+}
+
+{
+  const routedPayload = {
+    outcome: "needs_choice",
+    relationship: "ambiguous",
+    run: null,
+    previousRun: null,
+    clarification: {
+      question: "기존 작업을 이어갈까요, 아니면 새 요청을 시작할까요?",
+      choices: [
+        { disposition: "continue_previous", label: "기존 작업 계속" },
+        { disposition: "start_new", label: "새 요청 시작" }
+      ]
+    }
+  };
+  const calls = [];
+  const controller = new AgentController({}, {}, {
+    async routeMessage(currentUserId, workspaceId, body) {
+      calls.push({ currentUserId, workspaceId, body });
+      return routedPayload;
+    }
+  });
+  const body = {
+    activeRunId: RUN_ID,
+    clientRequestId: "message-request-1",
+    disposition: "auto",
+    message: "그거",
+    requestContext: null,
+    timezone: "Asia/Seoul"
+  };
+
+  const result = await controller.routeMessage(USER_ID, WORKSPACE_ID, body);
+
+  assert.deepEqual(result, { success: true, data: routedPayload });
+  assert.deepEqual(calls, [
+    { currentUserId: USER_ID, workspaceId: WORKSPACE_ID, body }
+  ]);
 }
 
 {

@@ -2764,16 +2764,21 @@ def test_processor_deletes_invalid_agent_payload_without_repository_calls() -> N
 def test_processor_deletes_missing_or_terminal_runs() -> None:
     missing_repository = FakeAgentRunRepository(context=None)
     terminal_repository = FakeAgentRunRepository(context=run_context(status="completed"))
+    cancelled_repository = FakeAgentRunRepository(context=run_context(status="cancelled"))
 
     missing = create_processor(missing_repository).process_payload(agent_payload())
     terminal = create_processor(terminal_repository).process_payload(agent_payload())
+    cancelled = create_processor(cancelled_repository).process_payload(agent_payload())
 
     assert missing.delete_message is True
     assert missing.reason == "agent_run_not_found"
     assert terminal.delete_message is True
     assert terminal.reason == "terminal_agent_run"
+    assert cancelled.delete_message is True
+    assert cancelled.reason == "terminal_agent_run"
     assert missing_repository.release_calls == [RUN_ID]
     assert terminal_repository.release_calls == [RUN_ID]
+    assert cancelled_repository.release_calls == [RUN_ID]
 
 
 def test_processor_deletes_waiting_confirmation_and_retries_running_handoff() -> None:

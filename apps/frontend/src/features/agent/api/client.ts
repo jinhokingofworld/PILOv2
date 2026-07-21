@@ -1,8 +1,10 @@
 import type {
   AgentConfirmationActionPayload,
   AgentConfirmationApproveInput,
+  AgentMessagePayload,
   AgentRunDetailPayload,
   CreateAgentRunInput,
+  RouteAgentMessageInput,
   SubmitAgentRunInput
 } from "@/features/agent/types";
 
@@ -210,6 +212,10 @@ function agentRunsPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/agent/runs` as const;
 }
 
+function agentMessagesPath(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/agent/messages` as const;
+}
+
 function agentRunPath(workspaceId: string, runId: string) {
   return `${agentRunsPath(workspaceId)}/${encodeURIComponent(runId)}` as const;
 }
@@ -241,6 +247,21 @@ export function createAgentApiClient({
   };
 
   return {
+    async routeMessage(
+      workspaceId: string,
+      body: RouteAgentMessageInput,
+      options: AgentRequestOptions = {}
+    ) {
+      return requestAgentData<AgentMessagePayload>(
+        agentMessagesPath(workspaceId),
+        withJsonBody(body, {
+          method: "POST",
+          signal: options.signal
+        }),
+        requestOptions
+      );
+    },
+
     async createRun(
       workspaceId: string,
       body: CreateAgentRunInput,
