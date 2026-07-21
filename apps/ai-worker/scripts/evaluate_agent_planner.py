@@ -9,6 +9,10 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.agent_multiturn_calibration import (
+    JudgeCalibrationResult,
+    load_multiturn_judge_calibration,
+)
 from app.agent_multiturn_context_evaluation import (
     build_multiturn_context_report,
     evaluate_multiturn_suite,
@@ -35,6 +39,7 @@ from app.agent_workflow_evaluation import (
 _EVALUATOR_SOURCE_PATHS = (
     Path("app/agent_planner_evaluation.py"),
     Path("app/agent_multiturn_context_evaluation.py"),
+    Path("app/agent_multiturn_calibration.py"),
     Path("app/agent_workflow_evaluation.py"),
     Path("app/agent_outcome_judge.py"),
     Path("app/agent_planner_comparison.py"),
@@ -61,6 +66,11 @@ def main() -> None:
         "--multiturn-catalog",
         type=Path,
         help="Path to the frozen multi-turn context benchmark catalog JSON.",
+    )
+    parser.add_argument(
+        "--multiturn-calibration",
+        type=Path,
+        help="Path to the private human/Judge multi-turn calibration record JSON.",
     )
     parser.add_argument(
         "--tool-capability-catalog",
@@ -143,7 +153,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--judge-prompt-version",
-        default="agent-outcome-judge:v1",
+        default="agent-multiturn-context-judge:v1",
         help="Fixed Judge prompt version recorded with the snapshot.",
     )
     parser.add_argument(
@@ -180,9 +190,20 @@ def main() -> None:
     multiturn_catalog = (
         load_multiturn_catalog(args.multiturn_catalog) if args.multiturn_catalog else None
     )
+    multiturn_calibration: JudgeCalibrationResult | None = None
     if args.meeting_variant == "multi_turn_context":
         if multiturn_catalog is None:
             raise SystemExit("multi_turn_context evaluation requires --multiturn-catalog")
+        if args.multiturn_calibration is None:
+            raise SystemExit("multi_turn_context evaluation requires --multiturn-calibration")
+        assert args.multiturn_catalog is not None
+        multiturn_calibration = load_multiturn_judge_calibration(
+            args.multiturn_calibration,
+            catalog=multiturn_catalog,
+            catalog_sha256=hashlib.sha256(args.multiturn_catalog.read_bytes()).hexdigest(),
+            judge_model=args.judge_model,
+            judge_prompt_version=args.judge_prompt_version,
+        )
         suite = replace(
             load_evaluation_suite(args.suite),
             version=f"{multiturn_catalog.version}:multi_turn_context",
@@ -317,7 +338,16 @@ def main() -> None:
         "multiTurnJudgePromptVersion": args.judge_prompt_version if multiturn_judge else None,
         "multiTurnJudgeTemperature": 0 if multiturn_judge else None,
         "multiTurnJudgeVoteCount": 3 if multiturn_judge else None,
-        "judgeCalibrationStatus": "pending" if multiturn_mode else None,
+        "judgeCalibrationStatus": (multiturn_calibration.status if multiturn_calibration else None),
+        "judgeCalibrationSha256": (multiturn_calibration.sha256 if multiturn_calibration else None),
+        "judgeCalibrationReviewerAgreement": (
+            multiturn_calibration.reviewer_agreement if multiturn_calibration else None
+        ),
+        "judgeCalibrationJudgeAgreement": (
+            multiturn_calibration.judge_agreement if multiturn_calibration else None
+        ),
+        "judgeCalibrationKappa": (multiturn_calibration.kappa if multiturn_calibration else None),
+        "evaluationLanguage": multiturn_catalog.language if multiturn_catalog else None,
         "retrievalTopK": args.retrieval_top_k,
         "retrieverVersion": TOOL_RETRIEVER_VERSION,
         "evaluationSeed": args.seed,

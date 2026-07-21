@@ -23,9 +23,10 @@ function readMockBoards(workspaceId: string): CanvasBoardDetail[] {
   const boards = readCanvasStorage(mockBoardListStorageScope, workspaceId);
 
   return Array.isArray(boards)
-    ? boards.filter(isRecord).map((board) =>
-        normalizeCanvasBoardDetail(board, { workspaceId }),
-      )
+    ? boards
+        .filter(isRecord)
+        .filter((board) => board.engineType !== "tldraw_sync")
+        .map((board) => normalizeCanvasBoardDetail(board, { workspaceId }))
     : [];
 }
 

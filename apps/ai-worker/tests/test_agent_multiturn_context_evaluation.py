@@ -8,6 +8,7 @@ import pytest
 from app.agent_multiturn_context_evaluation import (
     ExpectedContext,
     ExpectedOutcome,
+    MultiTurnCatalog,
     MultiTurnConversation,
     MultiTurnEvaluationResult,
     MultiTurnEvaluationToolCall,
@@ -17,6 +18,7 @@ from app.agent_multiturn_context_evaluation import (
     evaluate_deterministic_continuation,
     evaluate_multiturn_conversation,
     load_multiturn_catalog,
+    validate_korean_multiturn_holdout_catalog,
     validate_multiturn_catalog_against_job,
 )
 from app.agent_outcome_judge import MultiTurnJudgeEvidence
@@ -162,6 +164,115 @@ def test_frozen_catalog_covers_twelve_conversations_per_non_canvas_domain() -> N
         else:
             assert conversation.context_surface == "pr_review"
             assert follow_up.expected_context.constraints.keys() == {"focus"}
+
+
+def test_korean_dev_catalog_covers_all_non_canvas_domains_and_multi_turn_lengths() -> None:
+    catalog_path = Path(__file__).parents[1] / "evals" / "agent_multiturn_context_ko_dev_v2.json"
+
+    catalog = load_multiturn_catalog(catalog_path)
+
+    assert catalog.language == "ko-KR"
+    assert len(catalog.conversations) == 12
+    assert Counter(item.domain for item in catalog.conversations) == {
+        "meeting": 2,
+        "calendar": 2,
+        "board": 2,
+        "drive": 2,
+        "sqltoerd": 2,
+        "pr_review": 2,
+    }
+    assert {len(item.turns) for item in catalog.conversations} == {2, 3}
+
+
+def test_korean_holdout_contract_requires_two_cases_per_domain_and_family() -> None:
+    setup_turn = MultiTurnTurn(
+        user="문서를 찾아줘.",
+        expected_tools=("search_workspace_documents",),
+        expected_context=ExpectedContext("none", None, {}),
+        fixtures=(MultiTurnToolFixture("search_workspace_documents", {"documents": ["문서"]}),),
+        expected_outcome=ExpectedOutcome(True, ("문서",)),
+    )
+    follow_up_turn = MultiTurnTurn(
+        user="그중 최근 것만 보여줘.",
+        expected_tools=("search_workspace_documents",),
+        expected_context=ExpectedContext(
+            "prior_result_selector",
+            None,
+            {"query": "문서"},
+            source_turn=0,
+        ),
+        fixtures=(
+            MultiTurnToolFixture("search_workspace_documents", {"documents": ["최근 문서"]}),
+        ),
+        expected_outcome=ExpectedOutcome(True, ("최근 문서",)),
+    )
+    clarification_turn = MultiTurnTurn(
+        user="그중 어느 문서인지 다시 물어봐 줘.",
+        expected_tools=(),
+        expected_context=ExpectedContext(
+            "clarification",
+            None,
+            {},
+            source_turn=0,
+            required_clarification_fields=("document",),
+        ),
+        fixtures=(),
+        expected_outcome=ExpectedOutcome(False, ()),
+    )
+    return_turn = MultiTurnTurn(
+        user="다시 처음 문서 내용을 보여줘.",
+        expected_tools=("search_workspace_documents",),
+        expected_context=ExpectedContext(
+            "prior_result_selector",
+            None,
+            {"query": "문서"},
+            source_turn=0,
+        ),
+        fixtures=(MultiTurnToolFixture("search_workspace_documents", {"documents": ["문서"]}),),
+        expected_outcome=ExpectedOutcome(True, ("문서",)),
+    )
+    domains = ("meeting", "calendar", "board", "drive", "sqltoerd", "pr_review")
+    families = (
+        "anaphora",
+        "ellipsis",
+        "constraint_accumulation",
+        "correction",
+        "topic_switch_return",
+        "domain_collision",
+        "clarification",
+        "negation",
+        "relative_date",
+        "speech_variation",
+    )
+    surfaces = {"sqltoerd": "sql_erd", "pr_review": "pr_review"}
+    conversations = tuple(
+        MultiTurnConversation(
+            conversation_id=f"{domain}_{family}_{index}",
+            turns=(
+                (setup_turn, clarification_turn)
+                if family == "clarification"
+                else (
+                    (setup_turn, follow_up_turn, return_turn)
+                    if family == "topic_switch_return"
+                    else (setup_turn, follow_up_turn)
+                )
+            ),
+            context_surface=surfaces.get(domain),
+            domain=domain,
+            scenario_family=family,
+        )
+        for domain in domains
+        for family in families
+        for index in range(2)
+    )
+
+    validate_korean_multiturn_holdout_catalog(
+        MultiTurnCatalog(
+            "agent-korean-multiturn-holdout:v2",
+            conversations,
+            "ko-KR",
+        )
+    )
 
 
 def test_catalog_follow_up_constraints_use_registered_tool_fields() -> None:
@@ -559,8 +670,6 @@ def test_replay_preserves_prior_tool_result_across_user_turns() -> None:
         def __init__(self) -> None:
             self.requests = []
             self.decisions = [
-                _planner_decision("list_meeting_reports", {"limit": 1}),
-                _completed_decision(),
                 _planner_decision(
                     "find_action_items",
                     {
@@ -687,8 +796,10 @@ def test_replay_preserves_prior_tool_result_across_user_turns() -> None:
 
     assert result.deterministic_continuation_passed
     assert result.judge_verdict == "pass"
-    assert "tool list_meeting_reports:" in planner.requests[2].planning_context
-    assert "user: Does it contain action items?" in planner.requests[2].planning_context
+    assert len(planner.requests) == 2
+    assert "tool list_meeting_reports:" in planner.requests[0].planning_context
+    assert "assistant: ctx_111111111111111111111111" in planner.requests[0].planning_context
+    assert "user: Does it contain action items?" in planner.requests[0].planning_context
 
 
 class PassingJudge:

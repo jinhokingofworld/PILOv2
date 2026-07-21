@@ -184,9 +184,6 @@ jobs:
           cp \
             "$GITHUB_WORKSPACE/$catalog_source/apps/ai-worker/evals/meeting_agent_capability_catalog_v1.json" \
             "$RUNNER_TEMP/prepared/meeting-agent-capability-catalog.json"
-          cp \
-            "$GITHUB_WORKSPACE/$catalog_source/apps/ai-worker/evals/agent_multiturn_context_v1.json" \
-            "$RUNNER_TEMP/prepared/agent-multiturn-context-catalog.json"
 
       - name: Run candidate Meeting write E2E
         if: ${{ inputs.mode == 'compare' }}
@@ -241,6 +238,30 @@ jobs:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Download private Korean multi-turn evaluation inputs
+        env:
+          HOLDOUT_S3_URI: ${{ vars.PILO_AGENT_MULTITURN_HOLDOUT_S3_URI }}
+          CALIBRATION_S3_URI: ${{ vars.PILO_AGENT_MULTITURN_CALIBRATION_S3_URI }}
+        run: |
+          set -euo pipefail
+          [[ -n "$HOLDOUT_S3_URI" ]] || {
+            echo "PILO_AGENT_MULTITURN_HOLDOUT_S3_URI is required" >&2
+            exit 1
+          }
+          [[ -n "$CALIBRATION_S3_URI" ]] || {
+            echo "PILO_AGENT_MULTITURN_CALIBRATION_S3_URI is required" >&2
+            exit 1
+          }
+          mkdir -p "$RUNNER_TEMP/private-evaluation"
+          aws s3 cp \
+            "$HOLDOUT_S3_URI" \
+            "$RUNNER_TEMP/private-evaluation/korean-multiturn-holdout.json" \
+            --only-show-errors
+          aws s3 cp \
+            "$CALIBRATION_S3_URI" \
+            "$RUNNER_TEMP/private-evaluation/korean-multiturn-calibration.json" \
+            --only-show-errors
+
       - name: Run two-stage LLM evaluation shard
         working-directory: apps/ai-worker
         env:
@@ -258,7 +279,8 @@ jobs:
           PYTHONPATH=. python scripts/evaluate_agent_planner.py \
             --suite "$RUNNER_TEMP/prepared/$TARGET-phase4e-evaluation-tools.json" \
             --meeting-catalog "$RUNNER_TEMP/prepared/meeting-agent-capability-catalog.json" \
-            --multiturn-catalog "$RUNNER_TEMP/prepared/agent-multiturn-context-catalog.json" \
+            --multiturn-catalog "$RUNNER_TEMP/private-evaluation/korean-multiturn-holdout.json" \
+            --multiturn-calibration "$RUNNER_TEMP/private-evaluation/korean-multiturn-calibration.json" \
             --meeting-variant "$VARIANT" \
             --tool-capability-catalog "$RUNNER_TEMP/prepared/$TARGET-phase4e-tool-capability-catalog.json" \
             --registry-snapshot "$RUNNER_TEMP/prepared/$TARGET-agent-tool-registry-snapshot.json" \

@@ -174,6 +174,9 @@ const canvasShapeOperationMigration = await readSource(
 const canvasShapeParentMigration = await readSource(
   "../../../db/migrations/016_canvas_shape_parent_relation.sql"
 );
+const canvasSyncStorageRemovalMigration = await readSource(
+  "../../../db/migrations/105_remove_unused_canvas_sync_storage.sql"
+);
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
   "../../../infra/modules/secrets/main.tf"
@@ -571,6 +574,45 @@ assert.match(canvasShapeOperationMigration, /UNIQUE \(canvas_id, actor_user_id, 
 assert.match(canvasShapeParentMigration, /ADD COLUMN parent_shape_id TEXT/);
 assert.match(canvasShapeParentMigration, /idx_canvas_freeform_shapes_parent_active/);
 assert.match(canvasShapeParentMigration, /canvas_id, parent_shape_id/);
+assert.match(canvasSyncStorageRemovalMigration, /engine_type = 'tldraw_sync'/);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /LOCK TABLE public\.canvas, public\.canvas_sync_documents/
+);
+assert.match(canvasSyncStorageRemovalMigration, /FROM public\.canvas_sync_documents/);
+assert.match(canvasSyncStorageRemovalMigration, /source_canvas_id IS NOT NULL/);
+assert.match(canvasSyncStorageRemovalMigration, /engine_version <> 1/);
+assert.match(canvasSyncStorageRemovalMigration, /DROP TABLE public\.canvas_sync_documents/);
+assert.match(canvasSyncStorageRemovalMigration, /DROP INDEX public\.idx_canvas_source_canvas_id/);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /DROP CONSTRAINT canvas_source_canvas_id_fkey/
+);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /DROP CONSTRAINT canvas_source_canvas_not_self_check/
+);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /DROP CONSTRAINT canvas_engine_version_positive_check/
+);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /DROP CONSTRAINT canvas_engine_type_check/
+);
+assert.match(canvasSyncStorageRemovalMigration, /DROP COLUMN source_canvas_id/);
+assert.match(canvasSyncStorageRemovalMigration, /DROP COLUMN engine_version/);
+assert.match(canvasSyncStorageRemovalMigration, /CHECK \(engine_type = 'classic'\)/);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /COMMENT ON COLUMN public\.canvas\.engine_type/
+);
+assert.doesNotMatch(canvasSyncStorageRemovalMigration, /DROP COLUMN engine_type/);
+assert.doesNotMatch(
+  canvasSyncStorageRemovalMigration,
+  /^\s*(?:BEGIN|COMMIT|ROLLBACK)\s*;/gim
+);
+assert.doesNotMatch(canvasSyncStorageRemovalMigration, /^\s*\\/m);
 assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
 assert.match(meetingModule, /LiveKitEgressService/);

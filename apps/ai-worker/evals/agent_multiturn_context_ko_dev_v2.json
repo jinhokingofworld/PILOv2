@@ -1,0 +1,269 @@
+{
+  "version": "agent-korean-multiturn-dev:v2",
+  "language": "ko-KR",
+  "conversations": [
+    {
+      "id": "meeting_ko_dev_01",
+      "domain": "meeting",
+      "scenarioFamily": "anaphora",
+      "turns": [
+        {
+          "user": "릴리스 검토 회의록 찾아줘.",
+          "expectedTools": ["list_meeting_reports"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "list_meeting_reports", "output": {"reports": [{"title": "릴리스 검토", "contextRef": "ctx_meeting_ko_01"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["릴리스 검토"]}
+        },
+        {
+          "user": "거기서 나온 할 일만 보여줘.",
+          "expectedTools": ["find_action_items"],
+          "expectedContext": {"referenceKind": "prior_context_ref", "sourceTurn": 0, "contextRef": "ctx_meeting_ko_01", "constraints": {"contextRef": "ctx_meeting_ko_01"}, "forbiddenTools": ["search_workspace_documents"]},
+          "fixtures": [{"tool": "find_action_items", "output": {"items": [{"title": "배포 체크리스트 갱신", "status": "PENDING"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["배포 체크리스트 갱신"]}
+        }
+      ]
+    },
+    {
+      "id": "meeting_ko_dev_02",
+      "domain": "meeting",
+      "scenarioFamily": "ellipsis",
+      "turns": [
+        {
+          "user": "디자인 싱크 회의 내용 보여줘.",
+          "expectedTools": ["list_meeting_reports"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "list_meeting_reports", "output": {"reports": [{"title": "디자인 싱크", "contextRef": "ctx_meeting_ko_02"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["디자인 싱크"]}
+        },
+        {
+          "user": "결정 사항만 요약해줘.",
+          "expectedTools": ["summarize_meeting_report"],
+          "expectedContext": {"referenceKind": "prior_context_ref", "sourceTurn": 0, "contextRef": "ctx_meeting_ko_02", "constraints": {"contextRef": "ctx_meeting_ko_02"}},
+          "fixtures": [{"tool": "summarize_meeting_report", "output": {"summary": "검색 화면 시안을 확정함"}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["검색 화면 시안을 확정함"]}
+        }
+      ]
+    },
+    {
+      "id": "calendar_ko_dev_01",
+      "domain": "calendar",
+      "scenarioFamily": "relative_date",
+      "turns": [
+        {
+          "user": "7월 22일 일정 보여줘.",
+          "expectedTools": ["list_calendar_events"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "list_calendar_events", "output": {"events": [{"title": "스프린트 계획", "start": "2026-07-22T09:00:00+09:00", "end": "2026-07-22T10:00:00+09:00"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["스프린트 계획"]}
+        },
+        {
+          "user": "그 일정 몇 시에 끝나?",
+          "expectedTools": ["list_calendar_events"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"start": "2026-07-22", "end": "2026-07-22"}},
+          "fixtures": [{"tool": "list_calendar_events", "output": {"events": [{"title": "스프린트 계획", "end": "2026-07-22T10:00:00+09:00"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["10:00"]}
+        }
+      ]
+    },
+    {
+      "id": "calendar_ko_dev_02",
+      "domain": "calendar",
+      "scenarioFamily": "speech_variation",
+      "turns": [
+        {
+          "user": "이번 주 금욜 일정 뭐있어?",
+          "expectedTools": ["list_calendar_events"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "list_calendar_events", "output": {"events": [{"title": "주간 회고", "start": "2026-07-24T16:00:00+09:00"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["주간 회고"]}
+        },
+        {
+          "user": "방금 거 시간만 알려줘.",
+          "expectedTools": ["list_calendar_events"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"start": "2026-07-24", "end": "2026-07-24"}},
+          "fixtures": [{"tool": "list_calendar_events", "output": {"events": [{"title": "주간 회고", "start": "2026-07-24T16:00:00+09:00"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["16:00"]}
+        }
+      ]
+    },
+    {
+      "id": "board_ko_dev_01",
+      "domain": "board",
+      "scenarioFamily": "anaphora",
+      "turns": [
+        {
+          "user": "로그인 리다이렉트 버그 이슈 찾아줘.",
+          "expectedTools": ["search_board_issues"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "search_board_issues", "output": {"issues": [{"issueNumber": "#1001", "title": "로그인 리다이렉트 버그"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["로그인 리다이렉트 버그"]}
+        },
+        {
+          "user": "그 이슈 상세 내용 보여줘.",
+          "expectedTools": ["get_board_issue_context"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"issueNumber": "#1001"}},
+          "fixtures": [{"tool": "get_board_issue_context", "output": {"issueNumber": "#1001", "summary": "OAuth 콜백 이후 경로가 유실됨"}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["OAuth 콜백 이후 경로가 유실됨"]}
+        }
+      ]
+    },
+    {
+      "id": "board_ko_dev_02",
+      "domain": "board",
+      "scenarioFamily": "negation",
+      "turns": [
+        {
+          "user": "검색 성능 관련 보드 이슈 찾아줘.",
+          "expectedTools": ["search_board_issues"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "search_board_issues", "output": {"issues": [{"issueNumber": "#1002", "title": "검색 성능 개선"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["검색 성능 개선"]}
+        },
+        {
+          "user": "문서 말고 그 보드 이슈 상세만.",
+          "expectedTools": ["get_board_issue_context"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"issueNumber": "#1002"}, "forbiddenTools": ["search_workspace_documents"]},
+          "fixtures": [{"tool": "get_board_issue_context", "output": {"issueNumber": "#1002", "summary": "인덱스 재구성이 필요함"}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["인덱스 재구성이 필요함"]}
+        }
+      ]
+    },
+    {
+      "id": "drive_ko_dev_01",
+      "domain": "drive",
+      "scenarioFamily": "domain_collision",
+      "turns": [
+        {
+          "user": "드라이브에서 에이전트 평가 설계 문서 찾아줘.",
+          "expectedTools": ["search_workspace_documents"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "search_workspace_documents", "output": {"documents": [{"title": "에이전트 평가 설계", "excerpt": "고정 평가 입력을 사용한다"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["에이전트 평가 설계"]}
+        },
+        {
+          "user": "회의록 말고 그 문서에서 고정 입력 얘기만 보여줘.",
+          "expectedTools": ["search_workspace_documents"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"query": "에이전트 평가 설계"}, "forbiddenTools": ["list_meeting_reports"]},
+          "fixtures": [{"tool": "search_workspace_documents", "output": {"documents": [{"title": "에이전트 평가 설계", "excerpt": "고정 평가 입력을 사용한다"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["고정 평가 입력을 사용한다"]}
+        }
+      ]
+    },
+    {
+      "id": "drive_ko_dev_02",
+      "domain": "drive",
+      "scenarioFamily": "ellipsis",
+      "turns": [
+        {
+          "user": "온보딩 가이드 문서 검색해줘.",
+          "expectedTools": ["search_workspace_documents"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "search_workspace_documents", "output": {"documents": [{"title": "신규 입사자 온보딩 가이드", "excerpt": "첫날 계정을 발급한다"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["신규 입사자 온보딩 가이드"]}
+        },
+        {
+          "user": "첫날 해야 하는 것만.",
+          "expectedTools": ["search_workspace_documents"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"query": "신규 입사자 온보딩 가이드"}},
+          "fixtures": [{"tool": "search_workspace_documents", "output": {"documents": [{"title": "신규 입사자 온보딩 가이드", "excerpt": "첫날 계정을 발급한다"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["첫날 계정을 발급한다"]}
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_ko_dev_01",
+      "domain": "sqltoerd",
+      "scenarioFamily": "anaphora",
+      "contextSurface": "sql_erd",
+      "turns": [
+        {
+          "user": "현재 ERD에서 users랑 orders 테이블에 집중해줘.",
+          "expectedTools": ["focus_sql_erd_tables"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "focus_sql_erd_tables", "output": {"projection": {"tables": ["users and orders"]}}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["users and orders"]}
+        },
+        {
+          "user": "그 테이블들만 다시 강조해줘.",
+          "expectedTools": ["focus_sql_erd_tables"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"featureQuery": "users and orders"}},
+          "fixtures": [{"tool": "focus_sql_erd_tables", "output": {"focus": "users and orders", "tables": ["users", "orders"]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["users and orders"]}
+        }
+      ]
+    },
+    {
+      "id": "sqltoerd_ko_dev_02",
+      "domain": "sqltoerd",
+      "scenarioFamily": "correction",
+      "contextSurface": "sql_erd",
+      "turns": [
+        {
+          "user": "orders랑 payments 관계를 보고 싶어.",
+          "expectedTools": ["focus_sql_erd_tables"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "focus_sql_erd_tables", "output": {"projection": {"tables": ["orders and payments"]}}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["orders and payments"]}
+        },
+        {
+          "user": "아니, users 말고 방금 두 테이블 관계만 강조해.",
+          "expectedTools": ["focus_sql_erd_tables"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"featureQuery": "orders and payments"}},
+          "fixtures": [{"tool": "focus_sql_erd_tables", "output": {"focus": "orders and payments", "tables": ["orders", "payments"]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["orders and payments"]}
+        }
+      ]
+    },
+    {
+      "id": "pr_review_ko_dev_01",
+      "domain": "pr_review",
+      "scenarioFamily": "constraint_accumulation",
+      "contextSurface": "pr_review",
+      "turns": [
+        {
+          "user": "백엔드 변경의 리뷰 우선순위를 추천해줘.",
+          "expectedTools": ["recommend_pr_review_focus"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "recommend_pr_review_focus", "output": {"focus": "backend", "mustReview": [{"path": "apps/backend/auth.ts"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["apps/backend/auth.ts"]}
+        },
+        {
+          "user": "그중 위험도가 높은 파일만 다시 추천해줘.",
+          "expectedTools": ["recommend_pr_review_focus"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"focus": "backend"}},
+          "fixtures": [{"tool": "recommend_pr_review_focus", "output": {"focus": "backend", "mustReview": [{"path": "apps/backend/auth.ts"}], "summary": "인증 경로 우선 검토"}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["인증 경로 우선 검토"]}
+        }
+      ]
+    },
+    {
+      "id": "pr_review_ko_dev_02",
+      "domain": "pr_review",
+      "scenarioFamily": "topic_switch_return",
+      "contextSurface": "pr_review",
+      "turns": [
+        {
+          "user": "프론트엔드 변경 리뷰 포커스를 추천해줘.",
+          "expectedTools": ["recommend_pr_review_focus"],
+          "expectedContext": {"referenceKind": "none", "constraints": {}},
+          "fixtures": [{"tool": "recommend_pr_review_focus", "output": {"focus": "frontend", "mustReview": [{"path": "apps/frontend/page.tsx"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["apps/frontend/page.tsx"]}
+        },
+        {
+          "user": "백엔드 쪽도 잠깐 추천해줘.",
+          "expectedTools": ["recommend_pr_review_focus"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"focus": "backend"}, "sourceConstraints": {}},
+          "fixtures": [{"tool": "recommend_pr_review_focus", "output": {"focus": "backend", "mustReview": [{"path": "apps/app-server/router.ts"}]}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["apps/app-server/router.ts"]}
+        },
+        {
+          "user": "다시 처음 프론트엔드 추천에서 제일 위험한 파일만 알려줘.",
+          "expectedTools": ["recommend_pr_review_focus"],
+          "expectedContext": {"referenceKind": "prior_result_selector", "sourceTurn": 0, "constraints": {"focus": "frontend"}},
+          "fixtures": [{"tool": "recommend_pr_review_focus", "output": {"focus": "frontend", "mustReview": [{"path": "apps/frontend/page.tsx"}], "summary": "라우팅 화면 우선 검토"}}],
+          "expectedOutcome": {"deliveryRequired": true, "expectedFacts": ["라우팅 화면 우선 검토"]}
+        }
+      ]
+    }
+  ]
+}

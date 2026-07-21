@@ -10,13 +10,6 @@ import {
   PopoverTrigger
 } from "@/components/ui/popover";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
-import {
   CALENDAR_MAX_YEAR,
   CALENDAR_MIN_YEAR,
   createCalendarMonthDate
@@ -78,7 +71,7 @@ export function CalendarMonthPicker({
       >
         {monthLabel}
       </PopoverTrigger>
-      <PopoverContent align="center" className="w-64">
+      <PopoverContent align="start" className="w-72">
         <form className="grid gap-4" onSubmit={handleSubmit}>
           <div>
             <p className="font-medium text-foreground">이동할 연도와 월</p>
@@ -86,38 +79,39 @@ export function CalendarMonthPicker({
               원하는 달을 선택해 바로 이동합니다.
             </p>
           </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
-            <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-              연도
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={CALENDAR_MIN_YEAR}
-                max={CALENDAR_MAX_YEAR}
-                value={year}
-                aria-label="이동할 연도"
-                onChange={(event) => setYear(event.currentTarget.value)}
-              />
-            </label>
-            <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+            연도
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={CALENDAR_MIN_YEAR}
+              max={CALENDAR_MAX_YEAR}
+              value={year}
+              aria-label="이동할 연도"
+              onChange={(event) => setYear(event.currentTarget.value)}
+            />
+          </label>
+          <fieldset className="grid gap-1.5">
+            <legend className="text-xs font-medium text-muted-foreground">
               월
-              <Select
-                value={month}
-                onValueChange={(value) => value && setMonth(value)}
-              >
-                <SelectTrigger className="w-full" aria-label="이동할 월">
-                  <SelectValue>{month}월</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {calendarMonths.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
-          </div>
+            </legend>
+            <div className="grid grid-cols-4 gap-1.5">
+              {calendarMonths.map((option) => (
+                <Button
+                  key={option.value}
+                  type="button"
+                  variant={month === option.value ? "default" : "outline"}
+                  size="sm"
+                  className="px-0"
+                  aria-label={`${option.label} 선택`}
+                  aria-pressed={month === option.value}
+                  onClick={() => setMonth(option.value)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          </fieldset>
           <Button type="submit" className="w-full">
             이동
           </Button>

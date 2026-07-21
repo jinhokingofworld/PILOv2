@@ -727,6 +727,10 @@ assert.match(canvasMockClient, /readCanvasStorage/);
 assert.match(canvasMockClient, /writeCanvasStorage/);
 assert.match(canvasMockClient, /createMockCanvasClient/);
 assert.match(canvasMockClient, /mock-board-list/);
+assert.match(
+  canvasMockClient,
+  /\.filter\(\(board\) => board\.engineType !== "tldraw_sync"\)[\s\S]*normalizeCanvasBoardDetail/,
+);
 assert.match(canvasMockClient, /mock-user/);
 assert.match(canvasMockClient, /zoom: 0\.8/);
 assert.match(canvasMockClient, /listOperationsAfterSeq/);

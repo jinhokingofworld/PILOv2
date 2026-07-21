@@ -152,6 +152,9 @@ def multiturn_report(*, evaluator_sha: str = "1" * 64) -> dict[str, object]:
         "multiTurnContextEvaluation": {
             "conversationCount": 1,
             "attempts": 1,
+            "koreanMultiTurnContextTaskSuccessRate": 0.0,
+            "followUpToolSelectionAccuracy": 0.0,
+            "priorContextArgumentAccuracy": 1.0,
             "multiTurnContextResolutionRate": 0.5,
             "multiTurnToolSelectionAccuracy": 0.0,
             "partialRate": 0.0,
@@ -167,15 +170,26 @@ def multiturn_report(*, evaluator_sha: str = "1" * 64) -> dict[str, object]:
                 "judgeFollowUpDelivered": True,
                 "failureReasons": [],
                 "toolSelectionPassed": False,
+                "conversationSuccess": False,
+                "followUpResults": [
+                    {
+                        "turnIndex": 1,
+                        "toolSelectionPassed": False,
+                        "contextArgumentApplicable": True,
+                        "contextArgumentPassed": True,
+                    }
+                ],
             }
         ],
         "metadata": {
             "workflowCatalogSha256": "a" * 64,
+            "evaluationLanguage": "ko-KR",
             "multiTurnJudgeModel": "judge-model",
             "multiTurnJudgePromptVersion": "agent-outcome-judge:v1",
             "multiTurnJudgeTemperature": 0,
             "multiTurnJudgeVoteCount": 3,
             "judgeCalibrationStatus": "pending",
+            "judgeCalibrationSha256": "f" * 64,
             "currentDate": "2026-07-20",
             "timezone": "Asia/Seoul",
             "repetitions": 1,
@@ -196,16 +210,16 @@ def multiturn_report(*, evaluator_sha: str = "1" * 64) -> dict[str, object]:
 def test_multiturn_comparison_uses_direct_tool_selection_verdict() -> None:
     comparison = build_multiturn_context_comparison(multiturn_report(), multiturn_report())
 
-    assert comparison["metrics"]["multiTurnToolSelectionAccuracy"]["baseline"] == 0.0
+    assert comparison["metrics"]["followUpToolSelectionAccuracy"]["baseline"] == 0.0
 
 
-def test_multiturn_comparison_requires_a_passing_judge_verdict_for_context() -> None:
-    partial_report = multiturn_report()
-    partial_report["results"][0]["judgeVerdict"] = "partial"
+def test_multiturn_comparison_uses_conversation_success_for_primary_metric() -> None:
+    failed_report = multiturn_report()
 
-    comparison = build_multiturn_context_comparison(partial_report, partial_report)
+    comparison = build_multiturn_context_comparison(failed_report, failed_report)
 
-    assert comparison["metrics"]["multiTurnContextResolutionRate"]["baseline"] == 0.0
+    assert comparison["metrics"]["koreanMultiTurnContextTaskSuccessRate"]["baseline"] == 0.0
+    assert comparison["improvementEvidence"]["passed"] is False
 
 
 def test_multiturn_snapshot_preserves_pending_calibration_status() -> None:

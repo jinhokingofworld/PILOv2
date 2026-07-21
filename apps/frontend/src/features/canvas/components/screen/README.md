@@ -4,7 +4,7 @@
 
 - Canvas 화면 배치
 - toolbar, popover, dialog 상태
-- classic 또는 tldraw sync runtime 선택
+- Classic Canvas runtime 구성
 - 로그인 세션에서 Canvas 실행 설정 구성
 
 ## 담당하지 않는 것

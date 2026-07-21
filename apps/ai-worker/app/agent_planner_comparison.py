@@ -4,8 +4,8 @@ import random
 from collections.abc import Iterable
 
 COMPARISON_FORMAT = "agent-llm-router-planner-comparison:v1"
-MULTITURN_COMPARISON_FORMAT = "agent-multiturn-context-comparison:v1"
-MULTITURN_SNAPSHOT_FORMAT = "agent-multiturn-context-snapshot:v1"
+MULTITURN_COMPARISON_FORMAT = "agent-korean-multiturn-context-comparison:v2"
+MULTITURN_SNAPSHOT_FORMAT = "agent-korean-multiturn-context-snapshot:v2"
 SNAPSHOT_FORMAT = "agent-performance-snapshot:v1"
 SNAPSHOT_SCENARIO_COUNT = 31
 _FUNNEL_STAGES = (
@@ -49,11 +49,13 @@ def build_multiturn_context_comparison(
     candidate_metadata = _object(candidate_report.get("metadata"), "Missing evaluation metadata")
     metadata_keys = (
         "workflowCatalogSha256",
+        "evaluationLanguage",
         "multiTurnJudgeModel",
         "multiTurnJudgePromptVersion",
         "multiTurnJudgeTemperature",
         "multiTurnJudgeVoteCount",
         "judgeCalibrationStatus",
+        "judgeCalibrationSha256",
         "currentDate",
         "timezone",
         "repetitions",
@@ -76,15 +78,25 @@ def build_multiturn_context_comparison(
     if set(baseline_by_conversation) != set(candidate_by_conversation):
         raise ValueError("Multi-turn reports must contain identical conversations")
     metric_names = (
-        "multiTurnContextResolutionRate",
-        "multiTurnToolSelectionAccuracy",
+        "koreanMultiTurnContextTaskSuccessRate",
+        "followUpToolSelectionAccuracy",
+        "priorContextArgumentAccuracy",
     )
     metrics: dict[str, dict[str, float | list[float]]] = {}
     for metric_name in metric_names:
-        conversation_ids = sorted(baseline_by_conversation)
-        baseline_values = [baseline_by_conversation[item][metric_name] for item in conversation_ids]
+        conversation_ids = sorted(
+            item
+            for item in baseline_by_conversation
+            if baseline_by_conversation[item][metric_name] is not None
+            and candidate_by_conversation[item][metric_name] is not None
+        )
+        if not conversation_ids:
+            raise ValueError(f"Multi-turn metric has no comparable conversations: {metric_name}")
+        baseline_values = [
+            float(baseline_by_conversation[item][metric_name]) for item in conversation_ids
+        ]
         candidate_values = [
-            candidate_by_conversation[item][metric_name] for item in conversation_ids
+            float(candidate_by_conversation[item][metric_name]) for item in conversation_ids
         ]
         deltas = [
             candidate - baseline
@@ -96,11 +108,28 @@ def build_multiturn_context_comparison(
             "delta": round(_mean(deltas), 4),
             "confidenceInterval95": list(_bootstrap_mean_confidence_interval(deltas)),
         }
+    primary_interval = metrics["koreanMultiTurnContextTaskSuccessRate"]["confidenceInterval95"]
+    assert isinstance(primary_interval, list)
+    calibration_passed = baseline_metadata.get("judgeCalibrationStatus") == "passed"
+    primary_improved = primary_interval[0] > 0
+    diagnostics_non_regressed = all(
+        float(metrics[name]["delta"]) >= 0
+        for name in (
+            "followUpToolSelectionAccuracy",
+            "priorContextArgumentAccuracy",
+        )
+    )
     return {
         "format": MULTITURN_COMPARISON_FORMAT,
         "metadata": {key: baseline_metadata.get(key) for key in metadata_keys},
         "conversationCount": len(baseline_by_conversation),
         "metrics": metrics,
+        "improvementEvidence": {
+            "passed": (calibration_passed and primary_improved and diagnostics_non_regressed),
+            "calibrationPassed": calibration_passed,
+            "primaryConfidenceLowerBoundPositive": primary_improved,
+            "diagnosticNonRegression": diagnostics_non_regressed,
+        },
     }
 
 
@@ -115,11 +144,13 @@ def build_multiturn_context_snapshot(report: dict[str, object]) -> dict[str, obj
             for key in (
                 "sourceRevision",
                 "workflowCatalogSha256",
+                "evaluationLanguage",
                 "multiTurnJudgeModel",
                 "multiTurnJudgePromptVersion",
                 "multiTurnJudgeTemperature",
                 "multiTurnJudgeVoteCount",
                 "judgeCalibrationStatus",
+                "judgeCalibrationSha256",
                 "currentDate",
                 "timezone",
                 "repetitions",
@@ -129,6 +160,9 @@ def build_multiturn_context_snapshot(report: dict[str, object]) -> dict[str, obj
         "metrics": {
             key: summary[key]
             for key in (
+                "koreanMultiTurnContextTaskSuccessRate",
+                "followUpToolSelectionAccuracy",
+                "priorContextArgumentAccuracy",
                 "multiTurnContextResolutionRate",
                 "multiTurnToolSelectionAccuracy",
                 "partialRate",
@@ -141,6 +175,9 @@ def build_multiturn_context_snapshot(report: dict[str, object]) -> dict[str, obj
 def _validate_multiturn_report(report: dict[str, object]) -> None:
     summary = _object(report.get("multiTurnContextEvaluation"), "Missing multi-turn summary")
     for key in (
+        "koreanMultiTurnContextTaskSuccessRate",
+        "followUpToolSelectionAccuracy",
+        "priorContextArgumentAccuracy",
         "multiTurnContextResolutionRate",
         "multiTurnToolSelectionAccuracy",
         "partialRate",
@@ -152,6 +189,7 @@ def _validate_multiturn_report(report: dict[str, object]) -> None:
     metadata = _object(report.get("metadata"), "Missing evaluation metadata")
     required_strings = (
         "workflowCatalogSha256",
+        "judgeCalibrationSha256",
         "multiTurnJudgeModel",
         "multiTurnJudgePromptVersion",
     )
@@ -163,11 +201,13 @@ def _validate_multiturn_report(report: dict[str, object]) -> None:
         raise ValueError("Multi-turn Judge vote count must be three")
     if metadata.get("judgeCalibrationStatus") not in {"pending", "passed"}:
         raise ValueError("Multi-turn report has invalid Judge calibration status")
+    if metadata.get("evaluationLanguage") != "ko-KR":
+        raise ValueError("Multi-turn report language must be ko-KR")
 
 
 def _multiturn_conversation_scores(
     report: dict[str, object],
-) -> dict[str, dict[str, float]]:
+) -> dict[str, dict[str, float | None]]:
     grouped: dict[str, list[dict[str, object]]] = {}
     for raw in report["results"]:
         result = _object(raw, "Invalid multi-turn result")
@@ -180,9 +220,42 @@ def _multiturn_conversation_scores(
             raise ValueError("Invalid multi-turn deterministic result")
         if not isinstance(result.get("toolSelectionPassed"), bool):
             raise ValueError("Invalid multi-turn Tool selection verdict")
+        if not isinstance(result.get("conversationSuccess"), bool):
+            raise ValueError("Invalid Korean multi-turn conversation success verdict")
+        follow_up_results = result.get("followUpResults")
+        if not isinstance(follow_up_results, list) or not follow_up_results:
+            raise ValueError("Invalid Korean multi-turn follow-up results")
+        for follow_up in follow_up_results:
+            item = _object(follow_up, "Invalid Korean multi-turn follow-up result")
+            if not isinstance(item.get("toolSelectionPassed"), bool):
+                raise ValueError("Invalid follow-up Tool selection verdict")
+            if not isinstance(item.get("contextArgumentApplicable"), bool) or not isinstance(
+                item.get("contextArgumentPassed"), bool
+            ):
+                raise ValueError("Invalid follow-up context argument verdict")
         grouped.setdefault(conversation_id, []).append(result)
-    return {
-        conversation_id: {
+    scores: dict[str, dict[str, float | None]] = {}
+    for conversation_id, attempts in grouped.items():
+        context_argument_values = [
+            float(follow_up["contextArgumentPassed"] is True)
+            for item in attempts
+            for follow_up in item["followUpResults"]
+            if follow_up["contextArgumentApplicable"] is True
+        ]
+        scores[conversation_id] = {
+            "koreanMultiTurnContextTaskSuccessRate": _mean(
+                [float(item["conversationSuccess"] is True) for item in attempts]
+            ),
+            "followUpToolSelectionAccuracy": _mean(
+                [
+                    float(follow_up["toolSelectionPassed"] is True)
+                    for item in attempts
+                    for follow_up in item["followUpResults"]
+                ]
+            ),
+            "priorContextArgumentAccuracy": (
+                _mean(context_argument_values) if context_argument_values else None
+            ),
             "multiTurnContextResolutionRate": _mean(
                 [
                     float(
@@ -197,8 +270,7 @@ def _multiturn_conversation_scores(
                 [float(item["toolSelectionPassed"] is True) for item in attempts]
             ),
         }
-        for conversation_id, attempts in grouped.items()
-    }
+    return scores
 
 
 def _string_list(value: object) -> list[str]:

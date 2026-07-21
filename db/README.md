@@ -127,6 +127,7 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/102_generalize_agent_candidate_generations.sql` treats each clarification tool step as a domain-neutral candidate generation, assigns stable 1-based ordinals, and lets domain adapters revalidate Meeting and SQLtoERD references before one-time consumption.
 - `migrations/100_fix_canvas_agent_pgcrypto_digest_schema.sql` aligns the Canvas Agent embedding trigger with RDS pgcrypto installed in `public`, restoring Canvas checkpoint writes without moving the extension or changing the API schema.
 - `migrations/101_add_agent_outbox_planning_started_at.sql` records the server-owned start time of each Agent planning turn so publisher claim/retry updates cannot extend its terminal deadline.
+- `migrations/105_remove_unused_canvas_sync_storage.sql` removes unused tldraw sync document storage and engine source/version metadata after verifying that no sync Canvas data remains, while retaining the temporary Classic-only engine guard.
 
 ## Operational Data Repairs
 

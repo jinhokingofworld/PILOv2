@@ -44,8 +44,14 @@ def test_multiturn_variant_is_compared_without_the_legacy_readiness_gate() -> No
 
     assert '"multi_turn_context"' in script
     assert "--multiturn-catalog" in script
+    assert "--multiturn-calibration" in script
     assert '"multi_turn_context"' in workflow
-    assert "agent-multiturn-context-catalog.json" in workflow
+    assert "PILO_AGENT_MULTITURN_HOLDOUT_S3_URI" in workflow
+    assert "PILO_AGENT_MULTITURN_CALIBRATION_S3_URI" in workflow
+    assert "korean-multiturn-holdout.json" in workflow
+    assert "korean-multiturn-calibration.json" in workflow
+    assert "prepared/agent-multiturn-context-catalog.json" not in workflow
+    assert workflow.count("aws s3 cp") == 2
     assert "baseline-meeting-multi_turn_context-evaluation.json" in workflow
     assert "candidate-meeting-multi_turn_context-evaluation.json" in workflow
     assert "check_phase4e_dev_readiness.py" not in workflow
