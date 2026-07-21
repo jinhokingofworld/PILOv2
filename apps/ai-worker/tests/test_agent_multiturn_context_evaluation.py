@@ -8,9 +8,11 @@ from app.agent_multiturn_context_evaluation import (
     ExpectedContext,
     ExpectedOutcome,
     MultiTurnConversation,
+    MultiTurnEvaluationResult,
     MultiTurnEvaluationToolCall,
     MultiTurnToolFixture,
     MultiTurnTurn,
+    build_multiturn_context_report,
     evaluate_deterministic_continuation,
     evaluate_multiturn_conversation,
     load_multiturn_catalog,
@@ -134,6 +136,34 @@ def test_frozen_catalog_covers_twelve_conversations_per_non_canvas_domain() -> N
         "sqltoerd": 12,
         "prreview": 12,
     }
+
+
+def test_multiturn_report_emits_only_primary_rates_and_non_raw_diagnostics() -> None:
+    report = build_multiturn_context_report(
+        (
+            MultiTurnEvaluationResult(
+                "meeting_01", 1, True, True, (), "pass", (), True, True
+            ),
+            MultiTurnEvaluationResult(
+                "drive_01",
+                1,
+                True,
+                False,
+                ("tool_sequence",),
+                "inconclusive",
+                ("judge_vote_split",),
+                True,
+                False,
+            ),
+        )
+    )
+
+    summary = report["multiTurnContextEvaluation"]
+    assert summary["multiTurnContextResolutionRate"] == 1.0
+    assert summary["multiTurnContinuationSuccessRate"] == 0.5
+    assert summary["inconclusiveRate"] == 0.5
+    assert "conversationHistory" not in str(report)
+    assert "toolInput" not in str(report)
 
 
 def test_continuation_fails_when_right_tool_uses_context_from_a_different_turn() -> None:

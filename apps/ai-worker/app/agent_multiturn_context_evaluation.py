@@ -81,6 +81,8 @@ class MultiTurnEvaluationResult:
     failure_reasons: tuple[str, ...]
     judge_verdict: str | None = None
     judge_failure_codes: tuple[str, ...] = ()
+    judge_context_resolved: bool | None = None
+    judge_follow_up_delivered: bool | None = None
 
 
 def load_multiturn_catalog(catalog_path: Path) -> MultiTurnCatalog:
@@ -249,7 +251,85 @@ def evaluate_multiturn_conversation(
         failure_reasons=failure_reasons,
         judge_verdict=None,
         judge_failure_codes=(),
+        judge_context_resolved=None,
+        judge_follow_up_delivered=None,
     )
+
+
+def evaluate_multiturn_suite(
+    planner: AgentPlannerClient,
+    router: AgentRouterClient,
+    job: AgentRunJob,
+    conversations: tuple[MultiTurnConversation, ...],
+    *,
+    current_date: str,
+    timezone: str = "Asia/Seoul",
+    repetitions: int = 1,
+    judge: MultiTurnJudgeClient | None = None,
+) -> tuple[MultiTurnEvaluationResult, ...]:
+    if repetitions < 1:
+        raise ValueError("Multi-turn repetitions must be positive")
+    return tuple(
+        evaluate_multiturn_conversation(
+            planner,
+            job,
+            conversation,
+            current_date=current_date,
+            timezone=timezone,
+            router=router,
+            judge=judge,
+            attempt=attempt,
+        )
+        for conversation in conversations
+        for attempt in range(1, repetitions + 1)
+    )
+
+
+def build_multiturn_context_report(
+    results: tuple[MultiTurnEvaluationResult, ...],
+) -> dict[str, object]:
+    attempts = len(results)
+    context_resolved = sum(
+        result.deterministic_context_passed and result.judge_context_resolved is True
+        for result in results
+    )
+    continuation_success = sum(
+        result.deterministic_continuation_passed
+        and result.judge_verdict == "pass"
+        and result.judge_follow_up_delivered is True
+        for result in results
+    )
+    partial = sum(result.judge_verdict == "partial" for result in results)
+    inconclusive = sum(result.judge_verdict == "inconclusive" for result in results)
+    failure_codes: dict[str, int] = {}
+    for result in results:
+        for code in (*result.failure_reasons, *result.judge_failure_codes):
+            failure_codes[code] = failure_codes.get(code, 0) + 1
+    return {
+        "multiTurnContextEvaluation": {
+            "conversationCount": len({result.conversation_id for result in results}),
+            "attempts": attempts,
+            "multiTurnContextResolutionRate": _fraction(context_resolved, attempts),
+            "multiTurnContinuationSuccessRate": _fraction(continuation_success, attempts),
+            "partialRate": _fraction(partial, attempts),
+            "inconclusiveRate": _fraction(inconclusive, attempts),
+            "failureCodeCounts": dict(sorted(failure_codes.items())),
+        },
+        "results": [
+            {
+                "id": result.conversation_id,
+                "attempt": result.attempt,
+                "deterministicContextPassed": result.deterministic_context_passed,
+                "deterministicContinuationPassed": result.deterministic_continuation_passed,
+                "judgeVerdict": result.judge_verdict,
+                "judgeContextResolved": result.judge_context_resolved,
+                "judgeFollowUpDelivered": result.judge_follow_up_delivered,
+                "failureReasons": list(result.failure_reasons),
+                "judgeFailureCodes": list(result.judge_failure_codes),
+            }
+            for result in results
+        ],
+    }
 
 
 def _load_expected_context(raw_turn: dict[str, object], turn_index: int) -> ExpectedContext:
@@ -527,4 +607,10 @@ def _with_multiturn_judge(
         failure_reasons=result.failure_reasons,
         judge_verdict=verdict.verdict,
         judge_failure_codes=verdict.failure_codes,
+        judge_context_resolved=verdict.context_resolved,
+        judge_follow_up_delivered=verdict.follow_up_delivered,
     )
+
+
+def _fraction(numerator: int, denominator: int) -> float:
+    return round(numerator / denominator, 4) if denominator else 0.0

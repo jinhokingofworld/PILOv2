@@ -4,6 +4,8 @@ import random
 from collections.abc import Iterable
 
 COMPARISON_FORMAT = "agent-llm-router-planner-comparison:v1"
+MULTITURN_COMPARISON_FORMAT = "agent-multiturn-context-comparison:v1"
+MULTITURN_SNAPSHOT_FORMAT = "agent-multiturn-context-snapshot:v1"
 SNAPSHOT_FORMAT = "agent-performance-snapshot:v1"
 SNAPSHOT_SCENARIO_COUNT = 31
 _FUNNEL_STAGES = (
@@ -35,6 +37,148 @@ _REVISION_BINDING_KEYS = (
     "registryCatalogSha256",
     "registryEligibleSnapshotSha256",
 )
+
+
+def build_multiturn_context_comparison(
+    baseline_report: dict[str, object],
+    candidate_report: dict[str, object],
+) -> dict[str, object]:
+    _validate_multiturn_report(baseline_report)
+    _validate_multiturn_report(candidate_report)
+    baseline_metadata = _object(baseline_report.get("metadata"), "Missing evaluation metadata")
+    candidate_metadata = _object(candidate_report.get("metadata"), "Missing evaluation metadata")
+    metadata_keys = (
+        "workflowCatalogSha256",
+        "multiTurnJudgeModel",
+        "multiTurnJudgePromptVersion",
+        "multiTurnJudgeTemperature",
+        "multiTurnJudgeVoteCount",
+        "currentDate",
+        "timezone",
+        "repetitions",
+    )
+    for key in metadata_keys:
+        if baseline_metadata.get(key) != candidate_metadata.get(key):
+            raise ValueError(f"Multi-turn reports must share metadata: {key}")
+    baseline_by_conversation = _multiturn_conversation_scores(baseline_report)
+    candidate_by_conversation = _multiturn_conversation_scores(candidate_report)
+    if set(baseline_by_conversation) != set(candidate_by_conversation):
+        raise ValueError("Multi-turn reports must contain identical conversations")
+    metric_names = (
+        "multiTurnContextResolutionRate",
+        "multiTurnContinuationSuccessRate",
+    )
+    metrics: dict[str, dict[str, float | list[float]]] = {}
+    for metric_name in metric_names:
+        conversation_ids = sorted(baseline_by_conversation)
+        baseline_values = [
+            baseline_by_conversation[item][metric_name] for item in conversation_ids
+        ]
+        candidate_values = [
+            candidate_by_conversation[item][metric_name] for item in conversation_ids
+        ]
+        deltas = [
+            candidate - baseline
+            for baseline, candidate in zip(baseline_values, candidate_values, strict=True)
+        ]
+        metrics[metric_name] = {
+            "baseline": round(_mean(baseline_values), 4),
+            "candidate": round(_mean(candidate_values), 4),
+            "delta": round(_mean(deltas), 4),
+            "confidenceInterval95": list(_bootstrap_mean_confidence_interval(deltas)),
+        }
+    return {
+        "format": MULTITURN_COMPARISON_FORMAT,
+        "metadata": {key: baseline_metadata.get(key) for key in metadata_keys},
+        "conversationCount": len(baseline_by_conversation),
+        "metrics": metrics,
+    }
+
+
+def build_multiturn_context_snapshot(report: dict[str, object]) -> dict[str, object]:
+    _validate_multiturn_report(report)
+    summary = _object(report["multiTurnContextEvaluation"], "Missing multi-turn summary")
+    metadata = _object(report.get("metadata"), "Missing evaluation metadata")
+    return {
+        "format": MULTITURN_SNAPSHOT_FORMAT,
+        "metadata": {
+            key: metadata.get(key)
+            for key in (
+                "sourceRevision",
+                "workflowCatalogSha256",
+                "multiTurnJudgeModel",
+                "multiTurnJudgePromptVersion",
+                "multiTurnJudgeTemperature",
+                "multiTurnJudgeVoteCount",
+                "currentDate",
+                "timezone",
+                "repetitions",
+            )
+        },
+        "conversationCount": summary["conversationCount"],
+        "metrics": {
+            key: summary[key]
+            for key in (
+                "multiTurnContextResolutionRate",
+                "multiTurnContinuationSuccessRate",
+                "partialRate",
+                "inconclusiveRate",
+            )
+        },
+    }
+
+
+def _validate_multiturn_report(report: dict[str, object]) -> None:
+    summary = _object(report.get("multiTurnContextEvaluation"), "Missing multi-turn summary")
+    for key in (
+        "multiTurnContextResolutionRate",
+        "multiTurnContinuationSuccessRate",
+        "partialRate",
+        "inconclusiveRate",
+    ):
+        _rate(summary.get(key), f"Invalid multi-turn rate: {key}")
+    if not isinstance(report.get("results"), list):
+        raise ValueError("Multi-turn report is missing results")
+
+
+def _multiturn_conversation_scores(
+    report: dict[str, object],
+) -> dict[str, dict[str, float]]:
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for raw in report["results"]:
+        result = _object(raw, "Invalid multi-turn result")
+        conversation_id = result.get("id")
+        if not isinstance(conversation_id, str) or not conversation_id:
+            raise ValueError("Invalid multi-turn conversation id")
+        if not isinstance(result.get("deterministicContextPassed"), bool) or not isinstance(
+            result.get("deterministicContinuationPassed"), bool
+        ):
+            raise ValueError("Invalid multi-turn deterministic result")
+        grouped.setdefault(conversation_id, []).append(result)
+    return {
+        conversation_id: {
+            "multiTurnContextResolutionRate": _mean(
+                [
+                    float(
+                        item["deterministicContextPassed"] is True
+                        and item.get("judgeContextResolved") is True
+                    )
+                    for item in attempts
+                ]
+            ),
+            "multiTurnContinuationSuccessRate": _mean(
+                [
+                    float(
+                        item["deterministicContinuationPassed"] is True
+                        and item.get("judgeVerdict") == "pass"
+                        and item.get("judgeFollowUpDelivered") is True
+                    )
+                    for item in attempts
+                ]
+            ),
+        }
+        for conversation_id, attempts in grouped.items()
+    }
 
 
 def build_agent_performance_snapshot(

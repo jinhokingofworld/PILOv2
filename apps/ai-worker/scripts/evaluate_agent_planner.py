@@ -9,7 +9,12 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.agent_outcome_judge import OpenAiOutcomeJudge
+from app.agent_multiturn_context_evaluation import (
+    build_multiturn_context_report,
+    evaluate_multiturn_suite,
+    load_multiturn_catalog,
+)
+from app.agent_outcome_judge import OpenAiMultiTurnJudge
 from app.agent_planner_evaluation import (
     attach_tool_capability_catalog,
     build_evaluation_input_hashes,
@@ -24,12 +29,12 @@ from app.agent_tool_retrieval import TOOL_RETRIEVER_VERSION
 from app.agent_workflow_evaluation import (
     build_workflow_evaluation_report,
     evaluate_workflow_suite,
-    load_workflow_catalog,
     load_workflow_scenarios,
 )
 
 _EVALUATOR_SOURCE_PATHS = (
     Path("app/agent_planner_evaluation.py"),
+    Path("app/agent_multiturn_context_evaluation.py"),
     Path("app/agent_workflow_evaluation.py"),
     Path("app/agent_outcome_judge.py"),
     Path("app/agent_planner_comparison.py"),
@@ -53,9 +58,9 @@ def main() -> None:
         help="Path to the Meeting regression capability catalog JSON.",
     )
     parser.add_argument(
-        "--workflow-catalog",
+        "--multiturn-catalog",
         type=Path,
-        help="Path to the cross-domain Agent workflow catalog JSON.",
+        help="Path to the frozen multi-turn context benchmark catalog JSON.",
     )
     parser.add_argument(
         "--tool-capability-catalog",
@@ -75,7 +80,7 @@ def main() -> None:
             "counterexample",
             "context",
             "multi_tool",
-            "agent_workflow",
+            "multi_turn_context",
         ),
         default="canonical",
         help="Meeting regression prompt set to evaluate when --meeting-catalog is provided.",
@@ -134,7 +139,7 @@ def main() -> None:
     parser.add_argument(
         "--judge-model",
         default=os.environ.get("OPENAI_AGENT_OUTCOME_JUDGE_MODEL", "gpt-5.4"),
-        help="Evidence-grounded outcome Judge model used for agent_workflow evaluation.",
+        help="Fixed model used for outcome or multi-turn context Judge evaluation.",
     )
     parser.add_argument(
         "--judge-prompt-version",
@@ -172,15 +177,15 @@ def main() -> None:
     if not api_key:
         raise SystemExit("OPENAI_API_KEY is required")
 
-    workflow_catalog = (
-        load_workflow_catalog(args.workflow_catalog) if args.workflow_catalog else None
+    multiturn_catalog = (
+        load_multiturn_catalog(args.multiturn_catalog) if args.multiturn_catalog else None
     )
-    if args.meeting_variant == "agent_workflow":
-        if workflow_catalog is None:
-            raise SystemExit("agent_workflow evaluation requires --workflow-catalog")
+    if args.meeting_variant == "multi_turn_context":
+        if multiturn_catalog is None:
+            raise SystemExit("multi_turn_context evaluation requires --multiturn-catalog")
         suite = replace(
             load_evaluation_suite(args.suite),
-            version=f"{workflow_catalog.version}:agent_workflow",
+            version=f"{multiturn_catalog.version}:multi_turn_context",
         )
     else:
         suite = (
@@ -209,8 +214,11 @@ def main() -> None:
         suite.job.tool_capability_catalog is None
     ):
         raise SystemExit("--tool-capability-catalog is required for routing evaluation")
-    workflow_mode = args.meeting_variant in {"multi_tool", "agent_workflow"}
-    if workflow_mode and (args.compare_shadow_retrieval or not args.llm_routing):
+    workflow_mode = args.meeting_variant == "multi_tool"
+    multiturn_mode = args.meeting_variant == "multi_turn_context"
+    if (workflow_mode or multiturn_mode) and (
+        args.compare_shadow_retrieval or not args.llm_routing
+    ):
         raise SystemExit("workflow evaluation requires --llm-routing")
     planner = OpenAiAgentPlannerClient(api_key, args.model, args.timeout_seconds)
     router = (
@@ -218,21 +226,33 @@ def main() -> None:
         if args.llm_routing
         else None
     )
-    outcome_judge = (
-        OpenAiOutcomeJudge(api_key, args.judge_model, args.timeout_seconds)
-        if args.meeting_variant == "agent_workflow"
+    outcome_judge = None
+    multiturn_judge = (
+        OpenAiMultiTurnJudge(api_key, args.judge_model, args.timeout_seconds)
+        if multiturn_mode
         else None
     )
-    if workflow_mode:
+    if multiturn_mode:
         assert router is not None
-        if args.meeting_variant == "agent_workflow":
-            assert workflow_catalog is not None
-            scenarios = workflow_catalog.scenarios
-        else:
-            assert args.meeting_variant == "multi_tool"
-            if args.meeting_catalog is None:
-                raise SystemExit("multi_tool evaluation requires --meeting-catalog")
-            scenarios = load_workflow_scenarios(args.meeting_catalog)
+        assert multiturn_catalog is not None
+        report = build_multiturn_context_report(
+            evaluate_multiturn_suite(
+                planner,
+                router,
+                suite.job,
+                multiturn_catalog.conversations,
+                current_date=args.current_date,
+                timezone=args.timezone,
+                repetitions=args.repetitions,
+                judge=multiturn_judge,
+            )
+        )
+    elif workflow_mode:
+        assert router is not None
+        assert args.meeting_variant == "multi_tool"
+        if args.meeting_catalog is None:
+            raise SystemExit("multi_tool evaluation requires --meeting-catalog")
+        scenarios = load_workflow_scenarios(args.meeting_catalog)
         workflow_results = evaluate_workflow_suite(
             planner,
             router,
@@ -293,10 +313,10 @@ def main() -> None:
         "compareShadowRetrieval": args.compare_shadow_retrieval,
         "llmRouting": args.llm_routing,
         "routerModel": args.router_model if args.llm_routing else None,
-        "outcomeJudgeModel": args.judge_model if outcome_judge else None,
-        "outcomeJudgePromptVersion": args.judge_prompt_version if outcome_judge else None,
-        "outcomeJudgeTemperature": 0 if outcome_judge else None,
-        "outcomeJudgeVoteCount": 3 if outcome_judge else None,
+        "multiTurnJudgeModel": args.judge_model if multiturn_judge else None,
+        "multiTurnJudgePromptVersion": args.judge_prompt_version if multiturn_judge else None,
+        "multiTurnJudgeTemperature": 0 if multiturn_judge else None,
+        "multiTurnJudgeVoteCount": 3 if multiturn_judge else None,
         "retrievalTopK": args.retrieval_top_k,
         "retrieverVersion": TOOL_RETRIEVER_VERSION,
         "evaluationSeed": args.seed,
@@ -314,7 +334,7 @@ def main() -> None:
             args.suite,
             args.meeting_catalog,
             args.tool_capability_catalog,
-            args.workflow_catalog,
+            args.multiturn_catalog,
         ),
         **_registry_binding(args.registry_snapshot),
         "sourceRevision": _git_revision(),
