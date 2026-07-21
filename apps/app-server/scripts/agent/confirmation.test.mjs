@@ -170,11 +170,23 @@ class FakeDatabaseService {
   }
 
   async query(text) {
-    if (text.includes("FROM agent_runs r") && text.includes("c.status = 'approved'")) {
+    if (text.includes("SELECT DISTINCT tool_name")) {
+      return (this.state.completedToolNames ?? []).map((tool_name) => ({
+        tool_name
+      }));
+    }
+    if (text.includes("execution_lease_expires_at <= now()")) {
       return this.state.staleExecutions ?? [];
     }
 
     throw new Error(`Unhandled query: ${text}`);
+  }
+
+  async queryOne(text) {
+    if (text.includes("step_type = 'planner'")) {
+      return this.state.latestPlannerStep ?? null;
+    }
+    throw new Error(`Unhandled queryOne: ${text}`);
   }
 }
 
@@ -193,10 +205,21 @@ class FakeAgentLoggingService {
     });
 
     return {
-      id: STEP_ID,
-      runId: input.runId,
-      status: "running"
+      step: {
+        id: STEP_ID,
+        runId: input.runId,
+        status: "running"
+      },
+      lease: {
+        token: "66666666-6666-4666-8666-666666666666",
+        generation: 1
+      }
     };
+  }
+
+
+  async heartbeatExecutionLease() {
+    return true;
   }
 
   async completeStep(currentUserId, workspaceId, input) {
@@ -223,8 +246,15 @@ class FakeAgentLoggingService {
     });
 
     const run = this.state.runs.find((candidate) => candidate.id === input.runId);
-    const queuedNextPlannerTurn = this.state.toolCallLimitReached !== true;
-    run.status = queuedNextPlannerTurn ? "planning" : "waiting_user_input";
+    const disposition = input.postExecutionDisposition ?? "continue_planning";
+    const queuedNextPlannerTurn =
+      disposition === "continue_planning" &&
+      this.state.toolCallLimitReached !== true;
+    run.status = disposition === "complete_run"
+      ? "completed"
+      : queuedNextPlannerTurn
+        ? "planning"
+        : "waiting_user_input";
     run.message = queuedNextPlannerTurn
       ? "다음 작업을 확인하고 있습니다."
       : input.waitingMessage;
@@ -426,7 +456,10 @@ class FakeTransaction {
   }
 
   async queryOne(text, values = []) {
-    if (text.includes("r.updated_at <= now()")) {
+    if (
+      text.includes("r.execution_lease_token = $2::uuid") &&
+      text.includes("FOR UPDATE OF r")
+    ) {
       return this.findStaleExecution(values);
     }
 
@@ -443,7 +476,7 @@ class FakeTransaction {
         return null;
       }
       run.status = "failed";
-      run.message = "승인된 작업이 시간 안에 완료되지 않아 실행을 종료했습니다.";
+      run.message = "작업이 시간 안에 완료되지 않아 실행을 종료했습니다.";
       return { id: run.id };
     }
 
@@ -686,7 +719,9 @@ function errorMessage(error) {
         workspace_id: WORKSPACE_ID,
         requested_by_user_id: USER_ID,
         tool_step_id: STEP_ID,
-        tool_step_status: "running"
+        tool_step_status: "running",
+        execution_lease_token: "66666666-6666-4666-8666-666666666666",
+        execution_lease_generation: 1
       }
     ]
   };
@@ -709,7 +744,14 @@ function errorMessage(error) {
         }
       })
     ],
-    confirmations: [createConfirmation()]
+    confirmations: [createConfirmation()],
+    latestPlannerStep: {
+      output_json: {
+        toolRouting: {
+          capabilityIds: ["calendar.events.create"]
+        }
+      }
+    }
   };
   const {
     service,
@@ -726,18 +768,18 @@ function errorMessage(error) {
     undefined
   );
 
-  assert.equal(result.run.status, "planning");
+  assert.equal(result.run.status, "completed");
   assert.equal(result.run.confirmation.status, "approved");
   assert.equal(result.run.confirmation.approvedAt, "2026-07-08T00:03:00.000Z");
   assert.equal(result.run.confirmation.selectedChoiceId, null);
   assert.equal(state.confirmations[0].approved_by_user_id, USER_ID);
-  assert.equal(state.runs[0].message, "다음 작업을 확인하고 있습니다.");
+  assert.match(state.runs[0].message, /create_calendar_event 실행을 완료했습니다/);
   assert.equal(workspaceService.calls.length, 1);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
     ["createToolExecutionClaim", "completeToolStepAndAdvance"]
   );
-  assert.deepEqual(outboxPublisherService.calls, [RUN_ID]);
+  assert.deepEqual(outboxPublisherService.calls, []);
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
     ["getDefinition", "validateInput", "execute"]

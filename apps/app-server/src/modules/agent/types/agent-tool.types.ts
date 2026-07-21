@@ -134,7 +134,23 @@ export interface AgentToolExecutionResult {
   outputSummary: AgentToolOutputSummary;
   resourceRefs: AgentResourceRef[];
   status?: string;
+  /** Server-only evidence. It must never be copied into the public output summary. */
+  groundingSources?: AgentGroundingSourceCandidate[];
 }
+
+export interface AgentGroundingSourceCandidate {
+  sourceType: "meeting_transcript" | "meeting_activity" | "drive_document";
+  sourceRef: string;
+  title?: string;
+  excerpt: string;
+  score: number;
+  resourceRef: AgentResourceRef;
+}
+
+export type AgentToolPostExecutionDisposition =
+  | "continue_planning"
+  | "wait_for_user_input"
+  | "complete_run";
 
 export interface AgentToolDefinition<TInput> {
   name: string;
@@ -143,11 +159,7 @@ export interface AgentToolDefinition<TInput> {
   executionMode: AgentToolExecutionMode;
   contextRequirement?: AgentToolContextRequirement;
   requiresGroundedAnswer?: boolean;
-  /**
-   * The tool result is itself the final response for this run. Avoid another
-   * planner pass when no follow-up tool decision is needed.
-   */
-  completesRunAfterExecution?: boolean;
+  postExecutionDisposition?: AgentToolPostExecutionDisposition;
   inputSchema: AgentToolInputSchema;
   validateInput: (input: unknown) => TInput;
   /**

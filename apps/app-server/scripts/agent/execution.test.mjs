@@ -93,12 +93,25 @@ class FakeWorkspaceService {
 }
 
 class FakeDatabaseService {
-  constructor(state) {
+  constructor(state, timeline = []) {
     this.state = state;
     this.calls = [];
+    this.timeline = timeline;
+  }
+
+  async query(text) {
+    this.timeline.push("db:query");
+    this.calls.push({ text, values: [] });
+    if (text.includes("SELECT DISTINCT tool_name")) {
+      return (this.state.completedToolNames ?? []).map((tool_name) => ({
+        tool_name
+      }));
+    }
+    throw new Error(`Unhandled query: ${text}`);
   }
 
   async queryOne(text, values = []) {
+    this.timeline.push("db:queryOne");
     this.calls.push({ text, values });
 
     if (text.includes(" AS started")) {
@@ -168,6 +181,31 @@ class FakeAgentLoggingService {
     };
   }
 
+  async startNextToolExecutionClaimIfAbsent(
+    currentUserId,
+    workspaceId,
+    input
+  ) {
+    const step = await this.startNextToolStepIfAbsent(
+      currentUserId,
+      workspaceId,
+      input
+    );
+    return step
+      ? {
+          step,
+          lease: {
+            token: "66666666-6666-4666-8666-666666666666",
+            generation: 1
+          }
+        }
+      : null;
+  }
+
+  async heartbeatExecutionLease() {
+    return true;
+  }
+
   async completeStep(currentUserId, workspaceId, input) {
     this.calls.push({
       method: "completeStep",
@@ -191,10 +229,16 @@ class FakeAgentLoggingService {
       input
     });
 
+    const disposition = input.postExecutionDisposition ?? "continue_planning";
     const queuedNextPlannerTurn =
-      input.waitForUserInput !== true &&
+      disposition === "continue_planning" &&
       this.state.toolCallLimitReached !== true;
-    const status = queuedNextPlannerTurn ? "planning" : "waiting_user_input";
+    const status =
+      disposition === "complete_run"
+        ? "completed"
+        : queuedNextPlannerTurn
+          ? "planning"
+          : "waiting_user_input";
     return {
       step: {
         id: input.stepId,
@@ -213,11 +257,12 @@ class FakeAgentLoggingService {
         message: queuedNextPlannerTurn
           ? "다음 작업을 확인하고 있습니다."
           : input.waitingMessage,
-        finalAnswer: null,
+        finalAnswer: status === "completed" ? input.waitingMessage : null,
         errorCode: null,
         errorMessage: null,
         expiresAt: "2026-08-09T00:00:00.000Z",
-        completedAt: null,
+        completedAt:
+          status === "completed" ? "2026-07-10T00:00:00.000Z" : null,
         createdAt: "2026-07-10T00:00:00.000Z",
         updatedAt: "2026-07-10T00:00:00.000Z"
       },
@@ -341,6 +386,24 @@ class FakeAgentLoggingService {
   }
 }
 
+class FakeAgentLatencyObserver {
+  constructor(timeline = []) {
+    this.calls = [];
+    this.clock = 0;
+    this.timeline = timeline;
+  }
+
+  start() {
+    this.timeline.push("latency:start");
+    this.clock += 10;
+    return this.clock;
+  }
+
+  observe(input) {
+    this.calls.push(input);
+  }
+}
+
 class FakeAgentOutboxPublisherService {
   constructor(error = null) {
     this.calls = [];
@@ -400,7 +463,7 @@ class FakeAgentToolRegistryService {
       description: "fake tool",
       riskLevel,
       executionMode,
-      completesRunAfterExecution: this.state.completesRunAfterExecution === true,
+      postExecutionDisposition: this.state.postExecutionDisposition,
       inputSchema: {},
       validateInput: (input) => {
         this.calls.push({ method: "validateInput", input });
@@ -962,7 +1025,9 @@ function createExecutionServiceWithRegistry(
   registry,
   {
     prompt = "이번 주 일정 알려줘",
-    timezone = "Asia/Seoul"
+    timezone = "Asia/Seoul",
+    requestContext = null,
+    latencyObserver = undefined
   } = {}
 ) {
   const state = {
@@ -971,8 +1036,10 @@ function createExecutionServiceWithRegistry(
       workspace_id: WORKSPACE_ID,
       requested_by_user_id: USER_ID,
       status: "running",
+      turn_sequence: 1,
       prompt,
-      timezone
+      timezone,
+      request_context_json: requestContext
     },
     plannerStep: {
       id: STEP_ID,
@@ -980,7 +1047,10 @@ function createExecutionServiceWithRegistry(
     }
   };
   const workspaceService = new FakeWorkspaceService();
-  const database = new FakeDatabaseService(state);
+  const database = new FakeDatabaseService(
+    state,
+    latencyObserver?.timeline ?? []
+  );
   const loggingService = new FakeAgentLoggingService(state);
   const confirmationService = new FakeAgentConfirmationService();
   const outboxPublisherService = new FakeAgentOutboxPublisherService();
@@ -1008,7 +1078,8 @@ function createExecutionServiceWithRegistry(
       undefined,
       undefined,
       outboxPublisherService,
-      candidateSelectionService
+      candidateSelectionService,
+      latencyObserver
     ),
     candidateSelectionService,
     confirmationService,
@@ -1024,8 +1095,10 @@ function createService({
   executionStarted = false,
   requestContext = null,
   toolCallLimitReached = false,
+  completedToolNames = [],
   publisherError = null,
-  candidateSelectionService = undefined
+  candidateSelectionService = undefined,
+  latencyObserver = undefined
 } = {}) {
   const state = {
     run: {
@@ -1033,6 +1106,7 @@ function createService({
       workspace_id: WORKSPACE_ID,
       requested_by_user_id: USER_ID,
       status: runStatus,
+      turn_sequence: 1,
       prompt: "이번 주 일정 알려줘",
       timezone: "Asia/Seoul",
       request_context_json: requestContext
@@ -1042,10 +1116,14 @@ function createService({
       output_json: planner
     },
     executionStarted,
-    toolCallLimitReached
+    toolCallLimitReached,
+    completedToolNames
   };
   const workspaceService = new FakeWorkspaceService();
-  const database = new FakeDatabaseService(state);
+  const database = new FakeDatabaseService(
+    state,
+    latencyObserver?.timeline ?? []
+  );
   const loggingService = new FakeAgentLoggingService(state);
   const confirmationService = new FakeAgentConfirmationService();
   const toolRegistryService = new FakeAgentToolRegistryService(registryState);
@@ -1063,14 +1141,16 @@ function createService({
       undefined,
       undefined,
       outboxPublisherService,
-      candidateSelectionService
+      candidateSelectionService,
+      latencyObserver
     ),
     workspaceService,
     database,
     loggingService,
     confirmationService,
     toolRegistryService,
-    outboxPublisherService
+    outboxPublisherService,
+    latencyObserver
   };
 }
 
@@ -1128,7 +1208,8 @@ function formatterMeetingReport(index, overrides = {}) {
     resourceRefs: []
   });
 
-  assert.match(answer, /로그 관련 테이블에 집중 표시했습니다/);
+  assert.match(answer, /로그 관련 집중 보기 결과를 준비했습니다/);
+  assert.doesNotMatch(answer, /집중 표시했습니다/);
   assert.match(answer, /핵심 테이블: activity_logs/);
   assert.match(answer, /관련 테이블: users/);
 }
@@ -1491,24 +1572,174 @@ function formatterMeetingReport(index, overrides = {}) {
 }
 
 {
-  const { service, loggingService, outboxPublisherService } = createService({
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service, database, loggingService, outboxPublisherService } = createService({
     registryState: {
-      completesRunAfterExecution: true,
+      postExecutionDisposition: "complete_run",
       name: "focus_sql_erd_tables"
     },
-    planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" }),
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
   });
 
   const result = await service.executeReadyRun(RUN_ID);
 
-  assert.equal(result.status, "waiting_user_input");
-  assert.equal(result.run.status, "waiting_user_input");
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
   assert.deepEqual(outboxPublisherService.calls, []);
   const completion = loggingService.calls.find(
     (call) => call.method === "completeToolStepAndAdvance"
   );
-  assert.equal(completion.input.waitForUserInput, true);
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
   assert.match(completion.input.waitingMessage, /focus_sql_erd_tables 실행을 완료했습니다/);
+  assert.deepEqual(
+    latencyObserver.calls.map((call) => call.stage),
+    ["tool_preparation", "tool_execution", "tool_advance", "tool_turn"]
+  );
+  assert.equal(
+    latencyObserver.calls.every(
+      (call) =>
+        call.surface === "sql_erd" &&
+        call.toolName === "focus_sql_erd_tables" &&
+        call.turnSequence === 1
+    ),
+    true
+  );
+  assert.equal(latencyObserver.timeline[0], "latency:start");
+  assert.match(database.calls[0].text, /planner_turn_count AS turn_sequence/);
+}
+
+{
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({ latencyObserver });
+
+  await service.executeReadyRun(RUN_ID);
+
+  assert.deepEqual(latencyObserver.calls, []);
+}
+
+{
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({
+    registryState: {
+      name: "focus_sql_erd_tables",
+      validationError: badRequest("invalid focus input")
+    },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" }),
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed");
+  const preparationEvents = latencyObserver.calls.filter(
+    (call) => call.stage === "tool_preparation"
+  );
+  assert.equal(preparationEvents.length, 1);
+  assert.equal(preparationEvents[0].outcome, "failure");
+  assert.equal(preparationEvents[0].failureType, "validation_error");
+}
+
+for (const testCase of [
+  {
+    name: "context unavailable",
+    registryState: { contextUnavailable: true },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
+  },
+  {
+    name: "registry mismatch",
+    registryState: { riskLevel: "medium" },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
+  },
+  {
+    name: "high risk",
+    registryState: { riskLevel: "high" },
+    planner: plannerOutput({
+      toolName: "focus_sql_erd_tables",
+      riskLevel: "high"
+    })
+  },
+  {
+    name: "contextual preparation unavailable",
+    registryState: { executionMode: "contextual" },
+    planner: plannerOutput({
+      toolName: "focus_sql_erd_tables",
+      executionMode: "contextual",
+      requiresConfirmation: null
+    })
+  }
+]) {
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({
+    registryState: testCase.registryState,
+    planner: testCase.planner,
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed", testCase.name);
+  const preparationEvents = latencyObserver.calls.filter(
+    (call) => call.stage === "tool_preparation"
+  );
+  assert.deepEqual(
+    preparationEvents.map(({ outcome, failureType }) => ({ outcome, failureType })),
+    [{ outcome: "failure", failureType: "validation_error" }],
+    testCase.name
+  );
+}
+
+{
+  const { service, loggingService, outboxPublisherService } = createService({
+    planner: plannerOutput({
+      toolRouting: {
+        capabilityIds: ["calendar.events.list"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
+  assert.deepEqual(outboxPublisherService.calls, []);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
+}
+
+{
+  const { service, loggingService } = createService({
+    completedToolNames: ["list_calendar_events"],
+    registryState: { name: "update_calendar_event" },
+    planner: plannerOutput({
+      toolName: "update_calendar_event",
+      toolRouting: {
+        capabilityIds: ["calendar.events.update"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
 }
 
 {
@@ -1950,117 +2181,11 @@ function formatterMeetingReport(index, overrides = {}) {
     "assign_board_issue_safely",
     "diagnose_board_freshness",
     "generate_sql_erd",
-    "inspect_sql_erd_schema",
     "focus_sql_erd_tables"
   ]);
   assert.equal(
     registry.getDefinition("move_board_issue_status").executionMode,
     "confirmation_required"
-  );
-}
-
-{
-  const { registry, sqlErdService } = createSmokeRegistry();
-  const inspectDefinition = registry.getDefinition("inspect_sql_erd_schema");
-  const { confirmationService, loggingService, service } =
-    createExecutionServiceWithRegistry(
-      plannerOutput({
-        toolName: inspectDefinition.name,
-        riskLevel: inspectDefinition.riskLevel,
-        executionMode: inspectDefinition.executionMode,
-        requiresConfirmation:
-          inspectDefinition.executionMode === "contextual" ? null : false,
-        input: {
-          featureQuery: "결제 기능"
-        }
-      }),
-      registry,
-      {
-        prompt: "결제 기능과 관련된 테이블만 보여줘",
-        timezone: "Asia/Seoul"
-      }
-    );
-
-  const result = await service.executeLatestPlannedTool(
-    USER_ID,
-    WORKSPACE_ID,
-    RUN_ID
-  );
-
-  assert.equal(result.status, "waiting_user_input");
-  assert.equal(result.run.status, "waiting_user_input");
-  assert.equal(result.run.finalAnswer, null);
-  assert.match(result.run.message, /세션을 선택/);
-  assert.equal(confirmationService.calls.length, 0);
-  assert.deepEqual(sqlErdService.calls, [
-    {
-      method: "listSessions",
-      currentUserId: USER_ID,
-      workspaceId: WORKSPACE_ID,
-      query: { limit: 100 }
-    }
-  ]);
-  assert.deepEqual(
-    loggingService.calls.map((call) => call.method),
-    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
-  );
-  const outputSummary = loggingService.calls[1].input.outputSummary;
-  assert.equal(outputSummary.reason, "multiple_sessions");
-  assert.deepEqual(
-    outputSummary.candidateSelections.map((candidate) => candidate.label),
-    ["Untitled ERD", "Untitled ERD"]
-  );
-  assert.equal(JSON.stringify(outputSummary).includes(SQL_ERD_SESSION_ID), false);
-  assert.equal(loggingService.calls[1].input.waitForUserInput, true);
-
-  const selectedToken = SQL_ERD_SECOND_SESSION_ID;
-  const resumedExecution = createExecutionServiceWithRegistry(
-    plannerOutput({
-      toolName: inspectDefinition.name,
-      riskLevel: inspectDefinition.riskLevel,
-      executionMode: inspectDefinition.executionMode,
-      requiresConfirmation: null,
-      input: {
-        featureQuery: "결제 기능",
-        sessionSelectionToken: selectedToken
-      }
-    }),
-    registry,
-    {
-      prompt: "Untitled ERD 세션을 선택했습니다.",
-      timezone: "Asia/Seoul"
-    }
-  );
-  await resumedExecution.service.executeLatestPlannedTool(
-    USER_ID,
-    WORKSPACE_ID,
-    RUN_ID
-  );
-
-  const resumedOutput = resumedExecution.loggingService.calls.find(
-    (call) => call.method === "completeToolStepAndAdvance"
-  ).input.outputSummary;
-  assert.equal(resumedOutput.sessionId, SQL_ERD_SECOND_SESSION_ID);
-  assert.deepEqual(
-    sqlErdService.calls
-      .filter((call) => call.method === "getSession")
-      .map(({ currentUserId, workspaceId, sessionId }) => ({
-        currentUserId,
-        workspaceId,
-        sessionId
-      })),
-    [
-      {
-        currentUserId: USER_ID,
-        workspaceId: WORKSPACE_ID,
-        sessionId: SQL_ERD_SECOND_SESSION_ID
-      },
-      {
-        currentUserId: USER_ID,
-        workspaceId: WORKSPACE_ID,
-        sessionId: SQL_ERD_SECOND_SESSION_ID
-      }
-    ]
   );
 }
 
@@ -2140,7 +2265,10 @@ function formatterMeetingReport(index, overrides = {}) {
     ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
   );
   assert.equal(loggingService.calls[1].input.outputSummary.selection, "multiple");
-  assert.equal(loggingService.calls[1].input.waitForUserInput, true);
+  assert.equal(
+    loggingService.calls[1].input.postExecutionDisposition,
+    "wait_for_user_input"
+  );
 }
 
 {

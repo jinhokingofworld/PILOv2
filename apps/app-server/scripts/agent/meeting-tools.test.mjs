@@ -18,6 +18,9 @@ const { AgentCandidateSelectionService } = require(
 const { MeetingActionItemDeliveryService } = require(
   "../../dist/modules/meeting/meeting-action-item-delivery.service.js"
 );
+const { EmbeddingTemporarilyUnavailableError } = require(
+  "../../dist/modules/agent/grounding/query-embedding.js"
+);
 const { HttpException, HttpStatus } = require("@nestjs/common");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -32,6 +35,8 @@ const MEETING_ROOM_ID = "99999999-9999-4999-8999-999999999991";
 const SECOND_MEETING_ROOM_ID = "99999999-9999-4999-8999-999999999992";
 const CANDIDATE_STEP_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const ACTION_ITEM_ID = "99999999-9999-4999-8999-999999999994";
+const DOCUMENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01";
+const DOCUMENT_CHUNK_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb01";
 
 const meetingAgentWorkflowMigration = await readFile(
   new URL(
@@ -216,6 +221,7 @@ function createReport(overrides = {}) {
     id: REPORT_ID,
     meetingId: MEETING_ID,
     recordingId: RECORDING_ID,
+    title: "Backend meeting",
     status: "COMPLETED",
     failedStep: null,
     errorMessage: null,
@@ -442,8 +448,13 @@ class FakeMeetingService {
       workspaceId,
       query
     });
+    const reports = query.reportTitle
+      ? this.reports.filter(
+          (report) => report.title.toLowerCase() === query.reportTitle.toLowerCase()
+        )
+      : this.reports;
     return {
-      reports: this.reports.slice(0, query.limit ?? this.reports.length).map((report) =>
+      reports: reports.slice(0, query.limit ?? reports.length).map((report) =>
         toSummaryReport(report)
       )
     };
@@ -499,6 +510,27 @@ class FakeMeetingTranscriptRagService {
   async search(currentUserId, workspaceId, input) {
     this.calls.push({ currentUserId, workspaceId, input });
     return this.sources;
+  }
+}
+
+class FakeDocumentSearchService {
+  constructor(results = [
+    {
+      chunkId: DOCUMENT_CHUNK_ID,
+      documentId: DOCUMENT_ID,
+      title: "Async Processing Design",
+      headingPath: "Deployment",
+      excerpt: "Deploy the App Server before the Worker and keep rollback compatibility.",
+      score: 0.91
+    }
+  ]) {
+    this.calls = [];
+    this.results = results;
+  }
+
+  async search(currentUserId, workspaceId, input) {
+    this.calls.push({ currentUserId, workspaceId, input });
+    return this.results;
   }
 }
 
@@ -573,7 +605,10 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   assert.equal(result.outputSummary.groundingOutcome, "sources_found");
   assert.equal(result.outputSummary.sourceCount, 1);
   assert.deepEqual(result.outputSummary.sourceTypes, ["transcript"]);
-  assert.deepEqual(result.outputSummary.sourceIds, ["99999999-9999-4999-8999-999999999999"]);
+  assert.equal(result.outputSummary.sourceIds, undefined);
+  assert.equal(result.groundingSources.length, 1);
+  assert.equal(result.groundingSources[0].sourceType, "meeting_transcript");
+  assert.equal(result.groundingSources[0].sourceRef, "99999999-9999-4999-8999-999999999999");
   assert.doesNotMatch(JSON.stringify(result.outputSummary), /원문/);
   assert.deepEqual(ragService.calls[0].input, { query: "일정 결론" });
 
@@ -609,7 +644,8 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
     {
       domain: "meeting",
       resourceType: "meeting_report",
-      resourceId: REPORT_ID
+      resourceId: REPORT_ID,
+      url: `/report?reportId=${REPORT_ID}`
     }
   ]);
 
@@ -635,10 +671,102 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
     status: "grounding_queued",
     groundingOutcome: "no_relevant_sources",
     sourceCount: 0,
-    sourceTypes: [],
-    sourceIds: []
+    sourceTypes: []
   });
+  assert.deepEqual(result.groundingSources, []);
   assert.deepEqual(result.resourceRefs, []);
+}
+
+{
+  const meetingService = new FakeMeetingService();
+  const ragService = new FakeMeetingTranscriptRagService([
+    {
+      sourceId: "99999999-9999-4999-8999-999999999999",
+      sourceType: "transcript",
+      reportId: REPORT_ID,
+      startedAtMs: 1000,
+      endedAtMs: 2000,
+      content: "Worker deployment order and rollback compatibility were discussed."
+    }
+  ]);
+  const documentSearchService = new FakeDocumentSearchService();
+  const tools = new MeetingAgentToolsService(
+    meetingService,
+    ragService,
+    undefined,
+    new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService()),
+    undefined,
+    documentSearchService
+  );
+  const tool = new Map(
+    tools.listDefinitions().map((definition) => [definition.name, definition])
+  ).get("search_meeting_transcript");
+
+  const result = await tool.execute(
+    context,
+    tool.validateInput({ query: "Summarize yesterday's backend meeting" })
+  );
+
+  assert.equal(documentSearchService.calls.length, 1);
+  assert.equal(documentSearchService.calls[0].currentUserId, USER_ID);
+  assert.equal(documentSearchService.calls[0].workspaceId, WORKSPACE_ID);
+  assert.equal(documentSearchService.calls[0].input.topK, 3);
+  assert.match(documentSearchService.calls[0].input.query, /Worker deployment order/);
+  assert.ok(documentSearchService.calls[0].input.query.length <= 1000);
+  assert.equal(result.groundingSources.length, 2);
+  assert.equal(result.groundingSources[1].sourceType, "drive_document");
+  assert.equal(result.groundingSources[1].sourceRef, `drive_chunk:${DOCUMENT_CHUNK_ID}`);
+  assert.deepEqual(result.resourceRefs, [
+    {
+      domain: "meeting",
+      resourceType: "meeting_report",
+      resourceId: REPORT_ID,
+      url: `/report?reportId=${REPORT_ID}`
+    },
+    {
+      domain: "drive",
+      resourceType: "document",
+      resourceId: DOCUMENT_ID,
+      label: "Async Processing Design",
+      url: `/files?documentId=${DOCUMENT_ID}`,
+      metadata: { headingPath: "Deployment" }
+    }
+  ]);
+}
+
+{
+  const meetingService = new FakeMeetingService();
+  const documentSearchService = {
+    async search() {
+      throw new EmbeddingTemporarilyUnavailableError();
+    }
+  };
+  const tools = new MeetingAgentToolsService(
+    meetingService,
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService()),
+    undefined,
+    documentSearchService
+  );
+  const tool = new Map(
+    tools.listDefinitions().map((definition) => [definition.name, definition])
+  ).get("search_meeting_transcript");
+
+  const result = await tool.execute(
+    context,
+    tool.validateInput({ query: "Summarize the backend meeting" })
+  );
+
+  assert.equal(result.groundingSources.length, 1);
+  assert.deepEqual(result.resourceRefs, [
+    {
+      domain: "meeting",
+      resourceType: "meeting_report",
+      resourceId: REPORT_ID,
+      url: `/report?reportId=${REPORT_ID}`
+    }
+  ]);
 }
 
 class FakeCandidateSelectionDatabase {
@@ -1239,6 +1367,10 @@ class FakeCandidateSelectionDatabase {
     const ambiguousReport = await resolver.resolveReport(context, {});
     assert.equal(ambiguousReport.kind, "needs_clarification");
     assert.equal(ambiguousReport.reason, "ambiguous");
+    assert.deepEqual(
+      ambiguousReport.candidates.map((candidate) => candidate.label),
+      ["Backend meeting", "Backend meeting"]
+    );
     meetingService.reports.splice(1);
 
     meetingService.activeMeeting = {
@@ -1911,6 +2043,44 @@ function errorCode(error) {
 }
 
 {
+  const { meetingService, registry } = createRegistry();
+  meetingService.reports = [
+    createReport({ title: "Backend meeting" }),
+    createReport({ id: SECOND_REPORT_ID, title: "Infra meeting" })
+  ];
+  const tool = registry.getDefinition("summarize_meeting_report");
+  const input = tool.validateInput({
+    reportTitle: "Backend meeting",
+    from: "2026-07-08T00:00:00.000Z",
+    to: "2026-07-09T00:00:00.000Z"
+  });
+
+  assert.deepEqual(await tool.prepareExecution(context, input), { kind: "execute" });
+  const result = await tool.execute(context, input);
+
+  assert.equal(result.outputSummary.report.reportId, REPORT_ID);
+  assert.deepEqual(
+    meetingService.calls
+      .filter((call) => call.method === "listReportsForAgent")
+      .map((call) => call.query),
+    [
+      {
+        reportTitle: "Backend meeting",
+        from: "2026-07-08T00:00:00.000Z",
+        to: "2026-07-09T00:00:00.000Z",
+        limit: 4
+      },
+      {
+        reportTitle: "Backend meeting",
+        from: "2026-07-08T00:00:00.000Z",
+        to: "2026-07-09T00:00:00.000Z",
+        limit: 4
+      }
+    ]
+  );
+}
+
+{
   const { registry } = createRegistry();
   const tool = registry.getDefinition("summarize_meeting_report");
   const result = await tool.execute(context, tool.validateInput({}));
@@ -1923,6 +2093,7 @@ function errorCode(error) {
   assert.equal(report.transcript.available, true);
   assert.equal(report.transcript.stored, false);
   assert.equal(report.transcript.length > 0, true);
+  assert.equal(result.resourceRefs[0].url, `/report?reportId=${REPORT_ID}`);
   assert.equal(serialized.includes("회의 원문은 Agent outputSummary"), false);
   assert.deepEqual(report.actionItems[0], {
     title: "문서 정리",

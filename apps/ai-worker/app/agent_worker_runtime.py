@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 
 from app.agent_processor import (
+    AgentGroundedAnswerProcessor,
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
     OpenAiAgentRouterClient,
@@ -28,7 +29,8 @@ from app.meeting_report_runtime import (
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_AGENT_WORKER_VISIBILITY_TIMEOUT_SECONDS = 90
+DEFAULT_AGENT_WORKER_VISIBILITY_TIMEOUT_SECONDS = 180
+DEFAULT_AGENT_WORKER_VISIBILITY_HEARTBEAT_SECONDS = 45
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,7 @@ class AgentWorkerSettings:
     agent_stale_execution_sweep_interval_seconds: int
     wait_time_seconds: int
     visibility_timeout_seconds: int
+    visibility_heartbeat_seconds: int
     canvas_embedding_jobs_per_tick: int = 0
 
     @classmethod
@@ -97,6 +100,10 @@ class AgentWorkerSettings:
                 "AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS",
                 DEFAULT_AGENT_WORKER_VISIBILITY_TIMEOUT_SECONDS,
             ),
+            visibility_heartbeat_seconds=_positive_int_env(
+                "AI_WORKER_SQS_VISIBILITY_HEARTBEAT_SECONDS",
+                DEFAULT_AGENT_WORKER_VISIBILITY_HEARTBEAT_SECONDS,
+            ),
         )
 
 
@@ -130,17 +137,30 @@ def create_agent_worker(settings: AgentWorkerSettings | None = None) -> SqsAiJob
             resolved_settings.openai_agent_router_timeout_seconds,
         ),
     )
+    grounded_answer_processor = AgentGroundedAnswerProcessor(
+        handoff_client,
+        resolved_settings.openai_api_key,
+        resolved_settings.openai_agent_planner_model,
+        resolved_settings.openai_agent_planner_timeout_seconds,
+    )
     return SqsAiJobWorker(
         resolved_settings,
-        create_agent_dispatcher(processor),
+        create_agent_dispatcher(processor, grounded_answer_processor),
         boto3.client("sqs", **boto_kwargs),
         stale_execution_recovery=handoff_client,
         agent_retry_exhaustion_recovery=repository,
+        agent_grounded_answer_retry_exhaustion_recovery=repository,
     )
 
 
-def create_agent_dispatcher(processor: AgentRunProcessor) -> JobDispatcher:
-    return JobDispatcher(agent_run_processor=processor)
+def create_agent_dispatcher(
+    processor: AgentRunProcessor,
+    grounded_answer_processor: AgentGroundedAnswerProcessor | None = None,
+) -> JobDispatcher:
+    return JobDispatcher(
+        agent_run_processor=processor,
+        grounded_answer_processor=grounded_answer_processor,
+    )
 
 
 def run_agent_worker() -> None:

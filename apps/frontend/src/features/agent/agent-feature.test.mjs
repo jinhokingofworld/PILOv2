@@ -54,7 +54,7 @@ assert.match(agentTypes, /"completed"/);
 assert.match(agentTypes, /export type AgentRun/);
 assert.match(agentTypes, /export type CreateAgentRunInput/);
 assert.match(agentTypes, /export type SubmitAgentRunInput/);
-assert.match(agentTypes, /kind: "sql_erd_session"/);
+assert.doesNotMatch(agentTypes, /kind: "sql_erd_session"/);
 assert.match(agentTypes, /kind: "candidate"/);
 assert.match(agentTypes, /selection\?: AgentRunInputSelection/);
 assert.match(agentTypes, /export type AgentRunMessage/);
@@ -171,7 +171,7 @@ assert.match(
 );
 assert.match(agentChatWidget, /const canSend = draft\.trim\(\)\.length > 0 && !hasActiveAgentRequest/);
 assert.match(agentChatWidget, /AGENT_RUN_POLL_INTERVAL_MS/);
-assert.match(agentChatWidget, /AGENT_PLANNING_POLL_TIMEOUT_MS = 190_000/);
+assert.match(agentChatWidget, /AGENT_PLANNING_POLL_TIMEOUT_MS = 270_000/);
 assert.match(agentChatWidget, /createAgentPlanningPollingTimeoutError/);
 assert.match(agentChatWidget, /currentRun\.status === "planning"/);
 assert.match(agentChatWidget, /previousStatus !== "planning"/);
@@ -195,6 +195,8 @@ assert.match(agentChatWidget, /\{ \.\.\.input, message: displayMessage \}/);
 assert.match(agentChatWidget, /latestAssistantMessage/);
 assert.match(agentChatWidget, /같은 요청을 이어서 처리합니다/);
 assert.match(agentChatWidget, /enqueueMeetingConnectionAction/);
+assert.match(agentChatWidget, /applyAgentSqlErdTableFocus/);
+assert.match(agentChatWidget, /appliedSqlErdFocusActionKeysRef/);
 assert.match(agentChatWidget, /clientAction/);
 assert.match(agentChatWidget, /connect_meeting/);
 assert.match(agentChatWidget, /router\.push\("\/meeting"\)/);
@@ -208,13 +210,29 @@ assert.match(agentChatWidget, /completed/);
 assert.match(agentChatWidget, /failed/);
 assert.match(agentChatWidget, /cancelled/);
 assert.match(agentChatWidget, /finalAnswer/);
-assert.match(agentChatWidget, /errorMessage/);
+assert.doesNotMatch(agentChatWidget, /run\.errorMessage/);
+assert.match(
+  agentChatWidget,
+  /요청 처리 중 문제가 발생했습니다\. 잠시 후 다시 시도해주세요\./
+);
 assert.match(agentChatWidget, /Agent를 사용하려면 로그인과 워크스페이스 선택이 필요합니다/);
 assert.match(agentChatWidget, /activeRunAbortControllerRef\.current/);
 assert.match(agentChatWidget, /fixed inset-y-0 right-0/);
 assert.match(agentChatWidget, /max-w-\[420px\]/);
-assert.match(agentChatWidget, /오늘 일정 보기/);
-assert.match(agentChatWidget, /prompt: "오늘 일정 보여줘"/);
+assert.match(agentChatWidget, /안녕하세요, PILO AI입니다/);
+assert.match(agentChatWidget, /다양한 업무를 스마트하게 도와드릴게요/);
+assert.match(agentChatWidget, /어떤 업무를 도와드릴까요/);
+assert.doesNotMatch(agentChatWidget, /assistant-example/);
+assert.doesNotMatch(agentChatWidget, /예: 내일 오후 3시에 디자인 리뷰 일정 만들어줘/);
+assert.doesNotMatch(agentChatWidget, /오늘 일정 보기/);
+assert.doesNotMatch(agentChatWidget, /prompt: "오늘 일정 보여줘"/);
+assert.match(agentChatWidget, /messageListRef/);
+assert.match(agentChatWidget, /shouldAutoScrollRef/);
+assert.match(agentChatWidget, /if \(isOpen\) \{\s*shouldAutoScrollRef\.current = true;/);
+assert.match(agentChatWidget, /onScroll=\{handleMessageListScroll\}/);
+assert.match(agentChatWidget, /top: messageList\.scrollHeight/);
+assert.match(agentChatWidget, /behavior: "smooth"/);
+assert.match(agentChatWidget, /messageList\.clientHeight <=\s*24/);
 assert.doesNotMatch(agentChatWidget, /내 이슈 확인/);
 assert.doesNotMatch(agentChatWidget, /현재 PR 보기/);
 assert.doesNotMatch(agentChatWidget, /prompt: "내 이슈 보여줘"/);
@@ -236,11 +254,7 @@ assert.match(agentCandidateSelections, /getAgentCandidateSelections/);
 assert.match(agentCandidateSelections, /disabled=\{disabled\}/);
 assert.match(agentCandidateSelections, /candidate\.selection/);
 assert.match(agentCandidateSelections, /다시 찾기/);
-assert.equal(
-  typeof agentResourceUtilities.getSqlErdSessionCandidates,
-  "function",
-  "waiting SQLtoERD clarification candidates need a validated parser"
-);
+assert.equal(agentResourceUtilities.getSqlErdSessionCandidates, undefined);
 
 const presentedCanvasRuns = [];
 const unregisterCanvasDelegationAdapter = registerCanvasAgentDelegationAdapter({
@@ -357,101 +371,6 @@ assert.equal(
 assert.match(agentChatWidget, /z-\[70\]/);
 
 const resourceSessionId = "88888888-8888-4888-8888-888888888888";
-const candidateSessionId = "77777777-7777-4777-8777-777777777777";
-const sqlErdCandidateRun = {
-  status: "waiting_user_input",
-  steps: [
-    {
-      id: "step-older",
-      order: 1,
-      type: "tool",
-      status: "completed",
-      toolName: "inspect_sql_erd_schema",
-      outputSummary: {
-        status: "needs_clarification",
-        candidates: [
-          {
-            selectionToken: resourceSessionId,
-            title: "이전 후보",
-            updatedAt: "2026-07-15T00:00:00.000Z",
-            tableCount: 1,
-            relationCount: 0
-          }
-        ]
-      },
-      resourceRefs: []
-    },
-    {
-      id: "step-latest",
-      order: 2,
-      type: "tool",
-      status: "completed",
-      toolName: "inspect_sql_erd_schema",
-      outputSummary: {
-        status: "needs_clarification",
-        candidates: [
-          {
-            selectionToken: candidateSessionId,
-            title: "  결제\n\tERD\u0000 ",
-            updatedAt: "2026-07-17T00:00:00.000Z",
-            tableCount: 4,
-            relationCount: 3
-          },
-          {
-            selectionToken: resourceSessionId,
-            title: "결제 ERD",
-            updatedAt: "2026-07-16T00:00:00.000Z",
-            tableCount: 2,
-            relationCount: 1
-          }
-        ]
-      },
-      resourceRefs: []
-    }
-  ]
-};
-
-assert.deepEqual(
-  agentResourceUtilities.getSqlErdSessionCandidates(sqlErdCandidateRun),
-  [
-    {
-      selectionToken: candidateSessionId,
-      title: "결제 ERD",
-      updatedAt: "2026-07-17T00:00:00.000Z",
-      tableCount: 4,
-      relationCount: 3
-    },
-    {
-      selectionToken: resourceSessionId,
-      title: "결제 ERD",
-      updatedAt: "2026-07-16T00:00:00.000Z",
-      tableCount: 2,
-      relationCount: 1
-    }
-  ]
-);
-assert.deepEqual(agentResourceUtilities.getAgentCandidateSelections(sqlErdCandidateRun), [
-  {
-    key: `sql-erd:${candidateSessionId}`,
-    label: "결제 ERD",
-    description: "수정 2026-07-17T00:00:00.000Z · 테이블 4개 · 관계 3개",
-    status: null,
-    selection: {
-      kind: "sql_erd_session",
-      token: candidateSessionId
-    }
-  },
-  {
-    key: `sql-erd:${resourceSessionId}`,
-    label: "결제 ERD",
-    description: "수정 2026-07-16T00:00:00.000Z · 테이블 2개 · 관계 1개",
-    status: null,
-    selection: {
-      kind: "sql_erd_session",
-      token: resourceSessionId
-    }
-  }
-]);
 const meetingCandidateSelectionId = "99999999-9999-4999-8999-999999999999";
 assert.deepEqual(
   agentResourceUtilities.getAgentCandidateSelections({
@@ -492,155 +411,6 @@ assert.deepEqual(
     }
   ]
 );
-const sqlCandidateSelectionId = "77777777-7777-4777-8777-777777777777";
-assert.deepEqual(
-  agentResourceUtilities.getAgentCandidateSelections({
-    status: "waiting_user_input",
-    steps: [
-      {
-        id: "sql-candidate-step",
-        order: 1,
-        type: "tool",
-        status: "completed",
-        toolName: "inspect_sql_erd_schema",
-        outputSummary: {
-          status: "needs_clarification",
-          candidateSelections: [
-            {
-              candidateSelectionId: sqlCandidateSelectionId,
-              resourceType: "session",
-              label: "결제 ERD",
-              description: "테이블 4개 · 관계 3개",
-              status: null
-            }
-          ]
-        },
-        resourceRefs: []
-      }
-    ]
-  }),
-  [
-    {
-      key: `candidate:${sqlCandidateSelectionId}`,
-      label: "결제 ERD",
-      description: "테이블 4개 · 관계 3개",
-      status: null,
-      selection: {
-        kind: "candidate",
-        candidateSelectionId: sqlCandidateSelectionId
-      }
-    }
-  ]
-);
-assert.deepEqual(
-  agentResourceUtilities.getSqlErdSessionCandidates({
-    ...sqlErdCandidateRun,
-    status: "completed"
-  }),
-  []
-);
-assert.deepEqual(
-  agentResourceUtilities.getSqlErdSessionCandidates({
-    ...sqlErdCandidateRun,
-    steps: [
-      ...sqlErdCandidateRun.steps,
-      {
-        ...sqlErdCandidateRun.steps[1],
-        id: "newer-calendar-step",
-        order: 3,
-        toolName: "list_calendar_events"
-      }
-    ]
-  }),
-  []
-);
-assert.deepEqual(
-  agentResourceUtilities.getSqlErdSessionCandidates({
-    ...sqlErdCandidateRun,
-    steps: [
-      {
-        ...sqlErdCandidateRun.steps[1],
-        outputSummary: {
-          status: "needs_clarification",
-          candidates: Array.from({ length: 6 }, (_, index) => ({
-            selectionToken: `${index + 1}0000000-0000-4000-8000-000000000000`,
-            title: `후보 ${index + 1}`,
-            updatedAt: "2026-07-17T00:00:00.000Z",
-            tableCount: 1,
-            relationCount: 0
-          }))
-        }
-      }
-    ]
-  }),
-  []
-);
-assert.deepEqual(
-  agentResourceUtilities.getSqlErdSessionCandidates({
-    ...sqlErdCandidateRun,
-    steps: [
-      {
-        ...sqlErdCandidateRun.steps[1],
-        outputSummary: {
-          status: "needs_clarification",
-          candidates: [
-            ...sqlErdCandidateRun.steps[1].outputSummary.candidates,
-            {
-              ...sqlErdCandidateRun.steps[1].outputSummary.candidates[0],
-              title: "중복 token"
-            }
-          ]
-        }
-      }
-    ]
-  }),
-  []
-);
-assert.deepEqual(
-  agentResourceUtilities.getSqlErdSessionCandidates({
-    ...sqlErdCandidateRun,
-    steps: [
-      {
-        ...sqlErdCandidateRun.steps[1],
-        outputSummary: {
-          status: "needs_clarification",
-          candidates: [
-            sqlErdCandidateRun.steps[1].outputSummary.candidates[1],
-            {
-              selectionToken: "not-a-uuid",
-              title: "잘못된 UUID",
-              updatedAt: "2026-07-17T00:00:00.000Z",
-              tableCount: 1,
-              relationCount: 0
-            },
-            {
-              selectionToken: candidateSessionId,
-              title: "잘못된 날짜",
-              updatedAt: "2026-02-30T00:00:00.000Z",
-              tableCount: 1,
-              relationCount: 0
-            },
-            {
-              selectionToken: "99999999-9999-4999-8999-999999999999",
-              title: "잘못된 개수",
-              updatedAt: "2026-07-17T00:00:00.000Z",
-              tableCount: -1,
-              relationCount: 0
-            },
-            {
-              selectionToken: "66666666-6666-4666-8666-666666666666",
-              title: "\u0000\n\t",
-              updatedAt: "2026-07-17T00:00:00.000Z",
-              tableCount: 1,
-              relationCount: 0
-            }
-          ]
-        }
-      }
-    ]
-  }),
-  []
-);
 const validResourceRef = {
   domain: "sqltoerd",
   resourceType: "session",
@@ -649,6 +419,7 @@ const validResourceRef = {
   url: `/sql-erd/session?sessionId=${resourceSessionId}`
 };
 const completedRun = {
+  id: "run-focus",
   status: "completed",
   steps: [
     {
@@ -736,6 +507,92 @@ assert.deepEqual(getAgentResourceLinks(completedRun), [
   }
 ]);
 
+const meetingReportId = "77777777-7777-4777-8777-777777777771";
+const relatedDocumentId = "88888888-8888-4888-8888-888888888881";
+assert.deepEqual(
+  getAgentResourceLinks({
+    status: "completed",
+    steps: [
+      {
+        id: "meeting-summary-step",
+        status: "completed",
+        outputSummary: {},
+        resourceRefs: [
+          {
+            domain: "meeting",
+            resourceType: "meeting_report",
+            resourceId: meetingReportId,
+            url: `/report?reportId=${meetingReportId}`,
+          },
+          {
+            domain: "drive",
+            resourceType: "document",
+            resourceId: relatedDocumentId,
+            label: "Async Processing Design",
+            url: `/files?documentId=${relatedDocumentId}`,
+          },
+        ],
+      },
+    ],
+  }),
+  [
+    {
+      href: `/report?reportId=${meetingReportId}`,
+      key: `meeting:report:${meetingReportId}`,
+      label: "회의록 보기",
+    },
+    {
+      href: `/files?documentId=${relatedDocumentId}`,
+      key: `drive:document:${relatedDocumentId}`,
+      label: "Async Processing Design 보기",
+    },
+  ],
+);
+
+for (const resourceRef of [
+  {
+    domain: "meeting",
+    resourceType: "meeting_report",
+    resourceId: meetingReportId,
+    url: `/report?reportId=${meetingReportId}&extra=1`,
+  },
+  {
+    domain: "meeting",
+    resourceType: "meeting_report",
+    resourceId: meetingReportId,
+    url: `https://example.com/report?reportId=${meetingReportId}`,
+  },
+  {
+    domain: "drive",
+    resourceType: "document",
+    resourceId: relatedDocumentId,
+    label: "Async Processing Design",
+    url: `/wrong?documentId=${relatedDocumentId}`,
+  },
+  {
+    domain: "drive",
+    resourceType: "document",
+    resourceId: relatedDocumentId,
+    label: "Async Processing Design",
+    url: `\\files?documentId=${relatedDocumentId}`,
+  },
+]) {
+  assert.deepEqual(
+    getAgentResourceLinks({
+      status: "completed",
+      steps: [
+        {
+          id: "unsafe-resource-step",
+          status: "completed",
+          outputSummary: {},
+          resourceRefs: [resourceRef],
+        },
+      ],
+    }),
+    [],
+  );
+}
+
 const focusedResourceRef = {
   ...validResourceRef,
   status: "focused",
@@ -750,6 +607,7 @@ const focusedResourceRef = {
     featureLabel: "결제 기능",
     primaryTableIds: ["table-orders", "table-payments"],
     relatedTableIds: ["table-payment-attempts"],
+    contextTableIds: ["table-activity-logs"],
     relationIds: ["relation-orders-attempts", "relation-payments-attempts"],
     confidence: "medium"
   }
@@ -766,6 +624,7 @@ const expectedFocus = {
   featureLabel: "결제 기능",
   primaryTableIds: ["table-orders", "table-payments"],
   relatedTableIds: ["table-payment-attempts"],
+  contextTableIds: ["table-activity-logs"],
   relationIds: ["relation-orders-attempts", "relation-payments-attempts"],
   confidence: "medium"
 };
@@ -781,6 +640,12 @@ assert.deepEqual(
   parseSqlErdAgentTableFocusResource(focusedResourceRef),
   expectedFocus
 );
+const legacyFocusedResourceRef = structuredClone(focusedResourceRef);
+delete legacyFocusedResourceRef.metadata.contextTableIds;
+assert.deepEqual(parseSqlErdAgentTableFocusResource(legacyFocusedResourceRef), {
+  ...expectedFocus,
+  contextTableIds: []
+});
 assert.deepEqual(
   getAgentResourceLinks({
     ...completedRun,
@@ -795,6 +660,87 @@ assert.deepEqual(
     }
   ]
 );
+
+{
+  const applyFocus = agentResourceUtilities.applyAgentSqlErdTableFocus;
+  const appliedActionKeys = new Set();
+  const appliedFocuses = [];
+  const focusedRun = {
+    ...completedRun,
+    steps: [{ ...completedRun.steps[0], resourceRefs: [focusedResourceRef] }]
+  };
+  const result =
+    typeof applyFocus === "function"
+      ? {
+          calls: [
+            applyFocus(
+              focusedRun,
+              { surface: "sql_erd", sessionId: resourceSessionId },
+              appliedActionKeys,
+              (focus) => appliedFocuses.push(focus)
+            ),
+            applyFocus(
+              focusedRun,
+              { surface: "sql_erd", sessionId: resourceSessionId },
+              appliedActionKeys,
+              (focus) => appliedFocuses.push(focus)
+            )
+          ],
+          appliedFocuses
+        }
+      : null;
+
+  assert.deepEqual(result, {
+    calls: [true, false],
+    appliedFocuses: [expectedFocus]
+  });
+}
+
+{
+  const applyFocus = agentResourceUtilities.applyAgentSqlErdTableFocus;
+  const appliedFocuses = [];
+  const result =
+    typeof applyFocus === "function"
+      ? applyFocus(
+          {
+            ...completedRun,
+            steps: [
+              { ...completedRun.steps[0], resourceRefs: [focusedResourceRef] }
+            ]
+          },
+          {
+            surface: "sql_erd",
+            sessionId: "99999999-9999-4999-8999-999999999999"
+          },
+          new Set(),
+          (focus) => appliedFocuses.push(focus)
+        )
+      : null;
+
+  assert.equal(result, false);
+  assert.deepEqual(appliedFocuses, []);
+}
+
+{
+  const appliedFocuses = [];
+  const result = agentResourceUtilities.applyAgentSqlErdTableFocus(
+    {
+      ...completedRun,
+      steps: [
+        {
+          ...completedRun.steps[0],
+          resourceRefs: [{ ...focusedResourceRef, domain: "calendar" }]
+        }
+      ]
+    },
+    { surface: "sql_erd", sessionId: resourceSessionId },
+    new Set(),
+    (focus) => appliedFocuses.push(focus)
+  );
+
+  assert.equal(result, false);
+  assert.deepEqual(appliedFocuses, []);
+}
 assert.deepEqual(
   getAgentResourceLinks({
     ...completedRun,
@@ -821,6 +767,14 @@ for (const invalidMetadata of [
     ...focusedResourceRef.metadata,
     relatedTableIds: ["table-orders"]
   },
+  {
+    ...focusedResourceRef.metadata,
+    contextTableIds: ["table-orders"]
+  },
+  {
+    ...focusedResourceRef.metadata,
+    contextTableIds: ["table-payment-attempts"]
+  },
   { ...focusedResourceRef.metadata, confidence: "certain" },
   { ...focusedResourceRef.metadata, primaryTableIds: ["", "table-orders"] }
 ]) {
@@ -837,6 +791,10 @@ assert.equal(getSqlErdFocusedTableRole(expectedFocus, "table-orders"), "primary"
 assert.equal(
   getSqlErdFocusedTableRole(expectedFocus, "table-payment-attempts"),
   "related"
+);
+assert.equal(
+  getSqlErdFocusedTableRole(expectedFocus, "table-activity-logs"),
+  "context"
 );
 assert.equal(getSqlErdFocusedTableRole(expectedFocus, "table-users"), "dimmed");
 assert.equal(

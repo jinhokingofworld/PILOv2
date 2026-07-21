@@ -32,6 +32,7 @@ import { GithubSourceInvalidationPublisherService } from "./github-source-invali
 import { GithubSourceWebhookReconcileService } from "./github-source-webhook-reconcile.service";
 import { GithubSyncExecutorService } from "./github-sync-executor.service";
 import { GithubSyncJobService } from "./github-sync-job.service";
+import { GithubSyncObservabilityService } from "./github-sync-observability.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubWebhookService } from "./github-webhook.service";
@@ -69,6 +70,7 @@ import { GithubWebhookDeliveryDispatcherService } from "./github-webhook-deliver
     GithubSourceWebhookReconcileService,
     GithubSyncExecutorService,
     GithubSyncJobService,
+    GithubSyncObservabilityService,
     GithubProjectV2WebhookReconcileService,
     GithubSyncRunService,
     GithubTokenEncryptionService,

@@ -33,6 +33,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate migration change policy
+        run: node infra/tests/db-migration-change-policy.test.mjs
+
       - name: Validate migration changes
         run: node infra/tests/db-migration-change.test.mjs
 

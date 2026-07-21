@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from app.embedding_failure import RetryableEmbeddingError
 from app.meeting_activity_evidence_embedding_processor import (
     MeetingActivityEvidenceEmbeddingProcessor,
     activity_evidence_chunks,
@@ -34,10 +35,12 @@ class FakeRepository:
             "id": "job-1",
             "meeting_report_id": "report-1",
             "evidence_hash": activity_evidence_hash(self.evidence),
+            "attempt_count": 1,
         }
         self.completed_jobs: list[str] = []
         self.superseded_jobs: list[str] = []
         self.failed_jobs: list[tuple[str, str]] = []
+        self.requeued_jobs: list[tuple[str, str]] = []
         self.replaced = None
 
     def claim_activity_evidence_embedding_job(self):
@@ -59,6 +62,9 @@ class FakeRepository:
 
     def fail_activity_evidence_embedding_job(self, job_id, message):
         self.failed_jobs.append((job_id, message))
+
+    def requeue_activity_evidence_embedding_job(self, job_id, message):
+        self.requeued_jobs.append((job_id, message))
 
 
 def test_activity_evidence_hash_ignores_snapshot_uuid_but_tracks_safe_content() -> None:
@@ -105,6 +111,19 @@ def test_processor_supersedes_when_snapshot_changes_after_claim() -> None:
     assert processor.process_next() == "meeting_activity_evidence_embedding_superseded"
     assert repository.superseded_jobs == ["job-1"]
     assert repository.replaced is None
+
+
+def test_processor_requeues_temporary_embedding_failure() -> None:
+    class TimeoutEmbedder(FakeEmbedder):
+        def embed_passage(self, _text: str) -> list[float]:
+            raise RetryableEmbeddingError("provider timeout")
+
+    repository = FakeRepository()
+    processor = MeetingActivityEvidenceEmbeddingProcessor(repository, TimeoutEmbedder())
+
+    assert processor.process_next() == "meeting_activity_evidence_embedding_retryable_failure"
+    assert repository.requeued_jobs[0][0] == "job-1"
+    assert repository.failed_jobs == []
 
 
 def test_activity_evidence_chunk_does_not_copy_unrelated_metadata() -> None:

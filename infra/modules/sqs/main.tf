@@ -20,7 +20,7 @@ resource "aws_sqs_queue" "agent_jobs_dlq" {
 
 resource "aws_sqs_queue" "agent_jobs" {
   name                       = "${var.name_prefix}-agent-jobs"
-  visibility_timeout_seconds = 900
+  visibility_timeout_seconds = var.agent_visibility_timeout_seconds
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.agent_jobs_dlq.arn

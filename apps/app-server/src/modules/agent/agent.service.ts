@@ -24,12 +24,7 @@ import {
   toPublicMeetingCandidateSelectionMessage
 } from "./meeting-candidate-selection";
 import {
-  buildStoredSqlErdSelectionMessage,
   containsReservedAgentSelectionMarker,
-  isSqlErdClarificationOutput,
-  isSqlErdSelectionToken,
-  parseSqlErdSessionCandidates,
-  SQL_ERD_SESSION_SELECTION_KIND,
   toPublicAgentMessageContent
 } from "./sql-erd-session-selection";
 import type {
@@ -39,6 +34,9 @@ import type {
   AgentRiskLevel,
   AgentRunRequestContext
 } from "./types/agent-tool.types";
+
+const PUBLIC_AGENT_FAILURE_MESSAGE =
+  "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.";
 
 export interface AgentRunListQuery {
   status?: unknown;
@@ -56,10 +54,6 @@ export interface AgentRunCreateInput {
 export interface AgentRunInput {
   message: string;
   selection?:
-    | {
-        kind: typeof SQL_ERD_SESSION_SELECTION_KIND;
-        token: string;
-      }
     | {
         kind: typeof MEETING_CANDIDATE_SELECTION_KIND;
         candidateSelectionId: string;
@@ -394,41 +388,9 @@ export class AgentService {
           );
         if (selected.reference.domain === "meeting") {
           storedMessage = buildStoredMeetingCandidateSelectionMessage(selected.label);
-        } else if (
-          selected.reference.domain === "sqltoerd" &&
-          selected.reference.resourceType === "session"
-        ) {
-          storedMessage = buildStoredSqlErdSelectionMessage(
-            selected.reference.resourceId,
-            selected.label
-          );
         } else {
           throw badRequest("Agent candidate domain cannot resume this run");
         }
-      }
-      if (selection?.kind === SQL_ERD_SESSION_SELECTION_KIND) {
-        const selectionToken = selection.token;
-        const latestToolStep = await this.getLatestCompletedToolStep(
-          transaction,
-          runId
-        );
-        const candidates =
-          latestToolStep?.tool_name === "inspect_sql_erd_schema" &&
-          isSqlErdClarificationOutput(latestToolStep.output_json)
-            ? parseSqlErdSessionCandidates(latestToolStep.output_json.candidates)
-            : [];
-        const selected = candidates.find(
-          (candidate) => candidate.selectionToken === selectionToken
-        );
-        if (!selected) {
-          throw badRequest(
-            "selection token must belong to the latest SQLtoERD session candidates"
-          );
-        }
-        storedMessage = buildStoredSqlErdSelectionMessage(
-          selected.selectionToken,
-          selected.title
-        );
       }
       if (selection?.kind === MEETING_CANDIDATE_SELECTION_KIND) {
         const selected =
@@ -968,19 +930,6 @@ export class AgentService {
       };
     }
     if (
-      body.selection.kind === SQL_ERD_SESSION_SELECTION_KIND &&
-      Object.keys(body.selection).every((key) => ["kind", "token"].includes(key)) &&
-      isSqlErdSelectionToken(body.selection.token)
-    ) {
-      return {
-        message,
-        selection: {
-          kind: SQL_ERD_SESSION_SELECTION_KIND,
-          token: body.selection.token
-        }
-      };
-    }
-    if (
       body.selection.kind === MEETING_CANDIDATE_SELECTION_KIND &&
       Object.keys(body.selection).every((key) =>
         ["kind", "candidateSelectionId"].includes(key)
@@ -1026,21 +975,6 @@ export class AgentService {
     }
     const latestToolStep = await this.getLatestCompletedToolStep(transaction, runId);
     if (!latestToolStep) return undefined;
-
-    if (
-      latestToolStep.tool_name === "inspect_sql_erd_schema" &&
-      isSqlErdClarificationOutput(latestToolStep.output_json)
-    ) {
-      const candidates = parseSqlErdSessionCandidates(latestToolStep.output_json.candidates);
-      const selected = candidates[ordinal - 1];
-      if (!selected) {
-        throw badRequest("Candidate ordinal is invalid, expired, or unavailable");
-      }
-      return {
-        kind: SQL_ERD_SESSION_SELECTION_KIND,
-        token: selected.selectionToken
-      };
-    }
 
     const rawCandidates = latestToolStep.output_json.candidateSelections;
     if (!Array.isArray(rawCandidates)) return undefined;
@@ -1260,7 +1194,7 @@ export class AgentService {
       timezone: run.timezone,
       message: run.message,
       finalAnswer: run.finalAnswer,
-      errorMessage: run.errorMessage,
+      errorMessage: run.errorMessage ? PUBLIC_AGENT_FAILURE_MESSAGE : null,
       expiresAt: run.expiresAt,
       completedAt: run.completedAt,
       createdAt: run.createdAt,
@@ -1281,7 +1215,7 @@ export class AgentService {
       timezone: row.timezone,
       message: row.message,
       finalAnswer: row.final_answer,
-      errorMessage: row.error_message,
+      errorMessage: row.error_message ? PUBLIC_AGENT_FAILURE_MESSAGE : null,
       expiresAt: this.toIso(row.expires_at),
       completedAt: this.toIsoOrNull(row.completed_at),
       createdAt: this.toIso(row.created_at),
@@ -1301,7 +1235,7 @@ export class AgentService {
       inputSummary: this.sanitizeJsonObject(row.input_json),
       outputSummary: this.sanitizeJsonObject(row.output_json),
       resourceRefs: this.sanitizeResourceRefs(row.resource_refs),
-      errorMessage: row.error_message,
+      errorMessage: row.error_message ? PUBLIC_AGENT_FAILURE_MESSAGE : null,
       startedAt: this.toIsoOrNull(row.started_at),
       completedAt: this.toIsoOrNull(row.completed_at)
     };

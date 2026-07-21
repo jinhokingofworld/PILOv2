@@ -1,6 +1,7 @@
 import json
 from uuid import UUID
 
+from app.embedding_failure import TerminalEmbeddingError
 from app.workspace_indexing_worker_runtime import (
     DocumentEmbeddingProcessor,
     DocumentEmbeddingSource,
@@ -209,3 +210,20 @@ def test_worker_marks_third_retryable_document_failure_as_final() -> None:
             "ReceiptHandle": "receipt-1",
         }
     ]
+
+
+def test_document_embedding_processor_does_not_retry_terminal_vector_failure() -> None:
+    repository = FakeRepository(
+        {"id": "job-1", "snapshot_id": "snapshot-1"},
+        DocumentEmbeddingSource(snapshot_id="snapshot-1", plain_text="본문"),
+    )
+
+    class InvalidVectorEmbedder(FakeEmbedder):
+        def embed_passages(self, _texts: list[str]) -> list[list[float]]:
+            raise TerminalEmbeddingError("invalid vector")
+
+    result = DocumentEmbeddingProcessor(repository, InvalidVectorEmbedder()).process("job-1")
+
+    assert result == "document_embedding_failed"
+    assert repository.requeued == []
+    assert repository.failed == [("job-1", "Document embedding failed")]

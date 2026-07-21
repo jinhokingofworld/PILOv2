@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -101,11 +102,8 @@ AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE = (
     "회의록 근거 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요."
 )
 AGENT_PLANNING_CONTEXT_MAX_CHARACTERS = 12_000
-AGENT_THREAD_CONTEXT_MAX_RUNS = 6
 AGENT_THREAD_CONTEXT_MAX_BYTES = 12 * 1024
-AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS = 12
 AGENT_TOOL_OUTPUT_MAX_CHARACTERS = 3_000
-SQL_ERD_INSPECTION_TOOL_NAME = "inspect_sql_erd_schema"
 LOCAL_APP_ENVS = {"local", "test", "development"}
 MEETING_REPORT_FAILURE_STEPS = {
     "recording_not_completed": "STT",
@@ -182,22 +180,12 @@ def _serialize_bounded_agent_tool_output(output_json: object, max_characters: in
 
 def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
     serialized = json.dumps(output_json, ensure_ascii=False)
-    prefix_size = _utf8_size(f"tool {tool_name}: ")
-    max_size = (
-        AGENT_PLANNING_CONTEXT_MAX_CHARACTERS - prefix_size
-        if tool_name == SQL_ERD_INSPECTION_TOOL_NAME
-        else AGENT_TOOL_OUTPUT_MAX_CHARACTERS
-    )
+    max_size = AGENT_TOOL_OUTPUT_MAX_CHARACTERS
     if _utf8_size(serialized) <= max_size:
         return serialized
     return _serialize_bounded_agent_tool_output(output_json, max_size)
 
 
-SAFE_THREAD_RESOURCE_TYPES = {
-    "meeting",
-    "meeting_report",
-    "meeting_report_action_item",
-}
 UUID_TEXT_PATTERN = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
     re.IGNORECASE,
@@ -311,15 +299,6 @@ def _truncate_utf8(value: str, max_bytes: int) -> str:
         except UnicodeDecodeError:
             encoded = encoded[:-1]
     return ""
-
-
-def _agent_context_ref(thread_id: str, run_id: str, step_id: str, ref_index: int) -> str:
-    digest = hashlib.sha256(f"{thread_id}:{run_id}:{step_id}:{ref_index}".encode()).hexdigest()
-    return f"ctx_{digest[:24]}"
-
-
-def _thread_context_line(kind: str, **values: object) -> str:
-    return f"previous {kind}: {json.dumps(values, ensure_ascii=False, separators=(',', ':'))}"
 
 
 def _safe_meeting_candidate_resume_input(value: dict[object, object]) -> dict[str, object]:
@@ -1478,6 +1457,16 @@ class PgMeetingTranscriptEmbeddingRepository:
             (message[:4096], job_id),
         )
 
+    def requeue_transcript_embedding_job(self, job_id: str, message: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_transcript_embedding_jobs
+            SET status = 'pending', error_message = %s, completed_at = NULL, locked_at = NULL
+            WHERE id = %s AND status = 'processing'
+            """,
+            (message[:4096], job_id),
+        )
+
 
 class PgMeetingActivityEvidenceEmbeddingRepository:
     def __init__(self, database_url: str, database_ssl: bool) -> None:
@@ -1631,6 +1620,16 @@ class PgMeetingActivityEvidenceEmbeddingRepository:
             (message[:4096], job_id),
         )
 
+    def requeue_activity_evidence_embedding_job(self, job_id: str, message: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_activity_evidence_embedding_jobs
+            SET status = 'pending', error_message = %s, completed_at = NULL, locked_at = NULL
+            WHERE id = %s AND status = 'processing'
+            """,
+            (message[:4096], job_id),
+        )
+
 
 class PgAgentRunRepository:
     def __init__(self, database_url: str, database_ssl: bool) -> None:
@@ -1668,11 +1667,31 @@ class PgAgentRunRepository:
               run.prompt,
               run.timezone,
               run.planner_turn_count,
-              run.thread_id
+              latest_planner.output_json->>'toolName' AS latest_planner_tool_name,
+              CASE
+                WHEN outbox.planning_started_at IS NULL THEN NULL
+                ELSE GREATEST(
+                  0,
+                  FLOOR(
+                    EXTRACT(EPOCH FROM (
+                      clock_timestamp() - outbox.planning_started_at
+                    )) * 1000
+                  )
+                )::bigint
+              END AS queue_wait_ms
             FROM agent_runs AS run
             INNER JOIN agent_run_outbox AS outbox
               ON outbox.run_id = run.id
              AND outbox.turn_sequence = %s
+            LEFT JOIN LATERAL (
+              SELECT planner.output_json, planner.step_order
+              FROM agent_steps AS planner
+              WHERE planner.run_id = run.id
+                AND planner.step_type = 'planner'
+                AND planner.status = 'completed'
+              ORDER BY planner.step_order DESC, planner.id DESC
+              LIMIT 1
+            ) AS latest_planner ON TRUE
             WHERE run.id = %s
               AND run.workspace_id = %s
               AND run.requested_by_user_id = %s
@@ -1691,110 +1710,6 @@ class PgAgentRunRepository:
 
         memory: list[str] = []
         untrusted_source_lines: list[tuple[str, PromptSecuritySource]] = []
-        thread_id = row["thread_id"]
-        if thread_id is not None:
-            thread_runs = self.connection.execute(
-                """
-                SELECT id, prompt, final_answer
-                FROM agent_runs
-                WHERE thread_id = %s
-                  AND id <> %s
-                  AND workspace_id = %s
-                  AND requested_by_user_id = %s
-                  AND status = 'completed'
-                  AND final_answer IS NOT NULL
-                ORDER BY created_at DESC, id DESC
-                LIMIT %s
-                """,
-                (
-                    thread_id,
-                    job.run_id,
-                    job.workspace_id,
-                    job.requested_by_user_id,
-                    AGENT_THREAD_CONTEXT_MAX_RUNS,
-                ),
-            ).fetchall()
-            thread_memory_newest: list[list[str]] = []
-            remaining_resource_refs = AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS
-            for newest_index, thread_run in enumerate(thread_runs):
-                turn_lines: list[str] = []
-                turn = len(thread_runs) - newest_index
-                prompt = _truncate_utf8(str(thread_run["prompt"]).strip(), 1000)
-                answer = _truncate_utf8(str(thread_run["final_answer"]).strip(), 2000)
-                if prompt:
-                    turn_lines.append(_thread_context_line("user", turn=turn, text=prompt))
-                if answer:
-                    turn_lines.append(_thread_context_line("assistant", turn=turn, text=answer))
-
-                ref_rows = self.connection.execute(
-                    """
-                    SELECT id, resource_refs
-                    FROM agent_steps
-                    WHERE run_id = %s
-                      AND step_type = 'tool'
-                      AND status = 'completed'
-                    ORDER BY step_order ASC, id ASC
-                    """,
-                    (thread_run["id"],),
-                ).fetchall()
-                resource_ordinals: dict[str, int] = {}
-                for ref_row in ref_rows:
-                    for ref_index, resource_ref in enumerate(ref_row["resource_refs"] or []):
-                        if remaining_resource_refs <= 0:
-                            break
-                        if not isinstance(resource_ref, dict):
-                            continue
-                        domain = resource_ref.get("domain")
-                        resource_type = resource_ref.get("resourceType")
-                        resource_id = resource_ref.get("resourceId")
-                        label = resource_ref.get("label")
-                        status = resource_ref.get("status")
-                        if not all(
-                            isinstance(value, str) and value.strip()
-                            for value in (domain, resource_type, resource_id)
-                        ):
-                            continue
-                        if domain != "meeting" or resource_type not in SAFE_THREAD_RESOURCE_TYPES:
-                            continue
-                        resource_ordinals[resource_type] = (
-                            resource_ordinals.get(resource_type, 0) + 1
-                        )
-                        resource_label = (
-                            _truncate_utf8(label.strip(), 300)
-                            if isinstance(label, str) and label.strip()
-                            else None
-                        )
-                        resource_line = _thread_context_line(
-                            "resource",
-                            turn=turn,
-                            contextRef=_agent_context_ref(
-                                str(thread_id),
-                                str(thread_run["id"]),
-                                str(ref_row["id"]),
-                                ref_index,
-                            ),
-                            resourceType=resource_type,
-                            ordinal=resource_ordinals[resource_type],
-                            **({"label": resource_label} if resource_label else {}),
-                            **(
-                                {"status": _truncate_utf8(status.strip(), 100)}
-                                if isinstance(status, str) and status.strip()
-                                else {}
-                            ),
-                        )
-                        turn_lines.append(resource_line)
-                        if resource_label:
-                            untrusted_source_lines.append(
-                                (
-                                    resource_line,
-                                    PromptSecuritySource("thread_resource", resource_label),
-                                )
-                            )
-                        remaining_resource_refs -= 1
-                thread_memory_newest.append(turn_lines)
-            for turn_lines in reversed(thread_memory_newest):
-                memory.extend(turn_lines)
-
         selected_candidate = self.connection.execute(
             """
             SELECT
@@ -1964,6 +1879,14 @@ class PgAgentRunRepository:
             prompt=str(row["prompt"]),
             timezone=str(row["timezone"]),
             planner_turn_count=int(row["planner_turn_count"]),
+            latest_planner_tool_name=(
+                str(row["latest_planner_tool_name"])
+                if row.get("latest_planner_tool_name") is not None
+                else None
+            ),
+            queue_wait_ms=(
+                int(row["queue_wait_ms"]) if row.get("queue_wait_ms") is not None else None
+            ),
             planning_context=planning_context,
             untrusted_context_sources=tuple(
                 source for line, source in untrusted_source_lines if line in included_lines
@@ -1984,7 +1907,18 @@ class PgAgentRunRepository:
         }
         row = self.connection.execute(
             """
-            WITH claimed_run AS (
+            WITH orphaned_steps AS (
+              UPDATE agent_steps
+              SET status = 'failed',
+                  error_code = 'AGENT_PLANNER_DELIVERY_INTERRUPTED',
+                  error_message = 'The previous planner delivery ended before completion',
+                  completed_at = now(),
+                  updated_at = now()
+              WHERE run_id = %s
+                AND step_type = 'planner'
+                AND status = 'running'
+              RETURNING id
+            ), claimed_run AS (
               UPDATE agent_runs
               SET planner_turn_count = planner_turn_count + 1,
                   updated_at = now()
@@ -2023,7 +1957,13 @@ class PgAgentRunRepository:
             FROM next_step, claimed_run
             RETURNING id
             """,
-            (job.run_id, job.run_id, job.run_id, json.dumps(input_summary, ensure_ascii=False)),
+            (
+                job.run_id,
+                job.run_id,
+                job.run_id,
+                job.run_id,
+                json.dumps(input_summary, ensure_ascii=False),
+            ),
         ).fetchone()
         if row is None:
             raise InfrastructureError("Could not start Agent planner step")
@@ -2708,7 +2648,10 @@ class SqsAiJobWorker:
                     message.get("MessageId"),
                     self._receive_count(message),
                 )
-            result = self.dispatcher.process_message(body)
+            result = self._process_message_with_visibility_heartbeat(
+                body,
+                receipt_handle,
+            )
 
             if meeting_correlation is not None:
                 LOGGER.info(
@@ -2747,6 +2690,46 @@ class SqsAiJobWorker:
                 )
 
         return len(messages)
+
+    def _process_message_with_visibility_heartbeat(
+        self,
+        body: str,
+        receipt_handle: str | None,
+    ) -> Any:
+        heartbeat_seconds = int(
+            getattr(
+                self.settings,
+                "visibility_heartbeat_seconds",
+                max(1, self.settings.visibility_timeout_seconds // 3),
+            )
+        )
+        if not receipt_handle or heartbeat_seconds <= 0:
+            return self.dispatcher.process_message(body)
+
+        stopped = threading.Event()
+
+        def extend_visibility() -> None:
+            while not stopped.wait(heartbeat_seconds):
+                try:
+                    self.sqs_client.change_message_visibility(
+                        QueueUrl=self.settings.sqs_queue_url,
+                        ReceiptHandle=receipt_handle,
+                        VisibilityTimeout=self.settings.visibility_timeout_seconds,
+                    )
+                except Exception:
+                    LOGGER.exception("ai job visibility heartbeat failed")
+
+        heartbeat = threading.Thread(
+            target=extend_visibility,
+            name="ai-job-visibility-heartbeat",
+            daemon=True,
+        )
+        heartbeat.start()
+        try:
+            return self.dispatcher.process_message(body)
+        finally:
+            stopped.set()
+            heartbeat.join(timeout=min(1, heartbeat_seconds))
 
     def process_canvas_embedding_jobs(self) -> int:
         if self.canvas_embedding_processor is None:
@@ -3011,6 +2994,12 @@ class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
 
     def complete_grounded_answer_without_sources(self, run_id: str) -> None:
         self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/no-sources")
+
+    def complete_grounded_answer_security_refusal(self, run_id: str) -> None:
+        self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/security-refusal")
+
+    def fail_grounded_answer_citations(self, run_id: str) -> None:
+        self._post(f"/api/v1/internal/agent/runs/{run_id}/grounded-answer/citation-failure")
 
     def _post(self, path: str) -> None:
         request = Request(

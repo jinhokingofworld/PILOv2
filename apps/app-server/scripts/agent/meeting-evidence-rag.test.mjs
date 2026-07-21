@@ -8,6 +8,14 @@ const {
 const {
   AgentGroundedAnswerService
 } = require("../../dist/modules/agent/agent-grounded-answer.service.js");
+const {
+  EmbeddingTemporarilyUnavailableError,
+  embedGroundingQuery
+} = require("../../dist/modules/agent/grounding/query-embedding.js");
+const {
+  meetingRagMinimumSimilarity,
+  passesRelevanceThreshold
+} = require("../../dist/modules/agent/grounding/relevance-policy.js");
 
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -16,6 +24,42 @@ const TRANSCRIPT_ID = "55555555-5555-4555-8555-555555555555";
 const ACTIVITY_ID = "66666666-6666-4666-8666-666666666666";
 const SECOND_TRANSCRIPT_ID = "77777777-7777-4777-8777-777777777777";
 const SECOND_ACTIVITY_ID = "88888888-8888-4888-8888-888888888888";
+
+{
+  const previousThreshold = process.env.MEETING_RAG_MIN_SIMILARITY;
+  process.env.MEETING_RAG_MIN_SIMILARITY = "1.2";
+  try {
+    assert.throws(() => meetingRagMinimumSimilarity(), /between 0 and 1/);
+    assert.equal(passesRelevanceThreshold(0.55, 0.55), true);
+    assert.equal(passesRelevanceThreshold(0.549, 0.55), false);
+  } finally {
+    if (previousThreshold === undefined) delete process.env.MEETING_RAG_MIN_SIMILARITY;
+    else process.env.MEETING_RAG_MIN_SIMILARITY = previousThreshold;
+  }
+}
+
+{
+  const previousFetch = globalThis.fetch;
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  globalThis.fetch = async () => {
+    const error = new Error("aborted");
+    error.name = "AbortError";
+    throw error;
+  };
+  process.env.OPENAI_API_KEY = "test-key";
+  try {
+    await assert.rejects(
+      () => embedGroundingQuery("배포 구조"),
+      (error) =>
+        error instanceof EmbeddingTemporarilyUnavailableError &&
+        error.code === "EMBEDDING_TEMPORARILY_UNAVAILABLE"
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+  }
+}
 
 class FakeDatabase {
   constructor({ transcripts, activities, duplicatePairs = [] }) {
@@ -63,7 +107,7 @@ process.env.OPENAI_API_KEY = "test-key";
 try {
   const database = new FakeDatabase({
     transcripts: [transcript(TRANSCRIPT_ID, 0.1)],
-    activities: [activity(ACTIVITY_ID, 0.9)],
+    activities: [activity(ACTIVITY_ID, 0.4)],
     duplicatePairs: [{ transcript_id: TRANSCRIPT_ID, activity_id: ACTIVITY_ID }]
   });
   const workspaceService = {
@@ -92,11 +136,24 @@ try {
   assert.match(database.queries[1].text, /source_type IN \('decision', 'action_item'\)/);
   assert.match(database.queries[0].text, /chunk\.embedding OPERATOR\(extensions\.<=>\) \$4::extensions\.vector/);
   assert.match(database.queries[1].text, /chunk\.embedding OPERATOR\(extensions\.<=>\) \$4::extensions\.vector/);
+  assert.match(database.queries[0].text, /meeting_report_transcript_embedding_jobs/);
+  assert.match(database.queries[0].text, /job\.status = 'completed'/);
+  assert.match(database.queries[1].text, /meeting_report_activity_evidence_embedding_jobs/);
+  assert.match(database.queries[0].text, />= \$6/);
+  assert.equal(database.queries[0].values[5], 0.23);
   assert.match(database.queries[2].text, /transcript\.embedding OPERATOR\(extensions\.<=>\) activity\.embedding <= \$3/);
   assert.equal(workspaceService.calls.length, 1);
 
+  const thresholdFirstSources = await new MeetingTranscriptRagService(new FakeDatabase({
+    transcripts: [transcript(TRANSCRIPT_ID, 0.78)],
+    activities: [activity(ACTIVITY_ID, 0.9, true)]
+  }), workspaceService).search(USER_ID, WORKSPACE_ID, {
+    query: "관련 없는 직접 참조"
+  });
+  assert.deepEqual(thresholdFirstSources, []);
+
   const crowdedDatabase = new FakeDatabase({
-    transcripts: [transcript(TRANSCRIPT_ID, 0.7)],
+    transcripts: [transcript(TRANSCRIPT_ID, 0.78)],
     activities: [
       activity(ACTIVITY_ID, 0.1),
       activity(SECOND_ACTIVITY_ID, 0.11),
@@ -109,8 +166,8 @@ try {
     query: "일정이 왜 미뤄졌어?"
   });
   assert.equal(crowdedSources.length, 5);
-  assert.ok(crowdedSources.some((source) => source.sourceId === `transcript:${TRANSCRIPT_ID}`));
-  assert.ok(crowdedSources.some((source) => source.sourceType === "activity"));
+  assert.equal(crowdedSources.length, 5);
+  assert.ok(crowdedSources.every((source) => source.sourceType === "activity"));
 
   const transcriptOnlySources = await new MeetingTranscriptRagService(new FakeDatabase({
     transcripts: [transcript(TRANSCRIPT_ID, 0.1)],
@@ -173,12 +230,20 @@ try {
     async transaction(callback) {
       return callback(this);
     },
-    async queryOne(text) {
-      if (text.includes("SELECT id FROM agent_runs")) {
-        return { id: "77777777-7777-4777-8777-777777777777" };
+    async queryOne(text, values) {
+      if (text.includes("FROM agent_runs") && text.includes("FOR UPDATE")) {
+        return {
+          id: "77777777-7777-4777-8777-777777777777",
+          execution_lease_token: "99999999-9999-4999-8999-999999999999",
+          execution_lease_generation: 1
+        };
       }
       if (text.includes("SELECT COALESCE(MAX(step_order)")) {
         return { next_order: 2 };
+      }
+      if (text.includes("UPDATE agent_steps") && text.includes("SET status = 'completed'")) {
+        executed.push({ text, values });
+        return { id: values[0] };
       }
       return null;
     },
@@ -227,23 +292,175 @@ try {
         resourceType: "meeting_report",
         resourceId: REPORT_ID
       }
-    ]
+    ],
+    executionLease: {
+      token: "99999999-9999-4999-8999-999999999999",
+      generation: 1
+    }
   });
 
   const completedStep = executed.find((call) =>
-    call.text.includes("UPDATE agent_steps SET status = 'completed'")
+    call.text.includes("UPDATE agent_steps") && call.text.includes("SET status = 'completed'")
   );
   assert.deepEqual(JSON.parse(completedStep.values[2]), {
     status: "grounding_queued",
     groundingOutcome: "sources_found",
     sourceCount: 1,
-    sourceTypes: ["transcript"],
-    sourceIds: [allowedSourceId]
+    sourceTypes: ["meeting_transcript"]
   });
   const outboxInsert = executed.find((call) =>
     call.text.includes("INSERT INTO agent_grounded_answer_outbox")
   );
-  assert.deepEqual(JSON.parse(outboxInsert.values[2]), [allowedSourceId]);
+  const registry = JSON.parse(outboxInsert.values[2]);
+  assert.equal(registry.length, 1);
+  assert.match(registry[0].citationId, /^citation_[0-9a-f-]{36}$/);
+  assert.equal(registry[0].sourceType, "meeting_transcript");
+  assert.equal(registry[0].sourceRef, allowedSourceId);
+  assert.deepEqual(registry[0].resourceRef, {
+    domain: "meeting",
+    resourceType: "meeting_report",
+    resourceId: REPORT_ID
+  });
+}
+
+{
+  const executed = [];
+  const runId = "77777777-7777-4777-8777-777777777778";
+  const stepId = "88888888-8888-4888-8888-888888888889";
+  const leaseToken = "99999999-9999-4999-8999-999999999998";
+  const documentId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01";
+  const database = {
+    async transaction(callback) { return callback(this); },
+    async queryOne(text, values) {
+      if (text.includes("FROM agent_runs") && text.includes("FOR UPDATE")) {
+        return {
+          id: values[0],
+          execution_lease_token: leaseToken,
+          execution_lease_generation: 1
+        };
+      }
+      if (text.includes("SELECT COALESCE(MAX(step_order)")) {
+        return { next_order: 2 };
+      }
+      if (text.includes("UPDATE agent_steps") && text.includes("SET status = 'completed'")) {
+        executed.push({ text, values });
+        return { id: values[0] };
+      }
+      return null;
+    },
+    async execute(text, values) { executed.push({ text, values }); }
+  };
+  const service = new AgentGroundedAnswerService(database, {
+    normalizeSourceIds() { return []; },
+    async loadAuthorizedSources() { return []; }
+  });
+
+  await service.completeToolAndQueue({
+    runId,
+    workspaceId: WORKSPACE_ID,
+    currentUserId: USER_ID,
+    stepId,
+    outputSummary: { status: "grounding_queued" },
+    resourceRefs: [
+      {
+        domain: "meeting",
+        resourceType: "meeting_report",
+        resourceId: REPORT_ID
+      }
+    ],
+    groundingSources: [
+      {
+        sourceType: "drive_document",
+        sourceRef: "drive_chunk:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb01",
+        title: "Async Processing Design",
+        excerpt: "Worker deployment order",
+        score: 0.91,
+        resourceRef: {
+          domain: "drive",
+          resourceType: "document",
+          resourceId: documentId,
+          label: "Async Processing Design",
+          url: `/files?documentId=${documentId}`
+        }
+      },
+      {
+        sourceType: "drive_document",
+        sourceRef: "drive_chunk:cccccccc-cccc-4ccc-8ccc-cccccccccc01",
+        title: "Async Processing Design",
+        excerpt: "Previous-version rollback",
+        score: 0.88,
+        resourceRef: {
+          domain: "drive",
+          resourceType: "document",
+          resourceId: documentId,
+          label: "Async Processing Design",
+          url: `/files?documentId=${documentId}`
+        }
+      }
+    ],
+    executionLease: { token: leaseToken, generation: 1 }
+  });
+
+  const completedStep = executed.find((call) =>
+    call.text.includes("UPDATE agent_steps") && call.text.includes("SET status = 'completed'")
+  );
+  assert.deepEqual(JSON.parse(completedStep.values[3]), [
+    {
+      domain: "meeting",
+      resourceType: "meeting_report",
+      resourceId: REPORT_ID
+    },
+    {
+      domain: "drive",
+      resourceType: "document",
+      resourceId: documentId,
+      label: "Async Processing Design",
+      url: `/files?documentId=${documentId}`
+    }
+  ]);
+}
+
+{
+  const executed = [];
+  const database = {
+    async transaction(callback) { return callback(this); },
+    async queryOne(text, values) {
+      if (text.includes("FROM agent_runs") && text.includes("FOR UPDATE")) {
+        return {
+          id: values[0],
+          execution_lease_token: "99999999-9999-4999-8999-999999999999",
+          execution_lease_generation: 1
+        };
+      }
+      if (text.includes("UPDATE agent_steps") && text.includes("SET status = 'completed'")) {
+        executed.push({ text, values });
+        return { id: values[0] };
+      }
+      return null;
+    },
+    async execute(text, values) { executed.push({ text, values }); }
+  };
+  const service = new AgentGroundedAnswerService(database, {
+    normalizeSourceIds() { return []; },
+    async loadAuthorizedSources() { return []; }
+  });
+  await service.completeToolAndQueue({
+    runId: "77777777-7777-4777-8777-777777777777",
+    workspaceId: WORKSPACE_ID,
+    currentUserId: USER_ID,
+    stepId: "88888888-8888-4888-8888-888888888888",
+    outputSummary: { status: "grounding_queued" },
+    resourceRefs: [],
+    groundingSources: [],
+    executionLease: {
+      token: "99999999-9999-4999-8999-999999999999",
+      generation: 1
+    }
+  });
+  assert.equal(executed.some((call) => call.text.includes("agent_grounded_answer_outbox")), false);
+  assert.equal(executed.some((call) => call.text.includes("'answer', 'pending'")), false);
+  const completedRun = executed.find((call) => call.text.includes("SET status = 'completed', final_answer"));
+  assert.match(completedRun.values[1], /관련된 근거를 찾지 못했습니다/);
 }
 
 {
@@ -253,6 +470,7 @@ try {
       return {
         workspace_id: WORKSPACE_ID,
         requested_by_user_id: USER_ID,
+        prompt: "질문",
         source_ids: [sourceId]
       };
     },
@@ -264,8 +482,15 @@ try {
     normalizeSourceIds(sourceIds) {
       return sourceIds;
     },
-    async loadAuthorizedSources() {
-      throw new Error("unknown citation must not load source content");
+    async loadAuthorizedSources(_userId, _workspaceId, sourceIds) {
+      assert.deepEqual(sourceIds, [sourceId]);
+      return [{
+        sourceId,
+        sourceType: "activity",
+        reportId: REPORT_ID,
+        content: "허용된 근거",
+        directlyReferenced: false
+      }];
     }
   };
   const service = new AgentGroundedAnswerService(database, ragService);
@@ -275,5 +500,9 @@ try {
       `transcript:${TRANSCRIPT_ID}`
     ]),
     /unknown citation/
+  );
+  await assert.rejects(
+    () => service.complete("77777777-7777-4777-8777-777777777777", "근거 답변", []),
+    /citation is required/
   );
 }

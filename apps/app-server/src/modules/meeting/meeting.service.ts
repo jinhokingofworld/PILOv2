@@ -272,8 +272,9 @@ interface MeetingReportListQuery {
   limit?: unknown;
 }
 
-/** Internal Agent query. Keep roomName out of the public Meeting REST contract. */
+/** Internal Agent query. Keep reportTitle and roomName out of the public Meeting REST contract. */
 interface MeetingAgentReportListQuery extends MeetingReportListQuery {
+  reportTitle?: unknown;
   roomName?: unknown;
 }
 
@@ -1713,6 +1714,9 @@ export class MeetingService {
     const to = this.normalizeMeetingReportDate(query.to, "to");
     const status = this.normalizeMeetingReportStatus(query.status);
     const limit = this.normalizeAgentMeetingReportLimit(query.limit);
+    const reportTitle = query.reportTitle === undefined
+      ? null
+      : this.normalizeAgentResolutionText(String(query.reportTitle));
     const roomName = query.roomName === undefined
       ? null
       : this.normalizeAgentResolutionText(String(query.roomName));
@@ -1724,7 +1728,7 @@ export class MeetingService {
       currentUserId,
       status,
       limit,
-      { cursor, from, searchQuery: null, to, roomName }
+      { cursor, from, searchQuery: null, to, reportTitle, roomName }
     );
     return {
       nextCursor: page.nextCursor,
@@ -3692,6 +3696,7 @@ export class MeetingService {
       from: string | null;
       searchQuery: string | null;
       to: string | null;
+      reportTitle?: string | null;
       roomName?: string | null;
     }
   ): Promise<{ nextCursor: string | null; reports: MeetingReportRow[] }> {
@@ -3716,6 +3721,10 @@ export class MeetingService {
       filters.roomName === null || filters.roomName === undefined
         ? ""
         : `AND lower(regexp_replace(BTRIM(meeting_rooms.name), '\\s+', ' ', 'g')) = $${values.push(filters.roomName)}`;
+    const reportTitleCondition =
+      filters.reportTitle === null || filters.reportTitle === undefined
+        ? ""
+        : `AND lower(regexp_replace(BTRIM(COALESCE(meeting_reports.user_title, meeting_reports.title)), '\\s+', ' ', 'g')) = $${values.push(filters.reportTitle)}`;
     const cursorCondition =
       filters.cursor === null
         ? ""
@@ -3801,6 +3810,7 @@ export class MeetingService {
           ${fromCondition}
           ${toCondition}
           ${roomNameCondition}
+          ${reportTitleCondition}
           ${cursorCondition}
         ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
         LIMIT ${limitParameter}

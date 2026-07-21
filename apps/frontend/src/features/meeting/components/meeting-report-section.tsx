@@ -4,20 +4,25 @@ import {
   AlertCircle,
   ArrowLeft,
   ArrowDownWideNarrow,
+  ArrowUpWideNarrow,
+  CalendarPlus,
+  Check,
   CheckCircle2,
   Clock3,
   FileText,
   ListChecks,
   Loader2,
+  MousePointerClick,
   Pencil,
   RefreshCw,
   RotateCcw,
   Search,
+  Users,
   X,
   XCircle
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,9 +72,13 @@ type MeetingReportSectionProps = {
 
 type ReportDetailStatus = "idle" | "loading" | "success" | "error";
 type ReportDetailView = "detail" | "transcript";
+type ReportSortDirection = "newest" | "oldest";
 
 type MeetingReportTranscriptSegment = NonNullable<
   MeetingReportDetail["evidenceSegments"]
+>[number];
+type MeetingReportActivityEvidence = NonNullable<
+  MeetingReportDetail["activityEvidence"]
 >[number];
 
 const REPORT_POLL_INTERVAL_MS = 10000;
@@ -135,26 +144,21 @@ function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt" | "tit
   return report.title?.trim() || `${formatReportDateTime(report.createdAt)} 회의록`;
 }
 
-function formatActivityEvidenceReference(sourceType: string, sourceIndex: number) {
-  const label = {
-    summary: "요약",
-    discussion: "논의",
-    decision: "결정",
-    action_item: "후속 작업"
-  }[sourceType] ?? sourceType;
-  return sourceType === "decision" ? label : `${label} ${sourceIndex + 1}`;
-}
-
-function ReportParticipantSummary({ report }: { report: MeetingReportSummary }) {
+function getReportParticipantSummaryText(report: MeetingReportSummary) {
   const summary = report.participantSummary;
   if (!summary || summary.totalCount === 0) return null;
   const names = summary.participants
     .map((participant) => participant.name?.trim() || "이름 없음")
     .join(", ");
+  return `${summary.totalCount}명${names ? ` · ${names}` : ""}${summary.hasMore ? " 외" : ""}`;
+}
+
+function ReportParticipantSummary({ report }: { report: MeetingReportSummary }) {
+  const summaryText = getReportParticipantSummaryText(report);
+  if (!summaryText) return null;
   return (
     <span className="text-xs text-muted-foreground">
-      참석 {summary.totalCount}명{names ? ` · ${names}` : ""}
-      {summary.hasMore ? " 외" : ""}
+      참석 {summaryText}
     </span>
   );
 }
@@ -354,19 +358,36 @@ function getEvidenceSegments(
   return segments.sort((left, right) => left.segmentIndex - right.segmentIndex);
 }
 
+function getActivityEvidence(
+  report: MeetingReportDetail,
+  sourceType: string,
+  sourceIndex?: number
+) {
+  return (report.activityEvidence ?? [])
+    .filter((activity) => activity.references.some((reference) => (
+      reference.sourceType === sourceType &&
+      (sourceIndex === undefined || reference.sourceIndex === sourceIndex)
+    )))
+    .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+}
+
 function EvidenceTimeButtons({
+  activityEvidence = [],
+  onActivitySelect,
   onSelect,
   segments
 }: {
-  onSelect: (segment: MeetingReportTranscriptSegment) => void;
+  activityEvidence?: MeetingReportActivityEvidence[];
+  onActivitySelect?: (activityEvidence: MeetingReportActivityEvidence[]) => void;
+  onSelect?: (segment: MeetingReportTranscriptSegment) => void;
   segments: MeetingReportTranscriptSegment[];
 }) {
-  if (!segments.length) return null;
+  if ((!segments.length || !onSelect) && !activityEvidence.length) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs">
       <span className="font-medium text-muted-foreground">근거</span>
-      {segments.map((segment) => {
+      {onSelect ? segments.map((segment) => {
         const timestamp = formatTranscriptTimestamp(segment.startedAtMs);
         return (
           <button
@@ -377,37 +398,67 @@ function EvidenceTimeButtons({
             onClick={() => onSelect(segment)}
           >
             <Clock3 className="size-3" />
-            {timestamp}
+            시간 {timestamp}
           </button>
         );
-      })}
+      }) : null}
+      {activityEvidence.length && onActivitySelect ? (
+        <button
+          type="button"
+          className="inline-flex h-7 items-center gap-1 rounded-full border bg-muted/40 px-2 font-medium text-muted-foreground transition hover:border-primary/40 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`연결된 활동 근거 ${activityEvidence.length}건 보기`}
+          onClick={() => onActivitySelect(activityEvidence)}
+        >
+          <MousePointerClick className="size-3" />
+          활동 {activityEvidence.length}건
+        </button>
+      ) : null}
     </div>
   );
 }
 
 function ReportTextBlock({
+  activityEvidence = [],
+  asList = false,
   emptyLabel,
   evidenceSegments = [],
+  onActivitySelect,
   onEvidenceSelect,
   title,
   value
 }: {
+  activityEvidence?: MeetingReportActivityEvidence[];
+  asList?: boolean;
   emptyLabel: string;
   evidenceSegments?: MeetingReportTranscriptSegment[];
+  onActivitySelect?: (activityEvidence: MeetingReportActivityEvidence[]) => void;
   onEvidenceSelect?: (segment: MeetingReportTranscriptSegment) => void;
   title: string;
   value: string | null;
 }) {
+  const listItems = (value ?? "")
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean);
+
   return (
     <section className="grid gap-2">
-      <h3 className="font-heading text-base font-semibold">{title}</h3>
+      <h3 className="font-heading text-xl font-semibold">{title}</h3>
       <div className="min-h-24 whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-sm leading-6">
-        {value?.trim() || (
+        {asList && listItems.length ? (
+          <ul className="list-disc space-y-2 pl-5">
+            {listItems.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+          </ul>
+        ) : value?.trim() ? (
+          value
+        ) : (
           <span className="text-muted-foreground">{emptyLabel}</span>
         )}
       </div>
-      {onEvidenceSelect ? (
+      {onEvidenceSelect || onActivitySelect ? (
         <EvidenceTimeButtons
+          activityEvidence={activityEvidence}
+          onActivitySelect={onActivitySelect}
           segments={evidenceSegments}
           onSelect={onEvidenceSelect}
         />
@@ -417,9 +468,12 @@ function ReportTextBlock({
 }
 
 function EditableReportTextBlock({
+  activityEvidence = [],
+  asList = false,
   editable,
   emptyLabel,
   evidenceSegments = [],
+  onActivitySelect,
   onEvidenceSelect,
   onSave,
   saving,
@@ -427,9 +481,12 @@ function EditableReportTextBlock({
   title,
   value
 }: {
+  activityEvidence?: MeetingReportActivityEvidence[];
+  asList?: boolean;
   editable: boolean;
   emptyLabel: string;
   evidenceSegments?: MeetingReportTranscriptSegment[];
+  onActivitySelect?: (activityEvidence: MeetingReportActivityEvidence[]) => void;
   onEvidenceSelect?: (segment: MeetingReportTranscriptSegment) => void;
   onSave: (value: string) => Promise<void>;
   saving: boolean;
@@ -439,6 +496,10 @@ function EditableReportTextBlock({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
+  const listItems = (value ?? "")
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean);
 
   useEffect(() => {
     setDraft(value ?? "");
@@ -453,11 +514,18 @@ function EditableReportTextBlock({
 
   return (
     <section className="grid gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-heading text-base font-semibold">{title}</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-heading text-xl font-semibold">{title}</h3>
         {editable && !editing ? (
-          <Button type="button" size="sm" variant="outline" onClick={() => setEditing(true)}>
-            <Pencil /> 수정
+          <Button
+            aria-label={`${title} 수정`}
+            title={`${title} 수정`}
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => setEditing(true)}
+          >
+            <Pencil />
           </Button>
         ) : null}
       </div>
@@ -494,28 +562,48 @@ function EditableReportTextBlock({
         </div>
       ) : (
         <div className="min-h-24 whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-sm leading-6">
-          {value?.trim() || <span className="text-muted-foreground">{emptyLabel}</span>}
+          {asList && listItems.length ? (
+            <ul className="list-disc space-y-2 pl-5">
+              {listItems.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+            </ul>
+          ) : value?.trim() ? (
+            value
+          ) : (
+            <span className="text-muted-foreground">{emptyLabel}</span>
+          )}
         </div>
       )}
-      {onEvidenceSelect ? (
-        <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
+      {onEvidenceSelect || onActivitySelect ? (
+        <EvidenceTimeButtons
+          activityEvidence={activityEvidence}
+          onActivitySelect={onActivitySelect}
+          segments={evidenceSegments}
+          onSelect={onEvidenceSelect}
+        />
       ) : null}
     </section>
   );
 }
 
 function DecisionItemsBlock({
+  activityEvidenceForItem,
   editable,
   emptyLabel,
   evidenceForItem,
+  onActivityEvidenceSelect,
   onEvidenceSelect,
   onSave,
   saving,
   items
 }: {
+  activityEvidenceForItem: (item: MeetingReportDecisionItem) => MeetingReportActivityEvidence[];
   editable: boolean;
   emptyLabel: string;
   evidenceForItem: (item: MeetingReportDecisionItem) => MeetingReportTranscriptSegment[];
+  onActivityEvidenceSelect: (
+    activityEvidence: MeetingReportActivityEvidence[],
+    sourceIndex: number
+  ) => void;
   onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
   onSave: (item: MeetingReportDecisionItem, text: string) => Promise<void>;
   saving: boolean;
@@ -526,9 +614,9 @@ function DecisionItemsBlock({
 
   return (
     <section className="grid gap-2">
-      <h3 className="font-heading text-base font-semibold">결정사항</h3>
+      <h3 className="font-heading text-xl font-semibold">결정사항</h3>
       {items.length ? (
-        <ol className="grid gap-2">
+        <ul className="grid gap-2">
           {items.map((item) => {
             const editing = editingId === item.id;
             return (
@@ -564,11 +652,77 @@ function DecisionItemsBlock({
                 ) : (
                   <p className="whitespace-pre-wrap break-words">{item.text}</p>
                 )}
-                <EvidenceTimeButtons segments={evidenceForItem(item)} onSelect={onEvidenceSelect} />
+                <EvidenceTimeButtons
+                  activityEvidence={activityEvidenceForItem(item)}
+                  onActivitySelect={(activityEvidence) => onActivityEvidenceSelect(
+                    activityEvidence,
+                    item.sourceIndex
+                  )}
+                  segments={evidenceForItem(item)}
+                  onSelect={onEvidenceSelect}
+                />
               </li>
             );
           })}
-        </ol>
+        </ul>
+      ) : (
+        <div className="min-h-24 rounded-lg border bg-background p-3 text-sm leading-6 text-muted-foreground">
+          {emptyLabel}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DecisionTextItemsBlock({
+  activityEvidenceForItem,
+  emptyLabel,
+  evidenceForItem,
+  onActivityEvidenceSelect,
+  onEvidenceSelect,
+  value
+}: {
+  activityEvidenceForItem: (sourceIndex: number) => MeetingReportActivityEvidence[];
+  emptyLabel: string;
+  evidenceForItem: (sourceIndex: number) => MeetingReportTranscriptSegment[];
+  onActivityEvidenceSelect: (
+    activityEvidence: MeetingReportActivityEvidence[],
+    sourceIndex: number
+  ) => void;
+  onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
+  value: string | null;
+}) {
+  const items = (value ?? "")
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean);
+
+  return (
+    <section className="grid gap-2">
+      <h3 className="font-heading text-xl font-semibold">결정사항</h3>
+      {items.length ? (
+        <ul className="grid gap-2">
+          {items.map((item, sourceIndex) => (
+            <li
+              key={`${item}-${sourceIndex}`}
+              className="grid gap-2 rounded-lg border bg-background p-3 text-sm leading-6"
+            >
+              <span className="text-xs font-medium text-muted-foreground">
+                결정 {sourceIndex + 1}
+              </span>
+              <p className="whitespace-pre-wrap break-words">{item}</p>
+              <EvidenceTimeButtons
+                activityEvidence={activityEvidenceForItem(sourceIndex)}
+                onActivitySelect={(activityEvidence) => onActivityEvidenceSelect(
+                  activityEvidence,
+                  sourceIndex
+                )}
+                onSelect={onEvidenceSelect}
+                segments={evidenceForItem(sourceIndex)}
+              />
+            </li>
+          ))}
+        </ul>
       ) : (
         <div className="min-h-24 rounded-lg border bg-background p-3 text-sm leading-6 text-muted-foreground">
           {emptyLabel}
@@ -595,8 +749,10 @@ function getActionItemDeliveryErrorMessage(errorCode: string | null) {
 function ActionItemReviewCard({
   actionItem,
   actionItemAssignees,
+  activityEvidence,
   busy,
   evidenceSegments,
+  onActivityEvidenceSelect,
   onDeliver,
   onDismiss,
   onEvidenceSelect,
@@ -605,8 +761,12 @@ function ActionItemReviewCard({
 }: {
   actionItem: MeetingReportActionItem;
   actionItemAssignees: MeetingReportDetail["actionItemAssignees"];
+  activityEvidence: MeetingReportActivityEvidence[];
   busy: boolean;
   evidenceSegments: MeetingReportTranscriptSegment[];
+  onActivityEvidenceSelect: (
+    activityEvidence: MeetingReportActivityEvidence[]
+  ) => void;
   onDeliver: (input: MeetingReportActionItemDeliveryInput) => Promise<void>;
   onDismiss: () => void;
   onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
@@ -848,8 +1008,13 @@ function ActionItemReviewCard({
         </div>
       )}
 
-      {!editing && evidenceSegments.length ? (
-        <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
+      {!editing && (evidenceSegments.length || activityEvidence.length) ? (
+        <EvidenceTimeButtons
+          activityEvidence={activityEvidence}
+          onActivitySelect={onActivityEvidenceSelect}
+          segments={evidenceSegments}
+          onSelect={onEvidenceSelect}
+        />
       ) : null}
 
       {actionItem.delivery ? (
@@ -1027,14 +1192,26 @@ function MeetingReportDetailModal({
 }) {
   const actionItems = report?.actionItems ?? [];
   const [detailView, setDetailView] = useState<ReportDetailView>("detail");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const [selectedEvidenceSegment, setSelectedEvidenceSegment] = useState<
     MeetingReportTranscriptSegment | null
   >(null);
+  const [selectedActivityEvidence, setSelectedActivityEvidence] = useState<
+    MeetingReportActivityEvidence[] | null
+  >(null);
+  const [selectedActivityEvidenceSourceLabel, setSelectedActivityEvidenceSourceLabel] =
+    useState<string | null>(null);
   const selectedEvidencePanelRef = useRef<HTMLElement | null>(null);
   const actionItemsWithEvidence = report
     ? actionItems.map((item, index) => ({
         item,
         evidenceSegments: getEvidenceSegments(
+          report,
+          "action_item",
+          item.sourceIndex
+        ),
+        activityEvidence: getActivityEvidence(
           report,
           "action_item",
           item.sourceIndex
@@ -1045,29 +1222,76 @@ function MeetingReportDetailModal({
   useEffect(() => {
     setDetailView("detail");
     setSelectedEvidenceSegment(null);
-  }, [report?.id, report?.evidenceSegments]);
+    setSelectedActivityEvidence(null);
+    setSelectedActivityEvidenceSourceLabel(null);
+    setEditingTitle(false);
+    setTitleDraft(report?.title ?? "");
+  }, [report?.id, report?.evidenceSegments, report?.activityEvidence]);
 
   useEffect(() => {
-    if (!selectedEvidenceSegment) return;
+    if (!editingTitle) {
+      setTitleDraft(report?.title ?? "");
+    }
+  }, [editingTitle, report?.title]);
+
+  useEffect(() => {
+    if (!selectedEvidenceSegment && !selectedActivityEvidence) return;
 
     const panel = selectedEvidencePanelRef.current;
     if (!panel) return;
 
     panel.scrollIntoView({ behavior: "smooth", block: "center" });
     panel.focus({ preventScroll: true });
-  }, [selectedEvidenceSegment?.id]);
+  }, [selectedActivityEvidence, selectedEvidenceSegment]);
 
   function selectTranscriptSegment(segment: MeetingReportTranscriptSegment) {
+    setSelectedActivityEvidence(null);
+    setSelectedActivityEvidenceSourceLabel(null);
     setSelectedEvidenceSegment(segment);
+  }
+
+  function selectActivityEvidence(
+    activityEvidence: MeetingReportActivityEvidence[],
+    sourceLabel: string
+  ) {
+    setSelectedEvidenceSegment(null);
+    setSelectedActivityEvidence(activityEvidence);
+    setSelectedActivityEvidenceSourceLabel(sourceLabel);
+  }
+
+  function startTitleEdit() {
+    if (!report?.canEdit || report.status !== "COMPLETED") return;
+    setTitleDraft(report.title ?? "");
+    setEditingTitle(true);
+  }
+
+  async function saveTitle() {
+    if (!report) return;
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle) return;
+
+    await onUpdateContent({
+      expectedVersion: report.contentVersion,
+      title: nextTitle
+    });
+    setEditingTitle(false);
   }
 
   const summaryEvidence = report ? getEvidenceSegments(report, "summary") : [];
   const discussionEvidence = report
     ? getEvidenceSegments(report, "discussion")
     : [];
-  const decisionEvidence = report ? getEvidenceSegments(report, "decision") : [];
+  const summaryActivityEvidence = report
+    ? getActivityEvidence(report, "summary")
+    : [];
+  const discussionActivityEvidence = report
+    ? getActivityEvidence(report, "discussion")
+    : [];
   const decisionItems = report?.decisionItems ?? [];
   const canEditContent = Boolean(report?.canEdit && report.status === "COMPLETED");
+  const participantSummaryText = report
+    ? getReportParticipantSummaryText(report)
+    : null;
 
   return (
     <DialogPrimitive.Root
@@ -1081,9 +1305,6 @@ function MeetingReportDetailModal({
             <DialogPrimitive.Title className="font-heading text-lg font-semibold">
               {detailView === "transcript" ? "Transcript 전문" : "회의록 상세"}
             </DialogPrimitive.Title>
-            <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
-              {report ? formatReportDateTime(report.createdAt) : "불러오는 중"}
-            </DialogPrimitive.Description>
           </div>
 
           <DialogPrimitive.Close
@@ -1143,57 +1364,119 @@ function MeetingReportDetailModal({
               </section>
             ) : report ? (
               <div className="grid gap-5">
-                <section className="grid gap-4 rounded-lg border bg-muted/20 p-4">
+                <section className="grid gap-5 border-b pb-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold text-muted-foreground">
-                        회의 날짜
-                      </p>
-                      <h2 className="mt-1 break-words font-heading text-xl font-semibold">
-                        {report.title?.trim() || formatReportTitle(report)}
-                      </h2>
+                      {editingTitle ? (
+                        <form
+                          className="flex min-w-0 items-center gap-1"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void saveTitle();
+                          }}
+                        >
+                          <Input
+                            aria-label="회의록 제목 수정"
+                            autoFocus
+                            className="h-10 min-w-0 text-2xl font-semibold"
+                            disabled={updatingContent}
+                            onChange={(event) => setTitleDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                setEditingTitle(false);
+                              }
+                            }}
+                            value={titleDraft}
+                          />
+                          <Button
+                            aria-label="회의록 제목 저장"
+                            disabled={updatingContent || !titleDraft.trim()}
+                            size="icon-sm"
+                            type="submit"
+                            variant="ghost"
+                          >
+                            {updatingContent ? (
+                              <Loader2 className="animate-spin" />
+                            ) : (
+                              <Check />
+                            )}
+                          </Button>
+                          <Button
+                            aria-label="회의록 제목 수정 취소"
+                            disabled={updatingContent}
+                            onClick={() => setEditingTitle(false)}
+                            size="icon-sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <X />
+                          </Button>
+                        </form>
+                      ) : (
+                        <div className="flex min-w-0 items-center gap-2">
+                          <h2
+                            className="break-words font-heading text-2xl font-semibold"
+                            onDoubleClick={startTitleEdit}
+                          >
+                            {report.title?.trim() || formatReportTitle(report)}
+                          </h2>
+                          {canEditContent ? (
+                            <Button
+                              aria-label="회의록 제목 수정"
+                              onClick={startTitleEdit}
+                              size="icon-sm"
+                              type="button"
+                              variant="ghost"
+                            >
+                              <Pencil />
+                            </Button>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
                     <ReportStatusPill status={report.status} />
                   </div>
 
-                  <dl className="grid gap-3 text-sm sm:grid-cols-2">
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        실패 단계
-                      </dt>
-                      <dd className="mt-1">
-                        {getReportFailedStepLabel(report.failedStep)}
-                      </dd>
+                  <dl className="flex min-w-0 flex-wrap items-center gap-y-3 text-sm md:flex-nowrap">
+                    <div className="flex shrink-0 items-center gap-2 pr-4">
+                      <CalendarPlus className="size-4 text-muted-foreground" />
+                      <dt className="font-medium text-muted-foreground">생성일</dt>
+                      <dd>{formatReportDateTime(report.createdAt)}</dd>
                     </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        재생성 횟수
-                      </dt>
-                      <dd className="mt-1">{report.retryCount}회</dd>
+                    <div className="flex shrink-0 items-center gap-2 sm:border-l sm:pl-4 sm:pr-4">
+                      <RefreshCw className="size-4 text-muted-foreground" />
+                      <dt className="font-medium text-muted-foreground">수정일</dt>
+                      <dd>{formatReportDateTime(report.updatedAt)}</dd>
                     </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        생성일
-                      </dt>
-                      <dd className="mt-1">
-                        {formatReportDateTime(report.createdAt)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">참석자</dt>
-                      <dd className="mt-1">
-                        <ReportParticipantSummary report={report} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        수정일
-                      </dt>
-                      <dd className="mt-1">
-                        {formatReportDateTime(report.updatedAt)}
+                    <div className="flex min-w-0 items-center gap-2 sm:border-l sm:pl-4">
+                      <Users className="size-4 shrink-0 text-muted-foreground" />
+                      <dt className="shrink-0 font-medium text-muted-foreground">참석자</dt>
+                      <dd
+                        className="min-w-0 truncate"
+                        title={participantSummaryText ?? "참석자 정보 없음"}
+                      >
+                        {participantSummaryText ?? "정보 없음"}
                       </dd>
                     </div>
                   </dl>
+
+                  {report.failedStep || report.retryCount > 0 ? (
+                    <dl className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
+                      {report.failedStep ? (
+                        <div className="flex items-center gap-1.5">
+                          <dt className="font-medium">실패 단계</dt>
+                          <dd>{getReportFailedStepLabel(report.failedStep)}</dd>
+                        </div>
+                      ) : null}
+                      {report.retryCount > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <dt className="font-medium">재생성 횟수</dt>
+                          <dd>{report.retryCount}회</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  ) : null}
 
                   {report.errorMessage ? (
                     <div className="rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive">
@@ -1202,38 +1485,25 @@ function MeetingReportDetailModal({
                   ) : null}
                 </section>
 
-                <EditableReportTextBlock
-                  editable={canEditContent}
-                  emptyLabel={
-                    isReportInProgress(report.status)
-                      ? "회의록을 생성하는 중입니다."
-                      : "등록된 제목이 없습니다."
-                  }
-                  evidenceSegments={summaryEvidence}
-                  onEvidenceSelect={selectTranscriptSegment}
-                  onSave={(title) => onUpdateContent({
-                    expectedVersion: report.contentVersion,
-                    title
-                  })}
-                  saving={updatingContent}
-                  singleLine
-                  title="회의록 제목"
-                  value={report.title}
-                />
-
                 <ReportTextBlock
+                  activityEvidence={summaryActivityEvidence}
                   emptyLabel={
                     isReportInProgress(report.status)
                       ? "회의록을 생성하는 중입니다."
                       : "등록된 요약이 없습니다."
                   }
                   evidenceSegments={summaryEvidence}
+                  onActivitySelect={(activityEvidence) => selectActivityEvidence(
+                    activityEvidence,
+                    "요약"
+                  )}
                   onEvidenceSelect={selectTranscriptSegment}
                   title="요약"
                   value={report.summary}
                 />
 
                 <EditableReportTextBlock
+                  activityEvidence={discussionActivityEvidence}
                   editable={canEditContent}
                   emptyLabel={
                     isReportInProgress(report.status)
@@ -1241,6 +1511,10 @@ function MeetingReportDetailModal({
                       : "등록된 논의사항이 없습니다."
                   }
                   evidenceSegments={discussionEvidence}
+                  onActivitySelect={(activityEvidence) => selectActivityEvidence(
+                    activityEvidence,
+                    "논의사항"
+                  )}
                   onEvidenceSelect={selectTranscriptSegment}
                   onSave={(discussionPoints) => onUpdateContent({
                     expectedVersion: report.contentVersion,
@@ -1253,6 +1527,11 @@ function MeetingReportDetailModal({
 
                 {decisionItems.length ? (
                   <DecisionItemsBlock
+                    activityEvidenceForItem={(item) => getActivityEvidence(
+                      report,
+                      "decision",
+                      item.sourceIndex
+                    )}
                     editable={canEditContent}
                     emptyLabel={
                       isReportInProgress(report.status)
@@ -1261,6 +1540,9 @@ function MeetingReportDetailModal({
                     }
                     evidenceForItem={(item) => getEvidenceSegments(report, "decision", item.sourceIndex)}
                     items={decisionItems}
+                    onActivityEvidenceSelect={(activityEvidence, sourceIndex) =>
+                      selectActivityEvidence(activityEvidence, `결정 ${sourceIndex + 1}`)
+                    }
                     onEvidenceSelect={selectTranscriptSegment}
                     onSave={(item, text) => onUpdateContent({
                       expectedVersion: report.contentVersion,
@@ -1269,59 +1551,54 @@ function MeetingReportDetailModal({
                     saving={updatingContent}
                   />
                 ) : (
-                  <ReportTextBlock
-                  emptyLabel={
-                    isReportInProgress(report.status)
-                      ? "결정사항을 정리하는 중입니다."
-                      : "등록된 결정사항이 없습니다."
-                  }
-                  evidenceSegments={decisionEvidence}
-                  onEvidenceSelect={selectTranscriptSegment}
-                  title="결정사항"
-                  value={report.decisions}
+                  <DecisionTextItemsBlock
+                    activityEvidenceForItem={(sourceIndex) => getActivityEvidence(
+                      report,
+                      "decision",
+                      sourceIndex
+                    )}
+                    emptyLabel={
+                      isReportInProgress(report.status)
+                        ? "결정사항을 정리하는 중입니다."
+                        : "등록된 결정사항이 없습니다."
+                    }
+                    evidenceForItem={(sourceIndex) => getEvidenceSegments(
+                      report,
+                      "decision",
+                      sourceIndex
+                    )}
+                    onActivityEvidenceSelect={(activityEvidence, sourceIndex) =>
+                      selectActivityEvidence(activityEvidence, `결정 ${sourceIndex + 1}`)
+                    }
+                    onEvidenceSelect={selectTranscriptSegment}
+                    value={report.decisions}
                   />
                 )}
 
-                <section className="grid gap-2 rounded-lg border bg-muted/20 p-4">
-                  <div>
-                    <h3 className="font-heading text-base font-semibold">활동 근거</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Transcript와 별도로 녹음 구간에 기록된 Workspace 활동입니다.
-                    </p>
+                <section className="mt-8 grid gap-3 border-t-2 border-border/70 pt-8">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h3 className="font-heading text-xl font-semibold">후속 작업</h3>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-300">
+                      ✨ AI 추천
+                    </span>
                   </div>
-                  {report.activityEvidence?.length ? (
-                    <ul className="grid gap-2">
-                      {report.activityEvidence.map((activity) => (
-                        <li key={activity.id} className="rounded-md border bg-background p-3 text-sm">
-                          <p className="text-xs font-semibold text-muted-foreground">
-                            {formatReportDateTime(activity.occurredAt)} · {activity.action}
-                          </p>
-                          <p className="mt-1 whitespace-pre-wrap break-words">{activity.summary}</p>
-                          {activity.references.length ? (
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              연결된 산출물: {activity.references.map((reference) => formatActivityEvidenceReference(reference.sourceType, reference.sourceIndex)).join(", ")}
-                            </p>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">기록된 활동 근거가 없습니다.</p>
-                  )}
-                </section>
-
-                <section className="grid gap-2">
-                  <h3 className="font-heading text-base font-semibold">후속 작업</h3>
                   {actionItems.length ? (
                     <ul className="grid gap-2">
                       {actionItemsWithEvidence.map(
-                        ({ evidenceSegments, item }) => (
+                        ({ activityEvidence, evidenceSegments, item }) => (
                           <ActionItemReviewCard
                             key={item.id}
                             actionItem={item}
                             actionItemAssignees={report.actionItemAssignees}
+                            activityEvidence={activityEvidence}
                             busy={mutatingActionItemId === item.id}
                             evidenceSegments={evidenceSegments}
+                            onActivityEvidenceSelect={(selectedActivityEvidence) =>
+                              selectActivityEvidence(
+                                selectedActivityEvidence,
+                                `후속 작업 ${item.sourceIndex + 1}`
+                              )
+                            }
                             onDeliver={(input) => onDeliverActionItem(item, input)}
                             onDismiss={() => onDismissActionItem(item)}
                             onEvidenceSelect={selectTranscriptSegment}
@@ -1358,29 +1635,60 @@ function MeetingReportDetailModal({
                   )}
                 </section>
 
-                {selectedEvidenceSegment ? (
+                {selectedEvidenceSegment || selectedActivityEvidence ? (
                   <section
                     ref={selectedEvidencePanelRef}
                     tabIndex={-1}
                     className="grid gap-2 rounded-lg border border-primary/30 bg-primary/5 p-4"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-heading text-base font-semibold">근거 Transcript</h3>
+                      <h3 className="font-heading text-xl font-semibold">
+                        {selectedEvidenceSegment ? "근거 Transcript" : "활동 근거"}
+                      </h3>
                       <Button
                         type="button"
                         size="sm"
                         variant="ghost"
-                        onClick={() => setSelectedEvidenceSegment(null)}
+                        onClick={() => {
+                          setSelectedEvidenceSegment(null);
+                          setSelectedActivityEvidence(null);
+                          setSelectedActivityEvidenceSourceLabel(null);
+                        }}
                       >
                         닫기
                       </Button>
                     </div>
-                    <p className="text-xs font-semibold text-muted-foreground">
-                      {formatTranscriptTimestamp(selectedEvidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(selectedEvidenceSegment.endedAtMs)}
-                    </p>
-                    <p className="whitespace-pre-wrap break-words text-sm leading-6">
-                      {selectedEvidenceSegment.text}
-                    </p>
+                    {selectedEvidenceSegment ? (
+                      <>
+                        <p className="text-xs font-semibold text-muted-foreground">
+                          {formatTranscriptTimestamp(selectedEvidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(selectedEvidenceSegment.endedAtMs)}
+                        </p>
+                        <p className="whitespace-pre-wrap break-words text-sm leading-6">
+                          {selectedEvidenceSegment.text}
+                        </p>
+                      </>
+                    ) : selectedActivityEvidence ? (
+                      <>
+                        <p className="text-xs font-semibold text-muted-foreground">
+                          {selectedActivityEvidenceSourceLabel ?? "선택한 항목"}과 연결된 Workspace 활동 {selectedActivityEvidence.length}건
+                        </p>
+                        <ul className="grid gap-2">
+                          {selectedActivityEvidence.map((activity) => (
+                            <li
+                              key={activity.id}
+                              className="rounded-md border bg-background p-3 text-sm"
+                            >
+                              <p className="text-xs font-semibold text-muted-foreground">
+                                {formatReportDateTime(activity.occurredAt)} · {activity.action}
+                              </p>
+                              <p className="mt-1 whitespace-pre-wrap break-words leading-6">
+                                {activity.summary}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
                   </section>
                 ) : null}
               </div>
@@ -1475,6 +1783,8 @@ export function MeetingReportSection({
   const [searchQuery, setSearchQuery] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [sortDirection, setSortDirection] =
+    useState<ReportSortDirection>("newest");
   const [selectedReport, setSelectedReport] =
     useState<MeetingReportDetail | null>(null);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -1503,6 +1813,20 @@ export function MeetingReportSection({
   );
   const isInitialLoading = reportsStatus === "loading" && reports.length === 0;
   const showError = reportsStatus === "error" && reports.length === 0;
+  const sortedReports = useMemo(
+    () =>
+      [...reports].sort((left, right) => {
+        const timeDifference =
+          new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+
+        if (timeDifference !== 0) {
+          return sortDirection === "newest" ? -timeDifference : timeDifference;
+        }
+
+        return left.id.localeCompare(right.id);
+      }),
+    [reports, sortDirection]
+  );
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -1843,35 +2167,37 @@ export function MeetingReportSection({
         </Button>
       </div>
 
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 rounded-lg border bg-muted/20 p-2 sm:flex-row sm:items-center">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 rounded-lg border bg-muted/20 p-2 xl:flex-row xl:items-center">
+        <div className="grid w-full min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_9rem_9rem] xl:flex-1">
+          <div className="relative min-w-0 xl:min-w-48">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="h-9 pl-9"
+              placeholder="회의록 검색"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+          </div>
+
           <Input
-            className="h-9 pl-9"
-            placeholder="회의록 검색"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
+            aria-label="회의록 시작일"
+            className="h-9 w-full"
+            type="date"
+            value={fromDate}
+            onChange={(event) => setFromDate(event.target.value)}
+          />
+          <Input
+            aria-label="회의록 종료일"
+            className="h-9 w-full"
+            type="date"
+            value={toDate}
+            onChange={(event) => setToDate(event.target.value)}
           />
         </div>
 
-        <Input
-          aria-label="회의록 시작일"
-          className="h-9 sm:w-36"
-          type="date"
-          value={fromDate}
-          onChange={(event) => setFromDate(event.target.value)}
-        />
-        <Input
-          aria-label="회의록 종료일"
-          className="h-9 sm:w-36"
-          type="date"
-          value={toDate}
-          onChange={(event) => setToDate(event.target.value)}
-        />
+        <div className="hidden h-6 w-px bg-border xl:block" />
 
-        <div className="hidden h-6 w-px bg-border sm:block" />
-
-        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-nowrap">
+        <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:shrink-0 xl:flex-nowrap">
           {REPORT_STATUS_FILTERS.map((filter) => (
             <Button
               key={filter.value}
@@ -1883,10 +2209,24 @@ export function MeetingReportSection({
               {filter.label}
             </Button>
           ))}
-          <span className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-background px-2.5 text-xs font-medium text-muted-foreground">
-            <ArrowDownWideNarrow className="size-3.5" />
-            최신순
-          </span>
+          <Button
+            aria-label={`회의록 정렬: ${sortDirection === "newest" ? "최신순" : "오래된순"}`}
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              setSortDirection((current) =>
+                current === "newest" ? "oldest" : "newest"
+              )
+            }
+          >
+            {sortDirection === "newest" ? (
+              <ArrowDownWideNarrow />
+            ) : (
+              <ArrowUpWideNarrow />
+            )}
+            {sortDirection === "newest" ? "최신순" : "오래된순"}
+          </Button>
         </div>
       </div>
 
@@ -1904,7 +2244,7 @@ export function MeetingReportSection({
         </div>
       ) : null}
 
-      <div className="mx-auto min-h-96 w-full max-w-5xl rounded-lg border bg-muted/20 p-3 sm:p-5">
+      <div className="mx-auto w-full max-w-5xl">
         {isInitialLoading ? (
           <ReportListSkeleton />
         ) : showError ? (
@@ -1929,31 +2269,31 @@ export function MeetingReportSection({
             </div>
           </div>
         ) : reports.length ? (
-          <ul className="mx-auto grid w-full max-w-4xl gap-3">
-            {reports.map((report) => (
+          <ul className="grid w-full gap-3">
+            {sortedReports.map((report) => (
               <li
                 key={report.id}
-                className="grid gap-3 rounded-lg border bg-background p-4 transition hover:border-primary/30 hover:bg-muted/30 sm:grid-cols-[minmax(0,1fr)_auto]"
+                className="grid gap-4 rounded-lg border bg-background p-5 transition hover:border-primary/30 hover:bg-muted/30 sm:grid-cols-[minmax(0,1fr)_auto]"
               >
                 <button
                   type="button"
                   className="min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => handleOpenReport(report)}
                 >
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <FileText className="size-4 shrink-0 text-muted-foreground" />
-                    <h3 className="truncate font-heading text-base font-semibold">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+                    <FileText className="size-5 shrink-0 text-muted-foreground" />
+                    <h3 className="truncate font-heading text-2xl font-semibold">
                       {formatReportTitle(report)}
                     </h3>
                   </div>
-                  <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+                  <p className="mt-3 line-clamp-2 text-sm leading-6 text-muted-foreground">
                     {report.summary?.trim() ||
                       report.errorMessage?.trim() ||
                       (isReportInProgress(report.status)
                         ? "회의록을 생성하는 중입니다."
                         : "등록된 요약이 없습니다.")}
                   </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
                     <ReportStatusPill status={report.status} />
                     <span className="rounded-full border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">
                       {formatReportDateTime(report.createdAt)}
@@ -1970,7 +2310,7 @@ export function MeetingReportSection({
                       </span>
                     ) : null}
                   </div>
-                  <div className="mt-3">
+                  <div className="mt-4">
                     <ReportProgress status={report.status} />
                   </div>
                 </button>

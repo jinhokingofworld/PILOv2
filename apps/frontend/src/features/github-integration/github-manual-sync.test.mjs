@@ -54,4 +54,14 @@ assert.doesNotMatch(
   "manual sync must not clear the current repository or ProjectV2 selection"
 );
 
+const layout = await readFile(new URL("./components/github-connect-layout.tsx", import.meta.url), "utf8");
+const steps = await readFile(new URL("./components/github-connect-steps.tsx", import.meta.url), "utf8");
+const sync = await readFile(new URL("./components/github-connect-sync.tsx", import.meta.url), "utf8");
+assert.match(layout, /isWorkspaceOwner=\{isWorkspaceOwner\}/);
+assert.match(steps, /isWorkspaceOwner: boolean/);
+assert.match(steps, /isWorkspaceOwner \? <Button/);
+assert.match(sync, /isWorkspaceOwner: boolean/);
+assert.match(sync, /\{isWorkspaceOwner \? <div/);
+assert.match(sync, /Workspace Owner만 수동 동기화를 시작할 수 있습니다/);
+
 console.log("github manual-sync tests passed");

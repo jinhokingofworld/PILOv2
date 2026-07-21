@@ -1,0 +1,46 @@
+{
+  "meeting": [
+    {
+      "query": "파일 저장소를 무엇으로 결정했나요?",
+      "candidate": "파일 저장소는 Cloudflare R2를 사용하기로 결정했습니다.",
+      "label": "relevant"
+    },
+    {
+      "query": "파일 저장소를 무엇으로 결정했나요?",
+      "candidate": "다음 데일리 스크럼은 오전 10시에 진행합니다.",
+      "label": "irrelevant"
+    },
+    {
+      "query": "회의록 생성 작업의 배포 순서는 어떻게 정했나요?",
+      "candidate": "App Server를 배포한 다음 Worker를 배포하고 롤백 호환성을 확인하기로 했습니다.",
+      "label": "relevant"
+    },
+    {
+      "query": "회의록 생성 작업의 배포 순서는 어떻게 정했나요?",
+      "candidate": "PR 리뷰 그래프의 카드 간격을 조정했습니다.",
+      "label": "irrelevant"
+    }
+  ],
+  "drive": [
+    {
+      "query": "Worker 배포 순서를 알려줘",
+      "candidate": "App Server 배포 후 Worker를 배포하고 rollback 호환성을 확인합니다.",
+      "label": "relevant"
+    },
+    {
+      "query": "Worker 배포 순서를 알려줘",
+      "candidate": "브랜드 컬러와 로고 사용 규칙을 정리했습니다.",
+      "label": "irrelevant"
+    },
+    {
+      "query": "R2를 선택한 이유가 적힌 문서를 찾아줘",
+      "candidate": "S3 호환 API와 전송 비용을 검토한 뒤 Cloudflare R2를 파일 저장소로 선택했습니다.",
+      "label": "relevant"
+    },
+    {
+      "query": "R2를 선택한 이유가 적힌 문서를 찾아줘",
+      "candidate": "캘린더 반복 일정의 종료일 처리 규칙을 설명합니다.",
+      "label": "irrelevant"
+    }
+  ]
+}

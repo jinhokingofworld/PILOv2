@@ -168,7 +168,11 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
     monkeypatch.setattr(
         shared_ai_worker_runtime,
         "OpenAiTranscriptEmbedder",
-        lambda api_key, model_name: (api_key, model_name),
+        lambda api_key, model_name, timeout_seconds: (
+            api_key,
+            model_name,
+            timeout_seconds,
+        ),
     )
     monkeypatch.setattr(
         shared_ai_worker_runtime,
@@ -185,12 +189,12 @@ def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypat
 
     assert worker.meeting_transcript_embedding_processor == (
         "meeting-transcript-repository",
-        ("test-key", "text-embedding-3-small"),
+        ("test-key", "text-embedding-3-small", 30.0),
     )
     assert worker.settings.meeting_transcript_embedding_jobs_per_tick == 10
     assert worker.meeting_activity_evidence_embedding_processor == (
         "meeting-activity-evidence-repository",
-        ("test-key", "text-embedding-3-small"),
+        ("test-key", "text-embedding-3-small", 30.0),
     )
 
 
@@ -205,16 +209,19 @@ def test_agent_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None
     settings = AgentWorkerSettings.from_env()
 
     assert settings.sqs_queue_url == "https://sqs.example.com/agent-jobs"
-    assert settings.visibility_timeout_seconds == 90
+    assert settings.visibility_timeout_seconds == 180
+    assert settings.visibility_heartbeat_seconds == 45
     assert settings.openai_agent_router_model == settings.openai_agent_planner_model
 
 
 def test_agent_worker_dispatcher_has_no_meeting_or_pr_review_processor() -> None:
-    dispatcher = create_agent_dispatcher(object())
+    grounded_answer_processor = object()
+    dispatcher = create_agent_dispatcher(object(), grounded_answer_processor)
 
     assert dispatcher.meeting_report_processor is None
     assert dispatcher.canvas_agent_processor is None
     assert dispatcher.pr_review_analysis_processor is None
+    assert dispatcher.grounded_answer_processor is grounded_answer_processor
 
 
 def test_pr_review_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None:

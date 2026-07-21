@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { badRequest } from "../../common/api-error";
+import type { GithubManualSyncAdmissionConfig } from "./github-manual-sync-admission";
 
 export interface GithubOAuthRuntimeConfig {
   clientId: string;
@@ -32,6 +33,11 @@ export interface GithubWebhookRuntimeConfig {
 const DEFAULT_API_BASE_PATH = "/api/v1";
 const DEFAULT_FRONTEND_URL = "http://localhost:3000";
 const DEFAULT_STATE_TTL_SECONDS = 600;
+const DEFAULT_GITHUB_MANUAL_SYNC_USER_LIMIT = 5;
+const DEFAULT_GITHUB_MANUAL_SYNC_WORKSPACE_LIMIT = 10;
+const DEFAULT_GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS = 600;
+const DEFAULT_GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS = 30;
+const DEFAULT_GITHUB_MANUAL_SYNC_MAX_QUEUED_JOBS = 100;
 const GITHUB_APP_SLUG_PATTERN = /^[a-zA-Z0-9-]+$/;
 
 @Injectable()
@@ -166,6 +172,40 @@ export class GithubIntegrationConfigService {
     };
   }
 
+  getGithubManualSyncAdmissionConfig(): GithubManualSyncAdmissionConfig {
+    const rateWindowSeconds = this.readPositiveIntegerEnv(
+      "GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS",
+      DEFAULT_GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS
+    );
+    const cooldownSeconds = this.readPositiveIntegerEnv(
+      "GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS",
+      DEFAULT_GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS
+    );
+
+    if (cooldownSeconds > rateWindowSeconds) {
+      throw badRequest(
+        "GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS must be less than or equal to GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS"
+      );
+    }
+
+    return {
+      userLimit: this.readPositiveIntegerEnv(
+        "GITHUB_MANUAL_SYNC_USER_LIMIT",
+        DEFAULT_GITHUB_MANUAL_SYNC_USER_LIMIT
+      ),
+      workspaceLimit: this.readPositiveIntegerEnv(
+        "GITHUB_MANUAL_SYNC_WORKSPACE_LIMIT",
+        DEFAULT_GITHUB_MANUAL_SYNC_WORKSPACE_LIMIT
+      ),
+      rateWindowSeconds,
+      cooldownSeconds,
+      maxQueuedJobs: this.readPositiveIntegerEnv(
+        "GITHUB_MANUAL_SYNC_MAX_QUEUED_JOBS",
+        DEFAULT_GITHUB_MANUAL_SYNC_MAX_QUEUED_JOBS
+      )
+    };
+  }
+
   private getFrontendUrl(): string {
     return this.normalizeOrigin(
       process.env.FRONTEND_URL?.trim() || DEFAULT_FRONTEND_URL
@@ -223,5 +263,23 @@ export class GithubIntegrationConfigService {
 
     const parsed = Number.parseInt(value, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  }
+
+  private readPositiveIntegerEnv(name: string, fallback: number): number {
+    const value = process.env[name]?.trim();
+    if (!value) {
+      return fallback;
+    }
+
+    if (!/^[1-9]\d*$/.test(value)) {
+      throw badRequest(`${name} must be a positive integer`);
+    }
+
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed)) {
+      throw badRequest(`${name} must be a positive integer`);
+    }
+
+    return parsed;
   }
 }

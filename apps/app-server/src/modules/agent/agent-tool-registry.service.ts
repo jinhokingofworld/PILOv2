@@ -8,6 +8,7 @@ import { CanvasAgentDelegationToolsService } from "./tools/canvas-agent-delegati
 import { DriveAgentToolsService } from "./tools/drive-agent-tools.service";
 import {
   buildAgentToolCapabilityCatalog,
+  getAgentToolDomainAndOperation,
   type AgentToolCapabilityCatalogSnapshot
 } from "./agent-tool-capability-catalog";
 import {
@@ -112,8 +113,11 @@ export class AgentToolRegistryService {
     definition: AgentToolDefinition<unknown>,
     requestContext: AgentRunRequestContext
   ): boolean {
+    const requiredDomain = requestContext?.surface ?? null;
+    const toolDomain = getAgentToolDomainAndOperation(definition.name)?.domain ?? null;
     return (
       this.domainFeatureFlags.isToolEnabled(definition.name) &&
+      (!requiredDomain || toolDomain === requiredDomain) &&
       (!definition.contextRequirement ||
         definition.contextRequirement.surface === requestContext?.surface)
     );

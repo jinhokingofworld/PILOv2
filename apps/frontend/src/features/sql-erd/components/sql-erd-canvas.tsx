@@ -802,17 +802,26 @@ function resetSqlErdCanvas(
 
   if (zoomToFit) {
     window.requestAnimationFrame(() => {
-      fitSqlErdCanvas(editor);
+      fitSqlErdCanvas(editor, { enforceMinimumReadableZoom: false });
     });
   }
 }
 
-function fitSqlErdCanvas(editor: Editor) {
+function fitSqlErdCanvas(
+  editor: Editor,
+  {
+    enforceMinimumReadableZoom = true
+  }: { enforceMinimumReadableZoom?: boolean } = {}
+) {
   editor.zoomToFit();
 
   const pageBounds = editor.getCurrentPageBounds();
 
-  if (!pageBounds || editor.getZoomLevel() >= SQLTOERD_MINIMUM_READABLE_ZOOM) {
+  if (
+    !enforceMinimumReadableZoom ||
+    !pageBounds ||
+    editor.getZoomLevel() >= SQLTOERD_MINIMUM_READABLE_ZOOM
+  ) {
     return;
   }
 

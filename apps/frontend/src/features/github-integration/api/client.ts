@@ -84,6 +84,7 @@ export class GithubIntegrationApiError extends Error {
   status?: number;
   path?: string;
   code?: string;
+  retryAfterSeconds?: number;
 
   constructor(
     message: string,
@@ -91,6 +92,7 @@ export class GithubIntegrationApiError extends Error {
       status?: number;
       path?: string;
       code?: string;
+      retryAfterSeconds?: number;
     } = {}
   ) {
     super(message);
@@ -98,6 +100,7 @@ export class GithubIntegrationApiError extends Error {
     this.status = options.status;
     this.path = options.path;
     this.code = options.code;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 
@@ -111,6 +114,13 @@ function readApiErrorMessage(payload: unknown) {
     return {
       code:
         typeof payload.error.code === "string" ? payload.error.code : undefined,
+      retryAfterSeconds:
+        isRecord(payload.error.details) &&
+        typeof payload.error.details.retryAfterSeconds === "number" &&
+        Number.isFinite(payload.error.details.retryAfterSeconds) &&
+        payload.error.details.retryAfterSeconds > 0
+          ? Math.ceil(payload.error.details.retryAfterSeconds)
+          : undefined,
       message: payload.error.message
     };
   }
@@ -255,7 +265,8 @@ async function requestGithubIntegrationPayload<T>(
       {
         code: apiError?.code,
         path,
-        status: response.status
+        status: response.status,
+        retryAfterSeconds: apiError?.retryAfterSeconds
       }
     );
   }
@@ -566,11 +577,15 @@ export function createGithubIntegrationApiClient({
 
     async startGithubSyncRun(
       workspaceId: string,
-      body: StartGithubSyncRunInput
+      body: StartGithubSyncRunInput,
+      idempotencyKey: string
     ) {
       return requestGithubIntegrationData<GithubSyncRun>(
         workspaceGithubPath(workspaceId, "/sync-runs"),
-        withJsonBody(body, { method: "POST" }),
+        withJsonBody(body, {
+          method: "POST",
+          headers: { "Idempotency-Key": idempotencyKey }
+        }),
         requestOptions
       );
     },

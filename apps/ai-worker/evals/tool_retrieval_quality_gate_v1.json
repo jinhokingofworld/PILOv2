@@ -4,9 +4,9 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "4a2d24c5950e0ccd34ad8eb35f83d686f5dfa7fd60fa06a39f540442620282b3",
-    "catalogSha256": "76671ba18055e4c2c433ecd752a8fe22c6334e9ce7137f188545d959244b00d1",
-    "eligibleSnapshotSha256": "04dd22398573e7481e1bceea5c17c18b72649bf468d3c1d92afdf309e13cea46"
+    "inventorySha256": "ce2deb6bc059fc89a09655ddc7afd0234ca39c35b6f344aa74c63d09ad79a63c",
+    "catalogSha256": "81b0fa0bc6d08c464f212a8ec7e4d107e6ebc187eed2aae068208f7d0892278c",
+    "eligibleSnapshotSha256": "f7f0a523e061086f1596da6b056daff1878d28f4c12b7d002a2e230e0235bbab"
   },
   "privacySensitiveValues": [
     "11111111-1111-4111-8111-111111111111",
@@ -315,84 +315,14 @@
     "focus_sql_erd_tables": {
       "type": "object",
       "required": [
-        "sessionId",
-        "sessionRevision",
-        "modelFingerprint",
-        "featureLabel",
-        "primaryTableRefs",
-        "relatedTableRefs",
-        "confidence",
-        "reasons"
+        "featureQuery"
       ],
       "additionalProperties": false,
       "properties": {
-        "sessionId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "sessionRevision": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "modelFingerprint": {
-          "type": "string",
-          "pattern": "^fnv1a32:[0-9a-f]{8}$"
-        },
-        "featureLabel": {
+        "featureQuery": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 100
-        },
-        "primaryTableRefs": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 20,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^t[1-9][0-9]*$"
-          }
-        },
-        "relatedTableRefs": {
-          "type": "array",
-          "maxItems": 30,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^t[1-9][0-9]*$"
-          }
-        },
-        "confidence": {
-          "type": "string",
-          "enum": [
-            "high",
-            "medium",
-            "low"
-          ]
-        },
-        "reasons": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 50,
-          "items": {
-            "type": "object",
-            "required": [
-              "tableRef",
-              "reason"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "tableRef": {
-                "type": "string",
-                "pattern": "^t[1-9][0-9]*$"
-              },
-              "reason": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 240
-              }
-            }
-          }
+          "maxLength": 200
         }
       }
     },
@@ -798,10 +728,17 @@
             "FAILED"
           ]
         },
+        "reportTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+        },
         "roomName": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 100
+          "maxLength": 100,
+          "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
         },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
@@ -863,41 +800,21 @@
             "FAILED"
           ]
         },
+        "reportTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+        },
         "roomName": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 100
+          "maxLength": 100,
+          "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
         },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
           "const": true
-        }
-      }
-    },
-    "inspect_sql_erd_schema": {
-      "type": "object",
-      "required": [
-        "featureQuery"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "featureQuery": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
-        },
-        "sessionId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "sessionSelectionToken": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "sessionTitle": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 120
         }
       }
     },
@@ -1102,10 +1019,17 @@
             "FAILED"
           ]
         },
+        "reportTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+        },
         "roomName": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 100
+          "maxLength": 100,
+          "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
         },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
@@ -1243,10 +1167,17 @@
             "FAILED"
           ]
         },
+        "reportTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+        },
         "roomName": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 100
+          "maxLength": 100,
+          "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
         },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
@@ -1349,22 +1280,6 @@
           "type": "string",
           "pattern": "^ctx_[0-9a-f]{24}$"
         },
-        "sections": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 4,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "enum": [
-              "summary",
-              "discussionPoints",
-              "decisions",
-              "actionItems"
-            ]
-          },
-          "description": "반환할 회의록 영역. 생략하면 요약·논의사항·결정사항·후속 작업을 반환합니다."
-        },
         "from": {
           "type": "string",
           "format": "date-time"
@@ -1384,14 +1299,37 @@
             "FAILED"
           ]
         },
+        "reportTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+        },
         "roomName": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 100
+          "maxLength": 100,
+          "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
         },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
           "const": true
+        },
+        "sections": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "discussionPoints",
+              "decisions",
+              "actionItems"
+            ]
+          },
+          "description": "반환할 회의록 영역. 생략하면 요약·논의사항·결정사항·후속 작업을 반환합니다."
         }
       }
     },
@@ -1501,7 +1439,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "76671ba18055e4c2c433ecd752a8fe22c6334e9ce7137f188545d959244b00d1",
+    "sha256": "81b0fa0bc6d08c464f212a8ec7e4d107e6ebc187eed2aae068208f7d0892278c",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -1924,7 +1862,6 @@
         "id": "meeting.report.summary",
         "domain": "meeting",
         "toolNames": [
-          "list_meeting_reports",
           "summarize_meeting_report"
         ],
         "whenToUse": "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때",
@@ -2712,36 +2649,35 @@
         "id": "sql_erd.inspect",
         "domain": "sql_erd",
         "toolNames": [
-          "inspect_sql_erd_schema",
           "focus_sql_erd_tables"
         ],
-        "whenToUse": "SQLtoERD schema나 특정 table을 살펴볼 때",
+        "whenToUse": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
         "mustNotUseFor": [
-          "schema 생성 요청"
+          "schema 생성, SQL 실행 또는 session 밖 schema 조회 요청"
         ],
         "positiveExamples": [
-          "SQLtoERD schema나 특정 table을 살펴볼 때",
-          "SQLtoERD schema나 특정 table을 살펴볼 때 알려줘",
-          "SQLtoERDschema나특정table을살펴볼때",
-          "SQLtoERD schema나 특정 table을 살펴볼 때 부탁드려요",
+          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
+          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 알려줘",
+          "현재SQLtoERDsession에서특정기능의핵심table과직접FK연결table을집중보기로살펴볼때",
+          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 부탁드려요",
           "sql_erd inspect 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "SQLtoERD schema나 특정 table을 살펴볼 때"
+            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때"
           },
           {
             "kind": "paraphrase",
-            "utterance": "SQLtoERD schema나 특정 table을 살펴볼 때 알려줘"
+            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 알려줘"
           },
           {
             "kind": "typo",
-            "utterance": "SQLtoERDschema나특정table을살펴볼때"
+            "utterance": "현재SQLtoERDsession에서특정기능의핵심table과직접FK연결table을집중보기로살펴볼때"
           },
           {
             "kind": "honorific",
-            "utterance": "SQLtoERD schema나 특정 table을 살펴볼 때 부탁드려요"
+            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 부탁드려요"
           },
           {
             "kind": "abbreviation",
@@ -2838,6 +2774,51 @@
           {
             "kind": "abbreviation",
             "utterance": "canvas delegate 요청"
+          }
+        ],
+        "selectorKinds": [
+          "canvas_context"
+        ],
+        "requiresConfirmation": false,
+        "availability": "supported"
+      },
+      {
+        "id": "canvas.drive_images.import",
+        "domain": "canvas",
+        "toolNames": [
+          "delegate_canvas_agent"
+        ],
+        "whenToUse": "Workspace Drive의 기존 이미지를 Canvas에 가져올 때",
+        "mustNotUseFor": [
+          "일반 문서 검색 또는 Canvas 도형 직접 수정 요청"
+        ],
+        "positiveExamples": [
+          "드라이브에서 아키텍처 이미지를 캔버스에 올려줘",
+          "공유 드라이브의 팀 로고 이미지를 캔버스에 추가해줘",
+          "드라이브에서아키텍처이미지를캔버스에올려줘",
+          "드라이브에서 아키텍처 이미지를 캔버스에 올려줘 부탁드려요",
+          "canvas import 요청"
+        ],
+        "examples": [
+          {
+            "kind": "canonical",
+            "utterance": "드라이브에서 아키텍처 이미지를 캔버스에 올려줘"
+          },
+          {
+            "kind": "paraphrase",
+            "utterance": "공유 드라이브의 팀 로고 이미지를 캔버스에 추가해줘"
+          },
+          {
+            "kind": "typo",
+            "utterance": "드라이브에서아키텍처이미지를캔버스에올려줘"
+          },
+          {
+            "kind": "honorific",
+            "utterance": "드라이브에서 아키텍처 이미지를 캔버스에 올려줘 부탁드려요"
+          },
+          {
+            "kind": "abbreviation",
+            "utterance": "canvas import 요청"
           }
         ],
         "selectorKinds": [
@@ -3380,11 +3361,13 @@
         "action": "delegate_canvas_agent",
         "operation": "write",
         "capabilityIds": [
-          "canvas.delegate"
+          "canvas.delegate",
+          "canvas.drive_images.import"
         ],
-        "whenToUse": "Canvas 작업을 Agent에게 위임할 때",
+        "whenToUse": "Canvas 작업을 Agent에게 위임할 때 Workspace Drive의 기존 이미지를 Canvas에 가져올 때",
         "mustNotUseFor": [
-          "SQLtoERD 또는 Board 요청"
+          "SQLtoERD 또는 Board 요청",
+          "일반 문서 검색 또는 Canvas 도형 직접 수정 요청"
         ],
         "acceptedSelectorFields": [],
         "selectorKinds": [
@@ -3550,33 +3533,24 @@
         "capabilityIds": [
           "sql_erd.inspect"
         ],
-        "whenToUse": "SQLtoERD schema나 특정 table을 살펴볼 때",
+        "whenToUse": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
         "mustNotUseFor": [
-          "schema 생성 요청"
+          "schema 생성, SQL 실행 또는 session 밖 schema 조회 요청"
         ],
         "acceptedSelectorFields": [
-          "confidence",
-          "featureLabel",
-          "modelFingerprint",
-          "primaryTableRefs",
-          "reasons",
-          "relatedTableRefs",
-          "sessionId",
-          "sessionRevision"
+          "featureQuery"
         ],
         "selectorKinds": [
           "sql_erd_session",
           "table_reference"
         ],
-        "prerequisiteToolNames": [
-          "inspect_sql_erd_schema"
-        ],
+        "prerequisiteToolNames": [],
         "followUpToolNames": [],
         "riskLevel": "low",
         "executionMode": "auto",
         "requiresConfirmation": false,
-        "contextSurface": null,
-        "inputSchemaSha256": "c25efe99e934d690063e3473605dbe93c922cc8b2409cdc30df3a06688461f25"
+        "contextSurface": "sql_erd",
+        "inputSchemaSha256": "c17f04b92ca6e69694f13f15159c73eeed5053c42e28fe0a8485b8244958a622"
       },
       {
         "toolName": "generate_sql_erd",
@@ -3719,6 +3693,7 @@
           "contextRef",
           "decisionIndex",
           "from",
+          "reportTitle",
           "roomName",
           "status",
           "to",
@@ -3735,7 +3710,7 @@
         "executionMode": "contextual",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "2fc7c4ced03525187e566eb140b2068f5694065ee8950b237a0ff3cf91abf876"
+        "inputSchemaSha256": "8b436926a39463970d61c8c295ee3bf8e926438c59621642d4f2bfd937322219"
       },
       {
         "toolName": "get_meeting_participants",
@@ -3783,6 +3758,7 @@
         "acceptedSelectorFields": [
           "contextRef",
           "from",
+          "reportTitle",
           "roomName",
           "status",
           "to",
@@ -3799,39 +3775,7 @@
         "executionMode": "contextual",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "0042ad2c5c74f7307f22d5daa78e865a0915696814a0c86437b436c04f05cc48"
-      },
-      {
-        "toolName": "inspect_sql_erd_schema",
-        "domain": "sql_erd",
-        "action": "inspect_sql_erd_schema",
-        "operation": "read",
-        "capabilityIds": [
-          "sql_erd.inspect"
-        ],
-        "whenToUse": "SQLtoERD schema나 특정 table을 살펴볼 때",
-        "mustNotUseFor": [
-          "schema 생성 요청"
-        ],
-        "acceptedSelectorFields": [
-          "featureQuery",
-          "sessionId",
-          "sessionSelectionToken",
-          "sessionTitle"
-        ],
-        "selectorKinds": [
-          "sql_erd_session",
-          "table_reference"
-        ],
-        "prerequisiteToolNames": [],
-        "followUpToolNames": [
-          "focus_sql_erd_tables"
-        ],
-        "riskLevel": "low",
-        "executionMode": "contextual",
-        "requiresConfirmation": false,
-        "contextSurface": null,
-        "inputSchemaSha256": "5817d2cde0c54a1f3cdf2740a3abd070440e32774fa4ae408d6c93b518e391e4"
+        "inputSchemaSha256": "618ed357eb3772d671823acdc5817d1e99280dbcc68f92227b310ceabfd00dbb"
       },
       {
         "toolName": "join_meeting",
@@ -3938,15 +3882,13 @@
         "capabilityIds": [
           "meeting.reports.list",
           "meeting.report.detail",
-          "meeting.report.summary",
           "meeting.decision.evidence",
           "meeting.report.regenerate"
         ],
-        "whenToUse": "최신 N건 또는 기간별 회의록 목록을 조회할 때 특정 회의록의 상태나 상세를 확인할 때 회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때 특정 결정사항의 직접 근거를 확인할 때 실패한 회의록을 다시 생성할 때",
+        "whenToUse": "최신 N건 또는 기간별 회의록 목록을 조회할 때 특정 회의록의 상태나 상세를 확인할 때 특정 결정사항의 직접 근거를 확인할 때 실패한 회의록을 다시 생성할 때",
         "mustNotUseFor": [
           "단일 회의록 상세 또는 요약 요청",
           "회의록 목록만 필요한 요청",
-          "원문 근거 검색 요청",
           "일반 회의 대화 검색 요청",
           "회의록 조회 또는 요약 요청"
         ],
@@ -3965,8 +3907,7 @@
         "followUpToolNames": [
           "get_meeting_decision_evidence",
           "get_meeting_report",
-          "regenerate_meeting_report",
-          "summarize_meeting_report"
+          "regenerate_meeting_report"
         ],
         "riskLevel": "low",
         "executionMode": "auto",
@@ -4076,6 +4017,7 @@
         "acceptedSelectorFields": [
           "contextRef",
           "from",
+          "reportTitle",
           "roomName",
           "status",
           "to",
@@ -4092,7 +4034,7 @@
         "executionMode": "confirmation_required",
         "requiresConfirmation": true,
         "contextSurface": null,
-        "inputSchemaSha256": "0042ad2c5c74f7307f22d5daa78e865a0915696814a0c86437b436c04f05cc48"
+        "inputSchemaSha256": "618ed357eb3772d671823acdc5817d1e99280dbcc68f92227b310ceabfd00dbb"
       },
       {
         "toolName": "resolve_board_context",
@@ -4217,6 +4159,7 @@
           "contextRef",
           "from",
           "query",
+          "reportTitle",
           "roomName",
           "status",
           "to",
@@ -4232,7 +4175,7 @@
         "executionMode": "contextual",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "81cffb5ec93131cfb6eb37825f249090a4cd0c8aef87cda55eaf9429b04447f8"
+        "inputSchemaSha256": "aeaeff84c2f71bb0fdc59f19069c07e7fd43941e94055e08065482de0a83a220"
       },
       {
         "toolName": "search_workspace_documents",
@@ -4339,6 +4282,7 @@
         "acceptedSelectorFields": [
           "contextRef",
           "from",
+          "reportTitle",
           "roomName",
           "sections",
           "status",
@@ -4348,15 +4292,13 @@
         "selectorKinds": [
           "meeting_report"
         ],
-        "prerequisiteToolNames": [
-          "list_meeting_reports"
-        ],
+        "prerequisiteToolNames": [],
         "followUpToolNames": [],
         "riskLevel": "low",
         "executionMode": "contextual",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "01f2fe840aad462ef80a85877498726afeb2c17dcbca49e62832452eb62eed0a"
+        "inputSchemaSha256": "1f3564a81f12b4ade1defaea11440e2923fc4c3264d0e564a79d2918f76ae274"
       },
       {
         "toolName": "update_calendar_event",
@@ -4513,7 +4455,6 @@
       "domain": "meeting",
       "capabilityId": "meeting.report.summary",
       "requiredToolNames": [
-        "list_meeting_reports",
         "summarize_meeting_report",
         "create_calendar_event"
       ],
@@ -4536,7 +4477,6 @@
         "get_meeting_decision_evidence",
         "get_meeting_participants",
         "get_meeting_report",
-        "inspect_sql_erd_schema",
         "join_meeting",
         "leave_meeting",
         "list_calendar_events",
@@ -4599,7 +4539,6 @@
         "get_meeting_decision_evidence",
         "get_meeting_participants",
         "get_meeting_report",
-        "inspect_sql_erd_schema",
         "join_meeting",
         "leave_meeting",
         "list_calendar_events",
@@ -4648,7 +4587,6 @@
         "get_meeting_decision_evidence",
         "get_meeting_participants",
         "get_meeting_report",
-        "inspect_sql_erd_schema",
         "join_meeting",
         "leave_meeting",
         "list_calendar_events",
@@ -4695,7 +4633,6 @@
         "get_meeting_decision_evidence",
         "get_meeting_participants",
         "get_meeting_report",
-        "inspect_sql_erd_schema",
         "join_meeting",
         "leave_meeting",
         "list_calendar_events",
@@ -4742,7 +4679,6 @@
         "get_meeting_decision_evidence",
         "get_meeting_participants",
         "get_meeting_report",
-        "inspect_sql_erd_schema",
         "join_meeting",
         "leave_meeting",
         "list_calendar_events",

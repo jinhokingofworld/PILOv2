@@ -67,7 +67,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "4a2d24c5950e0ccd34ad8eb35f83d686f5dfa7fd60fa06a39f540442620282b3";
+  "ce2deb6bc059fc89a09655ddc7afd0234ca39c35b6f344aa74c63d09ad79a63c";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -113,8 +113,8 @@ const payload = {
   );
   assert.equal(
     sqlErdFocusEvaluation?.expected?.requiresConfirmation,
-    null,
-    "contextual SQLtoERD inspection must not require confirmation"
+    false,
+    "read-only SQLtoERD focus must not require confirmation"
   );
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService({}),
@@ -144,7 +144,10 @@ const payload = {
   assert.match(capabilityCatalog.sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(
     capabilityCatalog.descriptors.map((descriptor) => descriptor.toolName),
-    [...actualSnapshot].map((tool) => tool.name).sort()
+    registry
+      .listDefinitionsForContext(null)
+      .map((definition) => definition.name)
+      .sort()
   );
   assert.equal(
     capabilityCatalog.descriptors.find(
@@ -202,6 +205,13 @@ const payload = {
       "approve_meeting_report_action_item"
     ]
   );
+  assert.deepEqual(
+    capabilityCatalog.capabilities.find(
+      (capability) => capability.id === "meeting.report.summary"
+    )?.toolNames,
+    ["summarize_meeting_report"],
+    "meeting report summary must not require the optional list lookup"
+  );
   const updateActionItem = capabilityCatalog.descriptors.find(
     (descriptor) => descriptor.toolName === "update_meeting_report_action_item"
   );
@@ -227,6 +237,47 @@ const fullRegistry = new AgentToolRegistryService(
     new CanvasAgentDelegationToolsService({}, {}),
   new DriveAgentToolsService({})
 );
+{
+  const fullCapabilityCatalog = fullRegistry.listCapabilityCatalogForContext(null);
+  const canvasDriveImageImport = fullCapabilityCatalog.capabilities.find(
+    (capability) => capability.id === "canvas.drive_images.import"
+  );
+  assert.deepEqual(canvasDriveImageImport?.toolNames, ["delegate_canvas_agent"]);
+  assert.ok(
+    canvasDriveImageImport?.positiveExamples.includes(
+      "드라이브에서 아키텍처 이미지를 캔버스에 올려줘"
+    )
+  );
+  assert.ok(
+    fullCapabilityCatalog.descriptors
+      .find((descriptor) => descriptor.toolName === "delegate_canvas_agent")
+      ?.capabilityIds.includes("canvas.drive_images.import")
+  );
+}
+{
+  const sqlErdContext = {
+    surface: "sql_erd",
+    sessionId: "77777777-7777-4777-8777-777777777777"
+  };
+  assert.deepEqual(
+    fullRegistry
+      .listDefinitionsForContext(sqlErdContext)
+      .map((definition) => definition.name)
+      .sort(),
+    ["focus_sql_erd_tables", "generate_sql_erd"],
+    "a surface context must expose only tools owned by its domain"
+  );
+  assert.equal(
+    fullRegistry.getDefinitionForContext("list_calendar_events", sqlErdContext),
+    null,
+    "execution lookup must enforce the same surface domain"
+  );
+  assert.equal(
+    fullRegistry.getDefinitionForContext("focus_sql_erd_tables", null),
+    null,
+    "SQLtoERD focus must not be shortlisted outside the current SQLtoERD screen"
+  );
+}
 {
   const previousRead = process.env.AGENT_DOMAIN_MEETING_READ_ENABLED;
   const previousWrite = process.env.AGENT_DOMAIN_MEETING_WRITE_ENABLED;
@@ -266,6 +317,32 @@ const fullRegistry = new AgentToolRegistryService(
     }
   }
 }
+{
+  const previousAppEnv = process.env.APP_ENV;
+  const previousMeetingRead = process.env.AGENT_DOMAIN_MEETING_READ_ENABLED;
+  const previousBoardRead = process.env.AGENT_DOMAIN_BOARD_READ_ENABLED;
+  try {
+    process.env.APP_ENV = "dev";
+    delete process.env.AGENT_DOMAIN_MEETING_READ_ENABLED;
+    delete process.env.AGENT_DOMAIN_BOARD_READ_ENABLED;
+    const flags = new AgentDomainFeatureFlagService();
+    assert.equal(flags.isEnabled("meeting", "read"), true);
+    assert.equal(
+      flags.isEnabled("board", "read"),
+      false,
+      "dev must fail closed to the Terraform rollout when task env flags drift"
+    );
+  } finally {
+    if (previousAppEnv === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = previousAppEnv;
+    if (previousMeetingRead === undefined)
+      delete process.env.AGENT_DOMAIN_MEETING_READ_ENABLED;
+    else process.env.AGENT_DOMAIN_MEETING_READ_ENABLED = previousMeetingRead;
+    if (previousBoardRead === undefined)
+      delete process.env.AGENT_DOMAIN_BOARD_READ_ENABLED;
+    else process.env.AGENT_DOMAIN_BOARD_READ_ENABLED = previousBoardRead;
+  }
+}
 const inventory = fullRegistry.listToolInventory();
   const legacyFixtureToolNames = new Set(suite.tools.map((tool) => tool.name));
   const legacyExpectedToolSelections = Object.fromEntries(
@@ -291,8 +368,8 @@ const inventory = fullRegistry.listToolInventory();
     AGENT_TOOL_INVENTORY_BASELINE_SHA256,
     "registered tool inventory drift must update the recorded legacy baseline"
   );
-  assert.equal(inventory.totalTools, 36);
-  assert.equal(inventory.tools.length, 36);
+  assert.equal(inventory.totalTools, 35);
+  assert.equal(inventory.tools.length, 35);
   assert.equal(
     inventory.tools.filter((tool) => tool.operation === "write").length,
     16
@@ -368,6 +445,36 @@ const inventory = fullRegistry.listToolInventory();
       ),
     /invalid capability/,
     "duplicate tool names in a capability chain must fail closed"
+  );
+  assert.throws(
+    () =>
+      validateAgentToolCapabilityCatalog(
+        [
+          {
+            ...oneToolCatalog.capabilities[0],
+            domain: "meeting"
+          }
+        ],
+        oneToolCatalog.descriptors,
+        [calendarDefinition]
+      ),
+    /domain mismatch/,
+    "a capability domain must match every tool in its explicit chain"
+  );
+  assert.throws(
+    () =>
+      validateAgentToolCapabilityCatalog(
+        oneToolCatalog.capabilities,
+        [
+          {
+            ...oneToolCatalog.descriptors[0],
+            domain: "meeting"
+          }
+        ],
+        [calendarDefinition]
+      ),
+    /domain mismatch/,
+    "a descriptor domain must match the registered tool domain"
   );
 }
 
@@ -684,7 +791,7 @@ try {
     assert.match(terminalize.text, /AND step\.status IN \('pending', 'running'\)/);
     assert.match(terminalize.text, /'planning_timeout'/);
     assert.deepEqual(terminalize.values, [
-      120,
+      240,
       20,
       "AGENT_PLANNING_TIMEOUT",
       "요청 처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
@@ -833,7 +940,7 @@ try {
 
   {
     const database = new FakeOutboxDatabaseService({
-      claim: createOutboxClaim({ attempt_count: 6 }),
+      claim: createOutboxClaim({ attempt_count: 5 }),
       terminalRun: { id: payload.runId }
     });
     const publisher = new AgentOutboxPublisherService(

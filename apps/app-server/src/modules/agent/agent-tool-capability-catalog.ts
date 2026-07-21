@@ -77,7 +77,6 @@ const TOOL_DOMAIN_BY_NAME: Readonly<Record<string, string>> = {
   get_meeting_decision_evidence: "meeting",
   get_meeting_participants: "meeting",
   get_meeting_report: "meeting",
-  inspect_sql_erd_schema: "sql_erd",
   join_meeting: "meeting",
   leave_meeting: "meeting",
   list_calendar_events: "calendar",
@@ -116,7 +115,6 @@ const TOOL_OPERATION_BY_NAME: Readonly<Record<string, AgentToolOperation>> = {
   get_meeting_decision_evidence: "read",
   get_meeting_participants: "read",
   get_meeting_report: "read",
-  inspect_sql_erd_schema: "read",
   join_meeting: "write",
   leave_meeting: "write",
   list_calendar_events: "read",
@@ -155,7 +153,7 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("meeting.participants.list", "meeting", ["resolve_meeting_resource", "get_meeting_participants"], "특정 회의의 현재 또는 과거 참여자를 조회할 때", ["회의록 또는 후속 작업 조회 요청"]),
   capability("meeting.reports.list", "meeting", ["list_meeting_reports"], "최신 N건 또는 기간별 회의록 목록을 조회할 때", ["단일 회의록 상세 또는 요약 요청"], ["최근 회의록 보여줘", "최근 3건 회의록"]),
   capability("meeting.report.detail", "meeting", ["list_meeting_reports", "get_meeting_report"], "특정 회의록의 상태나 상세를 확인할 때", ["회의록 목록만 필요한 요청"]),
-  capability("meeting.report.summary", "meeting", ["list_meeting_reports", "summarize_meeting_report"], "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때", ["원문 근거 검색 요청"]),
+  capability("meeting.report.summary", "meeting", ["summarize_meeting_report"], "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때", ["원문 근거 검색 요청"]),
   capability("meeting.evidence.search", "meeting", ["search_meeting_transcript"], "회의 발언 또는 Activity 근거를 검색할 때", ["결정 item에 직접 연결된 근거만 요청할 때"]),
   capability("meeting.decision.evidence", "meeting", ["list_meeting_reports", "get_meeting_decision_evidence"], "특정 결정사항의 직접 근거를 확인할 때", ["일반 회의 대화 검색 요청"]),
   capability("meeting.action_items.list", "meeting", ["find_action_items"], "담당자, 상태, 회의 기준으로 후속 작업을 찾을 때", ["후속 작업 변경, 승인 또는 반려 요청"]),
@@ -179,9 +177,20 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("board.issues.move", "board", ["search_board_issues", "move_board_issue_status"], "기존 이슈 상태나 컬럼을 변경할 때", ["이슈 생성 또는 담당자 변경 요청"]),
   capability("board.issues.assign", "board", ["search_board_issues", "assign_board_issue_safely"], "기존 이슈의 담당자를 변경할 때", ["이슈 상태 변경 또는 생성 요청"]),
   capability("board.briefing", "board", ["get_board_briefing", "diagnose_board_freshness", "resolve_board_context"], "Board 현황, 동기화 상태, context를 확인할 때", ["이슈 mutation 요청"]),
-  capability("sql_erd.inspect", "sql_erd", ["inspect_sql_erd_schema", "focus_sql_erd_tables"], "SQLtoERD schema나 특정 table을 살펴볼 때", ["schema 생성 요청"]),
+  capability("sql_erd.inspect", "sql_erd", ["focus_sql_erd_tables"], "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때", ["schema 생성, SQL 실행 또는 session 밖 schema 조회 요청"]),
   capability("sql_erd.generate", "sql_erd", ["generate_sql_erd"], "SQL로 ERD를 생성할 때", ["기존 schema inspection 요청"]),
   capability("canvas.delegate", "canvas", ["delegate_canvas_agent"], "Canvas 작업을 Agent에게 위임할 때", ["SQLtoERD 또는 Board 요청"]),
+  capability(
+    "canvas.drive_images.import",
+    "canvas",
+    ["delegate_canvas_agent"],
+    "Workspace Drive의 기존 이미지를 Canvas에 가져올 때",
+    ["일반 문서 검색 또는 Canvas 도형 직접 수정 요청"],
+    [
+      "드라이브에서 아키텍처 이미지를 캔버스에 올려줘",
+      "공유 드라이브의 팀 로고 이미지를 캔버스에 추가해줘"
+    ]
+  ),
   capability("pr_review.focus", "pr_review", ["recommend_pr_review_focus"], "PR review에서 우선 확인할 변경을 추천받을 때", ["Board 또는 Meeting 요청"]),
   capability("drive.documents.search", "drive", ["search_workspace_documents"], "Workspace 문서를 검색할 때", ["회의 transcript 또는 Board issue 검색 요청"]),
   unsupportedCapability("meeting.action_items.create", "meeting", "회의록에 없는 새 후속 작업을 추가할 때", ["새 회의 할 일 추가", "회의록에 액션 아이템 넣어줘"]),
@@ -192,6 +201,36 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   unsupportedCapability("drive.documents.write", "drive", "Workspace 문서를 생성·수정·삭제할 때", ["문서 수정", "파일 삭제"]),
   unsupportedCapability("pr_review.submit", "pr_review", "GitHub PR Review를 제출하거나 merge할 때", ["PR 리뷰 제출", "PR 머지"])
 ];
+
+export function getAgentCapabilityToolNames(
+  capabilityId: string
+): readonly string[] | null {
+  return (
+    CAPABILITY_DEFINITIONS.find(
+      (capability) =>
+        capability.id === capabilityId &&
+        capability.availability === "supported"
+    )?.toolNames ?? null
+  );
+}
+
+export function isTerminalAgentCapabilityTool(
+  capabilityIds: readonly string[],
+  toolName: string,
+  completedToolNames: readonly string[] = []
+): boolean {
+  if (capabilityIds.length === 0) {
+    return false;
+  }
+  const chains = capabilityIds.map(getAgentCapabilityToolNames);
+  const satisfiedToolNames = new Set([...completedToolNames, toolName]);
+  return (
+    chains.every((chain) => chain !== null && chain.length > 0) &&
+    chains.every((chain) =>
+      chain?.every((requiredToolName) => satisfiedToolNames.has(requiredToolName))
+    )
+  );
+}
 
 export function buildAgentToolCapabilityCatalog(
   definitions: AgentToolDefinition<unknown>[]
@@ -383,6 +422,37 @@ export function validateAgentToolCapabilityCatalog(
   const capabilityIds = new Set(capabilities.map((capability) => capability.id));
   if (capabilityIds.size !== capabilities.length) {
     throw new Error("Agent capability catalog contains duplicate capability IDs");
+  }
+  for (const capability of capabilities) {
+    for (const toolName of capability.toolNames) {
+      if (TOOL_DOMAIN_BY_NAME[toolName] !== capability.domain) {
+        throw new Error(
+          `Agent capability domain mismatch: ${capability.id} includes ${toolName}`
+        );
+      }
+    }
+  }
+  const capabilityById = new Map(
+    capabilities.map((capability) => [capability.id, capability])
+  );
+  for (const descriptor of descriptors) {
+    if (TOOL_DOMAIN_BY_NAME[descriptor.toolName] !== descriptor.domain) {
+      throw new Error(
+        `Agent tool descriptor domain mismatch: ${descriptor.toolName}`
+      );
+    }
+    for (const capabilityId of descriptor.capabilityIds) {
+      const capability = capabilityById.get(capabilityId);
+      if (
+        !capability ||
+        capability.domain !== descriptor.domain ||
+        !capability.toolNames.includes(descriptor.toolName)
+      ) {
+        throw new Error(
+          `Agent capability descriptor domain mismatch: ${capabilityId} and ${descriptor.toolName}`
+        );
+      }
+    }
   }
   if (
     capabilities.some(

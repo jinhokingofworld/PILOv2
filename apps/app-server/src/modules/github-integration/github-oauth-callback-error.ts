@@ -16,6 +16,7 @@ export type GithubCallbackErrorCode =
   | "installation_failed"
   | "installation_lookup_failed"
   | "installation_not_accessible"
+  | "workspace_access_denied"
   | "invalid_state"
   | "project_oauth_account_mismatch"
   | "project_oauth_scope_missing"
@@ -44,7 +45,11 @@ const CALLBACK_ERROR_BY_MESSAGE = new Map<string, GithubCallbackErrorCode>([
   ],
   ["GitHub App installation lookup failed", "installation_lookup_failed"],
   ["GitHub OAuth callback is stale", "stale_callback"],
-  ["GitHub App installation could not be saved", "installation_failed"]
+  ["GitHub App installation could not be saved", "installation_failed"],
+  [
+    "Workspace owner access is required to install the GitHub App",
+    "workspace_access_denied"
+  ]
 ]);
 
 const POSTGRES_UNIQUE_VIOLATION_CODE = "23505";

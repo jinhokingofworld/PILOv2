@@ -107,6 +107,12 @@ export function buildAgentReadResultAnswer(
 }
 
 function formatSqlErdTableFocus(input: AgentReadResultFormatterInput): string | null {
+  if (readString(input.outputSummary.action) === "needs_clarification") {
+    return (
+      boundText(input.outputSummary.question, 240) ??
+      "집중해서 볼 테이블 이름이나 기능 범위를 더 구체적으로 알려주세요."
+    );
+  }
   if (readString(input.outputSummary.action) !== "focused") {
     return null;
   }
@@ -121,7 +127,7 @@ function formatSqlErdTableFocus(input: AgentReadResultFormatterInput): string | 
   }
 
   return [
-    `${title ?? "현재 ERD"}에서 ${featureLabel ?? "요청한 기능"} 관련 테이블에 집중 표시했습니다.`,
+    `${title ?? "현재 ERD"}에서 ${featureLabel ?? "요청한 기능"} 관련 집중 보기 결과를 준비했습니다.`,
     `핵심 테이블: ${primaryTables.join(", ") || "없음"}`,
     ...(relatedTables.length > 0 ? [`관련 테이블: ${relatedTables.join(", ")}`] : [])
   ].join("\n");

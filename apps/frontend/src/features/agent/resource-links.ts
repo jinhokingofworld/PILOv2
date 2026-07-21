@@ -11,12 +11,9 @@ export type AgentResourceLink = {
   label: string;
 };
 
-export type SqlErdSessionCandidate = {
-  selectionToken: string;
-  title: string;
-  updatedAt: string;
-  tableCount: number;
-  relationCount: number;
+type AgentSqlErdRequestContext = {
+  surface: string;
+  sessionId: string;
 };
 
 export type StoredAgentCandidateSelection = {
@@ -37,6 +34,8 @@ export type AgentCandidateSelection = {
 
 const SQL_ERD_SESSION_PATH = "/sql-erd/session";
 const CANVAS_PATH = "/canvas";
+const MEETING_REPORT_PATH = "/report";
+const DRIVE_FILES_PATH = "/files";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_AGENT_CANDIDATES = 5;
@@ -60,18 +59,6 @@ export function getAgentCandidateSelections(
       selection: {
         kind: "candidate",
         candidateSelectionId: candidate.candidateSelectionId
-      }
-    }));
-  }
-  if (Array.isArray(output.candidates)) {
-    return getSqlErdSessionCandidates(run).map((candidate) => ({
-      key: `sql-erd:${candidate.selectionToken}`,
-      label: candidate.title,
-      description: formatSqlErdCandidateDescription(candidate),
-      status: null,
-      selection: {
-        kind: "sql_erd_session",
-        token: candidate.selectionToken
       }
     }));
   }
@@ -125,71 +112,6 @@ export function getStoredAgentCandidateSelections(
     : (candidates as StoredAgentCandidateSelection[]);
 }
 
-export function getSqlErdSessionCandidates(
-  run: Pick<AgentRun, "status" | "steps"> | null | undefined
-): SqlErdSessionCandidate[] {
-  if (run?.status !== "waiting_user_input") return [];
-  const latestCompletedToolStep = getLatestCandidateToolStep(run);
-  if (
-    latestCompletedToolStep?.toolName !== "inspect_sql_erd_schema" ||
-    latestCompletedToolStep.outputSummary?.status !== "needs_clarification"
-  ) {
-    return [];
-  }
-  const rawCandidates = latestCompletedToolStep.outputSummary.candidates;
-  if (
-    !Array.isArray(rawCandidates) ||
-    rawCandidates.length === 0 ||
-    rawCandidates.length > MAX_AGENT_CANDIDATES
-  ) {
-    return [];
-  }
-  const tokenCounts = new Map<string, number>();
-  for (const candidate of rawCandidates) {
-    if (
-      isPlainObject(candidate) &&
-      typeof candidate.selectionToken === "string" &&
-      UUID_PATTERN.test(candidate.selectionToken)
-    ) {
-      tokenCounts.set(
-        candidate.selectionToken,
-        (tokenCounts.get(candidate.selectionToken) ?? 0) + 1
-      );
-    }
-  }
-  const candidates = rawCandidates.map((candidate) => {
-    if (!isPlainObject(candidate)) return null;
-    const title = normalizeCandidateTitle(candidate.title);
-    const updatedAt = normalizeCandidateDate(candidate.updatedAt);
-    if (
-      typeof candidate.selectionToken !== "string" ||
-      !UUID_PATTERN.test(candidate.selectionToken) ||
-      !title ||
-      !updatedAt ||
-      !isNonNegativeSafeInteger(candidate.tableCount) ||
-      !isNonNegativeSafeInteger(candidate.relationCount)
-    ) {
-      return null;
-    }
-    return {
-      selectionToken: candidate.selectionToken,
-      title,
-      updatedAt,
-      tableCount: candidate.tableCount,
-      relationCount: candidate.relationCount
-    };
-  });
-  if (
-    candidates.some(
-      (candidate) =>
-        candidate === null || tokenCounts.get(candidate.selectionToken) !== 1
-    )
-  ) {
-    return [];
-  }
-  return candidates as SqlErdSessionCandidate[];
-}
-
 function getLatestCandidateToolStep(
   run: Pick<AgentRun, "status" | "steps"> | null | undefined
 ): CandidateToolStep | null {
@@ -205,10 +127,6 @@ function getLatestCandidateToolStep(
     return null;
   }
   return latestCompletedToolStep as CandidateToolStep;
-}
-
-function formatSqlErdCandidateDescription(candidate: SqlErdSessionCandidate): string {
-  return `수정 ${candidate.updatedAt} · 테이블 ${candidate.tableCount}개 · 관계 ${candidate.relationCount}개`;
 }
 
 export function getAgentResourceLinks(
@@ -227,7 +145,9 @@ export function getAgentResourceLinks(
     for (const resourceRef of step.resourceRefs) {
       const link =
         toSqlErdSessionLink(resourceRef) ??
-        toCanvasLink(resourceRef, step.outputSummary);
+        toCanvasLink(resourceRef, step.outputSummary) ??
+        toMeetingReportLink(resourceRef) ??
+        toDriveDocumentLink(resourceRef);
       if (link) {
         links.set(link.key, link);
       }
@@ -235,6 +155,124 @@ export function getAgentResourceLinks(
   }
 
   return [...links.values()];
+}
+
+function toMeetingReportLink(
+  resourceRef: Record<string, unknown>,
+): AgentResourceLink | null {
+  if (
+    resourceRef.domain !== "meeting" ||
+    resourceRef.resourceType !== "meeting_report" ||
+    typeof resourceRef.resourceId !== "string" ||
+    !UUID_PATTERN.test(resourceRef.resourceId) ||
+    !hasExactInternalResourceUrl(
+      resourceRef.url,
+      MEETING_REPORT_PATH,
+      "reportId",
+      resourceRef.resourceId,
+    )
+  ) {
+    return null;
+  }
+  return {
+    href: `${MEETING_REPORT_PATH}?reportId=${encodeURIComponent(resourceRef.resourceId)}`,
+    key: `meeting:report:${resourceRef.resourceId}`,
+    label: "회의록 보기",
+  };
+}
+
+function toDriveDocumentLink(
+  resourceRef: Record<string, unknown>,
+): AgentResourceLink | null {
+  if (
+    resourceRef.domain !== "drive" ||
+    resourceRef.resourceType !== "document" ||
+    typeof resourceRef.resourceId !== "string" ||
+    !UUID_PATTERN.test(resourceRef.resourceId) ||
+    !hasExactInternalResourceUrl(
+      resourceRef.url,
+      DRIVE_FILES_PATH,
+      "documentId",
+      resourceRef.resourceId,
+    )
+  ) {
+    return null;
+  }
+  const title = normalizeCandidateTitle(resourceRef.label);
+  return {
+    href: `${DRIVE_FILES_PATH}?documentId=${encodeURIComponent(resourceRef.resourceId)}`,
+    key: `drive:document:${resourceRef.resourceId}`,
+    label: title ? `${title} 보기` : "관련 문서 보기",
+  };
+}
+
+function hasExactInternalResourceUrl(
+  value: unknown,
+  path: string,
+  queryKey: string,
+  resourceId: string,
+): boolean {
+  if (
+    typeof value !== "string" ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.includes("\\")
+  ) {
+    return false;
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(value, "https://pilo.local");
+  } catch {
+    return false;
+  }
+  const queryKeys = [...parsedUrl.searchParams.keys()];
+  const resourceIds = parsedUrl.searchParams.getAll(queryKey);
+  return (
+    parsedUrl.origin === "https://pilo.local" &&
+    parsedUrl.pathname === path &&
+    parsedUrl.hash === "" &&
+    queryKeys.length === 1 &&
+    queryKeys[0] === queryKey &&
+    resourceIds.length === 1 &&
+    resourceIds[0] === resourceId
+  );
+}
+
+export function applyAgentSqlErdTableFocus(
+  run: Pick<AgentRun, "id" | "status" | "steps"> | null | undefined,
+  requestContext: AgentSqlErdRequestContext | null | undefined,
+  appliedActionKeys: Set<string>,
+  applyFocus: (focus: SqlErdAgentTableFocus) => void
+): boolean {
+  if (
+    run?.status !== "completed" ||
+    requestContext?.surface !== "sql_erd"
+  ) {
+    return false;
+  }
+
+  for (const step of [...run.steps].reverse()) {
+    if (step.status !== "completed") {
+      continue;
+    }
+    for (const resourceRef of [...step.resourceRefs].reverse()) {
+      const focus = toSqlErdSessionLink(resourceRef)?.focus;
+      if (!focus || focus.sessionId !== requestContext.sessionId) {
+        continue;
+      }
+      const actionKey = `${run.id}:${step.id}:${focus.modelFingerprint}`;
+      if (appliedActionKeys.has(actionKey)) {
+        return false;
+      }
+      applyFocus(focus);
+      appliedActionKeys.add(actionKey);
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function toCanvasLink(
@@ -355,12 +393,20 @@ export function parseSqlErdAgentTableFocusResource(
   }
   const primaryTableIds = readUniqueIds(metadata.primaryTableIds, 20, true);
   const relatedTableIds = readUniqueIds(metadata.relatedTableIds, 30, false);
+  const contextTableIds =
+    metadata.contextTableIds === undefined
+      ? []
+      : readUniqueIds(metadata.contextTableIds, 20, false);
   const relationIds = readUniqueIds(metadata.relationIds, 300, false);
-  if (!primaryTableIds || !relatedTableIds || !relationIds) {
+  if (!primaryTableIds || !relatedTableIds || !contextTableIds || !relationIds) {
     return null;
   }
   const primarySet = new Set(primaryTableIds);
-  if (relatedTableIds.some((id) => primarySet.has(id))) {
+  const relatedSet = new Set(relatedTableIds);
+  if (
+    relatedTableIds.some((id) => primarySet.has(id)) ||
+    contextTableIds.some((id) => primarySet.has(id) || relatedSet.has(id))
+  ) {
     return null;
   }
 
@@ -373,6 +419,7 @@ export function parseSqlErdAgentTableFocusResource(
     featureLabel: metadata.featureLabel.trim().replace(/\s+/g, " "),
     primaryTableIds,
     relatedTableIds,
+    contextTableIds,
     relationIds,
     confidence: metadata.confidence as SqlErdAgentTableFocus["confidence"]
   };
@@ -407,18 +454,6 @@ function normalizeCandidateTitle(value: unknown): string | null {
     .trim()
     .replace(/\s+/g, " ");
   return normalized && [...normalized].length <= 120 ? normalized : null;
-}
-
-function normalizeCandidateDate(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return null;
-  const normalized = new Date(timestamp).toISOString();
-  return value === normalized ? normalized : null;
-}
-
-function isNonNegativeSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && Number(value) >= 0;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

@@ -59,4 +59,16 @@ export class AgentInternalController {
   async completeWithoutSources(@Param("runId") runId: string): Promise<void> {
     await this.agentGroundedAnswerService.completeWithoutSources(runId);
   }
+
+  @Post("runs/:runId/grounded-answer/security-refusal")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async completeSecurityRefusal(@Param("runId") runId: string): Promise<void> {
+    await this.agentGroundedAnswerService.completeSecurityRefusal(runId);
+  }
+
+  @Post("runs/:runId/grounded-answer/citation-failure")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async failCitationValidation(@Param("runId") runId: string): Promise<void> {
+    await this.agentGroundedAnswerService.failCitationValidation(runId);
+  }
 }

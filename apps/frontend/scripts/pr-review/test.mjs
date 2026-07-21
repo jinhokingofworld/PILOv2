@@ -343,6 +343,11 @@ assert.match(prReviewAnalysisStatus, /PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS = 5 \* 
 assert.match(prReviewAnalysisStatus, /shouldPollPrReviewAnalysis/);
 assert.match(prReviewAnalysisStatus, /isPrReviewAnalysisDelayed/);
 assert.match(prReviewAnalysisStatusComponent, /PR 분석 중/);
+assert.match(prReviewAnalysisStatusComponent, /Pretendard/);
+assert.match(prReviewAnalysisStatusComponent, /Noto Sans KR/);
+assert.match(prReviewAnalysisStatusComponent, /Malgun Gothic/);
+assert.match(prReviewAnalysisStatusComponent, /break-keep text-balance/);
+assert.match(prReviewAnalysisStatusComponent, /자동으로 리뷰 공간을 엽니다/);
 assert.match(prReviewAnalysisStatusComponent, /분석 시간이 예상보다 길어지고 있습니다/);
 assert.match(prReviewAnalysisStatusComponent, /pollingError/);
 assert.match(prReviewAnalysisStatusComponent, /getPrReviewAnalysisRetryLabel/);
@@ -640,6 +645,25 @@ assert.match(prReviewFileNodeShapeUtil, /relationCount/);
 assert.match(prReviewFileNodeShapeUtil, /relationDetails/);
 assert.match(prReviewFileNodeShapeUtil, /useFocusedRelationEndpoint/);
 assert.match(prReviewFileNodeShapeUtil, /PR_REVIEW_FLOW_LABEL_SHAPE_TYPE/);
+assert.match(
+  prReviewFileNodeShapeUtil,
+  /grid-cols-\[auto_minmax\(220px,0\.7fr\)_minmax\(320px,1\.3fr\)\]/
+);
+assert.match(
+  prReviewFileNodeShapeUtil,
+  /text-2xl font-semibold leading-8 text-slate-950/
+);
+assert.match(
+  prReviewFileNodeShapeUtil,
+  /text-base leading-6 text-slate-600/
+);
+assert.match(
+  prReviewFileNodeShapeUtil,
+  /truncate text-base font-semibold text-slate-950/
+);
+assert.match(prReviewFileNodeShapeUtil, /getPrReviewFlowDragShapeIds/);
+assert.match(prReviewFileNodeShapeUtil, /onPointerDownCapture/);
+assert.match(prReviewFileNodeShapeUtil, /cursor-move/);
 assert.match(prReviewFileNodeShapeUtil, /PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE/);
 assert.match(prReviewFileNodeShapeUtil, /PR_REVIEW_ROLE_LANE_SHAPE_TYPE/);
 assert.match(prReviewFileNodeShapeUtil, /PrReviewRoleLaneShapeUtil/);
@@ -652,6 +676,8 @@ assert.match(prReviewShapeUtils, /PrReviewFlowLabelShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewFlowMilestoneShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewRoleLaneShapeUtil/);
 assert.match(prReviewCanvasSurface, /ContextMenu: null/);
+assert.match(prReviewCanvasSurface, /!persistedFileShapeEnabled/);
+assert.match(prReviewCanvasSurface, /layoutPreview !== null/);
 assert.match(prReviewCanvasSurface, /isReviewVersionStale \|\| reviewRoom\?\.status === "completed"/);
 assert.match(prReviewCanvasShell, /createReviewRoomRevision/);
 assert.match(prReviewCanvasShell, /PULL_REQUEST_HEAD_POLL_INTERVAL_MS/);
@@ -663,7 +689,7 @@ assert.match(prReviewConflictDraftLock, /setLock\(null\);/);
 assert.match(prReviewCanvasShell, /overlayClassName="z-\[90\]"/);
 assert.match(
   prReviewCanvasSurface,
-  /editor\.createShapes\(shapes\);\s+updatePrReviewRelationGeometry\(editor, internalShapeUpdateRef, true\);/
+  /editor\.createShapes\(shapes\);\s+updatePrReviewDerivedGeometry\(editor, internalShapeUpdateRef, true\);/
 );
 assert.match(prReviewFileNodeShapeUtil, /override onDoubleClick/);
 assert.match(prReviewFileNodeShapeUtil, /activatePrReviewFileNode/);
@@ -681,5 +707,6 @@ await import("./graph-exploration.test.mjs");
 await import("./canvas-operation-sync.test.mjs");
 await import("./node-activation.test.mjs");
 await import("./system-shape-policy.test.mjs");
+await import("./flow-group-drag.test.mjs");
 await import("../../src/features/pr-review/pr-review-github-source-realtime.test.mjs");
 await import("../../src/features/pr-review/pr-review-pull-request-refresh.test.mjs");

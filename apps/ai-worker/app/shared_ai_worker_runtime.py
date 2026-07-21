@@ -56,6 +56,19 @@ from app.meeting_transcript_embedding_processor import (
 LOGGER = logging.getLogger(__name__)
 
 
+def _positive_float_env(key: str, default: float) -> float:
+    value = _optional_env(key)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise RuntimeError(f"{key} must be a positive number") from error
+    if parsed <= 0:
+        raise RuntimeError(f"{key} must be a positive number")
+    return parsed
+
+
 @dataclass(frozen=True)
 class SharedAiWorkerSettings:
     aws_region: str
@@ -77,6 +90,7 @@ class SharedAiWorkerSettings:
     canvas_embedding_jobs_per_tick: int
     openai_meeting_transcript_embedding_model: str
     meeting_transcript_embedding_jobs_per_tick: int
+    openai_indexing_embedding_timeout_seconds: float
     legacy_agent_drain_enabled: bool
     legacy_meeting_drain_enabled: bool
     legacy_meeting_recordings_bucket: str | None
@@ -153,6 +167,10 @@ class SharedAiWorkerSettings:
             meeting_transcript_embedding_jobs_per_tick=_positive_int_env(
                 "MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK",
                 DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK,
+            ),
+            openai_indexing_embedding_timeout_seconds=_positive_float_env(
+                "OPENAI_INDEXING_EMBEDDING_TIMEOUT_SECONDS",
+                30.0,
             ),
             legacy_agent_drain_enabled=legacy_agent_drain_enabled,
             legacy_meeting_drain_enabled=legacy_meeting_drain_enabled,
@@ -277,6 +295,7 @@ def create_shared_ai_worker(
         OpenAiTranscriptEmbedder(
             resolved_settings.openai_api_key,
             resolved_settings.openai_meeting_transcript_embedding_model,
+            resolved_settings.openai_indexing_embedding_timeout_seconds,
         ),
     )
     meeting_activity_evidence_embedding_processor = MeetingActivityEvidenceEmbeddingProcessor(
@@ -284,6 +303,7 @@ def create_shared_ai_worker(
         OpenAiTranscriptEmbedder(
             resolved_settings.openai_api_key,
             resolved_settings.openai_meeting_transcript_embedding_model,
+            resolved_settings.openai_indexing_embedding_timeout_seconds,
         ),
     )
     legacy_meeting_report_processor = None

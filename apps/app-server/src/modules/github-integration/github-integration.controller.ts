@@ -374,12 +374,14 @@ export class GithubIntegrationController {
   async startGithubSyncRun(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
-    @Body() body: StartGithubSyncRunRequest | undefined
+    @Body() body: StartGithubSyncRunRequest | undefined,
+    @Headers("idempotency-key") idempotencyKey: string | undefined
   ): Promise<ApiSuccessResponse<GithubSyncRunPayload>> {
     const result = await this.githubIntegrationService.startGithubSyncRun(
       currentUserId,
       workspaceId,
-      body
+      body,
+      idempotencyKey
     );
     return apiResponse(result);
   }

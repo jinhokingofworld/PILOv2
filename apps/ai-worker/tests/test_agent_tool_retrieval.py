@@ -156,6 +156,17 @@ def test_catalog_rejects_a_sha_that_does_not_match_the_canonical_content() -> No
         parse_tool_capability_catalog(invalid, TOOL_SCHEMAS)
 
 
+def test_catalog_rejects_capability_and_descriptor_domain_mismatch() -> None:
+    invalid = catalog_payload()
+    invalid["capabilities"][0]["domain"] = "meeting"
+    invalid["sha256"] = compute_tool_capability_catalog_sha(
+        invalid["version"], invalid["capabilities"], invalid["descriptors"]
+    )
+
+    with pytest.raises(ValueError, match="Invalid toolCapabilityCatalog"):
+        parse_tool_capability_catalog(invalid, TOOL_SCHEMAS)
+
+
 def test_metadata_retrieval_prefers_matching_domain_and_returns_low_confidence_fallback() -> None:
     catalog = parse_tool_capability_catalog(catalog_payload(), TOOL_SCHEMAS)
     assert catalog is not None
@@ -250,7 +261,7 @@ def test_full_catalog_shortlists_calendar_list_for_common_date_queries(prompt: s
         (
             "현재 ERD 테이블 보여줘",
             "sql_erd.inspect",
-            {"inspect_sql_erd_schema", "focus_sql_erd_tables"},
+            {"focus_sql_erd_tables"},
         ),
         (
             "PR 리뷰 우선순위 보여줘",
@@ -319,7 +330,6 @@ def test_full_catalog_keeps_meeting_decision_to_calendar_handoff_out_of_unsuppor
         "calendar.events.create",
     )
     assert set(selection.tool_names) == {
-        "list_meeting_reports",
         "summarize_meeting_report",
         "create_calendar_event",
     }
@@ -338,6 +348,8 @@ def test_catalog_rejects_descriptor_digest_that_does_not_match_the_tool_schema()
 
 def test_retrieval_expands_required_chain_within_the_schema_budget() -> None:
     payload = catalog_payload()
+    payload["capabilities"][1]["domain"] = "calendar"
+    payload["descriptors"][1]["domain"] = "calendar"
     payload["capabilities"][0]["toolNames"] = [
         "list_calendar_events",
         "list_meeting_reports",

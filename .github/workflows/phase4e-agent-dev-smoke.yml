@@ -7,9 +7,9 @@ on:
         description: Expected Agent Worker retrieval mode
         required: true
         type: choice
-        default: shortlist
+        default: llm_router
         options:
-          - shortlist
+          - llm_router
           - shadow
 
 permissions:

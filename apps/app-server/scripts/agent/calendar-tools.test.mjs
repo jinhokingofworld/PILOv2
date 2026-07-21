@@ -103,13 +103,14 @@ class FakeCalendarService {
     };
   }
 
-  async updateEvent(currentUserId, workspaceId, eventId, body) {
+  async updateEvent(currentUserId, workspaceId, eventId, body, options) {
     this.calls.push({
       method: "updateEvent",
       currentUserId,
       workspaceId,
       eventId,
-      body
+      body,
+      options
     });
     return createEvent({ id: Number(eventId), ...body });
   }
@@ -259,12 +260,16 @@ function errorCode(error) {
     }
   });
   const plan = await tool.buildConfirmation(context, input);
+  assert.equal(plan.call.expectedUpdatedAt, "2026-07-08T00:00:00.000Z");
+  const legacyPlan = structuredClone(plan);
+  delete legacyPlan.call.expectedUpdatedAt;
+  assert.throws(
+    () => tool.buildConfirmationInput(legacyPlan),
+    (error) => /updatedAt|stale/i.test(error.getResponse().error.message)
+  );
   const result = await tool.execute(
     context,
-    tool.validateConfirmationInput({
-      eventId: plan.target.resourceId,
-      changes: plan.after
-    })
+    tool.validateConfirmationInput(tool.buildConfirmationInput(plan))
   );
 
   assert.equal(plan.toolName, "update_calendar_event");
@@ -294,6 +299,9 @@ function errorCode(error) {
   assert.deepEqual(calendarService.calls[2].body, {
     startTime: "16:00",
     endTime: "17:00"
+  });
+  assert.deepEqual(calendarService.calls[2].options, {
+    expectedUpdatedAt: "2026-07-08T00:00:00.000Z"
   });
 }
 

@@ -389,7 +389,10 @@ class FakeTransaction {
     }
 
     if (text.includes("status = 'completed'")) {
-      const [, , riskLevel, message, finalAnswer] = values;
+      const completesAfterTool = text.includes("tool_call_count = LEAST");
+      const riskLevel = completesAfterTool ? values[1] : values[2];
+      const message = completesAfterTool ? values[2] : values[3];
+      const finalAnswer = completesAfterTool ? values[2] : values[4];
       run.status = "completed";
       run.risk_level = riskLevel ?? run.risk_level;
       run.message = message;
@@ -466,7 +469,7 @@ class FakeTransaction {
   await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "한 시간 뒤의 새 요청" });
   assert.equal(state.threads.length, 2);
   assert.equal(state.runs[0].thread_id, "new-thread-id");
-  assert.match(state.threadLookupQuery, /last_activity_at > now\(\) - INTERVAL '1 hour'/);
+  assert.equal(state.threadLookupQuery, undefined);
 }
 
 {
@@ -476,9 +479,9 @@ class FakeTransaction {
   };
   const { service } = createService(state);
   await service.createRun(USER_ID, WORKSPACE_ID, { prompt: "confirmation 대기 중인 요청" });
-  assert.equal(state.threads.length, 1);
-  assert.equal(state.runs[0].thread_id, THREAD_ID);
-  assert.match(state.threadLookupQuery, /confirmation\.status = 'pending'/);
+  assert.equal(state.threads.length, 2);
+  assert.equal(state.runs[0].thread_id, "new-thread-id");
+  assert.equal(state.threadLookupQuery, undefined);
 }
 
 function createService(state) {
@@ -552,8 +555,8 @@ function errorMessage(error) {
     prompt: "지난 회의록 이어서 알려줘"
   });
 
-  assert.equal(state.threads.length, 1);
-  assert.equal(state.runs[0].thread_id, THREAD_ID);
+  assert.equal(state.threads.length, 2);
+  assert.equal(state.runs[0].thread_id, "new-thread-id");
 }
 
 {
@@ -602,6 +605,75 @@ function errorMessage(error) {
       sequence: 1,
       role: "assistant",
       content: "몇 시에 시작할까요?"
+    }
+  ]);
+}
+
+{
+  const focusResourceRef = {
+    domain: "sqltoerd",
+    resourceType: "session",
+    resourceId: SQL_ERD_SESSION_ID,
+    label: "집중 보기",
+    status: "focused",
+    url: `/sql-erd/session?sessionId=${SQL_ERD_SESSION_ID}`,
+    metadata: {
+      version: 1,
+      view: "table_focus",
+      sessionRevision: 3,
+      modelFingerprint: "fnv1a32:55995977",
+      featureLabel: "회의",
+      primaryTableIds: ["t22"],
+      relatedTableIds: [],
+      relationIds: [],
+      confidence: "high"
+    }
+  };
+  const state = {
+    runs: [createRun({ status: "running", tool_call_count: 0 })],
+    steps: [createStep({ tool_name: "focus_sql_erd_tables" })],
+    logs: [],
+    messages: [],
+    outbox: [
+      {
+        id: "outbox-1",
+        run_id: RUN_ID,
+        workspace_id: WORKSPACE_ID,
+        status: "delivered",
+        turn_sequence: 1,
+        reason: "run_created"
+      }
+    ]
+  };
+  const { service, database } = createService(state);
+
+  const result = await service.completeToolStepAndAdvance(
+    USER_ID,
+    WORKSPACE_ID,
+    {
+      runId: RUN_ID,
+      stepId: STEP_ID,
+      riskLevel: "low",
+      outputSummary: { action: "focused" },
+      resourceRefs: [focusResourceRef],
+      waitingMessage: "집중 보기 결과를 준비했습니다.",
+      postExecutionDisposition: "complete_run"
+    }
+  );
+
+  assert.equal(database.transactionCount, 1);
+  assert.equal(result.step.status, "completed");
+  assert.deepEqual(result.step.resourceRefs, [focusResourceRef]);
+  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.finalAnswer, "집중 보기 결과를 준비했습니다.");
+  assert.equal(result.queuedNextPlannerTurn, false);
+  assert.equal(state.outbox[0].status, "delivered");
+  assert.deepEqual(state.messages, [
+    {
+      run_id: RUN_ID,
+      sequence: 1,
+      role: "assistant",
+      content: "집중 보기 결과를 준비했습니다."
     }
   ]);
 }
@@ -782,7 +854,7 @@ function errorMessage(error) {
       },
       resourceRefs: [],
       waitingMessage: "어느 일정을 선택할까요?",
-      waitForUserInput: true
+      postExecutionDisposition: "wait_for_user_input"
     }
   );
 

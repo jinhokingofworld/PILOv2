@@ -4,6 +4,7 @@ const STORAGE_KEY_PREFIX = "pilo:sql-erd:agent-table-focus:";
 const CONFIDENCE_VALUES = ["high", "medium", "low"] as const;
 const MAX_PRIMARY_TABLES = 20;
 const MAX_RELATED_TABLES = 30;
+const MAX_CONTEXT_TABLES = 20;
 const MAX_RELATIONS = 300;
 
 export type SqlErdAgentTableFocus = {
@@ -15,11 +16,16 @@ export type SqlErdAgentTableFocus = {
   featureLabel: string;
   primaryTableIds: string[];
   relatedTableIds: string[];
+  contextTableIds: string[];
   relationIds: string[];
   confidence: (typeof CONFIDENCE_VALUES)[number];
 };
 
-export type SqlErdFocusedTableRole = "primary" | "related" | "dimmed";
+export type SqlErdFocusedTableRole =
+  | "primary"
+  | "related"
+  | "context"
+  | "dimmed";
 export type SqlErdFocusedRelationRole = "focused" | "dimmed";
 
 export function createSqlErdModelFingerprint(modelJson: unknown): string {
@@ -49,7 +55,10 @@ export function getSqlErdFocusedTableRole(
   if (focus.primaryTableIds.includes(tableId)) {
     return "primary";
   }
-  return focus.relatedTableIds.includes(tableId) ? "related" : "dimmed";
+  if (focus.relatedTableIds.includes(tableId)) {
+    return "related";
+  }
+  return focus.contextTableIds.includes(tableId) ? "context" : "dimmed";
 }
 
 export function getSqlErdFocusedRelationRole(
@@ -133,12 +142,20 @@ export function parseSqlErdAgentTableFocusResource(
     MAX_RELATED_TABLES,
     false
   );
+  const contextTableIds =
+    metadata.contextTableIds === undefined
+      ? []
+      : readUniqueIds(metadata.contextTableIds, MAX_CONTEXT_TABLES, false);
   const relationIds = readUniqueIds(metadata.relationIds, MAX_RELATIONS, false);
-  if (!primaryTableIds || !relatedTableIds || !relationIds) {
+  if (!primaryTableIds || !relatedTableIds || !contextTableIds || !relationIds) {
     return null;
   }
   const primarySet = new Set(primaryTableIds);
-  if (relatedTableIds.some((id) => primarySet.has(id))) {
+  const relatedSet = new Set(relatedTableIds);
+  if (
+    relatedTableIds.some((id) => primarySet.has(id)) ||
+    contextTableIds.some((id) => primarySet.has(id) || relatedSet.has(id))
+  ) {
     return null;
   }
 
@@ -151,6 +168,7 @@ export function parseSqlErdAgentTableFocusResource(
     featureLabel: metadata.featureLabel.trim().replace(/\s+/g, " "),
     primaryTableIds,
     relatedTableIds,
+    contextTableIds,
     relationIds,
     confidence: metadata.confidence as SqlErdAgentTableFocus["confidence"]
   };

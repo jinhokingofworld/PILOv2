@@ -6,12 +6,18 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.embedding_failure import (
+    RetryableEmbeddingError,
+    TerminalEmbeddingError,
+    classify_openai_embedding_error,
+)
+
 TRANSCRIPT_CHUNK_MAX_CHARACTERS = 1_800
 OPENAI_TRANSCRIPT_EMBEDDING_MODEL = "text-embedding-3-small"
 OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS = 1_536
 
 
-class TranscriptEmbeddingError(Exception):
+class TranscriptEmbeddingError(TerminalEmbeddingError):
     pass
 
 
@@ -32,10 +38,11 @@ class OpenAiTranscriptEmbedder:
         self,
         api_key: str,
         model_name: str = OPENAI_TRANSCRIPT_EMBEDDING_MODEL,
+        timeout_seconds: float = 30.0,
     ) -> None:
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, timeout=timeout_seconds)
         self.model_name = model_name
 
     def embed_passage(self, text: str) -> list[float]:
@@ -52,7 +59,7 @@ class OpenAiTranscriptEmbedder:
             )
             vector = [float(value) for value in response.data[0].embedding]
         except Exception as error:
-            raise TranscriptEmbeddingError("OpenAI transcript embedding failed") from error
+            raise classify_openai_embedding_error(error) from error
 
         if len(vector) != OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS:
             raise TranscriptEmbeddingError("OpenAI transcript embedding dimension is invalid")
@@ -104,6 +111,8 @@ class MeetingTranscriptEmbeddingRepository(Protocol):
 
     def fail_transcript_embedding_job(self, job_id: str, message: str) -> None: ...
 
+    def requeue_transcript_embedding_job(self, job_id: str, message: str) -> None: ...
+
 
 class MeetingTranscriptEmbeddingProcessor:
     def __init__(
@@ -140,7 +149,19 @@ class MeetingTranscriptEmbeddingProcessor:
 
             self.repository.complete_transcript_embedding_job(job_id)
             return "meeting_transcript_embedding_completed"
-        except TranscriptEmbeddingError as error:
+        except RetryableEmbeddingError:
+            if int(job.get("attempt_count", 1)) < 3:
+                self.repository.requeue_transcript_embedding_job(
+                    job_id,
+                    "Meeting transcript embedding is temporarily unavailable",
+                )
+                return "meeting_transcript_embedding_retryable_failure"
+            self.repository.fail_transcript_embedding_job(
+                job_id,
+                "Meeting transcript embedding retry limit was reached",
+            )
+            return "meeting_transcript_embedding_retry_exhausted"
+        except TerminalEmbeddingError as error:
             self.repository.fail_transcript_embedding_job(job_id, str(error))
             return "meeting_transcript_embedding_failed"
         except Exception:

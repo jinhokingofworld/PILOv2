@@ -29,6 +29,7 @@ import {
   mapSqlErdSessionSummary
 } from "./sql-erd.mapper";
 import { applySqlErdLayoutPatch } from "./sql-erd-layout-patch";
+import { createSqlErdModelFingerprint } from "./sql-erd-model-fingerprint";
 import { mapSqlErdOperation } from "./sql-erd-operation.mapper";
 import {
   validateCreateSqlErdOperationRequest,
@@ -154,6 +155,10 @@ type SqlErdSourceSnapshotWriteInput = Omit<
   NormalizedSqlErdSourcePublishInput,
   "leaseId"
 >;
+export interface SqlErdAgentReplacementExpectedState {
+  revision: number;
+  modelFingerprint: string;
+}
 export const MAX_SQL_ERD_SOURCE_SNAPSHOT_BATCH_RESPONSE_BYTES = 10 * 1024 * 1024;
 
 export function resolveNewSqlErdWriteProtocol(): SqlErdWriteProtocol {
@@ -842,13 +847,21 @@ export class SqlErdService {
     workspaceId: string,
     sessionId: string,
     agentRunId: string,
-    schemaSpec: unknown
+    schemaSpec: unknown,
+    expectedState: SqlErdAgentReplacementExpectedState
   ): Promise<SqlErdAgentSchemaReplacementPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
     const validSessionId = validateSqlErdSessionId(sessionId);
     const validAgentRunId = validateAgentRunId(agentRunId);
     const normalizedSpec = validateSqlErdSchemaSpec(schemaSpec);
     const requestFingerprint = createAgentSchemaFingerprint(normalizedSpec);
+    if (
+      !Number.isInteger(expectedState.revision) ||
+      expectedState.revision < 1 ||
+      !/^fnv1a32:[0-9a-f]{8}$/.test(expectedState.modelFingerprint)
+    ) {
+      throw badRequest("sqltoerd expected session state is invalid");
+    }
 
     try {
       return await this.database.transaction(async (transaction) => {
@@ -874,6 +887,17 @@ export class SqlErdService {
           return { ...existing, warnings: generated.warnings };
         }
 
+        const currentRevision = Number(session.revision);
+        const currentModelFingerprint = createSqlErdModelFingerprint(
+          session.model_json
+        );
+        if (
+          currentRevision !== expectedState.revision ||
+          currentModelFingerprint !== expectedState.modelFingerprint
+        ) {
+          throw conflict("sqltoerd session changed; inspect the schema again");
+        }
+
         const activeSourceLock = await this.findActiveSourceLock(
           transaction,
           workspaceId,
@@ -883,7 +907,6 @@ export class SqlErdService {
           throw conflict("sqltoerd source lock is currently held");
         }
 
-        const currentRevision = Number(session.revision);
         const input: SqlErdSourceSnapshotWriteInput = {
           baseRevision: currentRevision,
           clientOperationId: validAgentRunId,

@@ -67,6 +67,8 @@ export interface MeetingAgentReportSelector {
   from?: string;
   to?: string;
   status?: "PROCESSING" | "QUEUED" | "TRANSCRIBING" | "SUMMARIZING" | "COMPLETED" | "FAILED";
+  /** Agent-only displayed report-title filter; it is distinct from roomName. */
+  reportTitle?: string;
   /** Agent-only room-name filter; it is not part of the public Meeting API. */
   roomName?: string;
 }
@@ -433,7 +435,7 @@ export class MeetingAgentResourceResolver {
   ): MeetingAgentResourceCandidate {
     return {
       resourceType: "meeting_report",
-      label: report.summary?.slice(0, 120) || "회의록",
+      label: report.title?.slice(0, 120) || "회의록",
       description: report.createdAt,
       status: report.status
     };

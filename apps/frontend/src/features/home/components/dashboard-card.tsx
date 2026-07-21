@@ -45,7 +45,7 @@ export function DashboardCard({
   return (
     <Card
       {...(cursorTarget ? pageCursorTargetAttributes(cursorTarget) : {})}
-      className={`relative h-full min-h-0 ${className ?? ""} shadow-sm`}
+      className={`relative h-full min-h-0 overflow-hidden rounded-[15px] border-[#e7e9ee] bg-white shadow-[0_10px_30px_rgba(32,33,36,0.05)] ${className ?? ""}`}
       size="sm"
     >
       {background ? (
@@ -53,15 +53,19 @@ export function DashboardCard({
           {background}
         </div>
       ) : null}
-      <CardHeader className="relative z-10">
-        <CardTitle className="flex items-center gap-2">
-          <span className="flex size-7 items-center justify-center rounded-lg border bg-background text-muted-foreground">
+      <CardHeader className="relative z-10 gap-1.5 px-5 pt-5">
+        <CardTitle className="flex items-center gap-2.5 text-[16px] font-semibold tracking-[-0.01em] text-[#202124]">
+          <span className="flex size-8 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f6f7f9] text-[#6b6f78]">
             {icon}
           </span>
           <span className={titleClassName}>{title}</span>
           {titleAdornment}
         </CardTitle>
-        {description ? <CardDescription>{description}</CardDescription> : null}
+        {description ? (
+          <CardDescription className="text-[12px] leading-5 text-[#6b6f78]">
+            {description}
+          </CardDescription>
+        ) : null}
         <CardAction>
           {action ?? (
             <Button variant="ghost" size="icon-sm" aria-label={`${title} 열기`}>
@@ -70,7 +74,7 @@ export function DashboardCard({
           )}
         </CardAction>
       </CardHeader>
-      <CardContent className="relative z-10 flex min-h-0 flex-1 flex-col gap-4">
+      <CardContent className="relative z-10 flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
         {children}
       </CardContent>
     </Card>
@@ -112,7 +116,7 @@ export function DashboardCardMessage({
 }) {
   return (
     <div
-      className={`${rowSpanClassName} flex min-h-0 items-center justify-center rounded-lg border bg-background/80 p-3 text-center text-xs font-medium shadow-sm backdrop-blur ${
+      className={`${rowSpanClassName} flex min-h-0 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f8f9fb] p-3 text-center text-[12px] font-medium ${
         tone === "danger" ? "text-destructive" : "text-muted-foreground"
       }`}
     >
@@ -147,4 +151,3 @@ export function StatusPill({
     </span>
   );
 }
-

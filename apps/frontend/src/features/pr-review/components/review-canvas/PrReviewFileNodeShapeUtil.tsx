@@ -1,6 +1,6 @@
 "use client";
 
-import { type MouseEvent, useState } from "react";
+import { type MouseEvent, type PointerEvent, useState } from "react";
 import {
   HTMLContainer,
   Polyline2d,
@@ -12,11 +12,13 @@ import {
   useEditor,
   useValue,
   type TLBaseShape,
-  type TLShape
+  type TLShape,
+  type TLShapeId
 } from "tldraw";
 import { AlertTriangle, FileSearch, LockKeyhole } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { getPrReviewFlowDragShapeIds } from "@/features/pr-review/components/review-canvas/pr-review-flow-group-drag";
 import { activatePrReviewFileNode } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
 import type {
   PrReviewFileRoleType,
@@ -474,7 +476,7 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
             {shape.props.workflowOrder}
           </span>
           <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold text-slate-950">
+            <h3 className="truncate text-base font-semibold text-slate-950">
               {shape.props.fileName}
             </h3>
             <p className="mt-1 truncate text-xs text-slate-500">
@@ -680,17 +682,50 @@ function PrReviewRoleLane({ shape }: { shape: PrReviewRoleLaneShape }) {
 }
 
 function PrReviewFlowLabel({ shape }: { shape: PrReviewFlowLabelShape }) {
+  const editor = useEditor();
+
+  function handlePointerDownCapture(event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || editor.getInstanceState().isReadonly) {
+      return;
+    }
+
+    const fileShapes = editor
+      .getCurrentPageShapes()
+      .filter(isPrReviewFileNodeShape)
+      .map((fileShape) => ({
+        id: String(fileShape.id),
+        flowId: fileShape.props.flowId,
+        pinned: fileShape.props.pinned
+      }));
+    const shapeIds = getPrReviewFlowDragShapeIds({
+      fileShapes,
+      flowId: shape.props.flowId,
+      flowLabelShapeId: String(shape.id)
+    });
+
+    editor.select(...shapeIds.map((shapeId) => shapeId as TLShapeId));
+  }
+
   return (
-    <HTMLContainer style={{ width: shape.props.w, height: shape.props.h }}>
-      <div className="flex h-full min-w-0 flex-col justify-center overflow-hidden">
-        <p className="text-xs font-semibold uppercase text-blue-600">
+    <HTMLContainer
+      className="cursor-move"
+      onPointerDownCapture={handlePointerDownCapture}
+      style={{ width: shape.props.w, height: shape.props.h }}
+    >
+      <div className="grid h-full min-w-0 grid-cols-[auto_minmax(220px,0.7fr)_minmax(320px,1.3fr)] items-center gap-6 overflow-hidden">
+        <p className="whitespace-nowrap text-sm font-semibold uppercase text-blue-600">
           Flow {shape.props.sortOrder} · {shape.props.fileCount}개 파일
         </p>
-        <h2 className="mt-1 line-clamp-2 break-words text-lg font-semibold leading-6 text-slate-950">
+        <h2
+          className={cn(
+            "line-clamp-2 min-w-0 break-keep text-2xl font-semibold leading-8 text-slate-950",
+            shape.props.description ? undefined : "col-span-2"
+          )}
+        >
           {shape.props.title}
         </h2>
         {shape.props.description ? (
-          <p className="mt-2 line-clamp-2 break-words text-sm leading-5 text-slate-600">
+          <p className="line-clamp-2 min-w-0 break-keep text-base leading-6 text-slate-600">
             {shape.props.description}
           </p>
         ) : null}

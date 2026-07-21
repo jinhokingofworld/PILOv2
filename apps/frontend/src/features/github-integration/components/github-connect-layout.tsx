@@ -37,6 +37,7 @@ export type GithubConnectLayoutProps = {
   hasNextRepositoryPage: boolean;
   selectedRepositoryId: string;
   selectedRepository: GithubRepository | undefined;
+  restoredRepository: GithubRepository | null;
   projects: GithubProjectV2[];
   selectedProjectV2Id: string;
   isLoading: boolean;
@@ -86,6 +87,7 @@ export function GithubConnectLayout({
   hasNextRepositoryPage,
   selectedRepositoryId,
   selectedRepository,
+  restoredRepository,
   projects,
   selectedProjectV2Id,
   isLoading,
@@ -158,6 +160,7 @@ export function GithubConnectLayout({
           isDeletingInstallation={isDeletingInstallation}
           isInstallationDeleteRequested={isInstallationDeleteRequested}
           isLoading={isLoading}
+          isWorkspaceOwner={isWorkspaceOwner}
           projectOAuth={projectOAuth}
           onCancelDeleteInstallation={onCancelDeleteInstallation}
           onConfirmDeleteInstallation={onConfirmDeleteInstallation}
@@ -182,6 +185,11 @@ export function GithubConnectLayout({
           repositoriesTotal={repositoriesTotal}
           repositoryPage={repositoryPage}
           repositoryQuery={repositoryQuery}
+          restoredRepository={
+            restoredRepository?.id === selectedRepositoryId
+              ? restoredRepository
+              : null
+          }
           selectedRepositoryId={selectedRepositoryId}
         />
         <GithubConnectProject
@@ -197,6 +205,7 @@ export function GithubConnectLayout({
           installations={installations}
           isLoading={isLoading}
           isSyncing={isSyncing}
+          isWorkspaceOwner={isWorkspaceOwner}
           onStartSync={onStartSync}
           onSyncTargetChange={onSyncTargetChange}
           selectedInstallationId={selectedInstallationId}

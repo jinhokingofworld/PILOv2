@@ -1,12 +1,44 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { RoomEvent, Track } from "livekit-client";
+import { RoomEvent, ScreenSharePresets, Track } from "livekit-client";
 
 import {
   createPublisherSession,
   createViewerSession,
 } from "./livekit-screen-share-session.ts";
+import {
+  publisherScreenShareRoomOptions,
+  screenShareCaptureOptions,
+  screenSharePublishOptions,
+  viewerScreenShareRoomOptions,
+} from "./screen-share-livekit-options.ts";
+
+test("screen share capture preserves picker preferences at 1080p and 15 fps", () => {
+  assert.deepEqual(screenShareCaptureOptions, {
+    audio: false,
+    contentHint: "detail",
+    preferCurrentTab: true,
+    resolution: { width: 1920, height: 1080, frameRate: 15 },
+    selfBrowserSurface: "include",
+  });
+});
+
+test("screen share publish uses the 1080p source and ordered simulcast layers", () => {
+  assert.equal(
+    screenSharePublishOptions.screenShareEncoding,
+    ScreenSharePresets.h1080fps15.encoding,
+  );
+  assert.deepEqual(screenSharePublishOptions.screenShareSimulcastLayers, [
+    ScreenSharePresets.h360fps3,
+    ScreenSharePresets.h720fps5,
+  ]);
+});
+
+test("screen share rooms use role-specific media optimization", () => {
+  assert.deepEqual(publisherScreenShareRoomOptions, { dynacast: true });
+  assert.deepEqual(viewerScreenShareRoomOptions, { adaptiveStream: true });
+});
 
 function deferred() {
   let resolve;
@@ -132,13 +164,7 @@ test("publisher captures video before reserving, connects, and publishes only sc
   });
 
   await Promise.resolve();
-  assert.deepEqual(captureOptions, {
-    audio: false,
-    contentHint: "detail",
-    preferCurrentTab: true,
-    resolution: { width: 1280, height: 720, frameRate: 5 },
-    selfBrowserSurface: "include",
-  });
+  assert.equal(captureOptions, screenShareCaptureOptions);
   assert.deepEqual(order, ["capture"]);
   capture.resolve([track]);
   const session = await creating;
@@ -152,18 +178,7 @@ test("publisher captures video before reserving, connects, and publishes only sc
   assert.deepEqual(room.connectCalls, [
     ["wss://livekit.example.com", "publisher-token"],
   ]);
-  assert.deepEqual(published, [
-    [
-      track,
-      {
-        screenShareEncoding: {
-          maxBitrate: 800_000,
-          maxFramerate: 5,
-          priority: "medium",
-        },
-      },
-    ],
-  ]);
+  assert.deepEqual(published, [[track, screenSharePublishOptions]]);
   assert.equal(session.sessionId, "session-1");
   await session.stop();
 });

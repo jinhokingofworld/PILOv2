@@ -22,6 +22,7 @@ type GithubConnectRepositoriesProps = {
   repositoryPage: number;
   hasNextRepositoryPage: boolean;
   selectedRepositoryId: string;
+  restoredRepository: GithubRepository | null;
   isLoading: boolean;
   enabled: boolean;
   onRepositoryQueryChange: (value: string) => void;
@@ -36,6 +37,7 @@ export function GithubConnectRepositories({
   repositoryPage,
   hasNextRepositoryPage,
   selectedRepositoryId,
+  restoredRepository,
   isLoading,
   enabled,
   onRepositoryQueryChange,
@@ -70,6 +72,15 @@ export function GithubConnectRepositories({
               value={repositoryQuery}
             />
           </div>
+
+          {restoredRepository ? (
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-[8px] border border-[#dbe3ff] bg-[#f7f9ff] px-3 py-2 text-[13px]">
+              <span className="shrink-0 font-semibold text-[#3157d5]">현재 선택</span>
+              <span className="min-w-0 truncate font-medium text-[#344054]">
+                {restoredRepository.fullName}
+              </span>
+            </div>
+          ) : null}
 
           {isLoading ? (
             <LoadingTable rows={4} />

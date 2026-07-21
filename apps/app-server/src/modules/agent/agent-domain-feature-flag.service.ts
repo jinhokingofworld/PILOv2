@@ -6,8 +6,9 @@ import {
 
 /**
  * Domain rollout is deliberately independent from the global retrieval mode.
- * An unset flag preserves the already-deployed registry; an explicitly supplied
- * value is strict so a typo never opens a domain by accident.
+ * Dev fails closed to the rollout encoded in Terraform even while an ECS task
+ * definition is being replaced. Other environments preserve the historical
+ * registry when a flag is absent.
  */
 @Injectable()
 export class AgentDomainFeatureFlagService {
@@ -19,6 +20,9 @@ export class AgentDomainFeatureFlagService {
   isEnabled(domain: string, operation: AgentToolOperation): boolean {
     const value = process.env[this.environmentKey(domain, operation)];
     if (value === undefined) {
+      if (process.env.APP_ENV?.trim().toLowerCase() === "dev") {
+        return domain === "meeting";
+      }
       return true;
     }
     return value.trim().toLowerCase() === "true";
