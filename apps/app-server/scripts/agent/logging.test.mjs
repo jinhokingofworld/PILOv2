@@ -613,6 +613,28 @@ function errorMessage(error) {
 }
 
 {
+  const state = {
+    runs: [createRun({ status: "running" })],
+    steps: [],
+    logs: [],
+    messages: []
+  };
+  const { service } = createService(state);
+
+  await service.waitForUserInput(USER_ID, WORKSPACE_ID, {
+    runId: RUN_ID,
+    message: "대상을 다시 알려주세요.",
+    diagnosticCode: "context_reference_stale"
+  });
+
+  assert.equal(state.logs.length, 1);
+  assert.equal(state.logs[0].event_type, "context_resolution_rejected");
+  assert.deepEqual(state.logs[0].metadata_json, {
+    diagnosticCode: "context_reference_stale"
+  });
+}
+
+{
   const focusResourceRef = {
     domain: "sqltoerd",
     resourceType: "session",

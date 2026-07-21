@@ -110,6 +110,7 @@ export interface WaitForAgentUserInput {
   runId: string;
   message: string;
   riskLevel?: AgentRiskLevel | null;
+  diagnosticCode?: string;
 }
 
 export interface QueueNextAgentPlannerTurnInput {
@@ -708,6 +709,24 @@ export class AgentLoggingService {
         [run.id, input.riskLevel ?? null, message]
       );
       if (!updated) throw new Error("Agent run could not wait for user input");
+      if (input.diagnosticCode) {
+        await this.insertLog(transaction, {
+          workspaceId,
+          runId: run.id,
+          actorType: "app_server",
+          actorUserId: null,
+          level: "warn",
+          eventType: "context_resolution_rejected",
+          message: "Agent context resolution was rejected",
+          metadata: {
+            diagnosticCode: this.normalizeRequiredText(
+              input.diagnosticCode,
+              "diagnostic code"
+            )
+          },
+          resourceRefs: []
+        });
+      }
       return this.mapRun(updated);
     });
   }

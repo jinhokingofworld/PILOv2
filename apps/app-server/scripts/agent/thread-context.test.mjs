@@ -53,6 +53,18 @@ class FakeScopeDatabase {
   }
 }
 
+class FakeCandidateDatabase {
+  constructor(rows) {
+    this.rows = rows;
+    this.calls = [];
+  }
+
+  async query(text, values) {
+    this.calls.push({ text, values });
+    return this.rows;
+  }
+}
+
 {
   const database = new FakeDatabase([
     {
@@ -86,14 +98,15 @@ class FakeScopeDatabase {
     context.currentUserId,
     6
   ]);
-  assert.match(database.calls[0].text, /prior_run\.workspace_id = \$2/);
-  assert.match(database.calls[0].text, /prior_run\.requested_by_user_id = \$3/);
+  assert.match(database.calls[0].text, /scoped_run\.workspace_id = \$2/);
+  assert.match(database.calls[0].text, /scoped_run\.requested_by_user_id = \$3/);
   assert.match(
     database.calls[0].text,
-    /ORDER BY prior_run\.created_at DESC, prior_run\.id DESC/
+    /ORDER BY scoped_run\.created_at DESC, scoped_run\.id DESC/
   );
   assert.match(database.calls[0].text, /recent_run\.id DESC/);
-  assert.match(database.calls[0].text, /step\.id ASC/);
+  assert.match(database.calls[0].text, /step\.step_order DESC/);
+  assert.match(database.calls[0].text, /step\.id DESC/);
   assert.match(database.calls[0].text, /LIMIT \$4/);
 }
 
@@ -121,6 +134,45 @@ class FakeScopeDatabase {
     resourceId: actionItemId,
     reportId
   });
+}
+
+{
+  const candidateId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const candidateContextRef = `ctx_${createHash("sha256")
+    .update(`candidate:${candidateId}`, "utf8")
+    .digest("hex")
+    .slice(0, 24)}`;
+  const database = new FakeCandidateDatabase([
+    {
+      id: candidateId,
+      domain: "drive",
+      resource_type: "document",
+      resource_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      report_id: null,
+      label: "Selected document",
+      status: "available"
+    }
+  ]);
+  const service = new AgentThreadContextService(database);
+
+  assert.deepEqual(
+    await service.resolveCandidateReference(context, candidateContextRef),
+    {
+      domain: "drive",
+      resourceType: "document",
+      resourceId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      label: "Selected document",
+      status: "available"
+    }
+  );
+  assert.match(database.calls[0].text, /candidate\.consumed_at IS NOT NULL/);
+  assert.match(database.calls[0].text, /candidate\.expires_at > now\(\)/);
+  assert.match(database.calls[0].text, /thread\.expires_at > now\(\)/);
+  assert.deepEqual(database.calls[0].values, [
+    context.runId,
+    context.workspaceId,
+    context.currentUserId
+  ]);
 }
 
 {
@@ -233,7 +285,8 @@ class FakeScopeDatabase {
       label: "Weekly sync",
       status: "completed",
       ordinal: 2,
-      generation: 42
+      generation: 42,
+      source: "candidate"
     }
   ]);
   assert.deepEqual(state.pendingState, { kind: "clarification" });
@@ -260,6 +313,7 @@ class FakeScopeDatabase {
           label: "Prior document",
           ordinal: 1,
           generation: 5,
+          source: "tool_result",
           resourceId: "must-not-survive"
         }
       ]

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.agent_context_resolution import resolve_agent_context
 from app.agent_processor import (
     AGENT_TOOL_SCHEMA_VERSION,
     TOOL_RETRIEVAL_MODE_LLM_ROUTER,
@@ -108,6 +109,7 @@ def agent_context_state(
     turn_sequence: int,
     *,
     domain: str = "meeting",
+    resource_type: str = "result",
     count: int = 1,
 ) -> dict[str, object]:
     return {
@@ -117,7 +119,7 @@ def agent_context_state(
         "resultSets": [
             {
                 "domain": domain,
-                "resourceType": "result",
+                "resourceType": resource_type,
                 "contextRef": f"ctx_{turn_sequence:012x}{index:012x}",
                 "label": "result-" + ("x" * 400),
                 "ordinal": index + 1,
@@ -1021,6 +1023,50 @@ def test_processor_records_redacted_decision_trace_on_planner_step() -> None:
     assert WORKSPACE_ID not in serialized
 
 
+def test_processor_passes_resolved_context_to_planner_and_handoff() -> None:
+    context_state = agent_context_state(1, domain="calendar", resource_type="event")
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            prompt="그 일정 다시 보여줘",
+            context_state=context_state,
+        )
+    )
+    planner = FakePlannerClient()
+    handoff = FakeExecutionHandoffClient()
+
+    result = create_processor(repository, planner, handoff).process_payload(agent_payload())
+
+    assert result.reason == "agent_execution_handoff_completed"
+    resolution = planner.requests[0].context_resolution
+    assert resolution is not None
+    assert resolution.status == "resolved"
+    assert repository.completed_steps[0][2]["contextResolution"] == resolution.payload()
+    assert (
+        repository.completed_steps[0][2]["decisionTrace"]["stages"]["contextResolution"]["status"]
+        == "resolved"
+    )
+
+
+def test_normalizer_rejects_raw_or_mismatched_context_target() -> None:
+    context_state = agent_context_state(1, domain="calendar", resource_type="event")
+    resolution = resolve_agent_context("그 일정", context_state)
+    job = parse_agent_run_job_payload(agent_payload())
+
+    with pytest.raises(AgentPlannerOutputError, match="raw ID"):
+        normalize_agent_planner_decision(
+            planner_decision(tool_input={"eventId": 101}),
+            job,
+            context_resolution=resolution,
+        )
+
+    with pytest.raises(AgentPlannerOutputError, match="does not match"):
+        normalize_agent_planner_decision(
+            planner_decision(tool_input={"contextRef": "ctx_ffffffffffffffffffffffff"}),
+            job,
+            context_resolution=resolution,
+        )
+
+
 def sql_erd_focus_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
     capability = {
         "id": "sql_erd.tables.focus",
@@ -1411,11 +1457,11 @@ def test_llm_router_low_confidence_asks_without_planner_or_handoff() -> None:
         agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
     )
 
-    assert result.reason == "agent_router_needs_clarification"
+    assert result.reason == "agent_context_needs_clarification"
     assert planner_client.requests == []
     assert handoff_client.calls == []
     assert repository.waiting_user_input_updates == [
-        (RUN_ID, "어떤 종류의 일정을 말씀하시는지 알려주세요.")
+        (RUN_ID, "어느 대상을 뜻하는지 이름이나 번호로 알려주세요.")
     ]
 
 

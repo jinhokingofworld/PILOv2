@@ -384,6 +384,7 @@ def _safe_agent_context_state(value: object) -> dict[str, object] | None:
         label = reference.get("label")
         ordinal = reference.get("ordinal")
         generation = reference.get("generation")
+        source = reference.get("source", "tool_result")
         if (
             not isinstance(context_ref, str)
             or re.fullmatch(r"ctx_[0-9a-f]{24}", context_ref) is None
@@ -393,6 +394,7 @@ def _safe_agent_context_state(value: object) -> dict[str, object] | None:
             or not isinstance(label, str)
             or not isinstance(ordinal, int)
             or not isinstance(generation, int)
+            or source not in {"tool_result", "candidate"}
         ):
             continue
         safe_reference: dict[str, object] = {
@@ -402,6 +404,7 @@ def _safe_agent_context_state(value: object) -> dict[str, object] | None:
             "label": _truncate_utf8(label, 300),
             "ordinal": ordinal,
             "generation": generation,
+            "source": source,
         }
         status = reference.get("status")
         if isinstance(status, str):
@@ -1787,6 +1790,14 @@ class PgAgentRunRepository:
               run.workspace_id,
               run.requested_by_user_id,
               run.thread_id,
+              EXISTS (
+                SELECT 1
+                FROM agent_threads AS thread
+                WHERE thread.id = run.thread_id
+                  AND thread.workspace_id = run.workspace_id
+                  AND thread.requested_by_user_id = run.requested_by_user_id
+                  AND thread.expires_at > now()
+              ) AS thread_context_valid,
               run.status,
               run.prompt,
               run.timezone,
@@ -1974,12 +1985,16 @@ class PgAgentRunRepository:
         prior_context_rows = self.connection.execute(
             """
             WITH current_run AS (
-              SELECT thread_id
-              FROM agent_runs
-              WHERE id = %s
-                AND workspace_id = %s
-                AND requested_by_user_id = %s
-                AND thread_id IS NOT NULL
+              SELECT run.thread_id
+              FROM agent_runs AS run
+              INNER JOIN agent_threads AS thread
+                ON thread.id = run.thread_id
+               AND thread.workspace_id = run.workspace_id
+               AND thread.requested_by_user_id = run.requested_by_user_id
+               AND thread.expires_at > now()
+              WHERE run.id = %s
+                AND run.workspace_id = %s
+                AND run.requested_by_user_id = %s
             ), recent_runs AS (
               SELECT prior_run.id, prior_run.created_at
               FROM agent_runs AS prior_run
@@ -2096,6 +2111,10 @@ class PgAgentRunRepository:
 
         if latest_current_context_state is not None:
             context_state_values.append(latest_current_context_state)
+
+        if row.get("thread_context_valid", True) is not True:
+            context_state_values = []
+            selected_target = None
 
         context_state = _merge_agent_context_states(
             context_state_values,

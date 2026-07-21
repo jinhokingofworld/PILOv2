@@ -1286,6 +1286,7 @@ export class AgentService {
             "contextRef",
             "correlationId",
             "citationId",
+            "excludedContextRefs",
             "selectionToken"
           ].includes(key) ||
           (key === "id" && path.at(-1) === "choices");
