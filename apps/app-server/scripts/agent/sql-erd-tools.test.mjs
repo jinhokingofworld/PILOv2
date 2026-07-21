@@ -20,7 +20,8 @@ const {
   resolveSqlErdAgentTableFocus
 } = require("../../dist/modules/agent/tools/sql-erd-table-focus.js");
 const {
-  resolveDeterministicSqlErdTableFocus
+  resolveDeterministicSqlErdTableFocus,
+  validateLlmSqlErdTableFocus
 } = require("../../dist/modules/agent/tools/sql-erd-table-focus-resolver.js");
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
@@ -345,6 +346,63 @@ assert.deepEqual(
   )?.primaryTableRefs,
   ["t2"],
   "a schema-qualified table name may be resolved deterministically"
+);
+
+const primaryLimitProjection = {
+  tables: Array.from({ length: 31 }, (_, index) => ({
+    ref: `t${index + 1}`,
+    name: `table_${index + 1}`,
+    columns: []
+  })),
+  edges: [],
+  truncatedTableRefs: [],
+  truncated: false
+};
+const thirtyPrimaryRefs = primaryLimitProjection.tables
+  .slice(0, 30)
+  .map((table) => table.ref);
+const thirtyPrimaryResolution = validateLlmSqlErdTableFocus(
+  primaryLimitProjection,
+  "업무 테이블",
+  {
+    status: "focused",
+    featureLabel: "업무",
+    primaryTableRefs: thirtyPrimaryRefs,
+    confidence: "medium",
+    question: null
+  }
+);
+assert.equal(
+  thirtyPrimaryResolution.kind,
+  "focused",
+  "the resolver may select up to 30 primary tables"
+);
+assert.deepEqual(
+  thirtyPrimaryResolution.primaryTableRefs,
+  thirtyPrimaryRefs,
+  "the resolver must preserve all 30 accepted primary refs"
+);
+assert.equal(
+  validateLlmSqlErdTableFocus(primaryLimitProjection, "업무 테이블", {
+    status: "focused",
+    featureLabel: "업무",
+    primaryTableRefs: primaryLimitProjection.tables.map((table) => table.ref),
+    confidence: "medium",
+    question: null
+  }).reason,
+  "invalid_resolver_result",
+  "more than 30 primary refs must be rejected instead of truncated"
+);
+assert.equal(
+  validateLlmSqlErdTableFocus(primaryLimitProjection, "업무 테이블", {
+    status: "focused",
+    featureLabel: "업무",
+    primaryTableRefs: ["t1", 2],
+    confidence: "medium",
+    question: null
+  }).reason,
+  "invalid_resolver_result",
+  "a mixed-type primary ref array must be rejected instead of filtered"
 );
 assert.deepEqual(
   focusProjection.tables.map((table) => [table.ref, table.name]),
@@ -994,6 +1052,25 @@ assert.deepEqual(
 );
 assert.deepEqual(llmFocused.outputSummary.relatedTables, []);
 assert.equal(capturedResolverBody.model, "gpt-5.4-mini");
+const resolverOutputProperties =
+  capturedResolverBody.text.format.schema.properties;
+assert.deepEqual(resolverOutputProperties.primaryTableRefs.items, {
+  type: "string"
+});
+for (const unsupportedKeyword of [
+  "pattern",
+  "uniqueItems",
+  "maxItems",
+  "maxLength"
+]) {
+  assert.equal(
+    JSON.stringify(capturedResolverBody.text.format.schema).includes(
+      `"${unsupportedKeyword}"`
+    ),
+    false,
+    `provider schema must not include ${unsupportedKeyword}`
+  );
+}
 assert.equal(capturedResolverBody.input[1].content.includes(SESSION_ID), false);
 assert.equal(
   capturedResolverBody.input[1].content.includes("internal-payments-id"),
