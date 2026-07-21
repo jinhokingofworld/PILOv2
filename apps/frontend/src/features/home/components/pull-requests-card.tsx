@@ -80,12 +80,12 @@ function PullRequestRow({ pullRequest }: { pullRequest: GithubPullRequest }) {
         type: "home_pull_request"
       })}
       aria-label={`${pullRequest.title} PR 리뷰로 이동`}
-      className="flex min-h-[54px] min-w-0 flex-col justify-center overflow-hidden rounded-[10px] border border-[#eceef2] bg-[#fbfbfc] px-3 py-2.5 text-left transition hover:border-[#dfe2e8] hover:bg-white hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="flex min-h-[54px] min-w-0 flex-col justify-center overflow-hidden rounded-[10px] border border-border bg-muted/50 px-3 py-2.5 text-left transition hover:bg-muted hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       onClick={handleOpenPullRequest}
       type="button"
     >
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <p className="min-w-0 flex-1 truncate text-[17px] font-medium text-[#202124]">
+        <p className="min-w-0 flex-1 truncate text-[17px] font-medium text-foreground">
           {pullRequest.title}
         </p>
         <StatusPill
@@ -93,7 +93,7 @@ function PullRequestRow({ pullRequest }: { pullRequest: GithubPullRequest }) {
           tone={pullRequest.draft ? "muted" : "neutral"}
         />
       </div>
-      <p className="mt-1 min-w-0 truncate text-[16px] text-[#6b6f78]">
+      <p className="mt-1 min-w-0 truncate text-[16px] text-muted-foreground">
         {pullRequest.headBranch} → {pullRequest.baseBranch} ·{" "}
         {pullRequest.changedFilesCount} files
       </p>
