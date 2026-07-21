@@ -1722,6 +1722,7 @@ def normalize_agent_planner_decision(
         decision,
         job,
         prompt=prompt,
+        current_date=current_date,
         planning_context=planning_context,
     )
     decision = _normalize_meeting_report_relative_date_query(
@@ -1960,13 +1961,18 @@ def _normalize_calendar_thread_context_reference(
     job: AgentRunJob,
     *,
     prompt: str,
+    current_date: str | None,
     planning_context: str,
 ) -> AgentPlannerDecision:
     normalized_prompt = re.sub(r"\s+", " ", prompt).strip().lower()
+    ordinal = _calendar_event_ordinal(normalized_prompt)
     if not (
-        re.search(
-            r"(?:그|이|저|선택한)\s*일정|방금\s*(?:본|보여준|선택한)?\s*일정",
-            normalized_prompt,
+        (
+            ordinal is not None
+            or re.search(
+                r"(?:그|이|저|선택한)\s*일정|방금\s*(?:본|보여준|선택한)?\s*일정",
+                normalized_prompt,
+            )
         )
         and re.search(r"변경|수정|바꿔|옮겨", normalized_prompt)
         and any(tool.name == "update_calendar_event" for tool in job.tools)
@@ -1979,6 +1985,8 @@ def _normalize_calendar_thread_context_reference(
         if (reference := _calendar_context_reference_line(line)) is not None
     ]
     references = _latest_thread_context_references(references, "event")
+    if ordinal is not None:
+        references = [reference for reference in references if reference.get("ordinal") == ordinal]
     if len(references) != 1:
         return AgentPlannerDecision(
             status="needs_clarification",
@@ -1993,10 +2001,16 @@ def _normalize_calendar_thread_context_reference(
 
     tool_input = dict(decision.tool_input)
     changes = tool_input.get("changes")
-    if not isinstance(changes, dict) or not changes:
+    normalized_changes = dict(changes) if isinstance(changes, dict) else {}
+    relative_date = _calendar_update_relative_weekday(prompt, current_date)
+    if relative_date is not None:
+        normalized_changes["startDate"] = relative_date.isoformat()
+        normalized_changes["endDate"] = relative_date.isoformat()
+    if not normalized_changes:
         return decision
     tool_input.pop("eventId", None)
     tool_input["target"] = {"contextRef": references[0]["contextRef"]}
+    tool_input["changes"] = normalized_changes
     return AgentPlannerDecision(
         status="tool_candidate",
         message="이전 대화의 Calendar 일정을 사용합니다.",
@@ -2007,6 +2021,33 @@ def _normalize_calendar_thread_context_reference(
         missing_fields=(),
         unsupported_reason=None,
     )
+
+
+def _calendar_update_relative_weekday(prompt: str, current_date: str | None) -> date | None:
+    if current_date is None:
+        return None
+    try:
+        base_date = date.fromisoformat(current_date)
+    except ValueError:
+        return None
+
+    matches = list(
+        re.finditer(
+            r"(?:(이번|다음|다다음)\s*주\s*)?([월화수목금토일])요일",
+            prompt,
+        )
+    )
+    if len(matches) != 1:
+        return None
+
+    modifier, weekday_name = matches[0].groups()
+    weekday = "월화수목금토일".index(weekday_name)
+    if modifier is None:
+        return _next_weekday(base_date, weekday)
+
+    week_offset = {"이번": 0, "다음": 1, "다다음": 2}[modifier]
+    current_week_start = base_date - timedelta(days=base_date.weekday())
+    return current_week_start + timedelta(days=week_offset * 7 + weekday)
 
 
 def _normalize_calendar_detail_thread_context_reference(
@@ -2040,9 +2081,12 @@ def _normalize_calendar_detail_thread_context_reference(
         if (reference := _calendar_context_reference_line(line)) is not None
     ]
     references = _latest_thread_context_references(references, "event")
-    if ordinal is not None:
-        references = [reference for reference in references if reference.get("ordinal") == ordinal]
-    if len(references) != 1:
+    selected_reference = _calendar_detail_context_reference(
+        references,
+        prompt=prompt,
+        planning_context=planning_context,
+    )
+    if selected_reference is None:
         return _calendar_context_clarification()
 
     return AgentPlannerDecision(
@@ -2050,11 +2094,48 @@ def _normalize_calendar_detail_thread_context_reference(
         message="이전 대화에서 선택한 Calendar 일정의 상세를 조회합니다.",
         final_answer_draft="선택한 일정의 상세 정보를 확인합니다.",
         tool_name="get_calendar_event",
-        tool_input={"contextRef": references[0]["contextRef"]},
+        tool_input={"contextRef": selected_reference["contextRef"]},
         requires_confirmation=False,
         missing_fields=(),
         unsupported_reason=None,
     )
+
+
+def _calendar_detail_context_reference(
+    references: list[dict[str, object]],
+    *,
+    prompt: str,
+    planning_context: str,
+) -> dict[str, object] | None:
+    selector_texts = [
+        line[len("user: ") :]
+        for line in reversed(planning_context.splitlines())
+        if line.startswith("user: ")
+    ]
+    selector_texts.append(prompt)
+
+    seen: set[str] = set()
+    for selector_text in selector_texts:
+        normalized_selector = re.sub(r"\s+", " ", selector_text).strip().lower()
+        if not normalized_selector or normalized_selector in seen:
+            continue
+        seen.add(normalized_selector)
+
+        ordinal = _meeting_action_item_ordinal(normalized_selector)
+        if ordinal is not None:
+            matches = [reference for reference in references if reference.get("ordinal") == ordinal]
+            return matches[0] if len(matches) == 1 else None
+
+        label_matches = [
+            reference
+            for reference in references
+            if isinstance(reference.get("label"), str)
+            and re.sub(r"\s+", " ", str(reference["label"])).strip().lower() in normalized_selector
+        ]
+        if label_matches:
+            return label_matches[0] if len(label_matches) == 1 else None
+
+    return references[0] if len(references) == 1 else None
 
 
 def _has_valid_uuid(value: object) -> bool:

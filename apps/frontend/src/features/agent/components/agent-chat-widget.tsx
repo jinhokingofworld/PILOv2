@@ -485,6 +485,7 @@ export function AgentChatWidget() {
     useState<AgentConfirmationActionState | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const activeRunAbortControllerRef = useRef<AbortController | null>(null);
+  const conversationIdRef = useRef<string | null>(null);
   const appliedSqlErdFocusActionKeysRef = useRef(new Set<string>());
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -544,12 +545,14 @@ export function AgentChatWidget() {
     if (!conversationStorageKey) {
       setMessages(initialMessages);
       setConversationId(null);
+      conversationIdRef.current = null;
       setHydratedStorageKey(null);
       return;
     }
     const persisted = readPersistedConversation(conversationStorageKey);
     setMessages(persisted?.messages ?? initialMessages);
     setConversationId(persisted?.conversationId ?? null);
+    conversationIdRef.current = persisted?.conversationId ?? null;
     setHydratedStorageKey(conversationStorageKey);
   }, [conversationStorageKey]);
 
@@ -637,6 +640,7 @@ export function AgentChatWidget() {
   );
 
   const rememberConversation = useCallback((run: AgentRun) => {
+    conversationIdRef.current = run.conversationId;
     setConversationId(run.conversationId);
   }, []);
 
@@ -1094,7 +1098,8 @@ export function AgentChatWidget() {
       const routingInput: RouteAgentMessageInput = {
         activeRunId: targetMessage?.run?.id ?? null,
         clientRequestId,
-        conversationId: targetMessage?.run?.conversationId ?? conversationId,
+        conversationId:
+          targetMessage?.run?.conversationId ?? conversationIdRef.current,
         disposition: "auto",
         message: trimmedPrompt,
         timezone: getBrowserTimezone(),
@@ -1115,7 +1120,7 @@ export function AgentChatWidget() {
             workspaceId,
             {
               clientRequestId,
-              conversationId,
+              conversationId: conversationIdRef.current,
               prompt: trimmedPrompt,
               timezone: getBrowserTimezone(),
               requestContext
@@ -1459,6 +1464,7 @@ export function AgentChatWidget() {
       window.localStorage.removeItem(conversationStorageKey);
     }
     setConversationId(null);
+    conversationIdRef.current = null;
     setMessages(initialMessages);
     setDraft("");
     setConfirmationAction(null);

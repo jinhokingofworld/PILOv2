@@ -1766,6 +1766,33 @@ for (const testCase of [
 }
 
 {
+  const { service, loggingService, outboxPublisherService } = createService({
+    registryState: {
+      name: "get_calendar_event",
+      postExecutionDisposition: "complete_run"
+    },
+    planner: plannerOutput({
+      toolName: "get_calendar_event",
+      toolRetrieval: {
+        mode: "shadow",
+        capabilityIds: ["calendar.events.get", "calendar.events.list"],
+        primaryCapabilityId: "calendar.events.list",
+        primaryToolName: "list_calendar_events"
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(outboxPublisherService.calls, []);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
+}
+
+{
   const { service, loggingService } = createService({
     completedToolNames: ["list_calendar_events"],
     registryState: { name: "update_calendar_event" },

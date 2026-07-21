@@ -5,6 +5,7 @@ import {
   didAgentRunAcceptInput,
   getLatestAgentRunMessageSequence
 } from "./run-input-recovery.ts";
+import { createAgentApiClient } from "./api/client.ts";
 import { shouldFallbackToLegacyMessageApiCode } from "./message-routing-policy.ts";
 import {
   presentCanvasAgentDelegationRunOnce,
@@ -91,6 +92,35 @@ assert.match(agentApiClient, /routeMessage/);
 assert.match(agentApiClient, /agentMessagesPath/);
 assert.match(agentApiClient, /\/agent\/messages/);
 
+let routedMessageBody = null;
+const conversationBoundaryClient = createAgentApiClient({
+  accessToken: "local-test-token",
+  baseUrl: "http://localhost:4000/api/v1",
+  fetcher: async (_url, init) => {
+    routedMessageBody = JSON.parse(String(init?.body));
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: null
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+  }
+});
+await conversationBoundaryClient.routeMessage("workspace-1", {
+  activeRunId: null,
+  clientRequestId: "agent-message-conversation-boundary",
+  disposition: "auto",
+  message: "이번 주 일정 알려줘",
+  requestContext: null,
+  timezone: "Asia/Seoul"
+});
+assert.equal(Object.hasOwn(routedMessageBody, "conversationId"), true);
+assert.equal(routedMessageBody.conversationId, null);
+
 assert.doesNotMatch(agentChatWidget, /thread-run-recovery/);
 assert.doesNotMatch(agentChatWidget, /sessionStorage/);
 assert.match(agentChatWidget, /localStorage/);
@@ -100,7 +130,11 @@ assert.match(agentChatWidget, /persistConversation/);
 assert.match(agentChatWidget, /handleNewConversation/);
 assert.match(agentChatWidget, /aria-label="새 대화"/);
 assert.match(agentChatWidget, /conversationId: run\.conversationId/);
-assert.match(agentChatWidget, /conversationId: targetMessage\?\.run\?\.conversationId \?\? conversationId/);
+assert.match(agentChatWidget, /conversationIdRef = useRef<string \| null>\(null\)/);
+assert.match(
+  agentChatWidget,
+  /targetMessage\?\.run\?\.conversationId \?\? conversationIdRef\.current/
+);
 assert.match(agentApiClient, /submitRunInput/);
 assert.match(agentApiClient, /agentRunInputsPath/);
 assert.match(agentApiClient, /\/inputs/);

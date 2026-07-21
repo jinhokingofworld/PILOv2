@@ -272,6 +272,18 @@ def test_full_catalog_shortlists_calendar_list_for_common_date_queries(prompt: s
     assert calendar.tool_names == ("list_calendar_events",)
 
 
+def test_full_catalog_keeps_single_calendar_detail_intent_when_scores_tie() -> None:
+    catalog = parse_tool_capability_catalog(catalog_payload(), TOOL_SCHEMAS)
+    assert catalog is not None
+
+    detail = select_tool_shortlist("세번째 일정 상세보기", catalog, TOOL_SCHEMAS)
+
+    assert detail.used_shortlist is True
+    assert detail.retrieval.primary_capability_id == "calendar.get"
+    assert detail.retrieval.selected_capability_ids == ("calendar.get",)
+    assert detail.tool_names == ("get_calendar_event",)
+
+
 @pytest.mark.parametrize(
     ("prompt", "capability_id", "tool_names"),
     (

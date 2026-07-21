@@ -294,15 +294,15 @@ export class AgentExecutionService {
         ? await this.findCompletedToolNames(runId)
         : [];
     const postExecutionDisposition: AgentToolPostExecutionDisposition =
-      candidate.capabilityIds.length > 0
-        ? isTerminalAgentCapabilityTool(
-            candidate.capabilityIds,
-            definition.name,
-            completedToolNames
-          )
-          ? "complete_run"
-          : "continue_planning"
-        : definition.postExecutionDisposition ?? "continue_planning";
+      definition.postExecutionDisposition ??
+      (candidate.capabilityIds.length > 0 &&
+      isTerminalAgentCapabilityTool(
+        candidate.capabilityIds,
+        definition.name,
+        completedToolNames
+      )
+        ? "complete_run"
+        : "continue_planning");
 
     const isLegacyMeetingReportPlan = this.isLegacyMeetingReportPlan(
       candidate,
@@ -575,7 +575,7 @@ export class AgentExecutionService {
     const capabilityIds =
       routedCapabilityIds.length > 0
         ? routedCapabilityIds
-        : this.readCapabilityIds(output.toolRetrieval);
+        : this.readRetrievalCapabilityIds(output.toolRetrieval);
     return {
       toolName,
       toolSchemaVersion,
@@ -633,6 +633,20 @@ export class AgentExecutionService {
     return value.capabilityIds.filter(
       (item): item is string => typeof item === "string" && item.length > 0
     );
+  }
+
+  private readRetrievalCapabilityIds(
+    value: AgentJsonValue | undefined
+  ): string[] {
+    const capabilityIds = this.readCapabilityIds(value);
+    if (!this.isPlainObject(value)) {
+      return capabilityIds;
+    }
+    const primaryCapabilityId = value.primaryCapabilityId;
+    return typeof primaryCapabilityId === "string" &&
+      capabilityIds.includes(primaryCapabilityId)
+      ? [primaryCapabilityId]
+      : capabilityIds;
   }
 
   private matchesRegistry(

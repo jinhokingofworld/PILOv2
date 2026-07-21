@@ -3453,6 +3453,118 @@ def test_normalizer_uses_single_opaque_calendar_event_context_reference() -> Non
     }
 
 
+def test_normalizer_routes_calendar_update_ordinal_to_matching_context_reference() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="update_calendar_event",
+                    description="Calendar 일정 수정",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["target", "changes"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "target": {"type": "object"},
+                            "changes": {"type": "object"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    third_context_ref = "ctx_abcdef0123456789abcdef01"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="update_calendar_event",
+            tool_input={
+                "target": {"contextRef": "ctx_0123456789abcdef01234567"},
+                "changes": {
+                    "startDate": "2026-07-24",
+                    "endDate": "2026-07-24",
+                },
+            },
+            requires_confirmation=True,
+        ),
+        job,
+        prompt="세번째 일정 금요일로 옮겨줘",
+        planning_context=(
+            'previous resource: {"turn":2,"contextRef":"ctx_0123456789abcdef01234567",'
+            '"resourceType":"event","ordinal":1}\n'
+            'previous resource: {"turn":2,"contextRef":"ctx_89abcdef0123456701234567",'
+            '"resourceType":"event","ordinal":2}\n'
+            'previous resource: {"turn":2,"contextRef":"'
+            + third_context_ref
+            + '","resourceType":"event","ordinal":3}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "target": {"contextRef": third_context_ref},
+        "changes": {
+            "startDate": "2026-07-24",
+            "endDate": "2026-07-24",
+        },
+    }
+
+
+def test_normalizer_repairs_calendar_update_ordinal_and_relative_weekday() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="update_calendar_event",
+                    description="Calendar 일정 수정",
+                    riskLevel="medium",
+                    executionMode="confirmation_required",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["target", "changes"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "target": {"type": "object"},
+                            "changes": {"type": "object"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    third_context_ref = "ctx_abcdef0123456789abcdef01"
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="needs_clarification",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("target event ordinal", "target date"),
+        ),
+        job,
+        prompt="세번째 일정 금요일로 옮겨줘",
+        current_date="2026-07-22",
+        planning_context=(
+            'previous resource: {"turn":2,"contextRef":"ctx_0123456789abcdef01234567",'
+            '"resourceType":"event","ordinal":1}\n'
+            'previous resource: {"turn":2,"contextRef":"ctx_89abcdef0123456701234567",'
+            '"resourceType":"event","ordinal":2}\n'
+            'previous resource: {"turn":2,"contextRef":"'
+            + third_context_ref
+            + '","resourceType":"event","ordinal":3}'
+        ),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "target": {"contextRef": third_context_ref},
+        "changes": {
+            "startDate": "2026-07-24",
+            "endDate": "2026-07-24",
+        },
+    }
+
+
 def test_normalizer_routes_calendar_detail_ordinal_to_calendar_context_reference() -> None:
     job = parse_agent_run_job_payload(
         agent_payload(
@@ -3505,6 +3617,85 @@ def test_normalizer_routes_calendar_detail_ordinal_to_calendar_context_reference
     assert normalized.output_summary["toolName"] == "get_calendar_event"
     assert normalized.output_summary["input"] == {"contextRef": third_context_ref}
     assert normalized.output_summary["requiresConfirmation"] is None
+
+
+@pytest.mark.parametrize(
+    ("prompt", "planning_context"),
+    (
+        (
+            "하하하 일정 상세보기",
+            (
+                'previous resource: {"turn":2,"contextRef":"ctx_0123456789abcdef01234567",'
+                '"resourceType":"event","ordinal":1,"label":"이이이"}\n'
+                'previous resource: {"turn":2,"contextRef":"ctx_89abcdef0123456701234567",'
+                '"resourceType":"event","ordinal":2,"label":"쿄쿄쿄"}\n'
+                'previous resource: {"turn":2,"contextRef":"ctx_abcdef0123456789abcdef01",'
+                '"resourceType":"event","ordinal":3,"label":"하하하"}'
+            ),
+        ),
+        (
+            "일정 상세보기",
+            (
+                'previous resource: {"turn":2,"contextRef":"ctx_0123456789abcdef01234567",'
+                '"resourceType":"event","ordinal":1,"label":"이이이"}\n'
+                'previous resource: {"turn":2,"contextRef":"ctx_89abcdef0123456701234567",'
+                '"resourceType":"event","ordinal":2,"label":"쿄쿄쿄"}\n'
+                'previous resource: {"turn":2,"contextRef":"ctx_abcdef0123456789abcdef01",'
+                '"resourceType":"event","ordinal":3,"label":"하하하"}\n'
+                "user: 일정 상세보기\nassistant: 목록 순번이나 제목을 알려주세요.\nuser: 3번"
+            ),
+        ),
+        (
+            "일정 상세보기",
+            (
+                'previous resource: {"turn":2,"contextRef":"ctx_0123456789abcdef01234567",'
+                '"resourceType":"event","ordinal":1,"label":"이이이"}\n'
+                'previous resource: {"turn":2,"contextRef":"ctx_89abcdef0123456701234567",'
+                '"resourceType":"event","ordinal":2,"label":"쿄쿄쿄"}\n'
+                'previous resource: {"turn":2,"contextRef":"ctx_abcdef0123456789abcdef01",'
+                '"resourceType":"event","ordinal":3,"label":"하하하"}\n'
+                "user: 일정 상세보기\nassistant: 목록 순번이나 제목을 알려주세요.\nuser: 하하하"
+            ),
+        ),
+    ),
+)
+def test_normalizer_routes_calendar_detail_title_or_follow_up_selector(
+    prompt: str,
+    planning_context: str,
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="get_calendar_event",
+                    description="Calendar 일정 상세 조회",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["contextRef"],
+                        "additionalProperties": False,
+                        "properties": {"contextRef": {"type": "string"}},
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="needs_clarification",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("calendar_event_context",),
+        ),
+        job,
+        prompt=prompt,
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "get_calendar_event"
+    assert normalized.output_summary["input"] == {"contextRef": "ctx_abcdef0123456789abcdef01"}
 
 
 def test_normalizer_rejects_calendar_detail_ordinal_outside_latest_result_set() -> None:

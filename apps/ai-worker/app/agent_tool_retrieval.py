@@ -348,7 +348,10 @@ def retrieve_tool_shortlist(
         minimum_candidate_score = 0.0
 
     selected_capability_ids: list[str] = []
+    allow_multiple_capabilities = compound_request or bool(handoff_capability_ids)
     for rank, (score, capability_id) in enumerate(ranked[:top_k]):
+        if rank > 0 and not allow_multiple_capabilities:
+            break
         if score < minimum_candidate_score:
             break
         required_chain = capability_by_id[capability_id].tool_names

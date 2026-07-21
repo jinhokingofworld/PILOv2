@@ -254,10 +254,13 @@ export function createAgentApiClient({
     ) {
       return requestAgentData<AgentMessagePayload>(
         agentMessagesPath(workspaceId),
-        withJsonBody(body, {
-          method: "POST",
-          signal: options.signal
-        }),
+        withJsonBody(
+          { ...body, conversationId: body.conversationId ?? null },
+          {
+            method: "POST",
+            signal: options.signal
+          }
+        ),
         requestOptions
       );
     },

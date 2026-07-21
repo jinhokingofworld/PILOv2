@@ -183,7 +183,7 @@ export type AgentMessageDisposition =
 
 export type RouteAgentMessageInput = {
   message: string;
-  conversationId?: string | null;
+  conversationId: string | null;
   timezone?: string;
   clientRequestId: string;
   activeRunId: string | null;

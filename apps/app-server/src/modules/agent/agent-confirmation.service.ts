@@ -818,16 +818,15 @@ export class AgentConfirmationService {
           ? await this.findCompletedToolNames(runId)
           : [];
       const postExecutionDisposition: AgentToolPostExecutionDisposition =
-        capabilityIds.length > 0
-          ? isTerminalAgentCapabilityTool(
-              capabilityIds,
-              toolExecution.definition.name,
-              completedToolNames
-            )
-            ? "complete_run"
-            : "continue_planning"
-          : toolExecution.definition.postExecutionDisposition ??
-            "continue_planning";
+        toolExecution.definition.postExecutionDisposition ??
+        (capabilityIds.length > 0 &&
+        isTerminalAgentCapabilityTool(
+          capabilityIds,
+          toolExecution.definition.name,
+          completedToolNames
+        )
+          ? "complete_run"
+          : "continue_planning");
 
       const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
         currentUserId,
