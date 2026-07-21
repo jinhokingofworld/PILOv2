@@ -41,6 +41,7 @@ class OpenAiOutcomeJudge:
     def judge(self, evidence: OutcomeJudgeEvidence) -> str:
         response = self.client.responses.create(
             model=self.model,
+            temperature=0,
             input=[
                 {"role": "system", "content": _OUTCOME_JUDGE_SYSTEM_PROMPT},
                 {
