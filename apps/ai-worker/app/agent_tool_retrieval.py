@@ -10,13 +10,9 @@ from typing import Protocol
 _SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 _TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣_]+")
 _SUPPORTED_CATALOG_VERSIONS = frozenset(
-    {
-        "agent-tool-capabilities:v1",
-        "agent-tool-capabilities:v2",
-        "agent-tool-capabilities:v3",
-    }
+    {"agent-tool-capabilities:v1", "agent-tool-capabilities:v2"}
 )
-TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v5"
+TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v4"
 _KOREAN_PARTICLES = (
     "으로",
     "에서",
@@ -56,14 +52,6 @@ _TOKEN_ALIASES = {
     "sql_erd": ("erd",),
     "sqltoerd": ("erd",),
     "table": ("테이블",),
-}
-_DOMAIN_SWITCH_ALIASES = {
-    "meeting": ("회의록", "회의", "미팅", "meeting"),
-    "calendar": ("일정", "캘린더", "calendar"),
-    "board": ("보드", "이슈", "board", "issue"),
-    "drive": ("드라이브", "문서", "파일", "drive", "document"),
-    "sql_erd": ("sqltoerd", "erd"),
-    "pr_review": ("pr review", "pr 리뷰", "pr"),
 }
 _INTENT_CUE_MARKERS = (
     ("조회", ("조회", "보여", "보기", "확인", "살펴")),
@@ -107,41 +95,6 @@ _INTENT_CUE_FAMILY = {
 _CAPABILITY_EXAMPLE_KINDS = frozenset(
     {"canonical", "paraphrase", "typo", "honorific", "abbreviation"}
 )
-_CAPABILITY_BOUNDARY_EXAMPLE_KINDS = frozenset(
-    {"negation", "exclusion", "correction", "anaphora", "domain_switch"}
-)
-_CAPABILITY_SELECTOR_KINDS = frozenset(
-    {
-        "none",
-        "current_meeting",
-        "meeting_room_name",
-        "meeting_scope",
-        "meeting_report",
-        "transcript_query",
-        "decision_index",
-        "action_item",
-        "workspace_member",
-        "query",
-        "calendar_event",
-        "date_range",
-        "board_issue",
-        "title_query",
-        "body_query",
-        "board_context",
-        "sql_erd_session",
-        "table_reference",
-        "sql_ddl",
-        "canvas_context",
-        "pr_review_session",
-        "review_file",
-        "document_query",
-    }
-)
-_UUID_PATTERN = re.compile(
-    r"(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![0-9a-f])",
-    re.IGNORECASE,
-)
 DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET = 8_000
 
 
@@ -149,14 +102,6 @@ DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET = 8_000
 class CapabilityExample:
     kind: str
     utterance: str
-
-
-@dataclass(frozen=True)
-class CapabilityBoundaryExample:
-    kind: str
-    utterance: str
-    expected_status: str
-    expected_capability_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -191,10 +136,6 @@ class CapabilityDefinition:
     selector_kinds: tuple[str, ...]
     requires_confirmation: bool
     availability: str
-    boundary_examples: tuple[CapabilityBoundaryExample, ...] = ()
-    terminal_tool_names: tuple[str, ...] = ()
-    operation: str | None = None
-    execution_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -264,15 +205,8 @@ def parse_tool_capability_catalog(
     if not hmac.compare_digest(sha256, expected_sha256):
         raise ValueError("Invalid toolCapabilityCatalog SHA")
 
-    strict_v2 = version in {
-        "agent-tool-capabilities:v2",
-        "agent-tool-capabilities:v3",
-    }
-    strict_v3 = version == "agent-tool-capabilities:v3"
-    capabilities = tuple(
-        _parse_capability(item, strict_v2=strict_v2, strict_v3=strict_v3)
-        for item in raw_capabilities
-    )
+    strict_v2 = version == "agent-tool-capabilities:v2"
+    capabilities = tuple(_parse_capability(item, strict_v2=strict_v2) for item in raw_capabilities)
     descriptors = tuple(_parse_descriptor(item, strict_v2=strict_v2) for item in raw_descriptors)
     tool_names = {descriptor.tool_name for descriptor in descriptors}
     eligible_tool_names = set(eligible_tool_schemas)
@@ -295,14 +229,6 @@ def parse_tool_capability_catalog(
             for descriptor in descriptors
         )
         or (strict_v2 and not _valid_v2_capability_contract(capabilities, descriptors))
-        or (
-            strict_v3
-            and not _valid_v3_capability_contract(
-                capabilities,
-                descriptors,
-                eligible_tool_schemas,
-            )
-        )
         or any(
             not hmac.compare_digest(
                 descriptor.input_schema_sha256,
@@ -336,15 +262,6 @@ def retrieve_tool_shortlist(
         raise ValueError("schema_token_budget must be positive")
 
     prompt_tokens = set(_tokens(prompt))
-    negated_intent_cues = _negated_intent_cues(prompt)
-    excluded_domains = _excluded_domains(prompt)
-    excluded_domain_tokens = set(
-        _tokens(
-            " ".join(
-                alias for domain in excluded_domains for alias in _DOMAIN_SWITCH_ALIASES[domain]
-            )
-        )
-    )
     capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
     descriptor_by_tool_name = {
         descriptor.tool_name: descriptor for descriptor in catalog.descriptors
@@ -358,15 +275,8 @@ def retrieve_tool_shortlist(
         terminal_descriptor = descriptor_by_tool_name[terminal_tool_name]
         metadata_tokens = _capability_metadata_tokens(capability)
         negative_tokens = set(_tokens(" ".join(capability.must_not_use_for))) - metadata_tokens
-        score = _capability_match_score(
-            prompt_tokens,
-            capability,
-            negated_intent_cues=negated_intent_cues,
-        )
-        if capability.domain in excluded_domains:
-            score -= 100.0
-        negative_prompt_tokens = prompt_tokens - set(negated_intent_cues) - excluded_domain_tokens
-        score -= float(len(negative_prompt_tokens & negative_tokens)) * 0.75
+        score = _capability_match_score(prompt_tokens, capability)
+        score -= float(len(prompt_tokens & negative_tokens)) * 0.75
         metadata_scores.append(score)
         if semantic_reranker:
             score += semantic_reranker.score(prompt, terminal_descriptor)
@@ -377,15 +287,7 @@ def retrieve_tool_shortlist(
     best_metadata_score = max(metadata_scores, default=0.0)
     unsupported_ranked = sorted(
         (
-            (
-                _capability_match_score(
-                    prompt_tokens,
-                    capability,
-                    negated_intent_cues=negated_intent_cues,
-                )
-                - (100.0 if capability.domain in excluded_domains else 0.0),
-                capability.capability_id,
-            )
+            (_capability_match_score(prompt_tokens, capability), capability.capability_id)
             for capability in catalog.capabilities
             if capability.availability == "unsupported"
         ),
@@ -401,11 +303,10 @@ def retrieve_tool_shortlist(
         prompt_tokens,
         capability_by_id,
     )
-    compound_request = _is_compound_request(prompt)
     if (
         not handoff_capability_ids
         and unsupported_score > 0
-        and unsupported_score >= best_metadata_score
+        and unsupported_score > best_metadata_score
     ):
         return ToolRetrievalResult(
             tool_names=tuple(),
@@ -414,17 +315,6 @@ def retrieve_tool_shortlist(
             unsupported_capability_id=unsupported_capability_id,
             candidate_count=candidate_count,
             confidence_bucket=_confidence_bucket(unsupported_score),
-        )
-    top_capability_ids = tuple(
-        capability_id for score, capability_id in ranked if score > 0 and score == best_score
-    )
-    if not handoff_capability_ids and not compound_request and len(top_capability_ids) > 1:
-        return ToolRetrievalResult(
-            tool_names=tuple(),
-            low_confidence=True,
-            fallback_reason="conflicting_capabilities",
-            candidate_count=candidate_count,
-            confidence_bucket=_confidence_bucket(best_metadata_score),
         )
     if best_score <= 0:
         return ToolRetrievalResult(
@@ -441,6 +331,7 @@ def retrieve_tool_shortlist(
     # Scores are discrete token overlaps. Preserve a closely matched second
     # capability only for compound requests, while excluding one-token
     # adjacent Meeting actions from an otherwise unambiguous shortlist.
+    compound_request = _is_compound_request(prompt)
     minimum_candidate_score = max(1.0, best_score - 1.0) if compound_request else best_score
 
     if handoff_capability_ids:
@@ -634,17 +525,11 @@ def _confidence_bucket(score: float) -> str:
     return "high"
 
 
-def _capability_match_score(
-    prompt_tokens: set[str],
-    capability: CapabilityDefinition,
-    *,
-    negated_intent_cues: frozenset[str] = frozenset(),
-) -> float:
+def _capability_match_score(prompt_tokens: set[str], capability: CapabilityDefinition) -> float:
     metadata_tokens = _capability_metadata_tokens(capability)
     overlapping_tokens = prompt_tokens & metadata_tokens
-    score = sum(0.25 if _is_intent_surface_token(token) else 1.0 for token in overlapping_tokens)
-    score -= float(len(negated_intent_cues & metadata_tokens)) * 4.0
-    prompt_intent_cues = (prompt_tokens & _INTENT_CUE_TOKENS) - negated_intent_cues
+    score = float(sum(not _is_intent_surface_token(token) for token in overlapping_tokens))
+    prompt_intent_cues = prompt_tokens & _INTENT_CUE_TOKENS
     capability_intent_cues = metadata_tokens & _INTENT_CUE_TOKENS
     prompt_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in prompt_intent_cues}
     capability_intent_families = {_INTENT_CUE_FAMILY[cue] for cue in capability_intent_cues}
@@ -652,37 +537,6 @@ def _capability_match_score(
     if prompt_intent_cues:
         score -= float(len(capability_intent_families - prompt_intent_families)) * 0.75
     return score
-
-
-def _negated_intent_cues(prompt: str) -> frozenset[str]:
-    negated: set[str] = set()
-    for cue, markers in _INTENT_CUE_MARKERS:
-        if any(
-            re.search(
-                rf"{re.escape(marker)}[^\s,.!?]{{0,8}}(?:지\s*말|하지\s*말|말고)",
-                prompt,
-                re.IGNORECASE,
-            )
-            for marker in markers
-        ):
-            negated.add(cue)
-    return frozenset(negated)
-
-
-def _excluded_domains(prompt: str) -> frozenset[str]:
-    folded = prompt.casefold()
-    excluded: set[str] = set()
-    for domain, aliases in _DOMAIN_SWITCH_ALIASES.items():
-        if any(
-            re.search(
-                rf"(?<![0-9a-z]){re.escape(alias)}(?![0-9a-z])\s*"
-                r"(?:말고|아니고|제외하고|빼고|대신)",
-                folded,
-            )
-            for alias in aliases
-        ):
-            excluded.add(domain)
-    return frozenset(excluded)
 
 
 def _is_intent_surface_token(token: str) -> bool:
@@ -764,115 +618,6 @@ def _valid_v2_capability_contract(
     return True
 
 
-def _valid_v3_capability_contract(
-    capabilities: tuple[CapabilityDefinition, ...],
-    descriptors: tuple[ToolCapabilityDescriptor, ...],
-    eligible_tool_schemas: dict[str, dict[str, object]],
-) -> bool:
-    if not _capability_chains_are_acyclic(capabilities):
-        return False
-    descriptor_by_tool_name = {descriptor.tool_name: descriptor for descriptor in descriptors}
-    capability_ids = {capability.capability_id for capability in capabilities}
-    for capability in capabilities:
-        boundary_kinds = {example.kind for example in capability.boundary_examples}
-        terminal_tool_name = capability.tool_names[-1] if capability.tool_names else None
-        terminal_descriptor = (
-            descriptor_by_tool_name.get(terminal_tool_name) if terminal_tool_name else None
-        )
-        if (
-            len(capability.boundary_examples) != len(_CAPABILITY_BOUNDARY_EXAMPLE_KINDS)
-            or boundary_kinds != _CAPABILITY_BOUNDARY_EXAMPLE_KINDS
-            or not set(capability.selector_kinds) <= _CAPABILITY_SELECTOR_KINDS
-            or any(_UUID_PATTERN.search(example.utterance) for example in capability.examples)
-            or any(
-                _UUID_PATTERN.search(example.utterance)
-                or len(set(example.expected_capability_ids)) != len(example.expected_capability_ids)
-                or not set(example.expected_capability_ids) <= capability_ids
-                or (example.expected_status == "routed" and not example.expected_capability_ids)
-                or (example.expected_status != "routed" and bool(example.expected_capability_ids))
-                or example.expected_status not in {"routed", "needs_clarification", "unsupported"}
-                for example in capability.boundary_examples
-            )
-            or (
-                capability.availability == "supported"
-                and (
-                    terminal_descriptor is None
-                    or capability.terminal_tool_names != (terminal_tool_name,)
-                    or capability.operation != terminal_descriptor.operation
-                    or capability.execution_mode != terminal_descriptor.execution_mode
-                    or capability.requires_confirmation != terminal_descriptor.requires_confirmation
-                )
-            )
-            or (
-                capability.availability == "unsupported"
-                and (
-                    capability.terminal_tool_names
-                    or capability.operation is not None
-                    or capability.execution_mode is not None
-                )
-            )
-        ):
-            return False
-
-    for descriptor in descriptors:
-        matching_capabilities = tuple(
-            capability
-            for capability in capabilities
-            if descriptor.tool_name in capability.tool_names
-        )
-        expected_prerequisites: set[str] = set()
-        expected_follow_ups: set[str] = set()
-        for capability in matching_capabilities:
-            index = capability.tool_names.index(descriptor.tool_name)
-            expected_prerequisites.update(capability.tool_names[:index])
-            expected_follow_ups.update(capability.tool_names[index + 1 :])
-        schema_properties = eligible_tool_schemas[descriptor.tool_name].get("properties", {})
-        if not isinstance(schema_properties, dict):
-            return False
-        if (
-            set(descriptor.capability_ids)
-            != {capability.capability_id for capability in matching_capabilities}
-            or set(descriptor.prerequisite_tool_names) != expected_prerequisites
-            or set(descriptor.follow_up_tool_names) != expected_follow_ups
-            or set(descriptor.accepted_selector_fields) != set(schema_properties)
-            or descriptor.operation not in {"read", "write"}
-        ):
-            return False
-    return True
-
-
-def _capability_chains_are_acyclic(
-    capabilities: tuple[CapabilityDefinition, ...],
-) -> bool:
-    edges: dict[str, set[str]] = {}
-    for capability in capabilities:
-        if capability.availability != "supported":
-            continue
-        for source, target in zip(
-            capability.tool_names,
-            capability.tool_names[1:],
-            strict=False,
-        ):
-            edges.setdefault(source, set()).add(target)
-
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(tool_name: str) -> bool:
-        if tool_name in visiting:
-            return False
-        if tool_name in visited:
-            return True
-        visiting.add(tool_name)
-        if not all(visit(target) for target in edges.get(tool_name, set())):
-            return False
-        visiting.remove(tool_name)
-        visited.add(tool_name)
-        return True
-
-    return all(visit(tool_name) for tool_name in edges)
-
-
 def _parse_descriptor(value: object, *, strict_v2: bool = False) -> ToolCapabilityDescriptor:
     if not isinstance(value, dict):
         raise ValueError("Invalid tool capability descriptor")
@@ -908,12 +653,7 @@ def _parse_descriptor(value: object, *, strict_v2: bool = False) -> ToolCapabili
     )
 
 
-def _parse_capability(
-    value: object,
-    *,
-    strict_v2: bool = False,
-    strict_v3: bool = False,
-) -> CapabilityDefinition:
+def _parse_capability(value: object, *, strict_v2: bool = False) -> CapabilityDefinition:
     if not isinstance(value, dict):
         raise ValueError("Invalid capability definition")
     return CapabilityDefinition(
@@ -939,22 +679,6 @@ def _parse_capability(
             if strict_v2
             else _optional_string(value, "availability", "supported")
         ),
-        boundary_examples=_parse_boundary_examples(value, required=strict_v3),
-        terminal_tool_names=(
-            _string_tuple(value, "terminalToolNames")
-            if strict_v3
-            else _optional_string_tuple(value, "terminalToolNames")
-        ),
-        operation=(
-            _nullable_operation(value, required=True)
-            if strict_v3
-            else _nullable_operation(value, required=False)
-        ),
-        execution_mode=(
-            _nullable_string(value, "executionMode", required=True)
-            if strict_v3
-            else _nullable_string(value, "executionMode", required=False)
-        ),
     )
 
 
@@ -974,29 +698,6 @@ def _parse_examples(
             CapabilityExample(
                 kind=_required_string(raw_example, "kind"),
                 utterance=_required_string(raw_example, "utterance"),
-            )
-        )
-    return tuple(examples)
-
-
-def _parse_boundary_examples(
-    value: dict[object, object], *, required: bool
-) -> tuple[CapabilityBoundaryExample, ...]:
-    if "boundaryExamples" not in value and not required:
-        return tuple()
-    raw_examples = value.get("boundaryExamples")
-    if not isinstance(raw_examples, list):
-        raise ValueError("Invalid tool capability descriptor")
-    examples: list[CapabilityBoundaryExample] = []
-    for raw_example in raw_examples:
-        if not isinstance(raw_example, dict):
-            raise ValueError("Invalid tool capability descriptor")
-        examples.append(
-            CapabilityBoundaryExample(
-                kind=_required_string(raw_example, "kind"),
-                utterance=_required_string(raw_example, "utterance"),
-                expected_status=_required_string(raw_example, "expectedStatus"),
-                expected_capability_ids=_string_tuple(raw_example, "expectedCapabilityIds"),
             )
         )
     return tuple(examples)
@@ -1055,28 +756,6 @@ def _required_operation(value: dict[object, object]) -> str:
     if operation not in {"read", "write"}:
         raise ValueError("Invalid tool capability descriptor")
     return operation
-
-
-def _nullable_operation(value: dict[object, object], *, required: bool) -> str | None:
-    if "operation" not in value:
-        if required:
-            raise ValueError("Invalid tool capability descriptor")
-        return None
-    result = value.get("operation")
-    if result is None:
-        return None
-    return _required_operation(value)
-
-
-def _nullable_string(value: dict[object, object], key: str, *, required: bool) -> str | None:
-    if key not in value:
-        if required:
-            raise ValueError("Invalid tool capability descriptor")
-        return None
-    result = value.get(key)
-    if result is None:
-        return None
-    return _required_string(value, key)
 
 
 def _sha256_string(value: dict[object, object], key: str) -> str:

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { AgentToolDefinition } from "./types/agent-tool.types";
 
 export const AGENT_TOOL_CAPABILITY_CATALOG_VERSION =
-  "agent-tool-capabilities:v3";
+  "agent-tool-capabilities:v2";
 
 export type AgentCapabilityAvailability = "supported" | "unsupported";
 
@@ -16,20 +16,6 @@ export type AgentCapabilityExampleKind =
 export interface AgentCapabilityExample {
   kind: AgentCapabilityExampleKind;
   utterance: string;
-}
-
-export type AgentCapabilityBoundaryExampleKind =
-  | "negation"
-  | "exclusion"
-  | "correction"
-  | "anaphora"
-  | "domain_switch";
-
-export interface AgentCapabilityBoundaryExample {
-  kind: AgentCapabilityBoundaryExampleKind;
-  utterance: string;
-  expectedStatus: "routed" | "needs_clarification" | "unsupported";
-  expectedCapabilityIds: string[];
 }
 
 export type AgentToolOperation = "read" | "write";
@@ -61,22 +47,10 @@ export interface AgentCapabilityDefinition {
   mustNotUseFor: string[];
   positiveExamples: string[];
   examples: AgentCapabilityExample[];
-  boundaryExamples: AgentCapabilityBoundaryExample[];
   selectorKinds: string[];
-  terminalToolNames: string[];
-  operation: AgentToolOperation | null;
-  executionMode: AgentToolDefinition<unknown>["executionMode"] | null;
   requiresConfirmation: boolean;
   availability: AgentCapabilityAvailability;
 }
-
-type AgentCapabilitySeed = Omit<
-  AgentCapabilityDefinition,
-  | "terminalToolNames"
-  | "operation"
-  | "executionMode"
-  | "requiresConfirmation"
->;
 
 export interface AgentToolCapabilityCatalogSnapshot {
   version: string;
@@ -169,7 +143,7 @@ export function getAgentToolDomainAndOperation(
   return domain && operation ? { domain, operation } : null;
 }
 
-const CAPABILITY_DEFINITIONS: AgentCapabilitySeed[] = [
+const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("meeting.rooms.list", "meeting", ["list_meeting_rooms"], "회의방 또는 진행 중인 회의를 조회할 때", ["회의에 참여하거나 시작하는 요청"]),
   capability("meeting.control.start", "meeting", ["list_meeting_rooms", "start_meeting_in_room"], "특정 회의방에서 새 회의를 시작할 때", ["기존 회의 참여 또는 퇴장 요청"]),
   capability("meeting.control.join", "meeting", ["resolve_meeting_resource", "join_meeting"], "진행 중인 회의에 참여하거나 재입장할 때", ["회의 시작 또는 현재 회의 퇴장 요청"]),
@@ -177,11 +151,11 @@ const CAPABILITY_DEFINITIONS: AgentCapabilitySeed[] = [
   capability("meeting.recording.start", "meeting", ["get_active_meeting", "start_meeting_recording"], "현재 회의의 녹음을 시작할 때", ["녹음 종료 또는 회의록 조회 요청"]),
   capability("meeting.recording.end", "meeting", ["get_active_meeting", "end_meeting_recording"], "현재 회의의 녹음을 종료하고 회의록 생성을 요청할 때", ["녹음 시작 또는 회의 퇴장 요청"]),
   capability("meeting.participants.list", "meeting", ["resolve_meeting_resource", "get_meeting_participants"], "특정 회의의 현재 또는 과거 참여자를 조회할 때", ["회의록 또는 후속 작업 조회 요청"]),
-  capability("meeting.reports.list", "meeting", ["list_meeting_reports"], "최신 N건 또는 기간별 회의록 목록을 조회할 때", ["단일 회의록 상세·요약, Drive 문서 또는 Board 이슈 검색 요청"], ["최근 회의록 보여줘", "최근 3건 회의록"]),
-  capability("meeting.report.detail", "meeting", ["list_meeting_reports", "get_meeting_report"], "특정 회의록의 상태나 상세를 확인할 때", ["회의록 목록·요약, Drive 문서 본문 검색 요청"]),
-  capability("meeting.report.summary", "meeting", ["summarize_meeting_report"], "특정 회의록의 요약, 결정사항, 논의, 후속 작업을 읽을 때", ["transcript 원문 검색, Drive 문서 검색, 후속 작업 mutation 요청"], ["그 회의록 요약해줘", "회의록 결정사항 알려줘"]),
-  capability("meeting.evidence.search", "meeting", ["search_meeting_transcript"], "회의 transcript 발언 또는 Activity 근거의 본문을 검색할 때", ["Drive 문서 본문, Board 이슈 본문, 결정 item 직접 근거 또는 write 요청"]),
-  capability("meeting.decision.evidence", "meeting", ["list_meeting_reports", "get_meeting_decision_evidence"], "특정 결정사항에 직접 연결된 Meeting 근거를 확인할 때", ["일반 회의 대화, Drive 문서 또는 Board 이슈 검색 요청"]),
+  capability("meeting.reports.list", "meeting", ["list_meeting_reports"], "최신 N건 또는 기간별 회의록 목록을 조회할 때", ["단일 회의록 상세 또는 요약 요청"], ["최근 회의록 보여줘", "최근 3건 회의록"]),
+  capability("meeting.report.detail", "meeting", ["list_meeting_reports", "get_meeting_report"], "특정 회의록의 상태나 상세를 확인할 때", ["회의록 목록만 필요한 요청"]),
+  capability("meeting.report.summary", "meeting", ["summarize_meeting_report"], "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때", ["원문 근거 검색 요청"]),
+  capability("meeting.evidence.search", "meeting", ["search_meeting_transcript"], "회의 발언 또는 Activity 근거를 검색할 때", ["결정 item에 직접 연결된 근거만 요청할 때"]),
+  capability("meeting.decision.evidence", "meeting", ["list_meeting_reports", "get_meeting_decision_evidence"], "특정 결정사항의 직접 근거를 확인할 때", ["일반 회의 대화 검색 요청"]),
   capability("meeting.action_items.list", "meeting", ["find_action_items"], "담당자, 상태, 회의 기준으로 후속 작업을 찾을 때", ["후속 작업 변경, 승인 또는 반려 요청"]),
   capability("meeting.action_items.update", "meeting", ["find_action_items", "update_meeting_report_action_item"], "후속 작업의 담당자, 제목, 우선순위를 변경할 때", ["후속 작업 승인 또는 반려 요청"]),
   capability("meeting.action_items.dismiss", "meeting", ["find_action_items", "dismiss_meeting_report_action_item"], "후속 작업을 반려하거나 제외할 때", ["후속 작업 수정 또는 승인 요청"]),
@@ -193,12 +167,12 @@ const CAPABILITY_DEFINITIONS: AgentCapabilitySeed[] = [
     "calendar",
     ["list_calendar_events"],
     "기간의 일정 목록을 조회할 때",
-    ["새 일정 생성, 기존 일정 변경 또는 일정 삭제 요청"],
+    ["새 일정 생성 또는 기존 일정 변경 요청"],
     ["일정 보여줘", "이번 주 일정 알려줘"]
   ),
-  capability("calendar.events.create", "calendar", ["create_calendar_event"], "새 Calendar 일정을 생성할 때", ["일정 목록 조회, 기존 일정 변경·삭제 또는 회의록 조회 요청"]),
-  capability("calendar.events.update", "calendar", ["list_calendar_events", "update_calendar_event"], "기존 Calendar 일정의 시간이나 내용을 변경할 때", ["일정 목록 조회, 새 일정 생성·삭제 요청"]),
-  capability("board.issues.search", "board", ["search_board_issues", "get_board_issue_context"], "Board 이슈 제목을 검색하거나 선택한 이슈의 본문·현재 맥락을 읽을 때", ["이슈 생성·상태·담당자 변경, Drive 문서 또는 Meeting transcript 검색 요청"], ["로그인 이슈 제목 찾아줘", "그 이슈 본문 보여줘"]),
+  capability("calendar.events.create", "calendar", ["create_calendar_event"], "새 일정을 생성할 때", ["기존 일정 변경 또는 회의록 조회 요청"]),
+  capability("calendar.events.update", "calendar", ["list_calendar_events", "update_calendar_event"], "기존 일정의 시간이나 내용을 변경할 때", ["새 일정 생성 요청"]),
+  capability("board.issues.search", "board", ["search_board_issues", "get_board_issue_context"], "이슈를 찾거나 현재 맥락을 확인할 때", ["이슈 생성 또는 상태 변경 요청"]),
   capability("board.issues.create", "board", ["create_board_issue"], "새 Board 이슈를 생성할 때", ["기존 이슈 담당자나 상태 변경 요청"]),
   capability("board.issues.move", "board", ["search_board_issues", "move_board_issue_status"], "기존 이슈 상태나 컬럼을 변경할 때", ["이슈 생성 또는 담당자 변경 요청"]),
   capability("board.issues.assign", "board", ["search_board_issues", "assign_board_issue_safely"], "기존 이슈의 담당자를 변경할 때", ["이슈 상태 변경 또는 생성 요청"]),
@@ -241,8 +215,8 @@ const CAPABILITY_DEFINITIONS: AgentCapabilitySeed[] = [
       "공유 드라이브의 팀 로고 이미지를 캔버스에 추가해줘"
     ]
   ),
-  capability("pr_review.focus", "pr_review", ["recommend_pr_review_focus"], "현재 PR Review session에서 우선 확인할 변경 파일을 추천받을 때", ["review 제출·merge, SQLtoERD, Board 또는 Meeting 요청"]),
-  capability("drive.documents.search", "drive", ["search_workspace_documents"], "Workspace Drive 문서의 제목이나 본문 query를 검색할 때", ["회의 transcript·회의록, Board issue 검색 또는 문서 write 요청"]),
+  capability("pr_review.focus", "pr_review", ["recommend_pr_review_focus"], "PR review에서 우선 확인할 변경을 추천받을 때", ["Board 또는 Meeting 요청"]),
+  capability("drive.documents.search", "drive", ["search_workspace_documents"], "Workspace 문서를 검색할 때", ["회의 transcript 또는 Board issue 검색 요청"]),
   unsupportedCapability("meeting.action_items.create", "meeting", "회의록에 없는 새 후속 작업을 추가할 때", ["새 회의 할 일 추가", "회의록에 액션 아이템 넣어줘"]),
   unsupportedCapability("calendar.events.delete", "calendar", "기존 Calendar 일정을 삭제할 때", ["내일 일정 삭제", "캘린더 이벤트 지워줘"]),
   unsupportedCapability("board.issues.delete", "board", "GitHub Board Issue를 삭제할 때", ["보드 이슈 삭제", "이슈 지워줘"]),
@@ -282,45 +256,6 @@ export function isTerminalAgentCapabilityTool(
   );
 }
 
-export function getNextAgentCapabilityToolNames(
-  capabilityIds: readonly string[],
-  completedToolNames: readonly string[] = []
-): readonly string[] | null {
-  if (capabilityIds.length === 0) return null;
-  const chains = capabilityIds.map(getAgentCapabilityToolNames);
-  if (chains.some((chain) => chain === null || chain.length === 0)) return null;
-
-  const completed = new Set(completedToolNames);
-  if (completed.size !== completedToolNames.length) return null;
-  const allowed = new Set<string>();
-  for (const chain of chains) {
-    if (!chain) return null;
-    for (let index = 0; index < chain.length; index += 1) {
-      const toolName = chain[index];
-      if (completed.has(toolName)) {
-        if (!chain.slice(0, index).every((name) => completed.has(name))) {
-          return null;
-        }
-      }
-    }
-    const nextToolName = chain.find((toolName) => !completed.has(toolName));
-    if (nextToolName) allowed.add(nextToolName);
-  }
-  return [...allowed].sort();
-}
-
-export function isNextAgentCapabilityTool(
-  capabilityIds: readonly string[],
-  toolName: string,
-  completedToolNames: readonly string[] = []
-): boolean {
-  const allowed = getNextAgentCapabilityToolNames(
-    capabilityIds,
-    completedToolNames
-  );
-  return allowed !== null && allowed.includes(toolName);
-}
-
 export function buildAgentToolCapabilityCatalog(
   definitions: AgentToolDefinition<unknown>[]
 ): AgentToolCapabilityCatalogSnapshot {
@@ -330,23 +265,16 @@ export function buildAgentToolCapabilityCatalog(
       capability.toolNames.every((toolName) =>
         definitions.some((definition) => definition.name === toolName)
       )
-  ).map((capability) => {
-    const terminalToolName = capability.toolNames.at(-1);
-    const terminalDefinition = definitions.find(
-      (definition) => definition.name === terminalToolName
-    );
-    const operation = terminalToolName
-      ? (TOOL_OPERATION_BY_NAME[terminalToolName] ?? null)
-      : null;
-    return {
-      ...capability,
-      terminalToolNames: terminalToolName ? [terminalToolName] : [],
-      operation,
-      executionMode: terminalDefinition?.executionMode ?? null,
-      requiresConfirmation:
-        terminalDefinition?.executionMode === "confirmation_required"
-    };
-  });
+  ).map((capability) => ({
+    ...capability,
+    requiresConfirmation:
+      capability.availability === "supported" &&
+      definitions.some(
+        (definition) =>
+          definition.name === capability.toolNames.at(-1) &&
+          definition.executionMode === "confirmation_required"
+      )
+  }));
   const descriptors = definitions
     .map((definition) => toDescriptor(definition, capabilities))
     .sort((left, right) => left.toolName.localeCompare(right.toolName));
@@ -430,7 +358,7 @@ function capability(
   whenToUse: string,
   mustNotUseFor: string[],
   positiveExamples: string[] = []
-): AgentCapabilitySeed {
+): AgentCapabilityDefinition {
   const examples = capabilityExamples(id, domain, whenToUse, positiveExamples);
   return {
     id,
@@ -440,14 +368,8 @@ function capability(
     mustNotUseFor,
     positiveExamples: examples.map((example) => example.utterance),
     examples,
-    boundaryExamples: capabilityBoundaryExamples(
-      id,
-      domain,
-      examples[0].utterance,
-      mustNotUseFor[0],
-      "supported"
-    ),
     selectorKinds: selectorKindsFor(id),
+    requiresConfirmation: false,
     availability: "supported"
   };
 }
@@ -457,7 +379,7 @@ function unsupportedCapability(
   domain: string,
   whenToUse: string,
   positiveExamples: string[]
-): AgentCapabilitySeed {
+): AgentCapabilityDefinition {
   const canonical = positiveExamples[0] ?? whenToUse;
   const examples = capabilityExamples(id, domain, canonical, positiveExamples);
   return {
@@ -468,74 +390,10 @@ function unsupportedCapability(
     mustNotUseFor: ["현재 Agent registry에 실행 tool이 없는 요청"],
     positiveExamples: examples.map((example) => example.utterance),
     examples,
-    boundaryExamples: capabilityBoundaryExamples(
-      id,
-      domain,
-      examples[0].utterance,
-      "지원되는 다른 요청",
-      "unsupported"
-    ),
     selectorKinds: selectorKindsFor(id),
+    requiresConfirmation: false,
     availability: "unsupported"
   };
-}
-
-function capabilityBoundaryExamples(
-  id: string,
-  domain: string,
-  canonical: string,
-  excludedIntent: string,
-  availability: AgentCapabilityAvailability
-): AgentCapabilityBoundaryExample[] {
-  const routedStatus =
-    availability === "supported" ? "routed" : "unsupported";
-  const routedCapabilityIds = availability === "supported" ? [id] : [];
-  const switchIntent = crossDomainIntent(domain);
-  return [
-    {
-      kind: "negation",
-      utterance: `${canonical}는 하지 마`,
-      expectedStatus: "needs_clarification",
-      expectedCapabilityIds: []
-    },
-    {
-      kind: "exclusion",
-      utterance: `${canonical}는 제외하고 ${excludedIntent}`,
-      expectedStatus: "needs_clarification",
-      expectedCapabilityIds: []
-    },
-    {
-      kind: "correction",
-      utterance: `아니, ${canonical} 말고 ${excludedIntent}`,
-      expectedStatus: "needs_clarification",
-      expectedCapabilityIds: []
-    },
-    {
-      kind: "anaphora",
-      utterance: `그 대상으로 이어서 ${canonical}`,
-      expectedStatus: routedStatus,
-      expectedCapabilityIds: routedCapabilityIds
-    },
-    {
-      kind: "domain_switch",
-      utterance: `${canonical} 말고 ${switchIntent}`,
-      expectedStatus: "needs_clarification",
-      expectedCapabilityIds: []
-    }
-  ];
-}
-
-function crossDomainIntent(domain: string): string {
-  const intentByDomain: Record<string, string> = {
-    meeting: "Drive 문서를 찾아줘",
-    calendar: "Board 이슈를 찾아줘",
-    board: "회의록을 보여줘",
-    drive: "Calendar 일정을 보여줘",
-    sql_erd: "PR Review 파일을 보여줘",
-    pr_review: "SQLtoERD 테이블을 보여줘",
-    canvas: "Drive 문서를 찾아줘"
-  };
-  return intentByDomain[domain] ?? "다른 도메인의 결과를 보여줘";
 }
 
 function capabilityExamples(
@@ -556,26 +414,20 @@ function capabilityExamples(
 }
 
 function selectorKindsFor(id: string): string[] {
-  if (id === "meeting.rooms.list") return ["meeting_room_name"];
   if (id.includes("meeting.control") || id.includes("meeting.recording")) {
     return ["current_meeting", "meeting_room_name"];
   }
   if (id.includes("meeting.participants")) return ["meeting_scope"];
   if (id.includes("meeting.report")) return ["meeting_report"];
   if (id.includes("meeting.action_items")) return ["action_item", "workspace_member"];
-  if (id.includes("meeting.evidence")) return ["meeting_report", "transcript_query"];
-  if (id.includes("meeting.decision")) return ["meeting_report", "decision_index"];
+  if (id.includes("meeting.evidence")) return ["meeting_report", "query"];
   if (id.includes("calendar.events")) return ["calendar_event", "date_range"];
-  if (id === "board.issues.search") {
-    return ["board_issue", "title_query", "body_query"];
-  }
   if (id.includes("board.issues")) return ["board_issue"];
   if (id === "board.briefing") return ["board_context"];
-  if (id === "sql_erd.generate") return ["sql_ddl"];
   if (id.startsWith("sql_erd.")) return ["sql_erd_session", "table_reference"];
   if (id.startsWith("canvas.")) return ["canvas_context"];
-  if (id.startsWith("pr_review.")) return ["pr_review_session", "review_file"];
-  if (id.startsWith("drive.")) return ["document_query", "title_query", "body_query"];
+  if (id.startsWith("pr_review.")) return ["pr_review_session"];
+  if (id.startsWith("drive.")) return ["document_query"];
   return ["none"];
 }
 
@@ -585,55 +437,12 @@ function hashCanonicalJson(value: unknown): string {
     .digest("hex");
 }
 
-const CAPABILITY_EXAMPLE_KINDS = new Set([
-  "canonical",
-  "paraphrase",
-  "typo",
-  "honorific",
-  "abbreviation"
-]);
-const CAPABILITY_BOUNDARY_EXAMPLE_KINDS = new Set([
-  "negation",
-  "exclusion",
-  "correction",
-  "anaphora",
-  "domain_switch"
-]);
-const CAPABILITY_SELECTOR_KINDS = new Set([
-  "none",
-  "current_meeting",
-  "meeting_room_name",
-  "meeting_scope",
-  "meeting_report",
-  "transcript_query",
-  "decision_index",
-  "action_item",
-  "workspace_member",
-  "query",
-  "calendar_event",
-  "date_range",
-  "board_issue",
-  "title_query",
-  "body_query",
-  "board_context",
-  "sql_erd_session",
-  "table_reference",
-  "sql_ddl",
-  "canvas_context",
-  "pr_review_session",
-  "review_file",
-  "document_query"
-]);
-
 export function validateAgentToolCapabilityCatalog(
   capabilities: AgentCapabilityDefinition[],
   descriptors: AgentToolCapabilityDescriptor[],
   definitions: AgentToolDefinition<unknown>[]
 ): void {
   const registeredToolNames = new Set(definitions.map((definition) => definition.name));
-  const definitionByName = new Map(
-    definitions.map((definition) => [definition.name, definition])
-  );
   const capabilityIds = new Set(capabilities.map((capability) => capability.id));
   if (capabilityIds.size !== capabilities.length) {
     throw new Error("Agent capability catalog contains duplicate capability IDs");
@@ -647,60 +456,9 @@ export function validateAgentToolCapabilityCatalog(
       }
     }
   }
-  validateCapabilityChainAcyclic(capabilities);
   const capabilityById = new Map(
     capabilities.map((capability) => [capability.id, capability])
   );
-  for (const capability of capabilities) {
-    const terminalToolName = capability.toolNames.at(-1);
-    const terminalDefinition = terminalToolName
-      ? definitionByName.get(terminalToolName)
-      : undefined;
-    const exampleKinds = new Set(
-      capability.examples.map((example) => example.kind)
-    );
-    const boundaryKinds = new Set(
-      capability.boundaryExamples.map((example) => example.kind)
-    );
-    if (
-      !sameStringSet(exampleKinds, CAPABILITY_EXAMPLE_KINDS) ||
-      !sameStringSet(boundaryKinds, CAPABILITY_BOUNDARY_EXAMPLE_KINDS) ||
-      capability.boundaryExamples.some(
-        (example) =>
-          !example.utterance.trim() ||
-          !["routed", "needs_clarification", "unsupported"].includes(
-            example.expectedStatus
-          ) ||
-          new Set(example.expectedCapabilityIds).size !==
-            example.expectedCapabilityIds.length ||
-          example.expectedCapabilityIds.some((id) => !capabilityIds.has(id)) ||
-          (example.expectedStatus === "routed" &&
-            example.expectedCapabilityIds.length === 0) ||
-          (example.expectedStatus !== "routed" &&
-            example.expectedCapabilityIds.length > 0)
-      ) ||
-      capability.selectorKinds.some(
-        (selectorKind) => !CAPABILITY_SELECTOR_KINDS.has(selectorKind)
-      ) ||
-      (capability.availability === "supported" &&
-        (!terminalDefinition ||
-          !terminalToolName ||
-          !sameStringSet(capability.terminalToolNames, [terminalToolName]) ||
-          capability.operation !== TOOL_OPERATION_BY_NAME[terminalToolName] ||
-          capability.executionMode !== terminalDefinition.executionMode ||
-          capability.requiresConfirmation !==
-            (terminalDefinition.executionMode === "confirmation_required"))) ||
-      (capability.availability === "unsupported" &&
-        (capability.terminalToolNames.length > 0 ||
-          capability.operation !== null ||
-          capability.executionMode !== null ||
-          capability.requiresConfirmation))
-    ) {
-      throw new Error(
-        `Agent capability boundary contract is invalid: ${capability.id}`
-      );
-    }
-  }
   for (const descriptor of descriptors) {
     if (TOOL_DOMAIN_BY_NAME[descriptor.toolName] !== descriptor.domain) {
       throw new Error(
@@ -719,49 +477,6 @@ export function validateAgentToolCapabilityCatalog(
         );
       }
     }
-    const definition = definitionByName.get(descriptor.toolName);
-    const matchingCapabilities = capabilities.filter((capability) =>
-      capability.toolNames.includes(descriptor.toolName)
-    );
-    const expectedPrerequisites = new Set<string>();
-    const expectedFollowUps = new Set<string>();
-    for (const capability of matchingCapabilities) {
-      const index = capability.toolNames.indexOf(descriptor.toolName);
-      capability.toolNames
-        .slice(0, index)
-        .forEach((toolName) => expectedPrerequisites.add(toolName));
-      capability.toolNames
-        .slice(index + 1)
-        .forEach((toolName) => expectedFollowUps.add(toolName));
-    }
-    const schemaFields = Object.keys(
-      (definition?.inputSchema.properties as
-        | Record<string, unknown>
-        | undefined) ?? {}
-    );
-    if (
-      !definition ||
-      descriptor.operation !== TOOL_OPERATION_BY_NAME[descriptor.toolName] ||
-      descriptor.riskLevel !== definition.riskLevel ||
-      descriptor.executionMode !== definition.executionMode ||
-      descriptor.contextSurface !==
-        (definition.contextRequirement?.surface ?? null) ||
-      !sameStringSet(
-        descriptor.capabilityIds,
-        matchingCapabilities.map((capability) => capability.id)
-      ) ||
-      !sameStringSet(descriptor.acceptedSelectorFields, schemaFields) ||
-      !sameStringSet(
-        descriptor.selectorKinds,
-        matchingCapabilities.flatMap((capability) => capability.selectorKinds)
-      ) ||
-      !sameStringSet(descriptor.prerequisiteToolNames, expectedPrerequisites) ||
-      !sameStringSet(descriptor.followUpToolNames, expectedFollowUps)
-    ) {
-      throw new Error(
-        `Agent capability chain contract is invalid: ${descriptor.toolName}`
-      );
-    }
   }
   if (
     capabilities.some(
@@ -774,7 +489,6 @@ export function validateAgentToolCapabilityCatalog(
         !capability.positiveExamples.length ||
         !capability.selectorKinds.length ||
         capability.examples.length !== 5 ||
-        capability.boundaryExamples.length !== 5 ||
         new Set(capability.examples.map((example) => example.kind)).size !== 5 ||
         capability.examples.some((example) => !example.utterance.trim()) ||
         capability.toolNames.some((toolName) => !registeredToolNames.has(toolName)) ||
@@ -805,47 +519,6 @@ export function validateAgentToolCapabilityCatalog(
   ) {
     throw new Error("Agent capability catalog contains an invalid tool descriptor");
   }
-}
-
-function validateCapabilityChainAcyclic(
-  capabilities: AgentCapabilityDefinition[]
-): void {
-  const edges = new Map<string, Set<string>>();
-  for (const capability of capabilities) {
-    if (capability.availability !== "supported") continue;
-    for (let index = 0; index < capability.toolNames.length - 1; index += 1) {
-      const from = capability.toolNames[index];
-      const to = capability.toolNames[index + 1];
-      const targets = edges.get(from) ?? new Set<string>();
-      targets.add(to);
-      edges.set(from, targets);
-    }
-  }
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const visit = (toolName: string): void => {
-    if (visiting.has(toolName)) {
-      throw new Error("Agent capability catalog contains a cyclic tool chain");
-    }
-    if (visited.has(toolName)) return;
-    visiting.add(toolName);
-    for (const target of edges.get(toolName) ?? []) visit(target);
-    visiting.delete(toolName);
-    visited.add(toolName);
-  };
-  for (const toolName of edges.keys()) visit(toolName);
-}
-
-function sameStringSet(
-  left: Iterable<string>,
-  right: Iterable<string>
-): boolean {
-  const leftSet = new Set(left);
-  const rightSet = new Set(right);
-  return (
-    leftSet.size === rightSet.size &&
-    [...leftSet].every((value) => rightSet.has(value))
-  );
 }
 
 function sortJson(value: unknown): unknown {

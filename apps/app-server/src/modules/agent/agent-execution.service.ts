@@ -1,4 +1,4 @@
-import { HttpException, Injectable, Logger } from "@nestjs/common";
+import { HttpException, Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
@@ -13,21 +13,13 @@ import {
   type AgentExecutionLease
 } from "./agent-logging.service";
 import { AgentLatencyObserver } from "./agent-latency-observer";
-import {
-  getAgentToolDomainAndOperation,
-  isNextAgentCapabilityTool,
-  isTerminalAgentCapabilityTool
-} from "./agent-tool-capability-catalog";
+import { isTerminalAgentCapabilityTool } from "./agent-tool-capability-catalog";
 import { buildAgentReadResultAnswer } from "./agent-read-result-formatter";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
 import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
-import {
-  AgentThreadContextService,
-  type AgentContextState
-} from "./agent-thread-context.service";
 import { EmbeddingTemporarilyUnavailableError } from "./grounding/query-embedding";
 import type {
   AgentJsonObject,
@@ -94,21 +86,6 @@ interface PlannedToolCandidate {
   executionMode: AgentToolExecutionMode;
   requiresConfirmation: boolean | null;
   capabilityIds: string[];
-  contextResolution: ResolvedContextResolution | null;
-}
-
-interface ResolvedContextResolution {
-  version: "agent-context-resolution:v1";
-  status: "resolved";
-  target: {
-    contextRef: string;
-    domain: string;
-    resourceType: string;
-    ordinal: number;
-    generation: number;
-    source: "tool_result" | "candidate";
-  };
-  constraints: AgentJsonObject;
 }
 
 const RISK_LEVELS = ["low", "medium", "high"] as const;
@@ -138,8 +115,6 @@ function positiveIntegerEnvironment(name: string, fallback: number): number {
 
 @Injectable()
 export class AgentExecutionService {
-  private readonly logger = new Logger(AgentExecutionService.name);
-
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
@@ -150,8 +125,7 @@ export class AgentExecutionService {
     private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService,
     private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
     private readonly agentCandidateSelectionService: AgentCandidateSelectionService,
-    private readonly agentLatencyObserver?: AgentLatencyObserver,
-    private readonly agentThreadContextService?: AgentThreadContextService
+    private readonly agentLatencyObserver?: AgentLatencyObserver
   ) {}
 
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
@@ -315,20 +289,6 @@ export class AgentExecutionService {
       candidate.capabilityIds.length > 0
         ? await this.findCompletedToolNames(runId)
         : [];
-    if (
-      candidate.capabilityIds.length > 0 &&
-      !isNextAgentCapabilityTool(
-        candidate.capabilityIds,
-        definition.name,
-        completedToolNames
-      )
-    ) {
-      return this.failRun(currentUserId, workspaceId, runId, {
-        errorCode: "AGENT_TOOL_CHAIN_MISMATCH",
-        errorMessage: "Agent tool is not the next allowed capability step",
-        message: "Agent tool sequence validation failed."
-      });
-    }
     const postExecutionDisposition: AgentToolPostExecutionDisposition =
       candidate.capabilityIds.length > 0
         ? isTerminalAgentCapabilityTool(
@@ -380,19 +340,6 @@ export class AgentExecutionService {
       });
     }
 
-    const contextValidation = await this.validateResolvedContext(
-      currentUserId,
-      workspaceId,
-      runId,
-      definition.name,
-      candidate,
-      requestContext
-    );
-    if (!contextValidation.ok) {
-      return contextValidation.result;
-    }
-    candidate.input = contextValidation.input;
-
     const validatedInput = await this.validateToolInput(
       currentUserId,
       workspaceId,
@@ -428,8 +375,7 @@ export class AgentExecutionService {
         input.timezone,
         postExecutionDisposition,
         preparationStartedAt,
-        input.turnSequence,
-        candidate.contextResolution?.target
+        input.turnSequence
       );
     }
 
@@ -476,8 +422,7 @@ export class AgentExecutionService {
       input.prompt,
       input.timezone,
       postExecutionDisposition,
-      input.turnSequence,
-      candidate.contextResolution?.target
+      input.turnSequence
     );
   }
 
@@ -519,15 +464,6 @@ export class AgentExecutionService {
           AND step_type = 'tool'
           AND status = 'completed'
           AND tool_name IS NOT NULL
-          AND created_at >= COALESCE(
-            (
-              SELECT MAX(message.created_at)
-              FROM agent_run_messages AS message
-              WHERE message.run_id = $1
-                AND message.role = 'user'
-            ),
-            '-infinity'::timestamptz
-          )
       `,
       [runId]
     );
@@ -636,51 +572,7 @@ export class AgentExecutionService {
       riskLevel,
       executionMode,
       requiresConfirmation,
-      capabilityIds: this.readCapabilityIds(output.toolRouting),
-      contextResolution: this.readContextResolution(output.contextResolution)
-    };
-  }
-
-  private readContextResolution(
-    value: AgentJsonValue | undefined
-  ): ResolvedContextResolution | null {
-    if (value === undefined || value === null) return null;
-    if (
-      !this.isPlainObject(value) ||
-      value.version !== "agent-context-resolution:v1" ||
-      value.status !== "resolved" ||
-      !this.isPlainObject(value.target) ||
-      !this.isPlainObject(value.constraints)
-    ) {
-      throw badRequest("Agent context resolution is invalid");
-    }
-    const target = value.target;
-    if (
-      typeof target.contextRef !== "string" ||
-      !/^ctx_[0-9a-f]{24}$/.test(target.contextRef) ||
-      typeof target.domain !== "string" ||
-      typeof target.resourceType !== "string" ||
-      typeof target.ordinal !== "number" ||
-      !Number.isSafeInteger(target.ordinal) ||
-      target.ordinal < 1 ||
-      typeof target.generation !== "number" ||
-      !Number.isSafeInteger(target.generation) ||
-      (target.source !== "tool_result" && target.source !== "candidate")
-    ) {
-      throw badRequest("Agent context resolution target is invalid");
-    }
-    return {
-      version: "agent-context-resolution:v1",
-      status: "resolved",
-      target: {
-        contextRef: target.contextRef,
-        domain: target.domain,
-        resourceType: target.resourceType,
-        ordinal: target.ordinal,
-        generation: target.generation,
-        source: target.source
-      },
-      constraints: value.constraints
+      capabilityIds: this.readCapabilityIds(output.toolRouting)
     };
   }
 
@@ -730,229 +622,6 @@ export class AgentExecutionService {
           candidate.requiresConfirmation === false;
     if (!matchesLegacyMetadata) return false;
     return definition.adaptLegacyPlannerInput?.(candidate.input) !== null;
-  }
-
-  private async validateResolvedContext(
-    currentUserId: string,
-    workspaceId: string,
-    runId: string,
-    toolName: string,
-    candidate: PlannedToolCandidate,
-    requestContext: AgentRunRequestContext
-  ): Promise<
-    | { ok: true; input: AgentJsonObject }
-    | { ok: false; result: AgentExecutionResult }
-  > {
-    const resolution = candidate.contextResolution;
-    const inputContextRefs = this.collectContextRefs(candidate.input);
-    if (!resolution) {
-      if (inputContextRefs.length === 0) return { ok: true, input: candidate.input };
-      return this.contextClarification(
-        currentUserId,
-        workspaceId,
-        runId,
-        "context_resolution_missing"
-      );
-    }
-    if (
-      this.containsRawContextTargetId(candidate.input) ||
-      inputContextRefs.some(
-        (contextRef) => contextRef !== resolution.target.contextRef
-      )
-    ) {
-      return this.contextClarification(
-        currentUserId,
-        workspaceId,
-        runId,
-        "context_target_mismatch"
-      );
-    }
-    const toolDomain = getAgentToolDomainAndOperation(toolName)?.domain;
-    const normalizedTargetDomain =
-      resolution.target.domain === "sqltoerd"
-        ? "sql_erd"
-        : resolution.target.domain;
-    if (!toolDomain || toolDomain !== normalizedTargetDomain) {
-      return this.contextClarification(
-        currentUserId,
-        workspaceId,
-        runId,
-        "context_tool_domain_mismatch"
-      );
-    }
-    const context = { currentUserId, workspaceId, runId, requestContext };
-    const reference =
-      resolution.target.source === "candidate"
-        ? await this.agentThreadContextService?.resolveCandidateReference(
-            context,
-            resolution.target.contextRef
-          )
-        : await this.agentThreadContextService?.resolveReference(
-            context,
-            resolution.target.contextRef
-          );
-    if (
-      !reference ||
-      reference.domain !== resolution.target.domain ||
-      reference.resourceType !== resolution.target.resourceType
-    ) {
-      return this.contextClarification(
-        currentUserId,
-        workspaceId,
-        runId,
-        "context_reference_stale"
-      );
-    }
-    const adapted =
-      resolution.target.source === "candidate"
-        ? { ...candidate.input }
-        : this.adaptResolvedContextInput(
-            toolName,
-            candidate.input,
-            reference,
-            requestContext,
-            resolution.target.contextRef
-          );
-    if (!adapted) {
-      return this.contextClarification(
-        currentUserId,
-        workspaceId,
-        runId,
-        "context_adapter_conflict"
-      );
-    }
-    return { ok: true, input: adapted };
-  }
-
-  private async contextClarification(
-    currentUserId: string,
-    workspaceId: string,
-    runId: string,
-    diagnosticCode: string
-  ): Promise<{ ok: false; result: AgentExecutionResult }> {
-    const run = await this.agentLoggingService.waitForUserInput(
-      currentUserId,
-      workspaceId,
-      {
-        runId,
-        message: "이전 결과의 대상을 다시 확인해야 합니다. 이름이나 번호로 알려주세요.",
-        diagnosticCode
-      }
-    );
-    return { ok: false, result: { status: "waiting_user_input", run } };
-  }
-
-  private adaptResolvedContextInput(
-    toolName: string,
-    input: AgentJsonObject,
-    reference: AgentResourceRef,
-    requestContext: AgentRunRequestContext,
-    contextRef: string
-  ): AgentJsonObject | null {
-    const adapted = { ...input };
-    if (reference.domain === "calendar" && reference.resourceType === "event") {
-      if (toolName !== "update_calendar_event") return adapted;
-      const startDate = reference.metadata?.startDate;
-      const endDate = reference.metadata?.endDate;
-      if (
-        !reference.label ||
-        typeof startDate !== "string" ||
-        typeof endDate !== "string"
-      ) {
-        return null;
-      }
-      adapted.target = {
-        title: reference.label,
-        startDate,
-        endDate,
-        ...(typeof reference.metadata?.isAllDay === "boolean"
-          ? { isAllDay: reference.metadata.isAllDay }
-          : {}),
-        ...(typeof reference.metadata?.startTime === "string"
-          ? { startTime: reference.metadata.startTime }
-          : {}),
-        ...(typeof reference.metadata?.endTime === "string"
-          ? { endTime: reference.metadata.endTime }
-          : {})
-      };
-      return adapted;
-    }
-    if (reference.domain === "board" && reference.resourceType === "issue") {
-      const issueNumber = reference.metadata?.issueNumber;
-      if (
-        [
-          "get_board_issue_context",
-          "move_board_issue_status",
-          "assign_board_issue_safely"
-        ].includes(toolName) &&
-        (typeof issueNumber === "number" || typeof issueNumber === "string")
-      ) {
-        adapted.issueNumber = String(issueNumber);
-      }
-      return adapted;
-    }
-    if (reference.domain === "meeting") {
-      if (
-        reference.resourceType === "meeting_report_action_item" &&
-        [
-          "update_meeting_report_action_item",
-          "approve_meeting_report_action_item"
-        ].includes(toolName)
-      ) {
-        adapted.actionItemContextRef = contextRef;
-      } else if (
-        reference.resourceType === "meeting_report" &&
-        [
-          "get_meeting_report",
-          "summarize_meeting_report",
-          "find_action_items",
-          "get_meeting_decision_evidence",
-          "regenerate_meeting_report"
-        ].includes(toolName)
-      ) {
-        adapted.contextRef = contextRef;
-      }
-      return adapted;
-    }
-    if (reference.domain === "sqltoerd" && reference.resourceType === "session") {
-      return requestContext?.surface === "sql_erd" &&
-        requestContext.sessionId === reference.resourceId
-        ? adapted
-        : null;
-    }
-    return adapted;
-  }
-
-  private collectContextRefs(value: AgentJsonValue): string[] {
-    if (Array.isArray(value)) {
-      return value.flatMap((item) => this.collectContextRefs(item));
-    }
-    if (!this.isPlainObject(value)) return [];
-    return Object.entries(value).flatMap(([key, item]) => {
-      const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
-      const current =
-        normalized.endsWith("contextref") && typeof item === "string"
-          ? [item]
-          : [];
-      return [...current, ...this.collectContextRefs(item)];
-    });
-  }
-
-  private containsRawContextTargetId(value: AgentJsonValue): boolean {
-    if (Array.isArray(value)) {
-      return value.some((item) => this.containsRawContextTargetId(item));
-    }
-    if (!this.isPlainObject(value)) return false;
-    return Object.entries(value).some(([key, item]) => {
-      const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
-      return (
-        (normalized.endsWith("id") &&
-          !normalized.endsWith("contextref") &&
-          item !== null &&
-          item !== "") ||
-        this.containsRawContextTargetId(item)
-      );
-    });
   }
 
   private async validateToolInput(
@@ -1022,8 +691,7 @@ export class AgentExecutionService {
     postExecutionDisposition: AgentToolPostExecutionDisposition =
       "continue_planning",
     preparationStartedAt?: number,
-    turnSequence?: number,
-    selectedTarget?: ResolvedContextResolution["target"] | null
+    turnSequence?: number
   ): Promise<AgentExecutionResult> {
     if (!definition.prepareExecution) {
       this.observeLatency({
@@ -1122,8 +790,7 @@ export class AgentExecutionService {
         prompt,
         timezone,
         postExecutionDisposition,
-        turnSequence,
-        selectedTarget
+        turnSequence
       );
     } catch (error) {
       this.observeLatency({
@@ -1347,20 +1014,11 @@ export class AgentExecutionService {
             }))
           )
       : [];
-    const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
-    const contextState = await this.agentThreadContextService?.buildContextState(
-      candidateContext,
-      step.id,
-      definition.name,
-      resourceRefs,
-      candidateSelections,
-      "clarification"
-    );
     const outputSummary = this.sanitizeJsonObject({
       ...clarification.outputSummary,
-      ...(candidateSelections.length > 0 ? { candidateSelections } : {}),
-      ...(contextState ? { agentContextState: contextState } : {})
+      ...(candidateSelections.length > 0 ? { candidateSelections } : {})
     });
+    const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
     const answer =
       typeof outputSummary.question === "string" && outputSummary.question.trim()
         ? outputSummary.question.trim()
@@ -1403,8 +1061,7 @@ export class AgentExecutionService {
     timezone?: string,
     postExecutionDisposition: AgentToolPostExecutionDisposition =
       "continue_planning",
-    turnSequence?: number,
-    selectedTarget?: ResolvedContextResolution["target"] | null
+    turnSequence?: number
   ): Promise<AgentExecutionResult> {
     const claim = await this.agentLoggingService.startNextToolExecutionClaimIfAbsent(
       currentUserId,
@@ -1458,32 +1115,8 @@ export class AgentExecutionService {
         turnSequence
       });
       advanceStartedAt = this.agentLatencyObserver?.start();
+      const outputSummary = this.buildOutputSummary(result);
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
-      let contextState: AgentContextState | null | undefined = null;
-      try {
-        contextState = await this.agentThreadContextService?.buildContextState(
-          {
-            currentUserId,
-            workspaceId,
-            runId,
-            requestContext
-          },
-          step.id,
-          definition.name,
-          resourceRefs,
-          [],
-          "completed",
-          selectedTarget
-        );
-      } catch {
-        this.logger.warn(
-          `Agent context projection failed after ${definition.name} completed`
-        );
-      }
-      const outputSummary = this.sanitizeJsonObject({
-        ...this.buildOutputSummary(result),
-        ...(contextState ? { agentContextState: contextState } : {})
-      });
 
       if (result.status === "delegated") {
         await this.agentLoggingService.deferToolStep(
