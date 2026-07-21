@@ -26,6 +26,12 @@ const baseContents = execFileSync("git", ["show", `origin/main:${approvedPath}`]
 });
 const headContents = await readFile(path.join(repositoryRoot, approvedPath));
 
+assert.equal(
+  sha256(baseContents),
+  approvedRepair.baseSha256,
+  "The temporary migration-104 recovery exception is stale. Remove the exception after the corrected checksum reaches main.",
+);
+
 function verifyWithManifest(manifest) {
   return verifyExistingMigrationRepair({
     status: "M",
