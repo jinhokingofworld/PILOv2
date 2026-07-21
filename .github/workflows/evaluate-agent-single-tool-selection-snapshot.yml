@@ -1,4 +1,4 @@
-name: Evaluate Agent Single Tool Selection
+name: Evaluate Agent Single Tool Selection Snapshot
 
 on:
   workflow_dispatch:
@@ -8,7 +8,9 @@ on:
         required: true
         default: snapshot
         type: choice
-        options: [snapshot, compare]
+        options:
+          - snapshot
+          - compare
       current_date:
         description: Fixed Agent current date (YYYY-MM-DD)
         required: true
@@ -18,7 +20,8 @@ on:
         required: true
         default: "5"
         type: choice
-        options: ["5"]
+        options:
+          - "5"
       baseline_sha:
         description: Baseline commit SHA (compare only)
         required: false
@@ -96,9 +99,11 @@ jobs:
           echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
           echo 'targets=["baseline","candidate"]' >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
-        with: { node-version: "22" }
+        with:
+          node-version: "22"
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
+        with:
+          python-version: "3.12"
       - name: Build target registry-bound inputs
         run: |
           set -euo pipefail
@@ -145,16 +150,21 @@ jobs:
         target: ${{ fromJSON(needs.prepare.outputs.targets) }}
     steps:
       - uses: actions/checkout@v4
-        with: { ref: ${{ github.sha }}, path: evaluator }
+        with:
+          ref: ${{ github.sha }}
+          path: evaluator
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.target == 'target' && needs.prepare.outputs.target_sha || matrix.target == 'baseline' && needs.prepare.outputs.baseline_sha || needs.prepare.outputs.candidate_sha }}
           path: target-source
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
+        with:
+          python-version: "3.12"
       - run: python -m pip install -r target-source/apps/ai-worker/requirements.txt
       - uses: actions/download-artifact@v4
-        with: { name: single-tool-selection-prepared-inputs, path: ${{ runner.temp }}/prepared }
+        with:
+          name: single-tool-selection-prepared-inputs
+          path: ${{ runner.temp }}/prepared
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
@@ -188,11 +198,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { ref: ${{ github.sha }}, path: evaluator }
+        with:
+          ref: ${{ github.sha }}
+          path: evaluator
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
+        with:
+          python-version: "3.12"
       - uses: actions/download-artifact@v4
-        with: { pattern: single-tool-selection-*, path: ${{ runner.temp }}/reports, merge-multiple: true }
+        with:
+          pattern: single-tool-selection-*
+          path: ${{ runner.temp }}/reports
+          merge-multiple: true
       - working-directory: evaluator/apps/ai-worker
         run: |
           PYTHONPATH=. python scripts/compare_single_tool_selection.py \
