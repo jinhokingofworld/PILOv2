@@ -94,6 +94,11 @@ export interface AgentContextState {
   };
 }
 
+export interface AgentSelectedContextTarget {
+  contextRef: string;
+  generation: number;
+}
+
 export interface AgentThreadMeetingReference {
   resourceType:
     | "meeting"
@@ -266,11 +271,12 @@ export class AgentThreadContextService {
       ordinal: number;
       generation: number;
     }> = [],
-    outcome: "completed" | "clarification" | "confirmation" = "completed"
+    outcome: "completed" | "clarification" | "confirmation" = "completed",
+    selectedTarget?: AgentSelectedContextTarget | null
   ): Promise<AgentContextState | null> {
     const scope = await this.findStepScope(context, stepId);
     if (!scope) return null;
-    const generation = Number(scope.step_order);
+    const stepOrder = Number(scope.step_order);
     const refs = resourceRefs
       .slice(0, THREAD_CONTEXT_MAX_RESOURCE_REFS)
       .map((reference, index) => this.toSafeContextReference(scope, reference, index))
@@ -295,10 +301,24 @@ export class AgentThreadContextService {
       version: 1,
       provenance: {
         turnSequence: Number(scope.turn_sequence),
-        stepOrder: generation
+        stepOrder
       },
       ...(activeDomain ? { activeDomain } : {}),
       resultSets,
+      ...(selectedTarget &&
+      resultSets.some(
+        (reference) =>
+          reference.contextRef === selectedTarget.contextRef &&
+          reference.generation === selectedTarget.generation
+      )
+        ? {
+            selectedTarget: {
+              contextRef: selectedTarget.contextRef,
+              generation: selectedTarget.generation,
+              source: "resolved_follow_up" as const
+            }
+          }
+        : {}),
       lastToolState: { toolName, outcome },
       ...(outcome === "clarification" || outcome === "confirmation"
         ? { pendingState: { kind: outcome } }
@@ -372,17 +392,29 @@ export class AgentThreadContextService {
   ): Promise<AgentSafeContextReference[]> {
     const row = await this.database.queryOne<StoredContextStateRow>(
       `
-        SELECT output_json->'agentContextState' AS context_state
-        FROM agent_steps
-        WHERE run_id = $1
-          AND step_type = 'tool'
-          AND status = 'completed'
-          AND step_order < $2
-          AND output_json ? 'agentContextState'
-        ORDER BY step_order DESC, id DESC
+        SELECT step.output_json->'agentContextState' AS context_state
+        FROM agent_steps AS step
+        INNER JOIN agent_runs AS run ON run.id = step.run_id
+        WHERE step.step_type = 'tool'
+          AND step.status = 'completed'
+          AND step.output_json ? 'agentContextState'
+          AND (
+            (step.run_id = $1 AND step.step_order < $2)
+            OR (
+              run.thread_id = $3
+              AND run.id <> $1
+              AND run.status = 'completed'
+              AND run.expires_at > now()
+            )
+          )
+        ORDER BY
+          CASE WHEN step.run_id = $1 THEN 0 ELSE 1 END,
+          run.created_at DESC,
+          step.step_order DESC,
+          step.id DESC
         LIMIT 1
       `,
-      [scope.run_id, Number(scope.step_order)]
+      [scope.run_id, Number(scope.step_order), scope.thread_id]
     );
     if (!row || !this.isPlainObject(row.context_state)) return [];
     const resultSets = row.context_state.resultSets;
@@ -449,7 +481,7 @@ export class AgentThreadContextService {
       ),
       label: this.boundText(reference.label, 300) ?? resourceType,
       ordinal: index + 1,
-      generation: Number(scope.step_order),
+      generation: this.contextGeneration(scope.run_id, scope.step_id),
       source: "tool_result",
       ...(status ? { status } : {})
     };
@@ -492,6 +524,14 @@ export class AgentThreadContextService {
       .update(`${threadId}:${runId}:${stepId}:${index}`, "utf8")
       .digest("hex");
     return `ctx_${digest.slice(0, 24)}`;
+  }
+
+  private contextGeneration(runId: string, stepId: string): number {
+    const digest = createHash("sha256")
+      .update(`${runId}:${stepId}`, "utf8")
+      .digest("hex");
+    const generation = Number.parseInt(digest.slice(0, 13), 16);
+    return generation > 0 ? generation : 1;
   }
 
   private candidateContextRef(candidateSelectionId: string): string {

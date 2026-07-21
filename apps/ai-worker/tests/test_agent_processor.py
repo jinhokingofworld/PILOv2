@@ -1563,6 +1563,46 @@ def test_llm_router_low_confidence_asks_without_planner_or_handoff() -> None:
     ]
 
 
+def test_drive_context_follow_up_fails_closed_without_target_aware_tool() -> None:
+    context_state = agent_context_state(
+        2,
+        domain="drive",
+        resource_type="document",
+    )
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            prompt="그 문서 요약해줘",
+            context_state=context_state,
+        )
+    )
+    router_client = FakeRouterClient(error=AssertionError("router must not be called"))
+    planner_client = FakePlannerClient(error=AssertionError("planner must not be called"))
+    handoff_client = FakeExecutionHandoffClient()
+    processor = create_processor(
+        repository,
+        planner_client,
+        handoff_client,
+        router_client,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+    tools = [tool_snapshot(name="search_workspace_documents")]
+
+    result = processor.process_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=tool_capability_catalog(tools),
+        )
+    )
+
+    assert result.reason == "agent_context_needs_clarification"
+    assert router_client.requests == []
+    assert planner_client.requests == []
+    assert handoff_client.calls == []
+    assert repository.completed_steps[0][2]["contextResolution"]["reasonCode"] == (
+        "drive_context_tool_unavailable"
+    )
+
+
 def test_llm_router_preserves_compound_domain_tool_chains() -> None:
     tools = [tool_snapshot(), tool_snapshot(name="list_meeting_reports")]
     catalog = calendar_and_meeting_read_catalog(tools)
@@ -4863,6 +4903,21 @@ def test_agent_context_state_is_domain_and_size_bounded() -> None:
     assert USER_VISIBLE_UUID not in serialized
     assert "resourceId" not in serialized
     assert all(reference["domain"] == "meeting" for reference in merged["resultSets"])
+
+
+def test_agent_context_state_preserves_resolved_follow_up_target() -> None:
+    state = agent_context_state(3, count=2)
+    target_reference = state["resultSets"][0]
+    state["selectedTarget"] = {
+        "contextRef": target_reference["contextRef"],
+        "generation": target_reference["generation"],
+        "source": "resolved_follow_up",
+    }
+
+    merged = _merge_agent_context_states([state])
+
+    assert merged is not None
+    assert merged["selectedTarget"] == state["selectedTarget"]
 
 
 def test_agent_context_state_rejects_invalid_reference_contract() -> None:

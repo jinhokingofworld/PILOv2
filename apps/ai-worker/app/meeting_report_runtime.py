@@ -440,6 +440,26 @@ def _safe_agent_context_state(value: object) -> dict[str, object] | None:
         "confirmation",
     }:
         state["pendingState"] = {"kind": pending_state["kind"]}
+    selected_target = value.get("selectedTarget")
+    if isinstance(selected_target, dict):
+        selected_context_ref = selected_target.get("contextRef")
+        selected_generation = selected_target.get("generation")
+        selected_source = selected_target.get("source")
+        if (
+            isinstance(selected_context_ref, str)
+            and isinstance(selected_generation, int)
+            and selected_source in {"candidate_button", "resolved_follow_up"}
+            and any(
+                reference["contextRef"] == selected_context_ref
+                and reference["generation"] == selected_generation
+                for reference in safe_refs
+            )
+        ):
+            state["selectedTarget"] = {
+                "contextRef": selected_context_ref,
+                "generation": selected_generation,
+                "source": selected_source,
+            }
     return state
 
 
@@ -467,13 +487,25 @@ def _merge_agent_context_states(
     for key in ("activeDomain", "pendingState"):
         if key in latest:
             merged[key] = latest[key]
-    if selected_target is not None:
-        merged["selectedTarget"] = selected_target
+    effective_selected_target = selected_target or latest.get("selectedTarget")
+    if effective_selected_target is not None and any(
+        reference.get("contextRef") == effective_selected_target.get("contextRef")
+        and reference.get("generation") == effective_selected_target.get("generation")
+        for reference in bounded_refs
+    ):
+        merged["selectedTarget"] = effective_selected_target
     serialized = json.dumps(merged, ensure_ascii=False, separators=(",", ":"))
     if _utf8_size(serialized) > AGENT_THREAD_CONTEXT_MAX_BYTES:
         while bounded_refs and _utf8_size(serialized) > AGENT_THREAD_CONTEXT_MAX_BYTES:
             bounded_refs.pop(0)
             serialized = json.dumps(merged, ensure_ascii=False, separators=(",", ":"))
+    retained_target = merged.get("selectedTarget")
+    if isinstance(retained_target, dict) and not any(
+        reference.get("contextRef") == retained_target.get("contextRef")
+        and reference.get("generation") == retained_target.get("generation")
+        for reference in bounded_refs
+    ):
+        merged.pop("selectedTarget", None)
     return merged
 
 

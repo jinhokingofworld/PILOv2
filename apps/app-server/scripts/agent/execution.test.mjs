@@ -2607,6 +2607,46 @@ for (const legacyTool of [
 }
 
 {
+  const { registry } = createSmokeRegistry();
+  const threadContextService = {
+    async buildContextState() {
+      throw new Error("projection unavailable");
+    }
+  };
+  const { loggingService, service } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: "search_board_issues",
+      riskLevel: "low",
+      executionMode: "auto",
+      requiresConfirmation: false,
+      input: { search: "Agent" }
+    }),
+    registry,
+    { threadContextService }
+  );
+
+  const result = await service.executeLatestPlannedTool(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID
+  );
+
+  assert.notEqual(result.status, "failed");
+  assert.equal(
+    loggingService.calls.some(
+      (call) => call.method === "failStep" || call.method === "failRun"
+    ),
+    false
+  );
+  assert.equal(
+    loggingService.calls.some(
+      (call) => call.method === "completeToolStepAndAdvance"
+    ),
+    true
+  );
+}
+
+{
   const threadContextService = {
     calls: [],
     async buildContextState() {

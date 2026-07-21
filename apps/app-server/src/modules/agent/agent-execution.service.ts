@@ -1,4 +1,4 @@
-import { HttpException, Injectable } from "@nestjs/common";
+import { HttpException, Injectable, Logger } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
@@ -24,7 +24,10 @@ import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
 import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
-import { AgentThreadContextService } from "./agent-thread-context.service";
+import {
+  AgentThreadContextService,
+  type AgentContextState
+} from "./agent-thread-context.service";
 import { EmbeddingTemporarilyUnavailableError } from "./grounding/query-embedding";
 import type {
   AgentJsonObject,
@@ -135,6 +138,8 @@ function positiveIntegerEnvironment(name: string, fallback: number): number {
 
 @Injectable()
 export class AgentExecutionService {
+  private readonly logger = new Logger(AgentExecutionService.name);
+
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
@@ -423,7 +428,8 @@ export class AgentExecutionService {
         input.timezone,
         postExecutionDisposition,
         preparationStartedAt,
-        input.turnSequence
+        input.turnSequence,
+        candidate.contextResolution?.target
       );
     }
 
@@ -470,7 +476,8 @@ export class AgentExecutionService {
       input.prompt,
       input.timezone,
       postExecutionDisposition,
-      input.turnSequence
+      input.turnSequence,
+      candidate.contextResolution?.target
     );
   }
 
@@ -1015,7 +1022,8 @@ export class AgentExecutionService {
     postExecutionDisposition: AgentToolPostExecutionDisposition =
       "continue_planning",
     preparationStartedAt?: number,
-    turnSequence?: number
+    turnSequence?: number,
+    selectedTarget?: ResolvedContextResolution["target"] | null
   ): Promise<AgentExecutionResult> {
     if (!definition.prepareExecution) {
       this.observeLatency({
@@ -1114,7 +1122,8 @@ export class AgentExecutionService {
         prompt,
         timezone,
         postExecutionDisposition,
-        turnSequence
+        turnSequence,
+        selectedTarget
       );
     } catch (error) {
       this.observeLatency({
@@ -1394,7 +1403,8 @@ export class AgentExecutionService {
     timezone?: string,
     postExecutionDisposition: AgentToolPostExecutionDisposition =
       "continue_planning",
-    turnSequence?: number
+    turnSequence?: number,
+    selectedTarget?: ResolvedContextResolution["target"] | null
   ): Promise<AgentExecutionResult> {
     const claim = await this.agentLoggingService.startNextToolExecutionClaimIfAbsent(
       currentUserId,
@@ -1449,17 +1459,27 @@ export class AgentExecutionService {
       });
       advanceStartedAt = this.agentLatencyObserver?.start();
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
-      const contextState = await this.agentThreadContextService?.buildContextState(
-        {
-          currentUserId,
-          workspaceId,
-          runId,
-          requestContext
-        },
-        step.id,
-        definition.name,
-        resourceRefs
-      );
+      let contextState: AgentContextState | null | undefined = null;
+      try {
+        contextState = await this.agentThreadContextService?.buildContextState(
+          {
+            currentUserId,
+            workspaceId,
+            runId,
+            requestContext
+          },
+          step.id,
+          definition.name,
+          resourceRefs,
+          [],
+          "completed",
+          selectedTarget
+        );
+      } catch {
+        this.logger.warn(
+          `Agent context projection failed after ${definition.name} completed`
+        );
+      }
       const outputSummary = this.sanitizeJsonObject({
         ...this.buildOutputSummary(result),
         ...(contextState ? { agentContextState: contextState } : {})

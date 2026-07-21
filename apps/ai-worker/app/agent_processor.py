@@ -107,6 +107,10 @@ AGENT_PLANNER_OUTPUT_CLARIFICATION_MESSAGE = (
     "요청을 안전하게 처리하기 위한 정보가 부족합니다. "
     "원하는 결과를 조금 더 구체적으로 알려주세요."
 )
+AGENT_DRIVE_CONTEXT_TOOL_UNAVAILABLE_MESSAGE = (
+    "선택한 Drive 문서를 직접 읽거나 요약하는 기능은 아직 지원하지 않습니다. "
+    "문서에서 찾을 내용을 검색어로 알려주세요."
+)
 UNTRUSTED_COMPLETION_EVIDENCE_TOOL_NAME = "__trusted_capability_terminal_unavailable__"
 NEXT_TOOL_DECISION_VERSION = "agent-next-tool-decision:v1"
 
@@ -1078,6 +1082,23 @@ class AgentRunProcessor:
                 current_user_source.text,
                 context.context_state,
             )
+            if (
+                context_resolution.status == "resolved"
+                and context_resolution.target is not None
+                and context_resolution.target.domain == "drive"
+                and context_resolution.target.resource_type == "document"
+                and not any(
+                    tool.name in {"get_workspace_document", "summarize_workspace_document"}
+                    for tool in job.tools
+                )
+            ):
+                context_resolution = ContextResolution(
+                    "needs_clarification",
+                    "drive_context_tool_unavailable",
+                    target=context_resolution.target,
+                    constraints=context_resolution.constraints,
+                    clarification_question=AGENT_DRIVE_CONTEXT_TOOL_UNAVAILABLE_MESSAGE,
+                )
             record_trace_stage(
                 decision_trace or {},
                 "contextResolution",

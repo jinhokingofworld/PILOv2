@@ -655,7 +655,7 @@ class FakeTransaction {
   }
 }
 
-function createService(state) {
+function createService(state, threadContextService = undefined) {
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
   const loggingService = new FakeAgentLoggingService(state);
@@ -670,13 +670,65 @@ function createService(state) {
       workspaceService,
       loggingService,
       toolRegistryService,
-      outboxPublisherService
+      outboxPublisherService,
+      threadContextService
     ),
     workspaceService,
     loggingService,
     toolRegistryService,
     outboxPublisherService
   };
+}
+
+{
+  const contextRef = "ctx_1234567890abcdef12345678";
+  const contextState = {
+    version: 1,
+    provenance: { turnSequence: 2, stepOrder: 4 },
+    resultSets: [],
+    lastToolState: { toolName: "create_calendar_event", outcome: "completed" }
+  };
+  const threadContextService = {
+    calls: [],
+    async buildContextState(...args) {
+      this.calls.push(args);
+      return contextState;
+    }
+  };
+  const state = {
+    runs: [createRun()],
+    confirmations: [createConfirmation()],
+    latestPlannerStep: {
+      output_json: {
+        toolRouting: { capabilityIds: ["calendar.events.create"] },
+        contextResolution: {
+          version: "agent-context-resolution:v1",
+          status: "resolved",
+          target: { contextRef, generation: 77 },
+          constraints: {}
+        }
+      }
+    }
+  };
+  const { service, loggingService } = createService(state, threadContextService);
+
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "completed");
+  assert.deepEqual(
+    loggingService.calls.at(-1).input.outputSummary.agentContextState,
+    contextState
+  );
+  assert.deepEqual(threadContextService.calls[0].at(-1), {
+    contextRef,
+    generation: 77
+  });
 }
 
 function errorCode(error) {

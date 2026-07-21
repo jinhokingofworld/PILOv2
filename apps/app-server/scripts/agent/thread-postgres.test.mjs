@@ -126,7 +126,7 @@ try {
   await resetTables();
   const recentThreadId = await insertThread(new Date());
   const recentResult = await service.createRun(userId, workspaceId, { prompt: "독립 요청" });
-  assert.notEqual(await threadIdFor(recentResult.run.id), recentThreadId);
+  assert.equal(await threadIdFor(recentResult.run.id), recentThreadId);
 
   await resetTables();
   const pendingThreadId = await insertThread(new Date());

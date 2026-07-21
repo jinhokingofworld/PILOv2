@@ -25,6 +25,13 @@ function contextRef(index) {
   return `ctx_${digest.slice(0, 24)}`;
 }
 
+function contextGeneration(runId, scopedStepId) {
+  const digest = createHash("sha256")
+    .update(`${runId}:${scopedStepId}`, "utf8")
+    .digest("hex");
+  return Number.parseInt(digest.slice(0, 13), 16) || 1;
+}
+
 class FakeDatabase {
   constructor(rows) {
     this.rows = rows;
@@ -219,6 +226,10 @@ class FakeCandidateDatabase {
 
   assert.equal(state.version, 1);
   assert.deepEqual(state.provenance, { turnSequence: 2, stepOrder: 4 });
+  assert.equal(
+    state.resultSets[0].generation,
+    contextGeneration(context.runId, currentStepId)
+  );
   assert.equal(state.resultSets.length, 12);
   assert.deepEqual(
     state.resultSets.slice(0, domains.length).map((reference) => reference.domain),
@@ -332,7 +343,10 @@ class FakeCandidateDatabase {
         resourceId: "current-event",
         label: "Current event"
       }
-    ]
+    ],
+    [],
+    "completed",
+    { contextRef: priorContextRef, generation: 5 }
   );
 
   assert.deepEqual(
@@ -341,4 +355,55 @@ class FakeCandidateDatabase {
   );
   assert.equal(JSON.stringify(state).includes("must-not-survive"), false);
   assert.equal(JSON.stringify(state).includes("current-event"), false);
+  assert.deepEqual(state.selectedTarget, {
+    contextRef: priorContextRef,
+    generation: 5,
+    source: "resolved_follow_up"
+  });
+}
+
+{
+  const firstRunId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const secondRunId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const firstStepId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const secondStepId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const reference = {
+    domain: "drive",
+    resourceType: "document",
+    resourceId: "opaque-server-value",
+    label: "Document"
+  };
+  const firstState = await new AgentThreadContextService(
+    new FakeScopeDatabase({
+      thread_id: threadId,
+      run_id: firstRunId,
+      step_id: firstStepId,
+      step_order: 2,
+      turn_sequence: 1
+    })
+  ).buildContextState(
+    { ...context, runId: firstRunId },
+    firstStepId,
+    "search_drive_documents",
+    [reference]
+  );
+  const secondState = await new AgentThreadContextService(
+    new FakeScopeDatabase({
+      thread_id: threadId,
+      run_id: secondRunId,
+      step_id: secondStepId,
+      step_order: 2,
+      turn_sequence: 1
+    })
+  ).buildContextState(
+    { ...context, runId: secondRunId },
+    secondStepId,
+    "search_drive_documents",
+    [reference]
+  );
+
+  assert.notEqual(
+    firstState.resultSets[0].generation,
+    secondState.resultSets[0].generation
+  );
 }
