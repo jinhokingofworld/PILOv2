@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 from time import perf_counter
 
+from app.agent_outcome_judge import OutcomeJudgeClient, OutcomeJudgeEvidence, judge_outcome
 from app.agent_processor import (
     AgentPlannerClient,
     AgentRouterClient,
@@ -69,6 +70,8 @@ class WorkflowEvaluationResult:
     execution_contract_passed: bool
     execution_contract_failure_reasons: tuple[str, ...]
     outcome_assertion_results: dict[str, bool]
+    outcome_judge_verdict: str | None
+    outcome_judge_failure_codes: tuple[str, ...]
     executed_tool_names: tuple[str, ...]
     latency_ms: float
     provider_total_tokens: int | None
@@ -193,6 +196,7 @@ def evaluate_workflow_suite(
     current_date: str,
     timezone: str = "Asia/Seoul",
     repetitions: int = 1,
+    outcome_judge: OutcomeJudgeClient | None = None,
 ) -> tuple[WorkflowEvaluationResult, ...]:
     if repetitions < 1:
         raise ValueError("Workflow evaluation repetitions must be at least 1")
@@ -205,6 +209,7 @@ def evaluate_workflow_suite(
             attempt=attempt,
             current_date=current_date,
             timezone=timezone,
+            outcome_judge=outcome_judge,
         )
         for attempt in range(1, repetitions + 1)
         for scenario in scenarios
@@ -294,6 +299,10 @@ def build_workflow_evaluation_report(
                     "taskOutcomeSuccess": result.task_success,
                     "executionContractPassed": result.execution_contract_passed,
                     "outcomeAssertions": result.outcome_assertion_results,
+                    "outcomeJudge": {
+                        "verdict": result.outcome_judge_verdict,
+                        "failureCodes": list(result.outcome_judge_failure_codes),
+                    },
                     "latencyMs": round(result.latency_ms, 3),
                     "providerTotalTokens": result.provider_total_tokens,
                     "safetyViolations": list(result.safety_violations),
@@ -313,6 +322,7 @@ def _evaluate_workflow(
     attempt: int,
     current_date: str,
     timezone: str,
+    outcome_judge: OutcomeJudgeClient | None,
 ) -> WorkflowEvaluationResult:
     request_context = dict(job.request_context or {})
     if scenario.context_surface is not None:
@@ -358,14 +368,24 @@ def _evaluate_workflow(
         outcome_failures.append("terminal_state")
     planner_status = (repository.latest_output_summary or {}).get("status")
     expected_tools = tuple(fixture.tool_name for fixture in scenario.fixtures)
-    if has_outcome_assertions:
+    outcome_judge_verdict: str | None = None
+    outcome_judge_failure_codes: tuple[str, ...] = ()
+    if has_outcome_assertions and outcome_judge is None:
         outcome_failures.extend(
             _response_outcome_failures(repository.final_answer, scenario.outcome_assertions)
         )
+    elif (
+        has_outcome_assertions
+        and scenario.outcome_assertions.require_response
+        and not _normalize_text(repository.final_answer)
+    ):
+        outcome_failures.append("response_missing")
     else:
         if tuple(repository.executed_tool_names) != expected_tools:
             outcome_failures.append("tool_sequence")
-        if not _contains_normalized_text(repository.final_answer, scenario.expected_answer_contains):
+        if not _contains_normalized_text(
+            repository.final_answer, scenario.expected_answer_contains
+        ):
             outcome_failures.append("final_answer_grounding")
     routing_decisions = router_recorder.decisions
     router_routed = bool(routing_decisions) and all(
@@ -393,6 +413,22 @@ def _evaluate_workflow(
             outcome_failures.append("domain")
         if not capability_exact:
             outcome_failures.append("capability")
+    if outcome_judge is not None and not outcome_failures and not repository.safety_violations:
+        verdict = judge_outcome(
+            OutcomeJudgeEvidence(
+                user_task=scenario.prompt,
+                expected_outcome=_expected_outcome_text(scenario),
+                tool_facts=tuple(repository.tool_facts),
+                final_answer=repository.final_answer,
+                terminal_state=repository.status,
+                safety_passed=not repository.safety_violations,
+            ),
+            outcome_judge,
+        )
+        outcome_judge_verdict = verdict.verdict
+        outcome_judge_failure_codes = verdict.failure_codes
+        if verdict.verdict != "pass":
+            outcome_failures.append(f"judge_{verdict.verdict}")
     failure_reasons = tuple(dict.fromkeys(outcome_failures))
     contract_failures = list(repository.validation_failures)
     if runtime_failure is not None:
@@ -427,6 +463,8 @@ def _evaluate_workflow(
             "responseForbidden": "response_forbidden" not in failure_reasons,
             "responsePresent": "response_missing" not in failure_reasons,
         },
+        outcome_judge_verdict=outcome_judge_verdict,
+        outcome_judge_failure_codes=outcome_judge_failure_codes,
         executed_tool_names=tuple(repository.executed_tool_names),
         latency_ms=latency_ms,
         provider_total_tokens=_sum_optional(
@@ -458,6 +496,7 @@ class _ReplayRepository:
         self.latest_planner_tool_name: str | None = None
         self.latest_output_summary: dict[str, object] | None = None
         self.final_answer = ""
+        self.tool_facts: list[str] = []
         self.executed_tool_names: list[str] = []
         self.validation_failures: list[str] = []
         self.outcome_failures: list[str] = []
@@ -568,6 +607,8 @@ class _ReplayHandoff:
             separators=(",", ":"),
             sort_keys=True,
         )
+        if tool_name == fixture.tool_name and outcome_input_matches:
+            self.repository.tool_facts.extend(_fixture_facts(fixture.output))
         line = f"tool {tool_name}: {output}"
         self.repository.planning_context = "\n".join(
             item for item in (self.repository.planning_context, line) if item
@@ -602,13 +643,13 @@ def _contains(actual: dict[str, object], expected: dict[str, object]) -> bool:
     return all(key in actual and actual[key] == value for key, value in expected.items())
 
 
-def _matches_outcome_input(
-    tool_input: dict[str, object], fixture: WorkflowToolFixture
-) -> bool:
+def _matches_outcome_input(tool_input: dict[str, object], fixture: WorkflowToolFixture) -> bool:
     if not fixture.outcome_input_assertions:
         return _contains(tool_input, fixture.input_contains)
     return all(
-        _contains_all_normalized_terms(_value_at_path(tool_input, assertion.path), assertion.contains_all)
+        _contains_all_normalized_terms(
+            _value_at_path(tool_input, assertion.path), assertion.contains_all
+        )
         for assertion in fixture.outcome_input_assertions
     )
 
@@ -644,6 +685,31 @@ def _response_outcome_failures(
     if any(_normalize_text(item) in normalized_answer for item in assertions.response_forbidden):
         failures.append("response_forbidden")
     return failures
+
+
+def _expected_outcome_text(scenario: WorkflowScenario) -> str:
+    assertions = scenario.outcome_assertions
+    if assertions is None or not assertions.response_evidence:
+        return "Provide the expected terminal response safely."
+    return "; ".join(" ".join(group) for group in assertions.response_evidence)
+
+
+def _fixture_facts(value: object, prefix: str = "") -> tuple[str, ...]:
+    if isinstance(value, dict):
+        return tuple(
+            fact
+            for key, nested in sorted(value.items())
+            for fact in _fixture_facts(nested, f"{prefix}{key}.")
+        )
+    if isinstance(value, list):
+        return tuple(
+            fact
+            for index, nested in enumerate(value)
+            for fact in _fixture_facts(nested, f"{prefix}{index}.")
+        )
+    if isinstance(value, str | int | float | bool) or value is None:
+        return (f"{prefix.rstrip('.')}: {value}",)
+    return ()
 
 
 def _contains_normalized_text(actual: str, expected: tuple[str, ...]) -> bool:
@@ -784,9 +850,7 @@ def _optional_outcome_assertions(
             not isinstance(evidence, dict)
             or not isinstance(evidence.get("allOf"), list)
             or not evidence["allOf"]
-            or not all(
-                isinstance(item, str) and item.strip() for item in evidence["allOf"]
-            )
+            or not all(isinstance(item, str) and item.strip() for item in evidence["allOf"])
         ):
             raise ValueError("Workflow outcome responseEvidence is invalid")
         evidence_groups.append(tuple(item.strip() for item in evidence["allOf"]))

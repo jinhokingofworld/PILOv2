@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from app.agent_planner_evaluation import load_evaluation_suite
+from app.agent_outcome_judge import OutcomeJudgeEvidence
 from app.agent_processor import AgentPlannerDecision, AgentRoutingDecision
 from app.agent_tool_retrieval import (
     CapabilityDefinition,
@@ -139,6 +140,32 @@ def test_workflow_hides_fixture_result_when_task_critical_input_is_wrong() -> No
 
     assert matched.task_success is True
     assert "task_critical_input" in mismatched.failure_reasons
+
+
+def test_workflow_uses_judge_verdict_for_task_outcome_success() -> None:
+    class PassingJudge:
+        def judge(self, _evidence: OutcomeJudgeEvidence) -> str:
+            return (
+                '{"taskFulfilled":true,"groundedInToolEvidence":true,'
+                '"containsMaterialError":false,"verdict":"pass","failureCodes":[]}'
+            )
+
+    scenario = replace(
+        _scenario(),
+        outcome_assertions=WorkflowOutcomeAssertions(require_response=True),
+    )
+
+    result = evaluate_workflow_suite(
+        ScriptedPlanner(_successful_decisions()),
+        ScriptedRouter(),
+        _job(),
+        (scenario,),
+        current_date="2026-07-21",
+        outcome_judge=PassingJudge(),
+    )[0]
+
+    assert result.task_success is True
+    assert result.outcome_judge_verdict == "pass"
 
 
 def test_workflow_separates_user_task_outcome_from_strict_execution_contract() -> None:
