@@ -16,6 +16,7 @@ class FakeRedisClient {
   values = new Map();
   sets = new Map();
   sortedSets = new Map();
+  deadlines = new Map();
   expiries = new Map();
   streamEntries = [];
   cleanupEntries = [];
@@ -70,20 +71,26 @@ class FakeRedisClient {
   async eval(script, options) {
     if (this.failEval) throw new Error("Redis eval failed");
     if (script.includes("RESERVE_WORKSPACE_SCREEN_SHARE")) {
-      const [workspaceKey, roomKey, rollbackKey] = options.keys;
-      if (this.has(workspaceKey) || this.has(roomKey)) return 0;
+      const [workspaceKey, roomKey, rollbackKey, lifecycleKey, lifecycleWorkspaceKey, lifecycleRoomKey] = options.keys;
+      if (this.has(workspaceKey) || this.has(roomKey) || this.has(lifecycleWorkspaceKey)) return 0;
       const ttl = Number(options.arguments[1]);
       this.values.set(workspaceKey, options.arguments[0]);
       this.values.set(roomKey, options.arguments[2]);
       this.values.set(rollbackKey, options.arguments[3]);
+      this.values.set(lifecycleKey, options.arguments[0]);
+      this.values.set(lifecycleWorkspaceKey, options.arguments[4]);
+      this.values.set(lifecycleRoomKey, options.arguments[4]);
       this.expiries.set(workspaceKey, this.nowSeconds + ttl);
       this.expiries.set(roomKey, this.nowSeconds + ttl);
       this.expiries.set(rollbackKey, this.nowSeconds + ttl);
+      this.expiries.set(lifecycleKey, this.nowSeconds + ttl);
+      this.expiries.set(lifecycleWorkspaceKey, this.nowSeconds + ttl);
+      this.expiries.set(lifecycleRoomKey, this.nowSeconds + ttl);
       return 1;
     }
 
     if (script.includes("ACTIVATE_WORKSPACE_SCREEN_SHARE")) {
-      const [workspaceKey, roomKey, rollbackKey] = options.keys;
+      const [workspaceKey, roomKey, rollbackKey, , lifecycleKey, lifecycleWorkspaceKey, lifecycleRoomKey] = options.keys;
       const value = await this.get(workspaceKey);
       if (!value) return null;
       const session = JSON.parse(value);
@@ -106,12 +113,14 @@ class FakeRedisClient {
         startedAt: options.arguments[2]
       };
       const encoded = JSON.stringify(active);
-      const ttl = Number(options.arguments[3]);
       this.values.set(workspaceKey, encoded);
-      this.expiries.set(workspaceKey, this.nowSeconds + ttl);
-      if (roomKey && this.values.get(roomKey) === session.workspaceId) {
-        this.expiries.set(roomKey, this.nowSeconds + ttl);
-      }
+      this.values.set(lifecycleKey, encoded);
+      this.expiries.delete(workspaceKey);
+      this.expiries.delete(roomKey);
+      this.expiries.delete(lifecycleKey);
+      this.expiries.delete(lifecycleWorkspaceKey);
+      this.expiries.delete(lifecycleRoomKey);
+      this.deadlines.set(session.sessionId, Number(options.arguments[3]));
       this.values.delete(rollbackKey);
       this.expiries.delete(rollbackKey);
       const outboxId = `${this.nextStreamId++}-0`;
@@ -277,7 +286,13 @@ class FakeRedisClient {
         rollbackKey,
         candidateRoomKey,
         candidateRollbackKey,
-        tombstoneKey
+        tombstoneKey,
+        lifecycleKey,
+        lifecycleWorkspaceKey,
+        lifecycleRoomKey,
+        candidateLifecycleKey,
+        candidateLifecycleWorkspaceKey,
+        candidateLifecycleRoomKey
       ] = options.keys;
       const value = await this.get(workspaceKey);
       if (!value) return 0;
@@ -299,12 +314,21 @@ class FakeRedisClient {
       const ttl = Number(options.arguments[5]);
       this.values.delete(roomKey);
       this.values.delete(rollbackKey);
+      this.values.delete(lifecycleKey);
+      this.values.delete(lifecycleWorkspaceKey);
+      this.values.delete(lifecycleRoomKey);
       this.expiries.delete(roomKey);
       this.expiries.delete(rollbackKey);
+      this.expiries.delete(lifecycleKey);
+      this.expiries.delete(lifecycleWorkspaceKey);
+      this.expiries.delete(lifecycleRoomKey);
       this.values.set(workspaceKey, options.arguments[4]);
       this.values.set(candidateRoomKey, candidate.workspaceId);
       this.values.set(candidateRollbackKey, options.arguments[6]);
       this.values.set(tombstoneKey, session.sessionId);
+      this.values.set(candidateLifecycleKey, options.arguments[4]);
+      this.values.set(candidateLifecycleWorkspaceKey, candidate.sessionId);
+      this.values.set(candidateLifecycleRoomKey, candidate.sessionId);
       this.cleanupEntries.push({
         session: value,
         mode: "revocation"
@@ -312,6 +336,9 @@ class FakeRedisClient {
       this.expiries.set(workspaceKey, this.nowSeconds + ttl);
       this.expiries.set(candidateRoomKey, this.nowSeconds + ttl);
       this.expiries.set(candidateRollbackKey, this.nowSeconds + ttl);
+      this.expiries.set(candidateLifecycleKey, this.nowSeconds + ttl);
+      this.expiries.set(candidateLifecycleWorkspaceKey, this.nowSeconds + ttl);
+      this.expiries.set(candidateLifecycleRoomKey, this.nowSeconds + ttl);
       this.expiries.set(
         tombstoneKey,
         this.nowSeconds + Number(options.arguments[7])
@@ -324,7 +351,17 @@ class FakeRedisClient {
       script.includes("RELEASE_STARTING_WORKSPACE_SCREEN_SHARE")
     ) {
       const [workspaceKey, roomKey, rollbackKey] = options.keys;
-      const value = this.values.get(workspaceKey);
+      const lifecycleKey = script.includes("END_WORKSPACE_SCREEN_SHARE")
+        ? options.keys[7]
+        : options.keys[3];
+      const lifecycleWorkspaceKey = script.includes("END_WORKSPACE_SCREEN_SHARE")
+        ? options.keys[8]
+        : options.keys[4];
+      const lifecycleRoomKey = script.includes("END_WORKSPACE_SCREEN_SHARE")
+        ? options.keys[9]
+        : options.keys[5];
+      const authority = this.values.get(workspaceKey);
+      const value = authority ?? this.values.get(lifecycleKey);
       if (!value) return null;
       const session = JSON.parse(value);
       if (
@@ -333,16 +370,25 @@ class FakeRedisClient {
         (script.includes("RELEASE_STARTING_WORKSPACE_SCREEN_SHARE") &&
           (session.status !== "starting" ||
             this.values.get(rollbackKey) !== options.arguments[2])) ||
-        this.values.get(roomKey) !== session.workspaceId
+        (authority && this.values.get(roomKey) !== session.workspaceId) ||
+        (script.includes("END_WORKSPACE_SCREEN_SHARE") &&
+          (this.values.get(lifecycleWorkspaceKey) !== session.sessionId ||
+            this.values.get(lifecycleRoomKey) !== session.sessionId))
       ) {
         return null;
       }
       this.values.delete(workspaceKey);
       this.values.delete(roomKey);
       this.values.delete(rollbackKey);
+      this.values.delete(lifecycleKey);
+      this.values.delete(lifecycleWorkspaceKey);
+      this.values.delete(lifecycleRoomKey);
       this.expiries.delete(workspaceKey);
       this.expiries.delete(roomKey);
       this.expiries.delete(rollbackKey);
+      this.expiries.delete(lifecycleKey);
+      this.expiries.delete(lifecycleWorkspaceKey);
+      this.expiries.delete(lifecycleRoomKey);
       if (script.includes("END_WORKSPACE_SCREEN_SHARE")) {
         const outboxId = `${this.nextStreamId++}-0`;
         this.streamEntries.push({
@@ -365,6 +411,7 @@ class FakeRedisClient {
           mode: options.arguments[3]
         });
         const viewerIndexKey = options.keys[6];
+        this.deadlines.delete(session.sessionId);
         for (const viewerKey of this.sets.get(viewerIndexKey) ?? []) {
           this.sets.delete(viewerKey);
         }
@@ -517,6 +564,34 @@ try {
   assert.equal(
     (await state.getCurrent(session.workspaceId))?.startedAt,
     "2026-07-18T00:00:01.000Z"
+  );
+  const expectedDeadlineMs = Date.parse(activated.session.startedAt) + 12 * 60 * 60 * 1000;
+  assert.deepEqual(await state.getCurrent(session.workspaceId), activated.session);
+  assert.equal(redis.deadlines.get(session.sessionId), expectedDeadlineMs);
+  assert.equal(
+    redis.expiries.has(`workspace-screen-share:workspace:v1:${session.workspaceId}`),
+    false,
+    "active authority must not silently expire before its durable deadline"
+  );
+  redis.values.delete(`workspace-screen-share:workspace:v1:${session.workspaceId}`);
+  redis.values.delete(`workspace-screen-share:room:v1:${session.livekitRoomName}`);
+  assert.deepEqual(
+    await state.getCurrent(session.workspaceId),
+    activated.session,
+    "lifecycle snapshot must recover an active session after authority loss"
+  );
+  assert.deepEqual(
+    await state.getByRoom(session.livekitRoomName),
+    activated.session,
+    "room lifecycle index must recover an active session after authority loss"
+  );
+  redis.values.set(
+    `workspace-screen-share:workspace:v1:${session.workspaceId}`,
+    JSON.stringify(activated.session)
+  );
+  redis.values.set(
+    `workspace-screen-share:room:v1:${session.livekitRoomName}`,
+    session.workspaceId
   );
   const viewerIdentity =
     `screen-share-viewer:${session.sessionId}:viewer-user:viewer-request`;
