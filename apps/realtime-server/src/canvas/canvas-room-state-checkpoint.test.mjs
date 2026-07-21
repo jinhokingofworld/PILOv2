@@ -362,6 +362,45 @@ test("viewport hydration은 보이는 room-only Shape와 중첩 자식을 함께
   );
 });
 
+test("viewport hydration은 중첩 Shape의 로컬 좌표를 Canvas 좌표로 판정하지 않는다", () => {
+  const nestedRoom = { ...room, canvasId: "canvas-far-parent-hydration-test" };
+  const service = createCanvasRoomStateService();
+  const bounds = { height: 600, margin: 0, width: 800, x: 0, y: 0 };
+  const parent = {
+    ...createNote("far-parent", "shape:far-parent"),
+    props: { h: 300, w: 400 },
+    type: "frame",
+    x: 20_000,
+    y: 20_000,
+  };
+  const child = {
+    ...createNote("local-child", "shape:local-child"),
+    parentId: parent.id,
+    x: 100,
+    y: 100,
+  };
+
+  service.applyShapePatch(nestedRoom, {
+    deletedShapeIds: [],
+    upsertShapes: [parent, child],
+  });
+
+  assert.deepEqual(
+    service.getViewportHydration(nestedRoom, bounds).shapes,
+    [],
+  );
+  assert.deepEqual(
+    new Set(
+      service
+        .getViewportHydration(nestedRoom, bounds, {
+          includeShapeIds: [child.id],
+        })
+        .shapes.map((shape) => shape.id),
+    ),
+    new Set([parent.id, child.id]),
+  );
+});
+
 test("Canvas 입장은 access 직후 DB baseline을 조회하고 최신 roomState로 병합한다", async () => {
   const originalFetch = globalThis.fetch;
   const joinRoom = { ...room, canvasId: "canvas-join-hydration-test" };
