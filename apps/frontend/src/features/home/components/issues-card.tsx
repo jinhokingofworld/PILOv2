@@ -35,7 +35,7 @@ export function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {
       title={isRecentMode ? "최근 이슈" : "내 이슈"}
       titleAdornment={
         isRecentMode ? (
-          <span className="min-w-0 truncate text-[12px] font-medium text-destructive">
+          <span className="min-w-0 truncate text-[15px] font-medium text-destructive">
             GitHub 연결 시 내 담당 이슈만 볼 수 있어요
           </span>
         ) : null
@@ -79,7 +79,7 @@ function IssueTodoRow({ issue }: { issue: BoardIssueCardPayload }) {
       type="button"
     >
       <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-        <p className="min-w-0 flex-1 truncate text-[14px] font-medium text-[#202124]">
+        <p className="min-w-0 flex-1 truncate text-[17px] font-medium text-[#202124]">
           {issue.title}
         </p>
         <StatusPill label={issue.issueNumber} tone="neutral" />

@@ -264,7 +264,7 @@ export function MembersCard() {
   return (
     <>
       <DashboardCard
-        className="h-[430px] min-h-0"
+        className="h-[390px] min-h-0"
         cursorTarget={{ id: "members", label: "멤버", type: "home_card" }}
         action={
           canManageWorkspace ? (
@@ -281,7 +281,12 @@ export function MembersCard() {
             >
               <PopoverTrigger
                 render={
-                  <Button aria-label="멤버 초대 열기" size="sm" variant="outline" />
+                  <Button
+                    aria-label="멤버 초대 열기"
+                    className="text-[17px]"
+                    size="sm"
+                    variant="outline"
+                  />
                 }
               >
                 <UserPlus />
@@ -331,6 +336,7 @@ export function MembersCard() {
           ) : (
             <Button
               aria-label="워크스페이스 나가기"
+              className="text-[17px]"
               disabled={!canLeaveWorkspace}
               onClick={() => {
                 setLeaveWorkspaceError(null);
@@ -372,15 +378,15 @@ export function MembersCard() {
                 className="flex w-full items-center gap-3 rounded-[10px] border border-[#e7e9ee] bg-[#f8f9fb] px-2.5 py-2"
               >
                 <Avatar size="sm">
-                  <AvatarFallback className="bg-[#eef0ff] text-[#4855d4]">
+                  <AvatarFallback className="bg-[#eef0ff] text-[15px] text-[#4855d4] group-data-[size=sm]/avatar:text-[15px]">
                     {getInitial(invitation.email)}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-medium text-[#202124]">
+                  <p className="truncate text-[16px] font-medium text-[#202124]">
                     {invitation.email}
                   </p>
-                  <p className="truncate text-[12px] text-[#6b6f78]">
+                  <p className="truncate text-[15px] text-[#6b6f78]">
                     대기중
                   </p>
                 </div>
@@ -446,7 +452,7 @@ function MemberCardMessage({
 }) {
   return (
     <div
-      className={`flex min-h-0 flex-1 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f8f9fb] p-3 text-center text-[12px] font-medium ${
+      className={`flex min-h-0 flex-1 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f8f9fb] p-3 text-center text-[15px] font-medium ${
         tone === "danger" ? "text-destructive" : "text-[#6b6f78]"
       }`}
     >
@@ -533,7 +539,7 @@ function MemberPresenceHeader({
     >
       <span className="flex min-w-0 items-center gap-2">
         <span className={`size-2.5 shrink-0 rounded-full ${presenceClassName}`} />
-        <span className="truncate text-[12px] font-medium">
+        <span className="truncate text-[15px] font-medium">
           {title} - {count}
         </span>
       </span>
@@ -571,7 +577,7 @@ function MemberPresenceList({
     >
       <div className="grid min-h-0 content-start gap-1 py-1.5">
         {members.length === 0 ? (
-          <div className="rounded-[9px] border border-[#e7e9ee] bg-[#f8f9fb] px-2 py-3 text-center text-[12px] text-[#6b6f78]">
+          <div className="rounded-[9px] border border-[#e7e9ee] bg-[#f8f9fb] px-2 py-3 text-center text-[15px] text-[#6b6f78]">
             표시할 멤버가 없습니다
           </div>
         ) : null}
@@ -590,15 +596,15 @@ function MemberPresenceList({
                   src={member.user.avatarUrl}
                 />
               ) : null}
-              <AvatarFallback className="bg-[#eef0ff] text-[#4855d4]">
+              <AvatarFallback className="bg-[#eef0ff] text-[15px] text-[#4855d4] group-data-[size=sm]/avatar:text-[15px]">
                 {getInitial(member.user.name)}
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-medium text-[#202124]">
+              <p className="truncate text-[16px] font-medium text-[#202124]">
                 {member.user.name ?? "이름 없음"}
               </p>
-              <p className="truncate text-[12px] text-[#6b6f78]">
+              <p className="truncate text-[15px] text-[#6b6f78]">
                 {formatWorkspaceRole(member.role)}
               </p>
             </div>

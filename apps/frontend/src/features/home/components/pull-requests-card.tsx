@@ -85,7 +85,7 @@ function PullRequestRow({ pullRequest }: { pullRequest: GithubPullRequest }) {
       type="button"
     >
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <p className="min-w-0 flex-1 truncate text-[14px] font-medium text-[#202124]">
+        <p className="min-w-0 flex-1 truncate text-[17px] font-medium text-[#202124]">
           {pullRequest.title}
         </p>
         <StatusPill
@@ -93,7 +93,7 @@ function PullRequestRow({ pullRequest }: { pullRequest: GithubPullRequest }) {
           tone={pullRequest.draft ? "muted" : "neutral"}
         />
       </div>
-      <p className="mt-1 min-w-0 truncate text-[13px] text-[#6b6f78]">
+      <p className="mt-1 min-w-0 truncate text-[16px] text-[#6b6f78]">
         {pullRequest.headBranch} → {pullRequest.baseBranch} ·{" "}
         {pullRequest.changedFilesCount} files
       </p>

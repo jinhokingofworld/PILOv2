@@ -67,10 +67,10 @@ export function MeetingReportsCard({
               onClick={() => router.push(buildMeetingReportHref(report.id))}
               type="button"
             >
-              <p className="min-w-0 truncate text-[14px] font-medium leading-5 text-[#202124]">
+              <p className="min-w-0 truncate text-[17px] font-medium leading-5 text-[#202124]">
                 {formatMeetingReportTitle(report)}
               </p>
-              <p className="mt-0.5 min-w-0 truncate text-[13px] leading-4 text-[#6b6f78]">
+              <p className="mt-0.5 min-w-0 truncate text-[16px] leading-4 text-[#6b6f78]">
                 {report.summary?.trim() || getMeetingReportFallbackSummary(report)}
               </p>
             </button>
