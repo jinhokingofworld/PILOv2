@@ -71,7 +71,10 @@ type CalendarEventsDialogState = {
 } | null;
 
 const DEFAULT_EVENT_COLOR = "#3B82F6";
-const CALENDAR_EVENT_LANE_HEIGHT = 28;
+const CALENDAR_EVENT_HEIGHT = 28;
+const CALENDAR_EVENT_GAP = 4;
+const CALENDAR_EVENT_LANE_HEIGHT =
+  CALENDAR_EVENT_HEIGHT + CALENDAR_EVENT_GAP;
 const CALENDAR_DRAFT_ACTION_SEARCH_PARAM = "calendarAction";
 const CALENDAR_SELECTED_DATE_SEARCH_PARAM = "date";
 const CALENDAR_DRAFT_SEARCH_PARAMS = [
@@ -284,7 +287,7 @@ function CalendarEventChip({
     return (
       <span
         className={classNames(
-          "flex min-w-0 items-center rounded-md border px-1.5 py-1 text-xs font-medium shadow-sm",
+          "flex h-7 min-w-0 items-center rounded-md border px-2 text-xs font-medium shadow-sm",
           className
         )}
         style={getAllDayEventChipStyle(event)}
@@ -297,7 +300,7 @@ function CalendarEventChip({
   return (
     <span
       className={classNames(
-        "flex min-w-0 items-center gap-1.5 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-xs font-medium text-foreground",
+        "flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground",
         className
       )}
     >
@@ -331,10 +334,10 @@ function CalendarEventBar({
         "pointer-events-auto flex h-7 min-w-0 items-center border-y px-2 text-left text-xs font-medium shadow-sm transition hover:brightness-95 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         segment.continuesFromPreviousWeek
           ? "rounded-l-none border-l-0"
-          : "rounded-l-md border-l",
+          : "ml-2 rounded-l-md border-l",
         segment.continuesToNextWeek
           ? "rounded-r-none border-r-0"
-          : "rounded-r-md border-r"
+          : "mr-2 rounded-r-md border-r"
       )}
       style={{
         ...getAllDayEventChipStyle(event),
@@ -1597,15 +1600,8 @@ export function CalendarPanel() {
                       })}
                       key={date}
                       className={classNames(
-                        "relative border bg-background p-2 text-left align-top transition",
-                        dateBarLayout.connectsToPrevious
-                          ? "ml-0 rounded-l-none border-l-0"
-                          : "ml-0.75 rounded-l-lg",
-                        dateBarLayout.connectsToNext
-                          ? "mr-0 rounded-r-none border-r-0"
-                          : "mr-0.75 rounded-r-lg",
+                        "relative mx-0.75 rounded-xl border bg-card p-2 text-left align-top transition",
                         !isCurrentMonth && "bg-muted/20 text-muted-foreground",
-                        isSelected && "border-primary ring-2 ring-primary/80",
                         isToday && !isSelected && "border-primary/40 bg-primary/5"
                       )}
                       style={{
@@ -1679,11 +1675,17 @@ export function CalendarPanel() {
                           </button>
                         ) : null}
                       </div>
+                      {isSelected ? (
+                        <div
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-0.5 z-40 rounded-[10px] ring-2 ring-inset ring-ring"
+                        />
+                      ) : null}
                     </div>
                   );
                 })}
 
-                <div className="pointer-events-none absolute inset-x-0.75 top-11 z-30 grid grid-cols-7 auto-rows-7 gap-x-1.5 gap-y-0">
+                <div className="pointer-events-none absolute inset-x-0.75 top-11 z-30 grid grid-cols-7 auto-rows-7 gap-y-1 gap-x-1.5">
                   {week.segments.map((segment) => (
                     <CalendarEventBar
                       key={`${segment.weekIndex}-${segment.event.id}`}

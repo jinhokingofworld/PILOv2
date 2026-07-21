@@ -78,12 +78,17 @@ assert.doesNotMatch(
   calendarPanel,
   /calendarEvents\.events\.length\}개 일정/
 );
-assert.match(calendarPanel, /dateBarLayout\.connectsToPrevious/);
-assert.match(calendarPanel, /dateBarLayout\.connectsToNext/);
+assert.doesNotMatch(calendarPanel, /dateBarLayout\.connectsToPrevious/);
+assert.doesNotMatch(calendarPanel, /dateBarLayout\.connectsToNext/);
 assert.match(calendarPanel, /border-l-0/);
 assert.match(calendarPanel, /border-r-0/);
 assert.match(calendarPanel, /dateBarLayout\.laneCount/);
-assert.match(calendarPanel, /const CALENDAR_EVENT_LANE_HEIGHT = 28/);
+assert.match(calendarPanel, /const CALENDAR_EVENT_HEIGHT = 28/);
+assert.match(calendarPanel, /const CALENDAR_EVENT_GAP = 4/);
+assert.match(
+  calendarPanel,
+  /const CALENDAR_EVENT_LANE_HEIGHT =\s*CALENDAR_EVENT_HEIGHT \+ CALENDAR_EVENT_GAP/
+);
 assert.match(
   calendarPanel,
   /minHeight: `\$\{128 \+ dateBarLayout\.laneCount \* CALENDAR_EVENT_LANE_HEIGHT\}px`/
@@ -94,8 +99,16 @@ assert.match(
 );
 assert.match(calendarPanel, /CalendarEventBar/);
 assert.match(calendarPanel, /pointer-events-none absolute inset-x-0\.75 top-11/);
-assert.match(calendarPanel, /grid-cols-7 auto-rows-7 gap-x-1\.5 gap-y-0/);
+assert.match(calendarPanel, /grid-cols-7 auto-rows-7 gap-y-1/);
 assert.match(calendarPanel, /flex h-7 min-w-0 items-center border-y/);
+assert.match(calendarPanel, /flex h-7 min-w-0 items-center rounded-md border/);
+assert.match(calendarPanel, /"ml-2 rounded-l-md border-l"/);
+assert.match(calendarPanel, /"mr-2 rounded-r-md border-r"/);
+assert.match(calendarPanel, /relative mx-0\.75 rounded-xl border/);
+assert.match(
+  calendarPanel,
+  /pointer-events-none absolute inset-0\.5 z-40 rounded-\[10px\] ring-2 ring-inset ring-ring/
+);
 assert.match(calendarPanel, /CalendarEventDialog/);
 assert.match(
   calendarPanel,
